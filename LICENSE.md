@@ -2,20 +2,29 @@
 
 ## Copyright & License
 
-**Copyright © 2025 Zertificon Solutions GmbH. All Rights Reserved.**
+**Copyright © 2025 Denis Sota (sotadenis94@gmail.com). All Rights Reserved.**
 
-This software is proprietary and confidential. It is licensed for internal use by Zertificon Solutions GmbH and its affiliates.
+This software is proprietary and confidential. The copyright and all intellectual property rights belong exclusively to Denis Sota.
 
 ### License Terms
 
-- **Internal Use**: Licensed for use within Zertificon Solutions GmbH
-- **Commercial Licensing**: Available for purchase. Contact Zertificon Solutions GmbH for licensing inquiries
-- **Restrictions**:
-  - No redistribution without explicit written permission
-  - No modification or derivative works without authorization
-  - Source code remains proprietary to Zertificon Solutions GmbH
+**Owner & Rights Holder**: Denis Sota
+**Contact**: sotadenis94@gmail.com
 
-For licensing inquiries, contact: licensing@zertificon.com
+- **Licensed to**: Zertificon Solutions GmbH - Internal use license granted
+- **Commercial Licensing**: Available for purchase from Denis Sota
+- **Restrictions**:
+  - No redistribution without explicit written permission from Denis Sota
+  - No modification or derivative works without authorization from Denis Sota
+  - Source code remains proprietary to Denis Sota
+  - Licensees may use the software internally but cannot resell or sublicense
+
+### Licensing Inquiries
+
+For commercial licensing, custom deployments, or purchasing licenses, contact:
+
+**Denis Sota**
+Email: sotadenis94@gmail.com
 
 ---
 
@@ -47,5 +56,12 @@ See the following guides for setup and usage:
 
 ---
 
-**Developed by Zertificon Solutions GmbH**
-**For support or licensing: https://www.zertificon.com**
+## License Model
+
+SentriKat is available under commercial licensing:
+- **Single Organization License**: For use within one organization
+- **Multi-Organization License**: For managed service providers and resellers
+- **Enterprise License**: Includes custom features and dedicated support
+
+**Developed and owned by Denis Sota**
+**For licensing inquiries: sotadenis94@gmail.com**
