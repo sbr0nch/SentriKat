@@ -579,6 +579,16 @@
             };
             return icons[priority] || 'circle';
         }
+
+        function getPriorityColor(priority) {
+            const colors = {
+                'critical': '#dc2626',
+                'high': '#ea580c',
+                'medium': '#ca8a04',
+                'low': '#059669'
+            };
+            return colors[priority] || '#6b7280';
+        }
     </script>
     {% block extra_js %}{% endblock %}
 </body>
