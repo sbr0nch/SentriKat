@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - SentriKat{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-speedometer2"></i> Vulnerability Dashboard</h2>
+        <p class="text-muted">Monitoring vulnerabilities for your tracked products</p>
+    </div>
+</div>
+
+<div class="loading">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p>Loading data...</p>
+</div>
+
+<div class="row mb-4" id="statsContainer">
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card" style="border-left-color: #0d6efd;">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Total Vulnerabilities</h6>
+                <h2 class="card-title" id="totalVulns">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card" style="border-left-color: #dc3545;">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Matching Your Products</h6>
+                <h2 class="card-title" id="totalMatches">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card" style="border-left-color: #ffc107;">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Unacknowledged</h6>
+                <h2 class="card-title" id="unacknowledged">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card" style="border-left-color: #198754;">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Products Tracked</h6>
+                <h2 class="card-title" id="productsTracked">-</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Filter Vulnerabilities</h5>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <input type="text" class="form-control" id="filterCVE" placeholder="CVE ID">
+                    </div>
+                    <div class="col-md-3">
+                        <input type="text" class="form-control" id="filterVendor" placeholder="Vendor">
+                    </div>
+                    <div class="col-md-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="filterRansomware">
+                            <label class="form-check-label" for="filterRansomware">
+                                Ransomware only
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="filterUnack">
+                            <label class="form-check-label" for="filterUnack">
+                                Unacknowledged
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-primary w-100" onclick="loadVulnerabilities()">
+                            <i class="bi bi-search"></i> Filter
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <h4>Matched Vulnerabilities</h4>
+        <div id="vulnerabilitiesContainer"></div>
+    </div>
+</div>
+
+<div id="lastSync" class="text-muted mt-4"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadStats() {
+        try {
+            const response = await fetch('/api/vulnerabilities/stats');
+            const stats = await response.json();
+
+            document.getElementById('totalVulns').textContent = stats.total_vulnerabilities;
+            document.getElementById('totalMatches').textContent = stats.total_matches;
+            document.getElementById('unacknowledged').textContent = stats.unacknowledged;
+            document.getElementById('productsTracked').textContent = stats.products_tracked;
+        } catch (error) {
+            console.error('Error loading stats:', error);
+        }
+    }
+
+    async function loadVulnerabilities() {
+        showLoading();
+        const container = document.getElementById('vulnerabilitiesContainer');
+
+        try {
+            const params = new URLSearchParams();
+            const cve = document.getElementById('filterCVE').value;
+            const vendor = document.getElementById('filterVendor').value;
+            const ransomware = document.getElementById('filterRansomware').checked;
+            const unack = document.getElementById('filterUnack').checked;
+
+            if (cve) params.append('cve_id', cve);
+            if (vendor) params.append('vendor', vendor);
+            if (ransomware) params.append('ransomware_only', 'true');
+            if (unack) params.append('acknowledged', 'false');
+
+            const response = await fetch(`/api/vulnerabilities?${params}`);
+            const matches = await response.json();
+
+            if (matches.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">No vulnerabilities found matching your criteria.</div>';
+            } else {
+                container.innerHTML = matches.map(match => createVulnCard(match)).join('');
+            }
+        } catch (error) {
+            container.innerHTML = `<div class="alert alert-danger">Error loading vulnerabilities: ${error.message}</div>`;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function createVulnCard(match) {
+        const vuln = match.vulnerability;
+        const product = match.product;
+        const ransomwareClass = vuln.known_ransomware ? 'ransomware' : '';
+        const ransomwareBadge = vuln.known_ransomware ? '<span class="badge badge-ransomware"><i class="bi bi-exclamation-triangle"></i> Ransomware</span>' : '';
+        const ackButton = match.acknowledged
+            ? `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${match.id})"><i class="bi bi-check-circle"></i> Acknowledged</button>`
+            : `<button class="btn btn-sm btn-warning" onclick="acknowledgeMatch(${match.id})"><i class="bi bi-circle"></i> Acknowledge</button>`;
+
+        return `
+            <div class="card vuln-card ${ransomwareClass}" id="match-${match.id}">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h5 class="card-title">
+                                ${vuln.cve_id} - ${vuln.vulnerability_name}
+                                ${ransomwareBadge}
+                            </h5>
+                            <p class="card-text">
+                                <strong>Vendor:</strong> ${vuln.vendor_project} |
+                                <strong>Product:</strong> ${vuln.product}
+                            </p>
+                            <p class="card-text">${vuln.short_description}</p>
+                            <p class="card-text">
+                                <strong>Required Action:</strong> ${vuln.required_action}
+                            </p>
+                            <small class="text-muted">
+                                <strong>Matched Product:</strong> ${product.vendor} - ${product.product_name}
+                                ${product.version ? `(v${product.version})` : ''} |
+                                <strong>Match Reason:</strong> ${match.match_reason}
+                            </small>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <p><small><strong>Date Added:</strong> ${vuln.date_added}</small></p>
+                            ${vuln.due_date ? `<p><small><strong>Due Date:</strong> ${vuln.due_date}</small></p>` : ''}
+                            ${ackButton}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    async function acknowledgeMatch(matchId) {
+        try {
+            await fetch(`/api/matches/${matchId}/acknowledge`, { method: 'POST' });
+            showToast('Vulnerability acknowledged', 'success');
+            loadVulnerabilities();
+            loadStats();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        }
+    }
+
+    async function unacknowledgeMatch(matchId) {
+        try {
+            await fetch(`/api/matches/${matchId}/unacknowledge`, { method: 'POST' });
+            showToast('Vulnerability unacknowledged', 'info');
+            loadVulnerabilities();
+            loadStats();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        }
+    }
+
+    async function loadLastSync() {
+        try {
+            const response = await fetch('/api/sync/status');
+            const sync = await response.json();
+
+            if (sync.sync_date) {
+                const date = new Date(sync.sync_date);
+                document.getElementById('lastSync').innerHTML = `
+                    <i class="bi bi-clock"></i> Last sync: ${date.toLocaleString()}
+                    (Status: ${sync.status}, Matches: ${sync.matches_found})
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading sync status:', error);
+        }
+    }
+
+    // Load data on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        loadStats();
+        loadVulnerabilities();
+        loadLastSync();
+    });
+</script>
+{% endblock %}

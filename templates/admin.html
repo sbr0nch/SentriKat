@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - SentriKat{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-gear"></i> Product Management</h2>
+        <p class="text-muted">Manage your software inventory for vulnerability tracking</p>
+    </div>
+    <div class="col text-end">
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#productModal" onclick="showAddProduct()">
+            <i class="bi bi-plus-circle"></i> Add Product
+        </button>
+    </div>
+</div>
+
+<div class="loading">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p>Loading products...</p>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Vendor</th>
+                        <th>Product</th>
+                        <th>Version</th>
+                        <th>Keywords</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="productsTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Product Modal -->
+<div class="modal fade" id="productModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="productModalTitle">Add Product</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="productForm">
+                    <input type="hidden" id="productId">
+                    <div class="mb-3">
+                        <label for="vendor" class="form-label">Vendor *</label>
+                        <input type="text" class="form-control" id="vendor" required
+                               placeholder="e.g., Microsoft, Cisco, Apache">
+                        <small class="form-text text-muted">The vendor/manufacturer name</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="productName" class="form-label">Product Name *</label>
+                        <input type="text" class="form-control" id="productName" required
+                               placeholder="e.g., Windows Server, IOS, Tomcat">
+                        <small class="form-text text-muted">The software/product name</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="version" class="form-label">Version</label>
+                        <input type="text" class="form-control" id="version"
+                               placeholder="e.g., 2022, 15.2, 9.0">
+                        <small class="form-text text-muted">Optional: Specific version you're using</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="keywords" class="form-label">Additional Keywords</label>
+                        <input type="text" class="form-control" id="keywords"
+                               placeholder="e.g., Exchange, Webex, Struts">
+                        <small class="form-text text-muted">Comma-separated keywords for better matching</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Description</label>
+                        <textarea class="form-control" id="description" rows="2"
+                                  placeholder="Optional notes about this product"></textarea>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="active" checked>
+                        <label class="form-check-label" for="active">Active (track vulnerabilities)</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveProduct()">Save Product</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentProductId = null;
+
+    async function loadProducts() {
+        showLoading();
+        const tbody = document.getElementById('productsTable');
+
+        try {
+            const response = await fetch('/api/products');
+            const products = await response.json();
+
+            if (products.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center">No products added yet. Click "Add Product" to start tracking.</td></tr>';
+            } else {
+                tbody.innerHTML = products.map(product => `
+                    <tr>
+                        <td>${product.vendor}</td>
+                        <td>${product.product_name}</td>
+                        <td>${product.version || '-'}</td>
+                        <td>${product.keywords || '-'}</td>
+                        <td>
+                            ${product.active
+                                ? '<span class="badge bg-success">Active</span>'
+                                : '<span class="badge bg-secondary">Inactive</span>'}
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editProduct(${product.id})">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteProduct(${product.id}, '${product.vendor} ${product.product_name}')">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        } catch (error) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">Error loading products: ${error.message}</td></tr>`;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function showAddProduct() {
+        currentProductId = null;
+        document.getElementById('productModalTitle').textContent = 'Add Product';
+        document.getElementById('productForm').reset();
+        document.getElementById('active').checked = true;
+    }
+
+    async function editProduct(productId) {
+        currentProductId = productId;
+        document.getElementById('productModalTitle').textContent = 'Edit Product';
+
+        try {
+            const response = await fetch(`/api/products/${productId}`);
+            const product = await response.json();
+
+            document.getElementById('vendor').value = product.vendor;
+            document.getElementById('productName').value = product.product_name;
+            document.getElementById('version').value = product.version || '';
+            document.getElementById('keywords').value = product.keywords || '';
+            document.getElementById('description').value = product.description || '';
+            document.getElementById('active').checked = product.active;
+
+            new bootstrap.Modal(document.getElementById('productModal')).show();
+        } catch (error) {
+            showToast(`Error loading product: ${error.message}`, 'danger');
+        }
+    }
+
+    async function saveProduct() {
+        const vendor = document.getElementById('vendor').value.trim();
+        const productName = document.getElementById('productName').value.trim();
+
+        if (!vendor || !productName) {
+            showToast('Vendor and Product Name are required', 'warning');
+            return;
+        }
+
+        const productData = {
+            vendor: vendor,
+            product_name: productName,
+            version: document.getElementById('version').value.trim(),
+            keywords: document.getElementById('keywords').value.trim(),
+            description: document.getElementById('description').value.trim(),
+            active: document.getElementById('active').checked
+        };
+
+        try {
+            let response;
+            if (currentProductId) {
+                response = await fetch(`/api/products/${currentProductId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(productData)
+                });
+            } else {
+                response = await fetch('/api/products', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(productData)
+                });
+            }
+
+            if (response.ok) {
+                showToast(currentProductId ? 'Product updated successfully' : 'Product added successfully', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+                loadProducts();
+            } else {
+                const error = await response.json();
+                showToast(`Error: ${error.error}`, 'danger');
+            }
+        } catch (error) {
+            showToast(`Error saving product: ${error.message}`, 'danger');
+        }
+    }
+
+    async function deleteProduct(productId, productName) {
+        if (!confirm(`Are you sure you want to delete "${productName}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/products/${productId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                showToast('Product deleted successfully', 'success');
+                loadProducts();
+            } else {
+                showToast('Error deleting product', 'danger');
+            }
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        loadProducts();
+    });
+</script>
+{% endblock %}
