@@ -8,7 +8,13 @@ from config import Config
 def download_cisa_kev():
     """Download CISA KEV JSON feed"""
     try:
-        response = requests.get(Config.CISA_KEV_URL, timeout=30)
+        proxies = Config.get_proxies()
+        response = requests.get(
+            Config.CISA_KEV_URL,
+            timeout=30,
+            proxies=proxies,
+            verify=True  # Verify SSL certificates
+        )
         response.raise_for_status()
         return response.json()
     except Exception as e:

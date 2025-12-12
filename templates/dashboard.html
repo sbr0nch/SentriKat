@@ -3,148 +3,294 @@
 {% block title %}Dashboard - SentriKat{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col">
-        <h2><i class="bi bi-speedometer2"></i> Vulnerability Dashboard</h2>
-        <p class="text-muted">Monitoring vulnerabilities for your tracked products</p>
+<div class="fade-in">
+    <!-- Page Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1 class="display-6 fw-bold text-white mb-2">
+                <i class="bi bi-speedometer2 me-2"></i>Vulnerability Dashboard
+            </h1>
+            <p class="text-white-50 mb-0">Real-time monitoring of known exploited vulnerabilities affecting your infrastructure</p>
+        </div>
     </div>
-</div>
 
-<div class="loading">
-    <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Loading...</span>
-    </div>
-    <p>Loading data...</p>
-</div>
-
-<div class="row mb-4" id="statsContainer">
-    <div class="col-md-3 mb-3">
-        <div class="card stat-card" style="border-left-color: #0d6efd;">
-            <div class="card-body">
-                <h6 class="card-subtitle mb-2 text-muted">Total Vulnerabilities</h6>
-                <h2 class="card-title" id="totalVulns">-</h2>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 mb-3">
-        <div class="card stat-card" style="border-left-color: #dc3545;">
-            <div class="card-body">
-                <h6 class="card-subtitle mb-2 text-muted">Matching Your Products</h6>
-                <h2 class="card-title" id="totalMatches">-</h2>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 mb-3">
-        <div class="card stat-card" style="border-left-color: #ffc107;">
-            <div class="card-body">
-                <h6 class="card-subtitle mb-2 text-muted">Unacknowledged</h6>
-                <h2 class="card-title" id="unacknowledged">-</h2>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 mb-3">
-        <div class="card stat-card" style="border-left-color: #198754;">
-            <div class="card-body">
-                <h6 class="card-subtitle mb-2 text-muted">Products Tracked</h6>
-                <h2 class="card-title" id="productsTracked">-</h2>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row mb-3">
-    <div class="col-md-12">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">Filter Vulnerabilities</h5>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <input type="text" class="form-control" id="filterCVE" placeholder="CVE ID">
+    <!-- Statistics Cards -->
+    <div class="row g-4 mb-4" id="statsContainer">
+        <div class="col-xl-3 col-md-6">
+            <div class="card stat-card" style="border-left-color: #3b82f6;">
+                <div class="card-body position-relative">
+                    <i class="bi bi-database stat-icon"></i>
+                    <div class="stat-label">Total Vulnerabilities</div>
+                    <div class="stat-value text-primary" id="totalVulns">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
                     </div>
-                    <div class="col-md-3">
-                        <input type="text" class="form-control" id="filterVendor" placeholder="Vendor">
+                    <small class="text-muted">In CISA KEV Catalog</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card stat-card" style="border-left-color: #ef4444;">
+                <div class="card-body position-relative">
+                    <i class="bi bi-exclamation-triangle stat-icon"></i>
+                    <div class="stat-label">Affecting Your Products</div>
+                    <div class="stat-value text-danger" id="totalMatches">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
                     </div>
-                    <div class="col-md-2">
-                        <div class="form-check">
+                    <small class="text-muted">Direct matches found</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card stat-card" style="border-left-color: #f59e0b;">
+                <div class="card-body position-relative">
+                    <i class="bi bi-clock-history stat-icon"></i>
+                    <div class="stat-label">Needs Review</div>
+                    <div class="stat-value text-warning" id="unacknowledged">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                    </div>
+                    <small class="text-muted">Unacknowledged items</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card stat-card" style="border-left-color: #10b981;">
+                <div class="card-body position-relative">
+                    <i class="bi bi-gear-fill stat-icon"></i>
+                    <div class="stat-label">Products Tracked</div>
+                    <div class="stat-value text-success" id="productsTracked">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                    </div>
+                    <small class="text-muted">Active inventory items</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advanced Filters Panel -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-funnel me-2"></i>Advanced Filters</span>
+            <button class="btn btn-sm btn-light" onclick="resetFilters()">
+                <i class="bi bi-arrow-counterclockwise"></i> Reset
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">CVE ID</label>
+                    <input type="text" class="form-control" id="filterCVE" placeholder="e.g., CVE-2024-1234">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Vendor</label>
+                    <input type="text" class="form-control" id="filterVendor" placeholder="e.g., Microsoft">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Product</label>
+                    <input type="text" class="form-control" id="filterProduct" placeholder="e.g., Windows">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Sort By</label>
+                    <select class="form-select" id="sortBy">
+                        <option value="date_desc">Date Added (Newest)</option>
+                        <option value="date_asc">Date Added (Oldest)</option>
+                        <option value="cve_desc">CVE ID (Desc)</option>
+                        <option value="cve_asc">CVE ID (Asc)</option>
+                    </select>
+                </div>
+                <div class="col-md-12">
+                    <div class="d-flex gap-3 flex-wrap">
+                        <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" id="filterRansomware">
-                            <label class="form-check-label" for="filterRansomware">
-                                Ransomware only
+                            <label class="form-check-label fw-semibold" for="filterRansomware">
+                                <i class="bi bi-shield-exclamation text-danger"></i> Ransomware Only
                             </label>
                         </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="form-check">
+                        <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" id="filterUnack">
-                            <label class="form-check-label" for="filterUnack">
-                                Unacknowledged
+                            <label class="form-check-label fw-semibold" for="filterUnack">
+                                <i class="bi bi-circle text-warning"></i> Unacknowledged Only
                             </label>
                         </div>
                     </div>
-                    <div class="col-md-2">
-                        <button class="btn btn-primary w-100" onclick="loadVulnerabilities()">
-                            <i class="bi bi-search"></i> Filter
+                </div>
+                <div class="col-md-12">
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" onclick="loadVulnerabilities()">
+                            <i class="bi bi-search"></i> Apply Filters
+                        </button>
+                        <div class="dropdown export-dropdown">
+                            <button class="btn btn-success dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                <i class="bi bi-download"></i> Export
+                            </button>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="#" onclick="exportData('csv')">
+                                    <i class="bi bi-filetype-csv"></i> Export as CSV
+                                </a></li>
+                                <li><a class="dropdown-item" href="#" onclick="exportData('json')">
+                                    <i class="bi bi-filetype-json"></i> Export as JSON
+                                </a></li>
+                            </ul>
+                        </div>
+                        <button class="btn btn-outline-secondary" onclick="bulkAcknowledge()" id="bulkAckBtn" disabled>
+                            <i class="bi bi-check-all"></i> Bulk Acknowledge (<span id="selectedCount">0</span>)
                         </button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
-<div class="row">
-    <div class="col-md-12">
-        <h4>Matched Vulnerabilities</h4>
-        <div id="vulnerabilitiesContainer"></div>
+    <!-- Vulnerabilities List -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-shield-exclamation me-2"></i>Matched Vulnerabilities (<span id="vulnCount">0</span>)</span>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+                <label class="form-check-label" for="selectAll">Select All</label>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div id="vulnerabilitiesContainer" class="p-3"></div>
+        </div>
+    </div>
+
+    <!-- Last Sync Info -->
+    <div class="card mt-4">
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <h6 class="mb-0"><i class="bi bi-info-circle me-2"></i>Last Synchronization</h6>
+                    <p class="text-muted mb-0 mt-1" id="lastSync">Loading...</p>
+                </div>
+                <div class="col-md-6 text-end">
+                    <button class="btn btn-outline-primary" onclick="viewSyncHistory()">
+                        <i class="bi bi-clock-history"></i> View Sync History
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
-<div id="lastSync" class="text-muted mt-4"></div>
+<!-- Sync History Modal -->
+<div class="modal fade" id="syncHistoryModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-clock-history me-2"></i>Synchronization History</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Date & Time</th>
+                                <th>Status</th>
+                                <th>Vulnerabilities</th>
+                                <th>Matches Found</th>
+                                <th>Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="syncHistoryTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+    let currentVulnerabilities = [];
+    let selectedVulns = new Set();
+
     async function loadStats() {
         try {
             const response = await fetch('/api/vulnerabilities/stats');
             const stats = await response.json();
 
-            document.getElementById('totalVulns').textContent = stats.total_vulnerabilities;
-            document.getElementById('totalMatches').textContent = stats.total_matches;
-            document.getElementById('unacknowledged').textContent = stats.unacknowledged;
-            document.getElementById('productsTracked').textContent = stats.products_tracked;
+            document.getElementById('totalVulns').textContent = formatNumber(stats.total_vulnerabilities);
+            document.getElementById('totalMatches').textContent = formatNumber(stats.total_matches);
+            document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged);
+            document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
         } catch (error) {
             console.error('Error loading stats:', error);
+            showToast('Failed to load statistics', 'danger');
         }
     }
 
     async function loadVulnerabilities() {
         showLoading();
         const container = document.getElementById('vulnerabilitiesContainer');
+        selectedVulns.clear();
+        updateBulkActions();
 
         try {
             const params = new URLSearchParams();
             const cve = document.getElementById('filterCVE').value;
             const vendor = document.getElementById('filterVendor').value;
+            const product = document.getElementById('filterProduct').value;
             const ransomware = document.getElementById('filterRansomware').checked;
             const unack = document.getElementById('filterUnack').checked;
 
             if (cve) params.append('cve_id', cve);
             if (vendor) params.append('vendor', vendor);
+            if (product) params.append('product', product);
             if (ransomware) params.append('ransomware_only', 'true');
             if (unack) params.append('acknowledged', 'false');
 
             const response = await fetch(`/api/vulnerabilities?${params}`);
-            const matches = await response.json();
+            currentVulnerabilities = await response.json();
 
-            if (matches.length === 0) {
-                container.innerHTML = '<div class="alert alert-info">No vulnerabilities found matching your criteria.</div>';
+            // Apply client-side sorting
+            sortVulnerabilities();
+
+            document.getElementById('vulnCount').textContent = currentVulnerabilities.length;
+
+            if (currentVulnerabilities.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-5">
+                        <i class="bi bi-shield-check text-success" style="font-size: 4rem;"></i>
+                        <h4 class="mt-3">No vulnerabilities found</h4>
+                        <p class="text-muted">No matches found with the current filter criteria.</p>
+                    </div>
+                `;
             } else {
-                container.innerHTML = matches.map(match => createVulnCard(match)).join('');
+                container.innerHTML = currentVulnerabilities.map(match => createVulnCard(match)).join('');
             }
         } catch (error) {
-            container.innerHTML = `<div class="alert alert-danger">Error loading vulnerabilities: ${error.message}</div>`;
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${error.message}
+                </div>
+            `;
         } finally {
             hideLoading();
+        }
+    }
+
+    function sortVulnerabilities() {
+        const sortBy = document.getElementById('sortBy').value;
+
+        switch(sortBy) {
+            case 'date_desc':
+                currentVulnerabilities.sort((a, b) =>
+                    new Date(b.vulnerability.date_added) - new Date(a.vulnerability.date_added));
+                break;
+            case 'date_asc':
+                currentVulnerabilities.sort((a, b) =>
+                    new Date(a.vulnerability.date_added) - new Date(b.vulnerability.date_added));
+                break;
+            case 'cve_desc':
+                currentVulnerabilities.sort((a, b) =>
+                    b.vulnerability.cve_id.localeCompare(a.vulnerability.cve_id));
+                break;
+            case 'cve_asc':
+                currentVulnerabilities.sort((a, b) =>
+                    a.vulnerability.cve_id.localeCompare(b.vulnerability.cve_id));
+                break;
         }
     }
 
@@ -152,38 +298,82 @@
         const vuln = match.vulnerability;
         const product = match.product;
         const ransomwareClass = vuln.known_ransomware ? 'ransomware' : '';
-        const ransomwareBadge = vuln.known_ransomware ? '<span class="badge badge-ransomware"><i class="bi bi-exclamation-triangle"></i> Ransomware</span>' : '';
-        const ackButton = match.acknowledged
-            ? `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${match.id})"><i class="bi bi-check-circle"></i> Acknowledged</button>`
-            : `<button class="btn btn-sm btn-warning" onclick="acknowledgeMatch(${match.id})"><i class="bi bi-circle"></i> Acknowledge</button>`;
+        const ransomwareBadge = vuln.known_ransomware ?
+            '<span class="badge bg-danger"><i class="bi bi-shield-exclamation"></i> Ransomware Campaign</span>' : '';
+        const ackBadge = match.acknowledged ?
+            '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Acknowledged</span>' :
+            '<span class="badge bg-warning text-dark"><i class="bi bi-circle"></i> Needs Review</span>';
 
         return `
             <div class="card vuln-card ${ransomwareClass}" id="match-${match.id}">
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-8">
-                            <h5 class="card-title">
-                                ${vuln.cve_id} - ${vuln.vulnerability_name}
-                                ${ransomwareBadge}
-                            </h5>
-                            <p class="card-text">
-                                <strong>Vendor:</strong> ${vuln.vendor_project} |
-                                <strong>Product:</strong> ${vuln.product}
-                            </p>
-                            <p class="card-text">${vuln.short_description}</p>
-                            <p class="card-text">
-                                <strong>Required Action:</strong> ${vuln.required_action}
-                            </p>
-                            <small class="text-muted">
-                                <strong>Matched Product:</strong> ${product.vendor} - ${product.product_name}
-                                ${product.version ? `(v${product.version})` : ''} |
-                                <strong>Match Reason:</strong> ${match.match_reason}
-                            </small>
+                        <div class="col-auto">
+                            <input class="form-check-input" type="checkbox" value="${match.id}"
+                                   onchange="toggleSelection(${match.id}, this.checked)">
                         </div>
-                        <div class="col-md-4 text-end">
-                            <p><small><strong>Date Added:</strong> ${vuln.date_added}</small></p>
-                            ${vuln.due_date ? `<p><small><strong>Due Date:</strong> ${vuln.due_date}</small></p>` : ''}
-                            ${ackButton}
+                        <div class="col">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <h5 class="card-title mb-2">
+                                        <span class="badge bg-dark">${vuln.cve_id}</span>
+                                        ${vuln.vulnerability_name}
+                                    </h5>
+                                    <div class="mb-2">
+                                        ${ransomwareBadge}
+                                        ${ackBadge}
+                                        <span class="badge bg-secondary">
+                                            <i class="bi bi-calendar3"></i> Added: ${formatDate(vuln.date_added)}
+                                        </span>
+                                        ${vuln.due_date ? `<span class="badge bg-danger">
+                                            <i class="bi bi-alarm"></i> Due: ${formatDate(vuln.due_date)}
+                                        </span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <small class="text-muted fw-semibold">AFFECTED PRODUCT</small>
+                                    <p class="mb-0"><strong>${vuln.vendor_project}</strong> - ${vuln.product}</p>
+                                </div>
+                                <div class="col-md-6">
+                                    <small class="text-muted fw-semibold">YOUR PRODUCT</small>
+                                    <p class="mb-0"><strong>${product.vendor}</strong> - ${product.product_name}
+                                        ${product.version ? `<span class="badge bg-info">v${product.version}</span>` : ''}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="mb-2">
+                                <small class="text-muted fw-semibold">DESCRIPTION</small>
+                                <p class="mb-0">${vuln.short_description}</p>
+                            </div>
+
+                            <div class="mb-3">
+                                <small class="text-muted fw-semibold">REQUIRED ACTION</small>
+                                <p class="mb-0 fw-medium text-danger">${vuln.required_action}</p>
+                            </div>
+
+                            <div class="mb-3">
+                                <small class="text-muted fw-semibold">MATCH REASON</small>
+                                <p class="mb-0 text-primary">${match.match_reason}</p>
+                            </div>
+
+                            <div class="btn-group" role="group">
+                                ${!match.acknowledged ?
+                                    `<button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${match.id})">
+                                        <i class="bi bi-check-circle"></i> Acknowledge
+                                    </button>` :
+                                    `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${match.id})">
+                                        <i class="bi bi-arrow-counterclockwise"></i> Unacknowledge
+                                    </button>`
+                                }
+                                <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank"
+                                   class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-box-arrow-up-right"></i> View in NVD
+                                </a>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -191,14 +381,69 @@
         `;
     }
 
+    function toggleSelection(matchId, selected) {
+        if (selected) {
+            selectedVulns.add(matchId);
+        } else {
+            selectedVulns.delete(matchId);
+            document.getElementById('selectAll').checked = false;
+        }
+        updateBulkActions();
+    }
+
+    function toggleSelectAll(checkbox) {
+        const checkboxes = document.querySelectorAll('.vuln-card input[type="checkbox"]');
+        checkboxes.forEach(cb => {
+            cb.checked = checkbox.checked;
+            const matchId = parseInt(cb.value);
+            if (checkbox.checked) {
+                selectedVulns.add(matchId);
+            } else {
+                selectedVulns.delete(matchId);
+            }
+        });
+        updateBulkActions();
+    }
+
+    function updateBulkActions() {
+        const count = selectedVulns.size;
+        document.getElementById('selectedCount').textContent = count;
+        document.getElementById('bulkAckBtn').disabled = count === 0;
+    }
+
+    async function bulkAcknowledge() {
+        if (selectedVulns.size === 0) return;
+
+        if (!confirm(`Acknowledge ${selectedVulns.size} vulnerabilities?`)) return;
+
+        showLoading();
+        let success = 0;
+        let failed = 0;
+
+        for (const matchId of selectedVulns) {
+            try {
+                await fetch(`/api/matches/${matchId}/acknowledge`, { method: 'POST' });
+                success++;
+            } catch {
+                failed++;
+            }
+        }
+
+        hideLoading();
+        showToast(`✓ Acknowledged ${success} vulnerabilities${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'success' : 'danger');
+        selectedVulns.clear();
+        loadVulnerabilities();
+        loadStats();
+    }
+
     async function acknowledgeMatch(matchId) {
         try {
             await fetch(`/api/matches/${matchId}/acknowledge`, { method: 'POST' });
-            showToast('Vulnerability acknowledged', 'success');
+            showToast('✓ Vulnerability acknowledged', 'success');
             loadVulnerabilities();
             loadStats();
         } catch (error) {
-            showToast(`Error: ${error.message}`, 'danger');
+            showToast(`✗ Error: ${error.message}`, 'danger');
         }
     }
 
@@ -209,7 +454,7 @@
             loadVulnerabilities();
             loadStats();
         } catch (error) {
-            showToast(`Error: ${error.message}`, 'danger');
+            showToast(`✗ Error: ${error.message}`, 'danger');
         }
     }
 
@@ -220,9 +465,12 @@
 
             if (sync.sync_date) {
                 const date = new Date(sync.sync_date);
+                const statusBadge = sync.status === 'success' ?
+                    '<span class="badge bg-success">Success</span>' :
+                    '<span class="badge bg-danger">Failed</span>';
                 document.getElementById('lastSync').innerHTML = `
-                    <i class="bi bi-clock"></i> Last sync: ${date.toLocaleString()}
-                    (Status: ${sync.status}, Matches: ${sync.matches_found})
+                    ${date.toLocaleString()} ${statusBadge} |
+                    ${sync.matches_found || 0} matches found in ${(sync.duration_seconds || 0).toFixed(2)}s
                 `;
             }
         } catch (error) {
@@ -230,11 +478,120 @@
         }
     }
 
+    async function viewSyncHistory() {
+        try {
+            const response = await fetch('/api/sync/history?limit=20');
+            const history = await response.json();
+
+            const tbody = document.getElementById('syncHistoryTable');
+            tbody.innerHTML = history.map(sync => {
+                const date = new Date(sync.sync_date);
+                const statusBadge = sync.status === 'success' ?
+                    '<span class="badge bg-success">Success</span>' :
+                    '<span class="badge bg-danger">Failed</span>';
+
+                return `
+                    <tr>
+                        <td>${date.toLocaleString()}</td>
+                        <td>${statusBadge}</td>
+                        <td>${sync.vulnerabilities_count || 0}</td>
+                        <td>${sync.matches_found || 0}</td>
+                        <td>${(sync.duration_seconds || 0).toFixed(2)}s</td>
+                    </tr>
+                `;
+            }).join('');
+
+            new bootstrap.Modal(document.getElementById('syncHistoryModal')).show();
+        } catch (error) {
+            showToast('Failed to load sync history', 'danger');
+        }
+    }
+
+    function resetFilters() {
+        document.getElementById('filterCVE').value = '';
+        document.getElementById('filterVendor').value = '';
+        document.getElementById('filterProduct').value = '';
+        document.getElementById('filterRansomware').checked = false;
+        document.getElementById('filterUnack').checked = false;
+        document.getElementById('sortBy').value = 'date_desc';
+        loadVulnerabilities();
+    }
+
+    function exportData(format) {
+        const data = currentVulnerabilities.map(match => ({
+            cve_id: match.vulnerability.cve_id,
+            vulnerability_name: match.vulnerability.vulnerability_name,
+            vendor_project: match.vulnerability.vendor_project,
+            product: match.vulnerability.product,
+            date_added: match.vulnerability.date_added,
+            due_date: match.vulnerability.due_date,
+            description: match.vulnerability.short_description,
+            required_action: match.vulnerability.required_action,
+            ransomware: match.vulnerability.known_ransomware,
+            your_product: `${match.product.vendor} - ${match.product.product_name}`,
+            acknowledged: match.acknowledged,
+            match_reason: match.match_reason
+        }));
+
+        if (format === 'json') {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            downloadFile(blob, `sentrikat-vulnerabilities-${new Date().toISOString().split('T')[0]}.json`);
+        } else if (format === 'csv') {
+            const csv = convertToCSV(data);
+            const blob = new Blob([csv], { type: 'text/csv' });
+            downloadFile(blob, `sentrikat-vulnerabilities-${new Date().toISOString().split('T')[0]}.csv`);
+        }
+        showToast(`✓ Exported ${data.length} vulnerabilities as ${format.toUpperCase()}`, 'success');
+    }
+
+    function convertToCSV(data) {
+        if (data.length === 0) return '';
+        const headers = Object.keys(data[0]).join(',');
+        const rows = data.map(row =>
+            Object.values(row).map(val =>
+                `"${String(val).replace(/"/g, '""')}"`
+            ).join(',')
+        );
+        return [headers, ...rows].join('\n');
+    }
+
+    function downloadFile(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
     // Load data on page load
     document.addEventListener('DOMContentLoaded', function() {
         loadStats();
         loadVulnerabilities();
         loadLastSync();
+
+        // Auto-refresh stats every 5 minutes
+        setInterval(loadStats, 300000);
+    });
+
+    // Handle Enter key in filter inputs
+    document.querySelectorAll('#filterCVE, #filterVendor, #filterProduct').forEach(input => {
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loadVulnerabilities();
+            }
+        });
+    });
+
+    // Handle sort change
+    document.getElementById('sortBy').addEventListener('change', function() {
+        if (currentVulnerabilities.length > 0) {
+            sortVulnerabilities();
+            document.getElementById('vulnerabilitiesContainer').innerHTML =
+                currentVulnerabilities.map(match => createVulnCard(match)).join('');
+        }
     });
 </script>
 {% endblock %}
