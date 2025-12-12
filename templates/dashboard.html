@@ -147,6 +147,15 @@
                     </select>
                 </div>
                 <div class="col-md-3">
+                    <label class="form-label fw-semibold">CISA Urgency</label>
+                    <select class="form-select" id="filterUrgency">
+                        <option value="">All Urgency Levels</option>
+                        <option value="critical">Critical - Due ≤7 Days</option>
+                        <option value="high">High - Due ≤30 Days</option>
+                        <option value="has_due_date">Has Due Date</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
                     <label class="form-label fw-semibold">CVE Age</label>
                     <select class="form-select" id="filterAge">
                         <option value="">All Ages</option>
@@ -369,6 +378,38 @@
             currentVulnerabilities = currentVulnerabilities.filter(match => {
                 const effectivePriority = match.effective_priority;
                 return priorityOrder[effectivePriority] >= minLevel;
+            });
+        }
+
+        // Filter by CISA urgency (based on due date)
+        const urgencyFilter = document.getElementById('filterUrgency').value;
+        if (urgencyFilter) {
+            currentVulnerabilities = currentVulnerabilities.filter(match => {
+                const vuln = match.vulnerability;
+
+                // Check if CVE has a due date
+                if (!vuln.due_date) {
+                    return urgencyFilter === ''; // Only pass if no filter
+                }
+
+                // Calculate days until due
+                const today = new Date();
+                const dueDate = new Date(vuln.due_date);
+                const daysUntilDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+
+                switch(urgencyFilter) {
+                    case 'critical':
+                        // Critical: Due within 7 days OR ransomware
+                        return daysUntilDue <= 7 || vuln.known_ransomware;
+                    case 'high':
+                        // High: Due within 30 days
+                        return daysUntilDue <= 30;
+                    case 'has_due_date':
+                        // Any CVE with a due date
+                        return true;
+                    default:
+                        return true;
+                }
             });
         }
 
@@ -637,6 +678,7 @@
 
     function resetFilters() {
         document.getElementById('filterPriority').value = '';
+        document.getElementById('filterUrgency').value = '';
         document.getElementById('filterAge').value = '';
         document.getElementById('filterCVE').value = '';
         document.getElementById('filterVendor').value = '';
@@ -720,6 +762,7 @@
 
     // Handle filter changes
     document.getElementById('filterPriority').addEventListener('change', loadVulnerabilities);
+    document.getElementById('filterUrgency').addEventListener('change', loadVulnerabilities);
     document.getElementById('filterAge').addEventListener('change', loadVulnerabilities);
 
     // Handle sort change
