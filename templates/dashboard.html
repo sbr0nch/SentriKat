@@ -7,10 +7,70 @@
     <!-- Page Header -->
     <div class="row mb-4">
         <div class="col-12">
-            <h1 class="display-6 fw-bold text-white mb-2">
+            <h1 class="display-6 fw-bold text-dark mb-2">
                 <i class="bi bi-speedometer2 me-2"></i>Vulnerability Dashboard
             </h1>
-            <p class="text-white-50 mb-0">Real-time monitoring of known exploited vulnerabilities affecting your infrastructure</p>
+            <p class="text-muted mb-0">Real-time monitoring of known exploited vulnerabilities affecting your infrastructure</p>
+        </div>
+    </div>
+
+    <!-- Priority Alert Cards -->
+    <div class="row g-3 mb-4" id="priorityAlerts">
+        <div class="col-xl-3 col-md-6">
+            <div class="alert-card alert-card-critical">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="alert-card-label">Critical Priority</div>
+                        <div class="alert-card-value" id="criticalCount">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                        </div>
+                        <small class="text-muted">Immediate action required</small>
+                    </div>
+                    <i class="bi bi-exclamation-octagon-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="alert-card alert-card-high">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="alert-card-label">High Priority</div>
+                        <div class="alert-card-value" id="highCount">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                        </div>
+                        <small class="text-muted">Urgent attention needed</small>
+                    </div>
+                    <i class="bi bi-exclamation-triangle-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="alert-card alert-card-medium">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="alert-card-label">Medium Priority</div>
+                        <div class="alert-card-value" id="mediumCount">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                        </div>
+                        <small class="text-muted">Plan remediation</small>
+                    </div>
+                    <i class="bi bi-info-circle-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="alert-card alert-card-low">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="alert-card-label">Low Priority</div>
+                        <div class="alert-card-value" id="lowCount">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                        </div>
+                        <small class="text-muted">Monitor and review</small>
+                    </div>
+                    <i class="bi bi-shield-check" style="font-size: 2rem; opacity: 0.3;"></i>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -70,12 +130,31 @@
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-funnel me-2"></i>Advanced Filters</span>
-            <button class="btn btn-sm btn-light" onclick="resetFilters()">
+            <button class="btn btn-sm btn-outline-secondary" onclick="resetFilters()">
                 <i class="bi bi-arrow-counterclockwise"></i> Reset
             </button>
         </div>
         <div class="card-body">
             <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Priority Level</label>
+                    <select class="form-select" id="filterPriority">
+                        <option value="">All Priorities</option>
+                        <option value="critical">Critical Only</option>
+                        <option value="high">High & Above</option>
+                        <option value="medium">Medium & Above</option>
+                        <option value="low">Low & Above</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">CVE Age</label>
+                    <select class="form-select" id="filterAge">
+                        <option value="">All Ages</option>
+                        <option value="30">Last 30 Days</option>
+                        <option value="90">Last 90 Days</option>
+                        <option value="180">Last 6 Months</option>
+                    </select>
+                </div>
                 <div class="col-md-3">
                     <label class="form-label fw-semibold">CVE ID</label>
                     <input type="text" class="form-control" id="filterCVE" placeholder="e.g., CVE-2024-1234">
@@ -91,6 +170,7 @@
                 <div class="col-md-3">
                     <label class="form-label fw-semibold">Sort By</label>
                     <select class="form-select" id="sortBy">
+                        <option value="priority">Priority (Highest First)</option>
                         <option value="date_desc">Date Added (Newest)</option>
                         <option value="date_asc">Date Added (Oldest)</option>
                         <option value="cve_desc">CVE ID (Desc)</option>
@@ -215,6 +295,12 @@
             document.getElementById('totalMatches').textContent = formatNumber(stats.total_matches);
             document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged);
             document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
+
+            // Update priority counts
+            document.getElementById('criticalCount').textContent = formatNumber(stats.critical_count || 0);
+            document.getElementById('highCount').textContent = formatNumber(stats.high_count || 0);
+            document.getElementById('mediumCount').textContent = formatNumber(stats.medium_count || 0);
+            document.getElementById('lowCount').textContent = formatNumber(stats.low_count || 0);
         } catch (error) {
             console.error('Error loading stats:', error);
             showToast('Failed to load statistics', 'danger');
@@ -244,7 +330,10 @@
             const response = await fetch(`/api/vulnerabilities?${params}`);
             currentVulnerabilities = await response.json();
 
-            // Apply client-side sorting
+            // Apply client-side filtering for priority and age
+            applyClientFilters();
+
+            // Apply sorting
             sortVulnerabilities();
 
             document.getElementById('vulnCount').textContent = currentVulnerabilities.length;
@@ -271,10 +360,42 @@
         }
     }
 
+    function applyClientFilters() {
+        // Filter by priority
+        const priorityFilter = document.getElementById('filterPriority').value;
+        if (priorityFilter) {
+            const priorityOrder = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1};
+            const minLevel = priorityOrder[priorityFilter];
+            currentVulnerabilities = currentVulnerabilities.filter(match => {
+                const effectivePriority = match.effective_priority;
+                return priorityOrder[effectivePriority] >= minLevel;
+            });
+        }
+
+        // Filter by age
+        const ageFilter = document.getElementById('filterAge').value;
+        if (ageFilter) {
+            const maxDays = parseInt(ageFilter);
+            currentVulnerabilities = currentVulnerabilities.filter(match => {
+                const daysOld = match.vulnerability.days_old || 0;
+                return daysOld <= maxDays;
+            });
+        }
+    }
+
     function sortVulnerabilities() {
         const sortBy = document.getElementById('sortBy').value;
+        const priorityOrder = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1};
 
         switch(sortBy) {
+            case 'priority':
+                currentVulnerabilities.sort((a, b) => {
+                    const priorityDiff = priorityOrder[b.effective_priority] - priorityOrder[a.effective_priority];
+                    if (priorityDiff !== 0) return priorityDiff;
+                    // If same priority, sort by date (newest first)
+                    return new Date(b.vulnerability.date_added) - new Date(a.vulnerability.date_added);
+                });
+                break;
             case 'date_desc':
                 currentVulnerabilities.sort((a, b) =>
                     new Date(b.vulnerability.date_added) - new Date(a.vulnerability.date_added));
@@ -297,15 +418,19 @@
     function createVulnCard(match) {
         const vuln = match.vulnerability;
         const product = match.product;
-        const ransomwareClass = vuln.known_ransomware ? 'ransomware' : '';
+        const priority = match.effective_priority;
+        const productCriticality = match.product_criticality;
+
         const ransomwareBadge = vuln.known_ransomware ?
-            '<span class="badge bg-danger"><i class="bi bi-shield-exclamation"></i> Ransomware Campaign</span>' : '';
+            '<span class="badge badge-critical"><i class="bi bi-shield-exclamation"></i> Ransomware</span>' : '';
         const ackBadge = match.acknowledged ?
             '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Acknowledged</span>' :
             '<span class="badge bg-warning text-dark"><i class="bi bi-circle"></i> Needs Review</span>';
+        const priorityBadge = `<span class="badge ${getPriorityBadgeClass(priority)}"><i class="bi ${getPriorityIcon(priority)}"></i> ${priority.toUpperCase()} Priority</span>`;
+        const criticalityBadge = `<span class="badge ${getPriorityBadgeClass(productCriticality)} badge-outline">${productCriticality.toUpperCase()} Criticality Product</span>`;
 
         return `
-            <div class="card vuln-card ${ransomwareClass}" id="match-${match.id}">
+            <div class="card vuln-card mb-3" id="match-${match.id}" style="border-left: 4px solid ${getPriorityColor(priority)};">
                 <div class="card-body">
                     <div class="row">
                         <div class="col-auto">
@@ -320,10 +445,11 @@
                                         ${vuln.vulnerability_name}
                                     </h5>
                                     <div class="mb-2">
+                                        ${priorityBadge}
                                         ${ransomwareBadge}
                                         ${ackBadge}
                                         <span class="badge bg-secondary">
-                                            <i class="bi bi-calendar3"></i> Added: ${formatDate(vuln.date_added)}
+                                            <i class="bi bi-calendar3"></i> Added: ${formatDate(vuln.date_added)} (${vuln.days_old} days ago)
                                         </span>
                                         ${vuln.due_date ? `<span class="badge bg-danger">
                                             <i class="bi bi-alarm"></i> Due: ${formatDate(vuln.due_date)}
@@ -339,8 +465,10 @@
                                 </div>
                                 <div class="col-md-6">
                                     <small class="text-muted fw-semibold">YOUR PRODUCT</small>
-                                    <p class="mb-0"><strong>${product.vendor}</strong> - ${product.product_name}
+                                    <p class="mb-0">
+                                        <strong>${product.vendor}</strong> - ${product.product_name}
                                         ${product.version ? `<span class="badge bg-info">v${product.version}</span>` : ''}
+                                        ${criticalityBadge}
                                     </p>
                                 </div>
                             </div>
@@ -508,27 +636,32 @@
     }
 
     function resetFilters() {
+        document.getElementById('filterPriority').value = '';
+        document.getElementById('filterAge').value = '';
         document.getElementById('filterCVE').value = '';
         document.getElementById('filterVendor').value = '';
         document.getElementById('filterProduct').value = '';
         document.getElementById('filterRansomware').checked = false;
         document.getElementById('filterUnack').checked = false;
-        document.getElementById('sortBy').value = 'date_desc';
+        document.getElementById('sortBy').value = 'priority';
         loadVulnerabilities();
     }
 
     function exportData(format) {
         const data = currentVulnerabilities.map(match => ({
+            priority: match.effective_priority,
             cve_id: match.vulnerability.cve_id,
             vulnerability_name: match.vulnerability.vulnerability_name,
             vendor_project: match.vulnerability.vendor_project,
             product: match.vulnerability.product,
             date_added: match.vulnerability.date_added,
+            days_old: match.vulnerability.days_old,
             due_date: match.vulnerability.due_date,
             description: match.vulnerability.short_description,
             required_action: match.vulnerability.required_action,
             ransomware: match.vulnerability.known_ransomware,
             your_product: `${match.product.vendor} - ${match.product.product_name}`,
+            product_criticality: match.product_criticality,
             acknowledged: match.acknowledged,
             match_reason: match.match_reason
         }));
@@ -584,6 +717,10 @@
             }
         });
     });
+
+    // Handle filter changes
+    document.getElementById('filterPriority').addEventListener('change', loadVulnerabilities);
+    document.getElementById('filterAge').addEventListener('change', loadVulnerabilities);
 
     // Handle sort change
     document.getElementById('sortBy').addEventListener('change', function() {

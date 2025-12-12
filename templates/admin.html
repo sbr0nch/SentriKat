@@ -3,94 +3,133 @@
 {% block title %}Admin - SentriKat{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col">
-        <h2><i class="bi bi-gear"></i> Product Management</h2>
-        <p class="text-muted">Manage your software inventory for vulnerability tracking</p>
+<div class="fade-in">
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="display-6 fw-bold text-dark mb-2">
+                <i class="bi bi-gear me-2"></i>Product Management
+            </h1>
+            <p class="text-muted">Manage your software inventory for vulnerability tracking</p>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#productModal" onclick="showAddProduct()">
+                <i class="bi bi-plus-circle me-2"></i>Add Product
+            </button>
+        </div>
     </div>
-    <div class="col text-end">
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#productModal" onclick="showAddProduct()">
-            <i class="bi bi-plus-circle"></i> Add Product
-        </button>
-    </div>
-</div>
 
-<div class="loading">
-    <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Loading...</span>
-    </div>
-    <p>Loading products...</p>
-</div>
-
-<div class="row">
-    <div class="col-md-12">
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th>Vendor</th>
-                        <th>Product</th>
-                        <th>Version</th>
-                        <th>Keywords</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="productsTable"></tbody>
-            </table>
+    <div class="card">
+        <div class="card-header">
+            <i class="bi bi-list-ul me-2"></i>Product Inventory
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Vendor</th>
+                            <th>Product</th>
+                            <th>Version</th>
+                            <th>Criticality</th>
+                            <th>Keywords</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsTable">
+                        <tr>
+                            <td colspan="7" class="text-center py-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="text-muted mt-2">Loading products...</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>
 
 <!-- Product Modal -->
 <div class="modal fade" id="productModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="productModalTitle">Add Product</h5>
+                <h5 class="modal-title" id="productModalTitle">
+                    <i class="bi bi-plus-circle me-2"></i>Add Product
+                </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <form id="productForm">
                     <input type="hidden" id="productId">
-                    <div class="mb-3">
-                        <label for="vendor" class="form-label">Vendor *</label>
-                        <input type="text" class="form-control" id="vendor" required
-                               placeholder="e.g., Microsoft, Cisco, Apache">
-                        <small class="form-text text-muted">The vendor/manufacturer name</small>
-                    </div>
-                    <div class="mb-3">
-                        <label for="productName" class="form-label">Product Name *</label>
-                        <input type="text" class="form-control" id="productName" required
-                               placeholder="e.g., Windows Server, IOS, Tomcat">
-                        <small class="form-text text-muted">The software/product name</small>
-                    </div>
-                    <div class="mb-3">
-                        <label for="version" class="form-label">Version</label>
-                        <input type="text" class="form-control" id="version"
-                               placeholder="e.g., 2022, 15.2, 9.0">
-                        <small class="form-text text-muted">Optional: Specific version you're using</small>
-                    </div>
-                    <div class="mb-3">
-                        <label for="keywords" class="form-label">Additional Keywords</label>
-                        <input type="text" class="form-control" id="keywords"
-                               placeholder="e.g., Exchange, Webex, Struts">
-                        <small class="form-text text-muted">Comma-separated keywords for better matching</small>
-                    </div>
-                    <div class="mb-3">
-                        <label for="description" class="form-label">Description</label>
-                        <textarea class="form-control" id="description" rows="2"
-                                  placeholder="Optional notes about this product"></textarea>
-                    </div>
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="active" checked>
-                        <label class="form-check-label" for="active">Active (track vulnerabilities)</label>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="vendor" class="form-label fw-semibold">Vendor *</label>
+                            <input type="text" class="form-control" id="vendor" required
+                                   placeholder="e.g., Microsoft, Cisco, Apache">
+                            <small class="form-text text-muted">The vendor/manufacturer name</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="productName" class="form-label fw-semibold">Product Name *</label>
+                            <input type="text" class="form-control" id="productName" required
+                                   placeholder="e.g., Windows Server, IOS, Tomcat">
+                            <small class="form-text text-muted">The software/product name</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="version" class="form-label fw-semibold">Version</label>
+                            <input type="text" class="form-control" id="version"
+                                   placeholder="e.g., 2022, 15.2, 9.0">
+                            <small class="form-text text-muted">Optional: Specific version you're using</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="criticality" class="form-label fw-semibold">Criticality Level *</label>
+                            <select class="form-select" id="criticality" required>
+                                <option value="critical">Critical - Mission Critical Systems</option>
+                                <option value="high">High - Important Production Systems</option>
+                                <option value="medium" selected>Medium - Standard Systems</option>
+                                <option value="low">Low - Non-Critical Systems</option>
+                            </select>
+                            <small class="form-text text-muted">How critical is this product to your organization?</small>
+                        </div>
+
+                        <div class="col-md-12">
+                            <label for="keywords" class="form-label fw-semibold">Additional Keywords</label>
+                            <input type="text" class="form-control" id="keywords"
+                                   placeholder="e.g., Exchange, Webex, Struts">
+                            <small class="form-text text-muted">Comma-separated keywords for better matching</small>
+                        </div>
+
+                        <div class="col-md-12">
+                            <label for="description" class="form-label fw-semibold">Description</label>
+                            <textarea class="form-control" id="description" rows="3"
+                                      placeholder="Optional notes about this product (e.g., deployment details, business use)"></textarea>
+                        </div>
+
+                        <div class="col-md-12">
+                            <div class="form-check form-switch">
+                                <input type="checkbox" class="form-check-input" id="active" checked>
+                                <label class="form-check-label fw-semibold" for="active">
+                                    Active (track vulnerabilities for this product)
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveProduct()">Save Product</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Cancel
+                </button>
+                <button type="button" class="btn btn-primary" onclick="saveProduct()">
+                    <i class="bi bi-check-circle me-1"></i>Save Product
+                </button>
             </div>
         </div>
     </div>
@@ -110,32 +149,52 @@
             const products = await response.json();
 
             if (products.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center">No products added yet. Click "Add Product" to start tracking.</td></tr>';
-            } else {
-                tbody.innerHTML = products.map(product => `
+                tbody.innerHTML = `
                     <tr>
-                        <td>${product.vendor}</td>
-                        <td>${product.product_name}</td>
-                        <td>${product.version || '-'}</td>
-                        <td>${product.keywords || '-'}</td>
-                        <td>
-                            ${product.active
-                                ? '<span class="badge bg-success">Active</span>'
-                                : '<span class="badge bg-secondary">Inactive</span>'}
-                        </td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-primary" onclick="editProduct(${product.id})">
-                                <i class="bi bi-pencil"></i> Edit
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteProduct(${product.id}, '${product.vendor} ${product.product_name}')">
-                                <i class="bi bi-trash"></i> Delete
-                            </button>
+                        <td colspan="7" class="text-center py-5">
+                            <i class="bi bi-inbox text-muted" style="font-size: 3rem;"></i>
+                            <h5 class="mt-3 text-muted">No products added yet</h5>
+                            <p class="text-muted">Click "Add Product" to start tracking vulnerabilities for your software inventory.</p>
                         </td>
                     </tr>
-                `).join('');
+                `;
+            } else {
+                tbody.innerHTML = products.map(product => {
+                    const criticalityBadge = `<span class="badge ${getPriorityBadgeClass(product.criticality || 'medium')}">${(product.criticality || 'medium').toUpperCase()}</span>`;
+                    const statusBadge = product.active
+                        ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
+                        : '<span class="badge bg-secondary"><i class="bi bi-pause-circle"></i> Inactive</span>';
+
+                    return `
+                        <tr>
+                            <td class="fw-semibold">${product.vendor}</td>
+                            <td>${product.product_name}</td>
+                            <td>${product.version ? `<span class="badge bg-info">${product.version}</span>` : '<span class="text-muted">-</span>'}</td>
+                            <td>${criticalityBadge}</td>
+                            <td>${product.keywords ? `<small class="text-muted">${product.keywords}</small>` : '<span class="text-muted">-</span>'}</td>
+                            <td>${statusBadge}</td>
+                            <td>
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <button class="btn btn-outline-primary" onclick="editProduct(${product.id})" title="Edit">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger" onclick="deleteProduct(${product.id}, '${escapeHtml(product.vendor)} ${escapeHtml(product.product_name)}')" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
             }
         } catch (error) {
-            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">Error loading products: ${error.message}</td></tr>`;
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center text-danger py-4">
+                        <i class="bi bi-exclamation-triangle"></i> Error loading products: ${error.message}
+                    </td>
+                </tr>
+            `;
         } finally {
             hideLoading();
         }
@@ -143,14 +202,15 @@
 
     function showAddProduct() {
         currentProductId = null;
-        document.getElementById('productModalTitle').textContent = 'Add Product';
+        document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-plus-circle me-2"></i>Add Product';
         document.getElementById('productForm').reset();
         document.getElementById('active').checked = true;
+        document.getElementById('criticality').value = 'medium';
     }
 
     async function editProduct(productId) {
         currentProductId = productId;
-        document.getElementById('productModalTitle').textContent = 'Edit Product';
+        document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Product';
 
         try {
             const response = await fetch(`/api/products/${productId}`);
@@ -159,6 +219,7 @@
             document.getElementById('vendor').value = product.vendor;
             document.getElementById('productName').value = product.product_name;
             document.getElementById('version').value = product.version || '';
+            document.getElementById('criticality').value = product.criticality || 'medium';
             document.getElementById('keywords').value = product.keywords || '';
             document.getElementById('description').value = product.description || '';
             document.getElementById('active').checked = product.active;
@@ -172,6 +233,7 @@
     async function saveProduct() {
         const vendor = document.getElementById('vendor').value.trim();
         const productName = document.getElementById('productName').value.trim();
+        const criticality = document.getElementById('criticality').value;
 
         if (!vendor || !productName) {
             showToast('Vendor and Product Name are required', 'warning');
@@ -182,11 +244,13 @@
             vendor: vendor,
             product_name: productName,
             version: document.getElementById('version').value.trim(),
+            criticality: criticality,
             keywords: document.getElementById('keywords').value.trim(),
             description: document.getElementById('description').value.trim(),
             active: document.getElementById('active').checked
         };
 
+        showLoading();
         try {
             let response;
             if (currentProductId) {
@@ -204,7 +268,10 @@
             }
 
             if (response.ok) {
-                showToast(currentProductId ? 'Product updated successfully' : 'Product added successfully', 'success');
+                showToast(
+                    currentProductId ? '✓ Product updated successfully' : '✓ Product added successfully',
+                    'success'
+                );
                 bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
                 loadProducts();
             } else {
@@ -213,28 +280,39 @@
             }
         } catch (error) {
             showToast(`Error saving product: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
         }
     }
 
     async function deleteProduct(productId, productName) {
-        if (!confirm(`Are you sure you want to delete "${productName}"?`)) {
+        if (!confirm(`Are you sure you want to delete "${productName}"?\n\nThis will remove the product and all its vulnerability matches.`)) {
             return;
         }
 
+        showLoading();
         try {
             const response = await fetch(`/api/products/${productId}`, {
                 method: 'DELETE'
             });
 
             if (response.ok) {
-                showToast('Product deleted successfully', 'success');
+                showToast('✓ Product deleted successfully', 'success');
                 loadProducts();
             } else {
-                showToast('Error deleting product', 'danger');
+                showToast('✗ Error deleting product', 'danger');
             }
         } catch (error) {
-            showToast(`Error: ${error.message}`, 'danger');
+            showToast(`✗ Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
         }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     document.addEventListener('DOMContentLoaded', function() {

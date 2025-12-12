@@ -38,7 +38,8 @@ def create_product():
         version=data.get('version'),
         keywords=data.get('keywords'),
         description=data.get('description'),
-        active=data.get('active', True)
+        active=data.get('active', True),
+        criticality=data.get('criticality', 'medium')
     )
 
     db.session.add(product)
@@ -73,6 +74,8 @@ def update_product(product_id):
         product.description = data['description']
     if 'active' in data:
         product.active = data['active']
+    if 'criticality' in data:
+        product.criticality = data['criticality']
 
     db.session.commit()
 
@@ -110,7 +113,7 @@ def get_vulnerabilities():
 
 @bp.route('/api/vulnerabilities/stats', methods=['GET'])
 def get_vulnerability_stats():
-    """Get vulnerability statistics"""
+    """Get vulnerability statistics with priority breakdown"""
     total_vulns = Vulnerability.query.count()
     total_matches = VulnerabilityMatch.query.count()
     unacknowledged = VulnerabilityMatch.query.filter_by(acknowledged=False).count()
@@ -118,12 +121,25 @@ def get_vulnerability_stats():
         Vulnerability.known_ransomware == True
     ).count()
 
+    # Calculate priority-based stats
+    all_matches = VulnerabilityMatch.query.filter_by(acknowledged=False).all()
+
+    priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+    for match in all_matches:
+        priority = match.calculate_effective_priority()
+        priority_counts[priority] = priority_counts.get(priority, 0) + 1
+
     return jsonify({
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
         'unacknowledged': unacknowledged,
         'ransomware_related': ransomware,
-        'products_tracked': Product.query.filter_by(active=True).count()
+        'products_tracked': Product.query.filter_by(active=True).count(),
+        'priority_breakdown': priority_counts,
+        'critical_count': priority_counts['critical'],
+        'high_count': priority_counts['high'],
+        'medium_count': priority_counts['medium'],
+        'low_count': priority_counts['low']
     })
 
 @bp.route('/api/matches/<int:match_id>/acknowledge', methods=['POST'])
