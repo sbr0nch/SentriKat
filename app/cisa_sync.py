@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta
 from app import db
 from app.models import Vulnerability, SyncLog
+from app.nvd_api import fetch_cvss_data
 from config import Config
 
 def download_cisa_kev():
@@ -79,7 +80,42 @@ def parse_and_store_vulnerabilities(kev_data):
     db.session.commit()
     return stored_count, updated_count
 
-def sync_cisa_kev():
+def enrich_with_cvss_data(limit=50):
+    """
+    Enrich vulnerabilities with CVSS scores from NVD API
+    Only processes vulnerabilities without CVSS data
+    limit: Maximum number of CVEs to process per run (to avoid rate limits)
+    """
+    # Get vulnerabilities without CVSS data, prioritize recent ones
+    vulns_to_enrich = Vulnerability.query.filter(
+        Vulnerability.cvss_score == None
+    ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
+
+    if not vulns_to_enrich:
+        print("All vulnerabilities already have CVSS data")
+        return 0
+
+    enriched_count = 0
+    print(f"Enriching {len(vulns_to_enrich)} vulnerabilities with CVSS data from NVD...")
+
+    for vuln in vulns_to_enrich:
+        cvss_score, severity = fetch_cvss_data(vuln.cve_id)
+
+        if cvss_score is not None:
+            vuln.cvss_score = cvss_score
+            vuln.severity = severity
+            enriched_count += 1
+            print(f"  ✓ {vuln.cve_id}: CVSS {cvss_score} ({severity})")
+        else:
+            # Mark as checked even if not found
+            vuln.cvss_score = 0.0  # 0.0 means "checked but not found"
+            print(f"  - {vuln.cve_id}: No CVSS data available")
+
+    db.session.commit()
+    print(f"Enriched {enriched_count} vulnerabilities with CVSS data")
+    return enriched_count
+
+def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
     """Main sync function to download and process CISA KEV"""
     start_time = datetime.utcnow()
     sync_log = SyncLog()
@@ -94,6 +130,10 @@ def sync_cisa_kev():
         # Match vulnerabilities with products
         from app.filters import match_vulnerabilities_to_products
         matches_count = match_vulnerabilities_to_products()
+
+        # Optionally enrich with CVSS data from NVD
+        if enrich_cvss:
+            enrich_with_cvss_data(limit=cvss_limit)
 
         # Log success
         duration = (datetime.utcnow() - start_time).total_seconds()

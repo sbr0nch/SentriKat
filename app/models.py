@@ -45,37 +45,54 @@ class Vulnerability(db.Model):
     due_date = db.Column(db.Date, nullable=True, index=True)
     known_ransomware = db.Column(db.Boolean, default=False, index=True)
     notes = db.Column(db.Text, nullable=True)
+    cvss_score = db.Column(db.Float, nullable=True, index=True)  # CVSS score from NVD
+    severity = db.Column(db.String(20), nullable=True, index=True)  # CRITICAL, HIGH, MEDIUM, LOW
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def calculate_priority(self):
         """
         Calculate priority based on multiple factors:
-        - Ransomware involvement: Automatic CRITICAL
-        - Due date proximity: Urgent if due soon
-        - Age: Recent CVEs are higher priority
+        1. CVE Severity (from CVSS score) - PRIMARY FACTOR
+        2. Ransomware involvement: Automatic CRITICAL
+        3. Due date proximity: Urgent if due soon
+        4. Age: Recent CVEs are higher priority
         Returns: critical, high, medium, low
         """
-        # Ransomware = Always Critical
+        priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+
+        # Start with CVE severity if available (PRIMARY)
+        if self.severity:
+            base_priority = self.severity.lower()
+        else:
+            # Fallback to age-based if no severity data
+            days_since_added = (date.today() - self.date_added).days
+            if days_since_added <= 30:
+                base_priority = 'high'
+            elif days_since_added <= 90:
+                base_priority = 'medium'
+            else:
+                base_priority = 'low'
+
+        current_level = priority_order.get(base_priority, 2)
+
+        # Ransomware = Always Critical (OVERRIDE)
         if self.known_ransomware:
             return 'critical'
 
-        # Check due date
+        # Check due date urgency (can ELEVATE priority)
         if self.due_date:
             days_until_due = (self.due_date - date.today()).days
             if days_until_due <= 7:
-                return 'critical'
+                current_level = max(current_level, priority_order['critical'])
             elif days_until_due <= 30:
-                return 'high'
+                current_level = max(current_level, priority_order['high'])
 
-        # Check age of vulnerability
-        days_since_added = (date.today() - self.date_added).days
+        # Return the priority level
+        for priority, level in priority_order.items():
+            if level == current_level:
+                return priority
 
-        if days_since_added <= 30:  # Last 30 days
-            return 'high'
-        elif days_since_added <= 90:  # Last 3 months
-            return 'medium'
-        else:  # Older than 3 months
-            return 'low'
+        return 'medium'
 
     def to_dict(self):
         return {
@@ -90,6 +107,8 @@ class Vulnerability(db.Model):
             'due_date': self.due_date.isoformat() if self.due_date else None,
             'known_ransomware': self.known_ransomware,
             'notes': self.notes,
+            'cvss_score': self.cvss_score,
+            'severity': self.severity,
             'priority': self.calculate_priority(),
             'days_old': (date.today() - self.date_added).days if self.date_added else None
         }
