@@ -406,9 +406,9 @@
             currentVulnerabilities = currentVulnerabilities.filter(match => {
                 const vuln = match.vulnerability;
 
-                // Check if CVE has a due date
+                // If urgency filter is active, CVEs MUST have a due date
                 if (!vuln.due_date) {
-                    return urgencyFilter === ''; // Only pass if no filter
+                    return false;
                 }
 
                 // Calculate days until due
