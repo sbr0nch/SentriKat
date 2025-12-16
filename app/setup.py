@@ -13,19 +13,23 @@ setup_bp = Blueprint('setup', __name__)
 
 def is_setup_complete():
     """Check if initial setup has been completed"""
-    # Check if at least one organization exists
-    org_count = Organization.query.count()
-    # Check if at least one user exists (only if auth is enabled)
-    user_count = User.query.count()
+    try:
+        # Check if at least one organization exists
+        org_count = Organization.query.count()
+        # Check if at least one user exists (only if auth is enabled)
+        user_count = User.query.count()
 
-    # Setup is complete if we have at least one organization
-    # and either auth is disabled or we have at least one user
-    auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+        # Setup is complete if we have at least one organization
+        # and either auth is disabled or we have at least one user
+        auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
 
-    if auth_enabled:
-        return org_count > 0 and user_count > 0
-    else:
-        return org_count > 0
+        if auth_enabled:
+            return org_count > 0 and user_count > 0
+        else:
+            return org_count > 0
+    except Exception as e:
+        # If database doesn't exist or has schema issues, setup is not complete
+        return False
 
 @setup_bp.route('/setup', methods=['GET'])
 def setup_wizard():
@@ -131,6 +135,16 @@ def create_admin_user():
         if not data.get('username') or not data.get('password'):
             return jsonify({'error': 'Username and password are required'}), 400
 
+        # Validate password strength
+        password = data.get('password')
+        if len(password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters long'}), 400
+
+        # Validate email format if provided
+        email = data.get('email')
+        if email and '@' not in email:
+            return jsonify({'error': 'Invalid email format'}), 400
+
         # Check if user already exists
         existing = User.query.filter_by(username=data['username']).first()
         if existing:
@@ -199,11 +213,25 @@ def seed_service_catalog():
 
         # Import and run the seed script
         import subprocess
+        import sys
+
+        # Get the project root directory
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        seed_script = os.path.join(project_root, 'seed_service_catalog.py')
+
+        # Check if seed script exists
+        if not os.path.exists(seed_script):
+            return jsonify({
+                'success': False,
+                'error': f'Seed script not found at: {seed_script}'
+            }), 500
+
         result = subprocess.run(
-            ['python', 'seed_service_catalog.py'],
+            [sys.executable, seed_script],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            cwd=project_root
         )
 
         if result.returncode == 0:
@@ -227,6 +255,9 @@ def seed_service_catalog():
 def run_initial_sync():
     """Run initial CISA KEV sync"""
     try:
+        # Check if proxy is configured
+        has_proxy = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
+
         # Run sync with CVSS enrichment
         result = sync_cisa_kev(enrich_cvss=True, cvss_limit=50)
 
@@ -236,16 +267,26 @@ def run_initial_sync():
                 'stored': result.get('stored', 0),
                 'updated': result.get('updated', 0),
                 'matches': result.get('matches', 0),
-                'duration': result.get('duration', 0)
+                'duration': result.get('duration', 0),
+                'has_proxy': has_proxy is not None
             })
         else:
+            error_msg = result.get('error', 'Sync failed')
+            # Add helpful message for network errors
+            if 'connection' in error_msg.lower() or 'network' in error_msg.lower():
+                if not has_proxy:
+                    error_msg += '. If you are behind a proxy, configure HTTP_PROXY and HTTPS_PROXY in .env'
             return jsonify({
                 'success': False,
-                'error': result.get('error', 'Sync failed')
+                'error': error_msg
             }), 500
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        error_msg = str(e)
+        # Provide helpful context for common errors
+        if 'connection' in error_msg.lower():
+            error_msg += '. Check your internet connection and proxy settings.'
+        return jsonify({'error': error_msg}), 500
 
 @setup_bp.route('/api/setup/complete', methods=['POST'])
 def complete_setup():
