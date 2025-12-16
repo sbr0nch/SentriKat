@@ -13,8 +13,9 @@ def create_app(config_class=Config):
     db.init_app(app)
     migrate.init_app(app, db)
 
-    from app import routes, models
+    from app import routes, models, auth
     app.register_blueprint(routes.bp)
+    app.register_blueprint(auth.auth_bp)
 
     with app.app_context():
         db.create_all()

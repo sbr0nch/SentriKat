@@ -2,7 +2,7 @@ import requests
 import json
 from datetime import datetime, timedelta
 from app import db
-from app.models import Vulnerability, SyncLog
+from app.models import Vulnerability, SyncLog, Product
 from app.nvd_api import fetch_cvss_data
 from config import Config
 
@@ -135,6 +135,31 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
         if enrich_cvss:
             enrich_with_cvss_data(limit=cvss_limit)
 
+        # Send email alerts for new critical matches
+        from app.models import Organization, VulnerabilityMatch
+        from app.email_alerts import EmailAlertManager
+
+        alert_results = []
+        organizations = Organization.query.filter_by(active=True).all()
+
+        for org in organizations:
+            # Get new unacknowledged matches for this organization from this sync
+            new_matches = VulnerabilityMatch.query\
+                .join(Vulnerability).join(Product)\
+                .filter(
+                    Product.organization_id == org.id,
+                    VulnerabilityMatch.acknowledged == False,
+                    VulnerabilityMatch.created_at >= start_time
+                ).all()
+
+            if new_matches:
+                # Send alert
+                result = EmailAlertManager.send_critical_cve_alert(org, new_matches)
+                alert_results.append({
+                    'organization': org.name,
+                    'result': result
+                })
+
         # Log success
         duration = (datetime.utcnow() - start_time).total_seconds()
         sync_log.status = 'success'
@@ -150,7 +175,8 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
             'stored': stored,
             'updated': updated,
             'matches': matches_count,
-            'duration': duration
+            'duration': duration,
+            'alerts_sent': alert_results
         }
 
     except Exception as e:

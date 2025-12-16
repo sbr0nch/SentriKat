@@ -22,8 +22,19 @@ def admin():
 
 @bp.route('/api/products', methods=['GET'])
 def get_products():
-    """Get all products"""
-    products = Product.query.order_by(Product.vendor, Product.product_name).all()
+    """Get all products for current organization"""
+    # Get current organization
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
+    # Filter by organization
+    query = Product.query
+    if org_id:
+        query = query.filter_by(organization_id=org_id)
+
+    products = query.order_by(Product.vendor, Product.product_name).all()
     return jsonify([p.to_dict() for p in products])
 
 @bp.route('/api/products', methods=['POST'])
@@ -111,8 +122,15 @@ def delete_product(product_id):
 
 @bp.route('/api/vulnerabilities', methods=['GET'])
 def get_vulnerabilities():
-    """Get vulnerabilities with optional filters"""
+    """Get vulnerabilities with optional filters for current organization"""
+    # Get current organization
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
     filters = {
+        'organization_id': org_id,
         'product_id': request.args.get('product_id', type=int),
         'cve_id': request.args.get('cve_id'),
         'vendor': request.args.get('vendor'),
@@ -130,28 +148,49 @@ def get_vulnerabilities():
 
 @bp.route('/api/vulnerabilities/stats', methods=['GET'])
 def get_vulnerability_stats():
-    """Get vulnerability statistics with priority breakdown"""
+    """Get vulnerability statistics with priority breakdown for current organization"""
+    # Get current organization
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
     total_vulns = Vulnerability.query.count()
-    total_matches = VulnerabilityMatch.query.count()
-    unacknowledged = VulnerabilityMatch.query.filter_by(acknowledged=False).count()
-    ransomware = db.session.query(VulnerabilityMatch).join(Vulnerability).filter(
-        Vulnerability.known_ransomware == True
-    ).count()
+
+    # Filter matches by organization
+    total_matches_query = db.session.query(VulnerabilityMatch).join(Product)
+    unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).filter(VulnerabilityMatch.acknowledged == False)
+    ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).filter(Vulnerability.known_ransomware == True)
+
+    if org_id:
+        total_matches_query = total_matches_query.filter(Product.organization_id == org_id)
+        unacknowledged_query = unacknowledged_query.filter(Product.organization_id == org_id)
+        ransomware_query = ransomware_query.filter(Product.organization_id == org_id)
+
+    total_matches = total_matches_query.count()
+    unacknowledged = unacknowledged_query.count()
+    ransomware = ransomware_query.count()
 
     # Calculate priority-based stats
-    all_matches = VulnerabilityMatch.query.filter_by(acknowledged=False).all()
+    all_matches = unacknowledged_query.all()
 
     priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
     for match in all_matches:
         priority = match.calculate_effective_priority()
         priority_counts[priority] = priority_counts.get(priority, 0) + 1
 
+    # Products tracked for this org
+    products_tracked_query = Product.query.filter_by(active=True)
+    if org_id:
+        products_tracked_query = products_tracked_query.filter_by(organization_id=org_id)
+    products_tracked = products_tracked_query.count()
+
     return jsonify({
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
         'unacknowledged': unacknowledged,
         'ransomware_related': ransomware,
-        'products_tracked': Product.query.filter_by(active=True).count(),
+        'products_tracked': products_tracked,
         'priority_breakdown': priority_counts,
         'critical_count': priority_counts['critical'],
         'high_count': priority_counts['high'],

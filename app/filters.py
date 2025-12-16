@@ -88,6 +88,10 @@ def get_filtered_vulnerabilities(filters=None):
     query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product)
 
     if filters:
+        # Filter by organization
+        if filters.get('organization_id'):
+            query = query.filter(Product.organization_id == filters['organization_id'])
+
         # Filter by product ID
         if filters.get('product_id'):
             query = query.filter(VulnerabilityMatch.product_id == filters['product_id'])
