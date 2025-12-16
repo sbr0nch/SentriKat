@@ -324,6 +324,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False, index=True)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    full_name = db.Column(db.String(255), nullable=True)  # User's full name
     password_hash = db.Column(db.String(255), nullable=True)  # NULL for LDAP users
 
     # Organization assignment
@@ -365,6 +366,7 @@ class User(db.Model):
             'id': self.id,
             'username': self.username,
             'email': self.email,
+            'full_name': self.full_name,
             'organization_id': self.organization_id,
             'auth_type': self.auth_type,
             'is_admin': self.is_admin,

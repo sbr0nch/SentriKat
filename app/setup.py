@@ -59,7 +59,29 @@ def create_initial_organization():
         # Check if default org already exists
         existing = Organization.query.filter_by(name='default').first()
         if existing:
-            return jsonify({'error': 'Default organization already exists'}), 400
+            # Update existing organization instead of error
+            existing.display_name = data.get('display_name', existing.display_name)
+            existing.description = data.get('description', existing.description)
+            existing.notification_emails = data.get('notification_emails', existing.notification_emails)
+
+            # Update SMTP settings if provided
+            if data.get('smtp_host'):
+                existing.smtp_host = data['smtp_host']
+                existing.smtp_port = data.get('smtp_port', 587)
+                existing.smtp_username = data.get('smtp_username')
+                existing.smtp_password = data.get('smtp_password')
+                existing.smtp_from_email = data.get('smtp_from_email')
+                existing.smtp_from_name = data.get('smtp_from_name', 'SentriKat')
+                existing.smtp_use_tls = data.get('smtp_use_tls', True)
+
+            db.session.commit()
+            session['organization_id'] = existing.id
+
+            return jsonify({
+                'success': True,
+                'organization': existing.to_dict(),
+                'message': 'Organization already exists, updated with new information'
+            }), 200
 
         # Create default organization
         org = Organization(
@@ -112,7 +134,24 @@ def create_admin_user():
         # Check if user already exists
         existing = User.query.filter_by(username=data['username']).first()
         if existing:
-            return jsonify({'error': 'Username already exists'}), 400
+            # Update existing user instead of error
+            existing.email = data.get('email', existing.email)
+            existing.full_name = data.get('full_name', existing.full_name)
+            existing.is_admin = True
+            existing.is_active = True
+            existing.can_manage_products = True
+            existing.can_view_all_orgs = True
+
+            # Update password
+            existing.set_password(data['password'])
+
+            db.session.commit()
+
+            return jsonify({
+                'success': True,
+                'user': existing.to_dict(),
+                'message': 'User already exists, updated password and permissions'
+            }), 200
 
         # Get default organization
         org = Organization.query.filter_by(name='default').first()
