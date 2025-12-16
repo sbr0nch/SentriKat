@@ -63,22 +63,42 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                <!-- Service Catalog Quick Select -->
+                <div class="alert alert-info mb-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>
+                            <i class="bi bi-lightbulb me-2"></i>
+                            <strong>Quick Add:</strong> Select from 80+ pre-configured services
+                        </span>
+                        <button type="button" class="btn btn-sm btn-primary" onclick="showServiceCatalog()">
+                            <i class="bi bi-search me-1"></i>Browse Catalog
+                        </button>
+                    </div>
+                </div>
+
                 <form id="productForm">
                     <input type="hidden" id="productId">
+                    <input type="hidden" id="serviceCatalogId">
 
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label for="vendor" class="form-label fw-semibold">Vendor *</label>
                             <input type="text" class="form-control" id="vendor" required
-                                   placeholder="e.g., Microsoft, Cisco, Apache">
-                            <small class="form-text text-muted">The vendor/manufacturer name</small>
+                                   placeholder="e.g., Microsoft, Cisco, Apache"
+                                   list="vendorSuggestions"
+                                   oninput="searchVendors(this.value)">
+                            <datalist id="vendorSuggestions"></datalist>
+                            <small class="form-text text-muted">The vendor/manufacturer name or select from catalog</small>
                         </div>
 
                         <div class="col-md-6">
                             <label for="productName" class="form-label fw-semibold">Product Name *</label>
                             <input type="text" class="form-control" id="productName" required
-                                   placeholder="e.g., Windows Server, IOS, Tomcat">
-                            <small class="form-text text-muted">The software/product name</small>
+                                   placeholder="e.g., Windows Server, IOS, Tomcat"
+                                   list="productSuggestions"
+                                   oninput="searchProducts(this.value)">
+                            <datalist id="productSuggestions"></datalist>
+                            <small class="form-text text-muted">The software/product name or select from catalog</small>
                         </div>
 
                         <div class="col-md-6">
@@ -134,11 +154,54 @@
         </div>
     </div>
 </div>
+<!-- Service Catalog Modal -->
+<div class="modal fade" id="serviceCatalogModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-archive me-2"></i>Service Catalog Browser
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <input type="text" class="form-control" id="catalogSearch"
+                           placeholder="Search services by vendor, product, or keywords..."
+                           oninput="filterCatalog(this.value)">
+                </div>
+                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                    <table class="table table-hover">
+                        <thead class="sticky-top bg-white">
+                            <tr>
+                                <th>Vendor</th>
+                                <th>Product</th>
+                                <th>Keywords</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="catalogTable">
+                            <tr>
+                                <td colspan="4" class="text-center py-4">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <p class="text-muted mt-2">Loading service catalog...</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
     let currentProductId = null;
+    let serviceCatalog = [];
 
     async function loadProducts() {
         showLoading();
@@ -313,6 +376,135 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // Service Catalog Functions
+    async function showServiceCatalog() {
+        // Load catalog if not already loaded
+        if (serviceCatalog.length === 0) {
+            await loadServiceCatalog();
+        }
+
+        // Show modal
+        new bootstrap.Modal(document.getElementById('serviceCatalogModal')).show();
+    }
+
+    async function loadServiceCatalog() {
+        const tbody = document.getElementById('catalogTable');
+
+        try {
+            const response = await fetch('/api/catalog');
+            serviceCatalog = await response.json();
+
+            renderCatalog(serviceCatalog);
+        } catch (error) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center text-danger py-4">
+                        <i class="bi bi-exclamation-triangle"></i> Error loading catalog: ${error.message}
+                    </td>
+                </tr>
+            `;
+        }
+    }
+
+    function renderCatalog(catalog) {
+        const tbody = document.getElementById('catalogTable');
+
+        if (catalog.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center py-4 text-muted">
+                        No services found matching your search
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = catalog.map(service => `
+            <tr>
+                <td class="fw-semibold">${escapeHtml(service.vendor)}</td>
+                <td>${escapeHtml(service.product_name)}</td>
+                <td><small class="text-muted">${escapeHtml(service.keywords || '')}</small></td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="selectFromCatalog(${service.id})">
+                        <i class="bi bi-plus-circle me-1"></i>Select
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function filterCatalog(query) {
+        const lowerQuery = query.toLowerCase();
+
+        const filtered = serviceCatalog.filter(service => {
+            return service.vendor.toLowerCase().includes(lowerQuery) ||
+                   service.product_name.toLowerCase().includes(lowerQuery) ||
+                   (service.keywords && service.keywords.toLowerCase().includes(lowerQuery));
+        });
+
+        renderCatalog(filtered);
+    }
+
+    async function selectFromCatalog(catalogId) {
+        try {
+            const response = await fetch(`/api/catalog/${catalogId}`);
+            const service = await response.json();
+
+            // Fill form fields with catalog data
+            document.getElementById('vendor').value = service.vendor;
+            document.getElementById('productName').value = service.product_name;
+            document.getElementById('keywords').value = service.keywords || '';
+            document.getElementById('serviceCatalogId').value = catalogId;
+
+            // Close catalog modal
+            bootstrap.Modal.getInstance(document.getElementById('serviceCatalogModal')).hide();
+
+            // Show success toast
+            showToast('✓ Service selected from catalog', 'success');
+        } catch (error) {
+            showToast(`Error loading service: ${error.message}`, 'danger');
+        }
+    }
+
+    async function searchVendors(query) {
+        if (!query || query.length < 2) {
+            document.getElementById('vendorSuggestions').innerHTML = '';
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/catalog/search?type=vendor&q=${encodeURIComponent(query)}`);
+            const vendors = await response.json();
+
+            const datalist = document.getElementById('vendorSuggestions');
+            datalist.innerHTML = vendors.map(vendor =>
+                `<option value="${escapeHtml(vendor)}">`
+            ).join('');
+        } catch (error) {
+            console.error('Error searching vendors:', error);
+        }
+    }
+
+    async function searchProducts(query) {
+        if (!query || query.length < 2) {
+            document.getElementById('productSuggestions').innerHTML = '';
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/catalog/search?type=product&q=${encodeURIComponent(query)}`);
+            const products = await response.json();
+
+            const datalist = document.getElementById('productSuggestions');
+            datalist.innerHTML = products.map(product =>
+                `<option value="${escapeHtml(product)}">`
+            ).join('');
+        } catch (error) {
+            console.error('Error searching products:', error);
+        }
     }
 
     document.addEventListener('DOMContentLoaded', function() {

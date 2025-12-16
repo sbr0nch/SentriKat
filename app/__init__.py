@@ -18,6 +18,18 @@ def create_app(config_class=Config):
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
 
+    # Make current user available in all templates
+    @app.context_processor
+    def inject_user():
+        from flask import session
+        from app.models import User
+        import os
+        current_user = None
+        if 'user_id' in session:
+            current_user = User.query.get(session['user_id'])
+        auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+        return dict(current_user=current_user, auth_enabled=auth_enabled)
+
     # Setup wizard redirect
     @app.before_request
     def check_setup():

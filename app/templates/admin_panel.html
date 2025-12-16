@@ -1,0 +1,428 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel - SentriKat{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="display-6 fw-bold text-dark mb-2">
+                <i class="bi bi-shield-lock me-2"></i>Administration Panel
+            </h1>
+            <p class="text-muted">Manage users, organizations, and system settings</p>
+        </div>
+    </div>
+
+    <!-- Admin Tabs -->
+    <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">
+                <i class="bi bi-people me-2"></i>Users
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button">
+                <i class="bi bi-building me-2"></i>Organizations
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
+                <i class="bi bi-gear me-2"></i>Settings
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="adminTabsContent">
+        <!-- Users Tab -->
+        <div class="tab-pane fade show active" id="users" role="tabpanel">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-people me-2"></i>User Management</span>
+                    <button class="btn btn-primary btn-sm" onclick="showCreateUserModal()">
+                        <i class="bi bi-plus-circle me-1"></i>Create User
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Full Name</th>
+                                    <th>Email</th>
+                                    <th>Organization</th>
+                                    <th>Auth Type</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTable">
+                                <tr>
+                                    <td colspan="8" class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                        <p class="text-muted mt-2">Loading users...</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Organizations Tab -->
+        <div class="tab-pane fade" id="organizations" role="tabpanel">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-building me-2"></i>Organization Management</span>
+                    <button class="btn btn-primary btn-sm" onclick="showCreateOrgModal()">
+                        <i class="bi bi-plus-circle me-1"></i>Create Organization
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Display Name</th>
+                                    <th>Users</th>
+                                    <th>SMTP Configured</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orgsTable">
+                                <tr>
+                                    <td colspan="6" class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                        <p class="text-muted mt-2">Loading organizations...</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div class="tab-pane fade" id="settings" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-gear me-2"></i>System Settings
+                </div>
+                <div class="card-body">
+                    <h5>Sync Configuration</h5>
+                    <p class="text-muted">Configure CISA KEV sync schedule and NVD API settings</p>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Settings configuration will be available in the next update
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit User Modal -->
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="userModalTitle">
+                    <i class="bi bi-person-plus me-2"></i>Create User
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="userForm">
+                    <input type="hidden" id="userId">
+
+                    <!-- Auth Type Selection -->
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Authentication Type *</label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="authType" id="authLocal" value="local" checked onchange="toggleAuthFields()">
+                            <label class="btn btn-outline-primary" for="authLocal">
+                                <i class="bi bi-key me-1"></i>Local Account
+                            </label>
+                            <input type="radio" class="btn-check" name="authType" id="authLdap" value="ldap" onchange="toggleAuthFields()">
+                            <label class="btn btn-outline-primary" for="authLdap">
+                                <i class="bi bi-diagram-3 me-1"></i>LDAP Account
+                            </label>
+                        </div>
+                        <small class="form-text text-muted">Local: Password stored in database. LDAP: Authenticates against Active Directory</small>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="username" class="form-label fw-semibold">Username *</label>
+                            <input type="text" class="form-control" id="username" required>
+                            <small class="form-text text-muted" id="usernameHelp">For LDAP: Use AD sAMAccountName</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="email" class="form-label fw-semibold">Email *</label>
+                            <input type="email" class="form-control" id="email" required>
+                        </div>
+
+                        <div class="col-md-12">
+                            <label for="fullName" class="form-label fw-semibold">Full Name</label>
+                            <input type="text" class="form-control" id="fullName">
+                        </div>
+
+                        <!-- Password fields (only for local auth) -->
+                        <div class="col-md-6" id="passwordField">
+                            <label for="password" class="form-label fw-semibold">Password *</label>
+                            <input type="password" class="form-control" id="password">
+                            <small class="form-text text-muted">Minimum 8 characters</small>
+                        </div>
+
+                        <div class="col-md-6" id="passwordConfirmField">
+                            <label for="passwordConfirm" class="form-label fw-semibold">Confirm Password *</label>
+                            <input type="password" class="form-control" id="passwordConfirm">
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="organization" class="form-label fw-semibold">Organization *</label>
+                            <select class="form-select" id="organization" required>
+                                <option value="">Loading...</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Role & Permissions</label>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="isAdmin">
+                                <label class="form-check-label" for="isAdmin">
+                                    Administrator (full system access)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="canManageProducts" checked>
+                                <label class="form-check-label" for="canManageProducts">
+                                    Can manage products
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="canViewAllOrgs">
+                                <label class="form-check-label" for="canViewAllOrgs">
+                                    Can view all organizations
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-12">
+                            <div class="form-check form-switch">
+                                <input type="checkbox" class="form-check-input" id="isActive" checked>
+                                <label class="form-check-label fw-semibold" for="isActive">
+                                    Active (user can log in)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Cancel
+                </button>
+                <button type="button" class="btn btn-primary" onclick="saveUser()">
+                    <i class="bi bi-check-circle me-1"></i>Save User
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit Organization Modal -->
+<div class="modal fade" id="orgModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="orgModalTitle">
+                    <i class="bi bi-building me-2"></i>Create Organization
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="orgForm">
+                    <input type="hidden" id="orgId">
+
+                    <ul class="nav nav-tabs mb-3" id="orgFormTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basicInfo" type="button">
+                                <i class="bi bi-info-circle me-1"></i>Basic Info
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="smtp-tab" data-bs-toggle="tab" data-bs-target="#smtpConfig" type="button">
+                                <i class="bi bi-envelope me-1"></i>Email (SMTP)
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="alerts-tab" data-bs-toggle="tab" data-bs-target="#alertSettings" type="button">
+                                <i class="bi bi-bell me-1"></i>Alert Settings
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- Basic Info Tab -->
+                        <div class="tab-pane fade show active" id="basicInfo">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="orgName" class="form-label fw-semibold">Organization Name *</label>
+                                    <input type="text" class="form-control" id="orgName" required>
+                                    <small class="form-text text-muted">Unique identifier (lowercase, no spaces)</small>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="orgDisplayName" class="form-label fw-semibold">Display Name *</label>
+                                    <input type="text" class="form-control" id="orgDisplayName" required>
+                                    <small class="form-text text-muted">Shown in UI</small>
+                                </div>
+
+                                <div class="col-md-12">
+                                    <label for="orgDescription" class="form-label fw-semibold">Description</label>
+                                    <textarea class="form-control" id="orgDescription" rows="2"></textarea>
+                                </div>
+
+                                <div class="col-md-12">
+                                    <label for="orgEmails" class="form-label fw-semibold">Notification Emails</label>
+                                    <input type="text" class="form-control" id="orgEmails" placeholder="email1@company.com, email2@company.com">
+                                    <small class="form-text text-muted">Comma-separated email addresses for vulnerability alerts</small>
+                                </div>
+
+                                <div class="col-md-12">
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" id="orgActive" checked>
+                                        <label class="form-check-label fw-semibold" for="orgActive">
+                                            Active
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SMTP Config Tab -->
+                        <div class="tab-pane fade" id="smtpConfig">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure SMTP settings for this organization's email alerts. Leave empty to use global SMTP settings.
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="smtpHost" class="form-label fw-semibold">SMTP Server</label>
+                                    <input type="text" class="form-control" id="smtpHost" placeholder="smtp.gmail.com">
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="smtpPort" class="form-label fw-semibold">Port</label>
+                                    <input type="number" class="form-control" id="smtpPort" value="587">
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="smtpUsername" class="form-label fw-semibold">Username</label>
+                                    <input type="text" class="form-control" id="smtpUsername">
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="smtpPassword" class="form-label fw-semibold">Password</label>
+                                    <input type="password" class="form-control" id="smtpPassword">
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="smtpFromEmail" class="form-label fw-semibold">From Email</label>
+                                    <input type="email" class="form-control" id="smtpFromEmail" placeholder="noreply@company.com">
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="smtpFromName" class="form-label fw-semibold">From Name</label>
+                                    <input type="text" class="form-control" id="smtpFromName" value="SentriKat Alerts">
+                                </div>
+
+                                <div class="col-md-12">
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" id="smtpUseTls" checked>
+                                        <label class="form-check-label fw-semibold" for="smtpUseTls">
+                                            Use TLS/STARTTLS
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-12">
+                                    <button type="button" class="btn btn-outline-primary" onclick="testSMTP()">
+                                        <i class="bi bi-envelope-check me-1"></i>Test SMTP Connection
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Alert Settings Tab -->
+                        <div class="tab-pane fade" id="alertSettings">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure when this organization receives email alerts
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="alertCritical" checked>
+                                        <label class="form-check-label" for="alertCritical">
+                                            <strong>Alert on Critical CVEs</strong> (CVSS 9.0-10.0)
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="alertHigh">
+                                        <label class="form-check-label" for="alertHigh">
+                                            <strong>Alert on High CVEs</strong> (CVSS 7.0-8.9)
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="alertNewCVE" checked>
+                                        <label class="form-check-label" for="alertNewCVE">
+                                            <strong>Alert on New CVEs</strong> (when CISA adds new vulnerabilities)
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="alertRansomware" checked>
+                                        <label class="form-check-label" for="alertRansomware">
+                                            <strong>Alert on Ransomware</strong> (known to be used in ransomware)
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Cancel
+                </button>
+                <button type="button" class="btn btn-primary" onclick="saveOrganization()">
+                    <i class="bi bi-check-circle me-1"></i>Save Organization
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/admin_panel.js') }}"></script>
+{% endblock %}

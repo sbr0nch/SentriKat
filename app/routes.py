@@ -4,6 +4,7 @@ from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Orga
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
+from app.auth import admin_required
 import json
 
 bp = Blueprint('main', __name__)
@@ -17,6 +18,12 @@ def index():
 def admin():
     """Admin panel for managing products"""
     return render_template('admin.html')
+
+@bp.route('/admin-panel')
+@admin_required
+def admin_panel():
+    """Full administration panel for users, organizations, and settings"""
+    return render_template('admin_panel.html')
 
 # API Endpoints
 
@@ -306,6 +313,7 @@ def get_organizations():
     return jsonify([o.to_dict() for o in orgs])
 
 @bp.route('/api/organizations', methods=['POST'])
+@admin_required
 def create_organization():
     """Create a new organization"""
     data = request.get_json()
@@ -345,6 +353,7 @@ def get_organization(org_id):
     return jsonify(org.to_dict())
 
 @bp.route('/api/organizations/<int:org_id>', methods=['PUT'])
+@admin_required
 def update_organization(org_id):
     """Update an organization"""
     org = Organization.query.get_or_404(org_id)
@@ -396,6 +405,7 @@ def update_organization(org_id):
     return jsonify(org.to_dict())
 
 @bp.route('/api/organizations/<int:org_id>', methods=['DELETE'])
+@admin_required
 def delete_organization(org_id):
     """Delete an organization"""
     org = Organization.query.get_or_404(org_id)
@@ -412,6 +422,7 @@ def delete_organization(org_id):
     return jsonify({'success': True})
 
 @bp.route('/api/organizations/<int:org_id>/smtp/test', methods=['POST'])
+@admin_required
 def test_smtp(org_id):
     """Test SMTP connection for an organization"""
     org = Organization.query.get_or_404(org_id)
@@ -436,13 +447,14 @@ def get_alert_logs(org_id):
 # ============================================================================
 
 @bp.route('/api/users', methods=['GET'])
+@admin_required
 def get_users():
     """Get all users (admin only)"""
-    # TODO: Add auth check
     users = User.query.filter_by(is_active=True).order_by(User.username).all()
     return jsonify([u.to_dict() for u in users])
 
 @bp.route('/api/users', methods=['POST'])
+@admin_required
 def create_user():
     """Create a new user"""
     data = request.get_json()
@@ -479,12 +491,14 @@ def create_user():
     return jsonify(user.to_dict()), 201
 
 @bp.route('/api/users/<int:user_id>', methods=['GET'])
+@admin_required
 def get_user(user_id):
     """Get a specific user"""
     user = User.query.get_or_404(user_id)
     return jsonify(user.to_dict())
 
 @bp.route('/api/users/<int:user_id>', methods=['PUT'])
+@admin_required
 def update_user(user_id):
     """Update a user"""
     user = User.query.get_or_404(user_id)
@@ -512,6 +526,7 @@ def update_user(user_id):
     return jsonify(user.to_dict())
 
 @bp.route('/api/users/<int:user_id>', methods=['DELETE'])
+@admin_required
 def delete_user(user_id):
     """Delete a user"""
     user = User.query.get_or_404(user_id)

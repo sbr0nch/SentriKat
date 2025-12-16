@@ -455,7 +455,46 @@
                     <a class="nav-link {{ 'active' if request.endpoint == 'main.admin' else '' }}" href="/admin">
                         <i class="bi bi-server"></i> Products
                     </a>
+
+                    <!-- Admin Menu Dropdown (visible if no auth OR user is admin) -->
+                    {% if not auth_enabled or (current_user and current_user.is_admin) %}
+                    <div class="dropdown">
+                        <button class="nav-link {{ 'active' if request.endpoint == 'main.admin_panel' else '' }}"
+                                type="button"
+                                id="adminDropdown"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false"
+                                style="border: none; background: transparent;">
+                            <i class="bi bi-gear-fill"></i> Administration
+                            <i class="bi bi-chevron-down" style="font-size: 0.75rem;"></i>
+                        </button>
+                        <ul class="dropdown-menu" aria-labelledby="adminDropdown">
+                            <li>
+                                <a class="dropdown-item" href="/admin-panel">
+                                    <i class="bi bi-speedometer2 me-2"></i>Admin Panel
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item" href="/admin-panel#users">
+                                    <i class="bi bi-people me-2"></i>User Management
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="/admin-panel#organizations">
+                                    <i class="bi bi-building me-2"></i>Organizations
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="/admin-panel#settings">
+                                    <i class="bi bi-sliders me-2"></i>Settings
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+
                     <div class="vr"></div>
+                    {% endif %}
 
                     <!-- Organization Switcher -->
                     <div class="dropdown">
@@ -471,6 +510,43 @@
                     <button class="btn btn-primary btn-sm" onclick="triggerSync()">
                         <i class="bi bi-arrow-clockwise"></i> Sync Now
                     </button>
+
+                    <!-- User Menu (when auth is enabled) -->
+                    {% if auth_enabled and current_user %}
+                    <div class="vr"></div>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle"
+                                type="button"
+                                id="userDropdown"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false">
+                            <i class="bi bi-person-circle"></i> {{ current_user.full_name or current_user.username }}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                            <li>
+                                <span class="dropdown-item-text">
+                                    <div class="fw-semibold">{{ current_user.full_name or current_user.username }}</div>
+                                    <small class="text-muted">{{ current_user.email }}</small>
+                                </span>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <span class="dropdown-item-text">
+                                    <small>
+                                        <i class="bi bi-shield-check me-1"></i>
+                                        {% if current_user.is_admin %}Administrator{% else %}User{% endif %}
+                                    </small>
+                                </span>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item text-danger" href="/logout">
+                                    <i class="bi bi-box-arrow-right me-2"></i>Logout
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
