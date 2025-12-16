@@ -161,46 +161,103 @@ def auth_status():
 
 def authenticate_ldap(user, password):
     """
-    Authenticate user against LDAP server
+    Authenticate user against Active Directory LDAP server
+
+    This function:
+    1. Binds to AD with service account (BIND_DN)
+    2. Searches for user by sAMAccountName (username)
+    3. Retrieves user's DN
+    4. Attempts bind with user's credentials to verify password
 
     Args:
-        user: User object with ldap_dn
+        user: User object with username
         password: Password to check
 
     Returns:
         bool: True if authentication successful
     """
     # LDAP configuration from environment
-    ldap_server = os.environ.get('LDAP_SERVER')
-    ldap_port = int(os.environ.get('LDAP_PORT', '389'))
-    ldap_use_ssl = os.environ.get('LDAP_USE_SSL', 'false').lower() == 'true'
+    ldap_server = os.environ.get('LDAP_SERVER')  # e.g., ldap://dc3.bonelabs.com:389
+    base_dn = os.environ.get('LDAP_BASE_DN')     # e.g., DC=bonelabs,DC=com
+    bind_dn = os.environ.get('LDAP_BIND_DN')     # Service account DN
+    bind_pw = os.environ.get('LDAP_BIND_PW')     # Service account password
+    search_filter_template = os.environ.get('LDAP_SEARCH_FILTER', '(sAMAccountName={username})')
 
     if not ldap_server:
         raise Exception('LDAP_SERVER not configured')
 
-    if not user.ldap_dn:
-        raise Exception('User does not have LDAP DN configured')
+    if not base_dn:
+        raise Exception('LDAP_BASE_DN not configured')
 
     try:
         import ldap3
-        from ldap3 import Server, Connection, ALL, SIMPLE
+        from ldap3 import Server, Connection, ALL, SIMPLE, SUBTREE
+
+        # Parse server URL
+        # Handle both "ldap://server:389" and "server" formats
+        if '://' in ldap_server:
+            use_ssl = ldap_server.startswith('ldaps://')
+            server_host = ldap_server.split('://', 1)[1]
+            # Extract port if specified
+            if ':' in server_host:
+                server_host, port_str = server_host.rsplit(':', 1)
+                ldap_port = int(port_str)
+            else:
+                ldap_port = 636 if use_ssl else 389
+        else:
+            server_host = ldap_server
+            ldap_port = 389
+            use_ssl = False
 
         # Create server
-        if ldap_use_ssl:
-            server = Server(ldap_server, port=ldap_port, use_ssl=True, get_info=ALL)
+        server = Server(server_host, port=ldap_port, use_ssl=use_ssl, get_info=ALL)
+
+        # Step 1: Bind with service account to search for user
+        if bind_dn and bind_pw:
+            # Use service account for search
+            search_conn = Connection(server, user=bind_dn, password=bind_pw, authentication=SIMPLE)
+            if not search_conn.bind():
+                raise Exception(f'Failed to bind with service account: {search_conn.result}')
         else:
-            server = Server(ldap_server, port=ldap_port, get_info=ALL)
+            # Anonymous bind (not recommended for production)
+            search_conn = Connection(server, authentication=SIMPLE)
+            if not search_conn.bind():
+                raise Exception('Failed to bind anonymously. Configure LDAP_BIND_DN and LDAP_BIND_PW')
 
-        # Attempt bind with user credentials
-        conn = Connection(server, user=user.ldap_dn, password=password, authentication=SIMPLE)
+        # Step 2: Search for user by username (sAMAccountName)
+        search_filter = search_filter_template.replace('{username}', user.username)
+        search_conn.search(
+            search_base=base_dn,
+            search_filter=search_filter,
+            search_scope=SUBTREE,
+            attributes=['distinguishedName', 'sAMAccountName', 'mail', 'displayName']
+        )
 
-        if not conn.bind():
+        if not search_conn.entries:
+            search_conn.unbind()
             return False
 
-        conn.unbind()
+        # Get user's DN
+        user_entry = search_conn.entries[0]
+        user_dn = user_entry.distinguishedName.value
+
+        # Update user's LDAP DN in database if not set or changed
+        if user.ldap_dn != user_dn:
+            user.ldap_dn = user_dn
+            db.session.commit()
+
+        search_conn.unbind()
+
+        # Step 3: Attempt bind with user's credentials
+        user_conn = Connection(server, user=user_dn, password=password, authentication=SIMPLE)
+
+        if not user_conn.bind():
+            return False
+
+        user_conn.unbind()
         return True
 
     except ImportError:
         raise Exception('ldap3 library not installed. Install with: pip install ldap3')
     except Exception as e:
-        raise Exception(f'LDAP connection error: {str(e)}')
+        raise Exception(f'LDAP authentication error: {str(e)}')
