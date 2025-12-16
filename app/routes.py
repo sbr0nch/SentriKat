@@ -571,6 +571,36 @@ def delete_user(user_id):
     return jsonify({'success': True})
 
 # ============================================================================
+# DEBUG & DIAGNOSTICS
+# ============================================================================
+
+@bp.route('/api/debug/auth-status', methods=['GET'])
+def debug_auth_status():
+    """Debug endpoint to check authentication status"""
+    import os
+    auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+
+    user_info = None
+    if 'user_id' in session:
+        user = User.query.get(session['user_id'])
+        if user:
+            user_info = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'is_admin': user.is_admin,
+                'auth_type': user.auth_type,
+                'organization_id': user.organization_id
+            }
+
+    return jsonify({
+        'auth_enabled': auth_enabled,
+        'logged_in': 'user_id' in session,
+        'user': user_info,
+        'admin_menu_visible': not auth_enabled or (user_info and user_info['is_admin'])
+    })
+
+# ============================================================================
 # SESSION MANAGEMENT (Organization Switching)
 # ============================================================================
 
