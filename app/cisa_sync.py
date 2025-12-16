@@ -5,16 +5,23 @@ from app import db
 from app.models import Vulnerability, SyncLog, Product
 from app.nvd_api import fetch_cvss_data
 from config import Config
+import urllib3
 
 def download_cisa_kev():
     """Download CISA KEV JSON feed"""
     try:
         proxies = Config.get_proxies()
+        verify_ssl = Config.VERIFY_SSL
+
+        # Suppress SSL warnings if verification is disabled
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
         response = requests.get(
             Config.CISA_KEV_URL,
             timeout=30,
             proxies=proxies,
-            verify=True  # Verify SSL certificates
+            verify=verify_ssl  # Use configured SSL verification setting
         )
         response.raise_for_status()
         return response.json()

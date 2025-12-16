@@ -4,6 +4,7 @@ NVD API integration for fetching CVE severity and CVSS scores
 import requests
 import time
 from config import Config
+import urllib3
 
 def fetch_cvss_data(cve_id):
     """
@@ -16,6 +17,11 @@ def fetch_cvss_data(cve_id):
         params = {'cveId': cve_id}
 
         proxies = Config.get_proxies()
+        verify_ssl = Config.VERIFY_SSL
+
+        # Suppress SSL warnings if verification is disabled
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         # Add delay to respect NVD rate limits (5 requests per 30 seconds for public API)
         time.sleep(0.6)  # 600ms delay
@@ -25,7 +31,7 @@ def fetch_cvss_data(cve_id):
             params=params,
             timeout=10,
             proxies=proxies,
-            verify=True
+            verify=verify_ssl  # Use configured SSL verification setting
         )
 
         if response.status_code == 200:

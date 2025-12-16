@@ -30,6 +30,12 @@ class Config:
     SESSION_COOKIE_SAMESITE = 'Lax'
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
 
+    # SSL Certificate Verification
+    # WARNING: Disabling SSL verification is a security risk!
+    # Only disable in corporate environments with SSL inspection/interception
+    # Set to 'false' to disable SSL verification (not recommended for production)
+    VERIFY_SSL = os.environ.get('VERIFY_SSL', 'true').lower() != 'false'
+
     @staticmethod
     def get_proxies():
         """Get proxy configuration as dict for requests library"""
