@@ -301,13 +301,18 @@ class ServiceCatalog(db.Model):
     )
 
     def to_dict(self):
+        common_names_list = json.loads(self.common_names) if self.common_names else []
+        # Create keywords string from common names for display
+        keywords_str = ', '.join(common_names_list) if common_names_list else ''
+
         return {
             'id': self.id,
             'vendor': self.vendor,
             'product_name': self.product_name,
             'category': self.category,
             'subcategory': self.subcategory,
-            'common_names': json.loads(self.common_names) if self.common_names else [],
+            'common_names': common_names_list,
+            'keywords': keywords_str,  # String format for display/form
             'cpe_vendor': self.cpe_vendor,
             'cpe_product': self.cpe_product,
             'description': self.description,

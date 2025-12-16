@@ -246,13 +246,49 @@ def sync_history():
 # SERVICE CATALOG API ENDPOINTS
 # ============================================================================
 
+@bp.route('/api/catalog', methods=['GET'])
+def get_all_catalog():
+    """Get all services from catalog"""
+    services = ServiceCatalog.query.filter_by(is_active=True)\
+        .order_by(ServiceCatalog.vendor, ServiceCatalog.product_name).all()
+    return jsonify([s.to_dict() for s in services])
+
+@bp.route('/api/catalog/<int:catalog_id>', methods=['GET'])
+def get_catalog_service(catalog_id):
+    """Get a specific service from catalog"""
+    service = ServiceCatalog.query.get_or_404(catalog_id)
+    return jsonify(service.to_dict())
+
 @bp.route('/api/catalog/search', methods=['GET'])
 def search_catalog():
-    """Search service catalog"""
+    """Search service catalog - supports autocomplete for vendor/product or full search"""
     query = request.args.get('q', '').strip()
+    search_type = request.args.get('type')  # 'vendor' or 'product' for autocomplete
     category = request.args.get('category')
     limit = request.args.get('limit', 20, type=int)
 
+    # Autocomplete mode: return unique vendor or product names
+    if search_type == 'vendor':
+        vendors = db.session.query(ServiceCatalog.vendor)\
+            .filter(ServiceCatalog.is_active == True)\
+            .filter(ServiceCatalog.vendor.ilike(f'%{query}%'))\
+            .distinct()\
+            .order_by(ServiceCatalog.vendor)\
+            .limit(limit)\
+            .all()
+        return jsonify([v[0] for v in vendors])
+
+    elif search_type == 'product':
+        products = db.session.query(ServiceCatalog.product_name)\
+            .filter(ServiceCatalog.is_active == True)\
+            .filter(ServiceCatalog.product_name.ilike(f'%{query}%'))\
+            .distinct()\
+            .order_by(ServiceCatalog.product_name)\
+            .limit(limit)\
+            .all()
+        return jsonify([p[0] for p in products])
+
+    # Full search mode: return complete service records
     results = ServiceCatalog.query.filter_by(is_active=True)
 
     if query:
