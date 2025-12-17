@@ -152,6 +152,14 @@
                             <small class="form-text text-muted">How critical is this product to your organization?</small>
                         </div>
 
+                        <div class="col-md-6">
+                            <label for="productOrganization" class="form-label fw-semibold">Organization</label>
+                            <select class="form-select" id="productOrganization">
+                                <option value="">Loading organizations...</option>
+                            </select>
+                            <small class="form-text text-muted">Assign this product to an organization</small>
+                        </div>
+
                         <div class="col-md-12">
                             <label for="keywords" class="form-label fw-semibold">Additional Keywords</label>
                             <input type="text" class="form-control" id="keywords"
@@ -322,12 +330,15 @@
         }
     }
 
-    function showAddProduct() {
+    async function showAddProduct() {
         currentProductId = null;
         document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-plus-circle me-2"></i>Add Product';
         document.getElementById('productForm').reset();
         document.getElementById('active').checked = true;
         document.getElementById('criticality').value = 'medium';
+
+        // Load organizations into dropdown
+        await loadOrganizationsIntoProductForm();
     }
 
     async function editProduct(productId) {
@@ -335,6 +346,9 @@
         document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Product';
 
         try {
+            // Load organizations first
+            await loadOrganizationsIntoProductForm();
+
             const response = await fetch(`/api/products/${productId}`);
             const product = await response.json();
 
@@ -345,6 +359,7 @@
             document.getElementById('keywords').value = product.keywords || '';
             document.getElementById('description').value = product.description || '';
             document.getElementById('active').checked = product.active;
+            document.getElementById('productOrganization').value = product.organization_id || '';
 
             new bootstrap.Modal(document.getElementById('productModal')).show();
         } catch (error) {
@@ -362,6 +377,8 @@
             return;
         }
 
+        const orgId = document.getElementById('productOrganization').value;
+
         const productData = {
             vendor: vendor,
             product_name: productName,
@@ -371,6 +388,10 @@
             description: document.getElementById('description').value.trim(),
             active: document.getElementById('active').checked
         };
+
+        if (orgId) {
+            productData.organization_id = parseInt(orgId);
+        }
 
         showLoading();
         try {
@@ -428,6 +449,20 @@
             showToast(`✗ Error: ${error.message}`, 'danger');
         } finally {
             hideLoading();
+        }
+    }
+
+    async function loadOrganizationsIntoProductForm() {
+        try {
+            const response = await fetch('/api/organizations');
+            if (response.ok) {
+                const orgs = await response.json();
+                const select = document.getElementById('productOrganization');
+                select.innerHTML = '<option value="">No organization (use default)</option>' +
+                    orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+            }
+        } catch (error) {
+            console.error('Error loading organizations for product form:', error);
         }
     }
 
