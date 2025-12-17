@@ -339,11 +339,13 @@ class User(db.Model):
     auth_type = db.Column(db.String(20), default='local')  # 'local', 'ldap'
     ldap_dn = db.Column(db.String(500), nullable=True)  # LDAP Distinguished Name
 
-    # Permissions
-    is_admin = db.Column(db.Boolean, default=False)
+    # Permissions & Roles
+    # Role-based access: super_admin > org_admin > manager > user
+    role = db.Column(db.String(20), default='user', index=True)  # super_admin, org_admin, manager, user
+    is_admin = db.Column(db.Boolean, default=False)  # Backward compatibility - maps to super_admin or org_admin
     is_active = db.Column(db.Boolean, default=True, index=True)
     can_manage_products = db.Column(db.Boolean, default=True)
-    can_view_all_orgs = db.Column(db.Boolean, default=False)  # Super admin
+    can_view_all_orgs = db.Column(db.Boolean, default=False)  # Super admin only
 
     # Session tracking
     last_login = db.Column(db.DateTime, nullable=True)
@@ -366,6 +368,32 @@ class User(db.Model):
             return False
         return check_password_hash(self.password_hash, password)
 
+    def is_super_admin(self):
+        """Check if user is a super admin"""
+        return self.role == 'super_admin' or (self.is_admin and self.can_view_all_orgs)
+
+    def is_org_admin(self):
+        """Check if user is an organization admin"""
+        return self.role in ['super_admin', 'org_admin'] or self.is_admin
+
+    def can_manage_organization(self, org_id):
+        """Check if user can manage a specific organization"""
+        if self.is_super_admin():
+            return True
+        if self.role == 'org_admin' and self.organization_id == org_id:
+            return True
+        return False
+
+    def can_manage_user(self, target_user):
+        """Check if user can manage another user"""
+        if self.is_super_admin():
+            return True
+        if self.role == 'org_admin':
+            # Org admins can manage users in their organization (except super admins)
+            return (target_user.organization_id == self.organization_id and
+                    not target_user.is_super_admin())
+        return False
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -374,12 +402,35 @@ class User(db.Model):
             'full_name': self.full_name,
             'organization_id': self.organization_id,
             'auth_type': self.auth_type,
+            'role': self.role,
             'is_admin': self.is_admin,
             'is_active': self.is_active,
             'can_manage_products': self.can_manage_products,
             'can_view_all_orgs': self.can_view_all_orgs,
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+class SystemSettings(db.Model):
+    """Global system settings"""
+    __tablename__ = 'system_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    value = db.Column(db.Text, nullable=True)
+    category = db.Column(db.String(50), nullable=False, index=True)  # 'ldap', 'smtp', 'sync', 'general'
+    description = db.Column(db.Text, nullable=True)
+    is_encrypted = db.Column(db.Boolean, default=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    def to_dict(self):
+        return {
+            'key': self.key,
+            'value': self.value if not self.is_encrypted else '***ENCRYPTED***',
+            'category': self.category,
+            'description': self.description,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
 class AlertLog(db.Model):
