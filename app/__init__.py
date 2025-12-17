@@ -35,11 +35,13 @@ def create_app(config_class=Config):
     @app.before_request
     def check_setup():
         from flask import request, redirect, url_for
-        # Skip setup check for static files, setup routes, and API status
+        # Skip setup check for static files, setup routes, auth routes, and API status
         if request.endpoint and (
             request.endpoint.startswith('static') or
             request.endpoint.startswith('setup.') or
-            request.path == '/api/setup/status'
+            request.endpoint.startswith('auth.') or
+            request.path == '/api/setup/status' or
+            request.path == '/api/auth/status'
         ):
             return None
 

@@ -4,17 +4,19 @@ from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Orga
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
-from app.auth import admin_required
+from app.auth import admin_required, login_required
 import json
 
 bp = Blueprint('main', __name__)
 
 @bp.route('/')
+@login_required
 def index():
     """Dashboard homepage"""
     return render_template('dashboard.html')
 
 @bp.route('/admin')
+@login_required
 def admin():
     """Admin panel for managing products"""
     return render_template('admin.html')
@@ -28,6 +30,7 @@ def admin_panel():
 # API Endpoints
 
 @bp.route('/api/products', methods=['GET'])
+@login_required
 def get_products():
     """Get all products for current organization"""
     # Get current organization
@@ -45,6 +48,7 @@ def get_products():
     return jsonify([p.to_dict() for p in products])
 
 @bp.route('/api/products', methods=['POST'])
+@login_required
 def create_product():
     """Create a new product"""
     data = request.get_json()
@@ -86,12 +90,14 @@ def create_product():
     return jsonify(product.to_dict()), 201
 
 @bp.route('/api/products/<int:product_id>', methods=['GET'])
+@login_required
 def get_product(product_id):
     """Get a specific product"""
     product = Product.query.get_or_404(product_id)
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['PUT'])
+@login_required
 def update_product(product_id):
     """Update a product"""
     product = Product.query.get_or_404(product_id)
@@ -120,6 +126,7 @@ def update_product(product_id):
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['DELETE'])
+@login_required
 def delete_product(product_id):
     """Delete a product"""
     product = Product.query.get_or_404(product_id)
@@ -128,6 +135,7 @@ def delete_product(product_id):
     return jsonify({'success': True})
 
 @bp.route('/api/vulnerabilities', methods=['GET'])
+@login_required
 def get_vulnerabilities():
     """Get vulnerabilities with optional filters for current organization"""
     # Get current organization
@@ -154,6 +162,7 @@ def get_vulnerabilities():
     return jsonify([m.to_dict() for m in matches])
 
 @bp.route('/api/vulnerabilities/stats', methods=['GET'])
+@login_required
 def get_vulnerability_stats():
     """Get vulnerability statistics with priority breakdown for current organization"""
     # Get current organization
@@ -206,6 +215,7 @@ def get_vulnerability_stats():
     })
 
 @bp.route('/api/matches/<int:match_id>/acknowledge', methods=['POST'])
+@login_required
 def acknowledge_match(match_id):
     """Acknowledge a vulnerability match"""
     match = VulnerabilityMatch.query.get_or_404(match_id)
@@ -214,6 +224,7 @@ def acknowledge_match(match_id):
     return jsonify(match.to_dict())
 
 @bp.route('/api/matches/<int:match_id>/unacknowledge', methods=['POST'])
+@login_required
 def unacknowledge_match(match_id):
     """Unacknowledge a vulnerability match"""
     match = VulnerabilityMatch.query.get_or_404(match_id)
@@ -222,12 +233,14 @@ def unacknowledge_match(match_id):
     return jsonify(match.to_dict())
 
 @bp.route('/api/sync', methods=['POST'])
+@login_required
 def trigger_sync():
     """Manually trigger CISA KEV sync"""
     result = sync_cisa_kev()
     return jsonify(result)
 
 @bp.route('/api/sync/status', methods=['GET'])
+@login_required
 def sync_status():
     """Get last sync status"""
     last_sync = SyncLog.query.order_by(SyncLog.sync_date.desc()).first()
@@ -236,6 +249,7 @@ def sync_status():
     return jsonify({'message': 'No sync performed yet'})
 
 @bp.route('/api/sync/history', methods=['GET'])
+@login_required
 def sync_history():
     """Get sync history"""
     limit = request.args.get('limit', 10, type=int)
@@ -247,6 +261,7 @@ def sync_history():
 # ============================================================================
 
 @bp.route('/api/catalog', methods=['GET'])
+@login_required
 def get_all_catalog():
     """Get all services from catalog"""
     services = ServiceCatalog.query.filter_by(is_active=True)\
@@ -254,12 +269,14 @@ def get_all_catalog():
     return jsonify([s.to_dict() for s in services])
 
 @bp.route('/api/catalog/<int:catalog_id>', methods=['GET'])
+@login_required
 def get_catalog_service(catalog_id):
     """Get a specific service from catalog"""
     service = ServiceCatalog.query.get_or_404(catalog_id)
     return jsonify(service.to_dict())
 
 @bp.route('/api/catalog/search', methods=['GET'])
+@login_required
 def search_catalog():
     """Search service catalog - supports autocomplete for vendor/product or full search"""
     query = request.args.get('q', '').strip()
@@ -313,6 +330,7 @@ def search_catalog():
     return jsonify([s.to_dict() for s in results.all()])
 
 @bp.route('/api/catalog/categories', methods=['GET'])
+@login_required
 def get_categories():
     """Get all categories with counts"""
     categories = db.session.query(
@@ -323,6 +341,7 @@ def get_categories():
     return jsonify([{'name': c[0], 'count': c[1]} for c in categories])
 
 @bp.route('/api/catalog/popular', methods=['GET'])
+@login_required
 def get_popular_services():
     """Get most popular services"""
     limit = request.args.get('limit', 20, type=int)
@@ -331,6 +350,7 @@ def get_popular_services():
     return jsonify([s.to_dict() for s in services])
 
 @bp.route('/api/catalog/<int:catalog_id>/use', methods=['POST'])
+@login_required
 def increment_catalog_usage(catalog_id):
     """Increment usage frequency when a service is selected"""
     service = ServiceCatalog.query.get_or_404(catalog_id)
@@ -343,6 +363,7 @@ def increment_catalog_usage(catalog_id):
 # ============================================================================
 
 @bp.route('/api/organizations', methods=['GET'])
+@login_required
 def get_organizations():
     """Get all organizations"""
     orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
@@ -383,6 +404,7 @@ def create_organization():
     return jsonify(org.to_dict()), 201
 
 @bp.route('/api/organizations/<int:org_id>', methods=['GET'])
+@login_required
 def get_organization(org_id):
     """Get a specific organization"""
     org = Organization.query.get_or_404(org_id)
@@ -471,6 +493,7 @@ def test_smtp(org_id):
     return jsonify(result)
 
 @bp.route('/api/organizations/<int:org_id>/alert-logs', methods=['GET'])
+@login_required
 def get_alert_logs(org_id):
     """Get alert logs for an organization"""
     limit = request.args.get('limit', 50, type=int)
@@ -581,6 +604,7 @@ def delete_user(user_id):
 # ============================================================================
 
 @bp.route('/api/debug/auth-status', methods=['GET'])
+@login_required
 def debug_auth_status():
     """Debug endpoint to check authentication status"""
     import os
@@ -611,6 +635,7 @@ def debug_auth_status():
 # ============================================================================
 
 @bp.route('/api/session/organization', methods=['GET'])
+@login_required
 def get_current_organization():
     """Get current organization from session"""
     org_id = session.get('organization_id')
@@ -627,6 +652,7 @@ def get_current_organization():
     return jsonify({'error': 'No organization found'}), 404
 
 @bp.route('/api/session/organization/<int:org_id>', methods=['POST'])
+@login_required
 def switch_organization(org_id):
     """Switch to a different organization"""
     org = Organization.query.get_or_404(org_id)
