@@ -56,6 +56,30 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def org_admin_required(f):
+    """Decorator to require org admin or super admin privileges"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # If auth is disabled, allow all requests
+        if not AUTH_ENABLED:
+            return f(*args, **kwargs)
+
+        # Check if user is logged in
+        if 'user_id' not in session:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Authentication required'}), 401
+            return redirect(url_for('auth.login', next=request.url))
+
+        # Check if user is org_admin or super_admin
+        user = User.query.get(session['user_id'])
+        if not user or user.role not in ['org_admin', 'super_admin']:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Organization admin privileges required'}), 403
+            return redirect(url_for('main.index'))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
 def get_current_user():
     """Get current logged-in user"""
     if not AUTH_ENABLED:
