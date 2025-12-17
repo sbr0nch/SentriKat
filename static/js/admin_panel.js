@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
         loadUsers();
         loadOrganizations();
         loadOrganizationsDropdown();
+        checkLdapPermissions();  // Check if user can access LDAP features
 
         // Tab change handlers
         const orgTab = document.getElementById('organizations-tab');
@@ -957,5 +958,238 @@ async function loadAllSettings() {
         }
     } catch (error) {
         console.error('Error loading settings:', error);
+    }
+}
+
+// ============================================================================
+// LDAP User Management
+// ============================================================================
+
+async function checkLdapPermissions() {
+    try {
+        const response = await fetch('/api/current-user');
+        if (response.ok) {
+            const user = await response.json();
+            // Show LDAP Users tab for org_admin and super_admin
+            if (user.role === 'org_admin' || user.role === 'super_admin') {
+                const ldapTab = document.getElementById('ldap-users-tab-item');
+                if (ldapTab) {
+                    ldapTab.style.display = 'block';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error checking LDAP permissions:', error);
+    }
+}
+
+function showLdapSearchModal() {
+    try {
+        document.getElementById('ldapSearchQuery').value = '';
+        document.getElementById('ldapSearchResultsTable').innerHTML = `
+            <div class="text-center text-muted py-4">
+                <i class="bi bi-search" style="font-size: 2rem;"></i>
+                <p class="mt-2">Enter a search query and click Search</p>
+            </div>
+        `;
+
+        const modalElement = document.getElementById('ldapSearchModal');
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+    } catch (error) {
+        console.error('Error showing LDAP search modal:', error);
+        showToast('Error opening search modal: ' + error.message, 'danger');
+    }
+}
+
+async function searchLdapUsers() {
+    const query = document.getElementById('ldapSearchQuery').value.trim();
+    if (!query) {
+        showToast('Please enter a search query', 'warning');
+        return;
+    }
+
+    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    resultsDiv.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-2">Searching LDAP directory...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('/api/ldap/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ search_query: query })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Search failed');
+        }
+
+        const results = await response.json();
+
+        if (results.users.length === 0) {
+            resultsDiv.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <p class="mt-2">No users found matching "${escapeHtml(query)}"</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Display results in a table
+        const tableHtml = `
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Full Name</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${results.users.map(user => {
+                            const statusBadge = user.exists_in_db
+                                ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Already Invited</span>'
+                                : '<span class="badge bg-secondary">Not Invited</span>';
+
+                            const actionButton = user.exists_in_db
+                                ? '<button class="btn btn-sm btn-secondary" disabled>Already Exists</button>'
+                                : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
+                                       <i class="bi bi-person-plus me-1"></i>Invite
+                                   </button>`;
+
+                            return `
+                                <tr>
+                                    <td class="fw-semibold">${escapeHtml(user.username)}</td>
+                                    <td>${user.full_name ? escapeHtml(user.full_name) : '<span class="text-muted">-</span>'}</td>
+                                    <td>${escapeHtml(user.email)}</td>
+                                    <td>${statusBadge}</td>
+                                    <td>${actionButton}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        resultsDiv.innerHTML = tableHtml;
+        showToast(`Found ${results.users.length} user(s)`, 'success');
+
+    } catch (error) {
+        console.error('Error searching LDAP:', error);
+        resultsDiv.innerHTML = `
+            <div class="text-center text-danger py-4">
+                <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                <p class="mt-2">Error: ${escapeHtml(error.message)}</p>
+            </div>
+        `;
+        showToast(`Search failed: ${error.message}`, 'danger');
+    }
+}
+
+async function showInviteLdapUserModal(userData) {
+    try {
+        // Populate form with user data
+        document.getElementById('ldapUserDN').value = userData.dn;
+        document.getElementById('ldapInviteUsername').value = userData.username;
+        document.getElementById('ldapInviteEmail').value = userData.email;
+        document.getElementById('ldapInviteFullName').value = userData.full_name || '';
+
+        // Load organizations into dropdown
+        const orgResponse = await fetch('/api/organizations');
+        const orgs = await orgResponse.json();
+        const orgSelect = document.getElementById('ldapInviteOrganization');
+        orgSelect.innerHTML = '<option value="">Select organization...</option>' +
+            orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+
+        // Load user's LDAP groups
+        document.getElementById('ldapGroupsList').textContent = 'Loading...';
+
+        const groupsResponse = await fetch('/api/ldap/user-groups', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: userData.username })
+        });
+
+        if (groupsResponse.ok) {
+            const groupsData = await groupsResponse.json();
+            const groupsList = groupsData.groups.length > 0
+                ? groupsData.groups.join(', ')
+                : 'No groups found';
+            document.getElementById('ldapGroupsList').textContent = groupsList;
+        } else {
+            document.getElementById('ldapGroupsList').textContent = 'Could not load groups';
+        }
+
+        // Show the modal
+        const modalElement = document.getElementById('ldapInviteModal');
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+
+    } catch (error) {
+        console.error('Error showing invite modal:', error);
+        showToast('Error opening invite modal: ' + error.message, 'danger');
+    }
+}
+
+async function inviteLdapUser() {
+    const username = document.getElementById('ldapInviteUsername').value;
+    const email = document.getElementById('ldapInviteEmail').value;
+    const fullName = document.getElementById('ldapInviteFullName').value;
+    const dn = document.getElementById('ldapUserDN').value;
+    const organizationId = parseInt(document.getElementById('ldapInviteOrganization').value);
+    const role = document.getElementById('ldapInviteRole').value;
+
+    if (!organizationId) {
+        showToast('Please select an organization', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/ldap/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: username,
+                email: email,
+                full_name: fullName,
+                dn: dn,
+                organization_id: organizationId,
+                role: role
+            })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast('✓ LDAP user invited successfully', 'success');
+
+            // Close the invite modal
+            const inviteModal = bootstrap.Modal.getInstance(document.getElementById('ldapInviteModal'));
+            inviteModal.hide();
+
+            // Refresh user list
+            loadUsers();
+
+            // Refresh search results if search modal is still open
+            const searchQuery = document.getElementById('ldapSearchQuery').value;
+            if (searchQuery) {
+                searchLdapUsers();
+            }
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        console.error('Error inviting LDAP user:', error);
+        showToast(`Error inviting user: ${error.message}`, 'danger');
     }
 }

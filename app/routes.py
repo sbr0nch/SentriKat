@@ -577,6 +577,18 @@ def get_alert_logs(org_id):
 # USER MANAGEMENT & AUTHENTICATION API ENDPOINTS
 # ============================================================================
 
+@bp.route('/api/current-user', methods=['GET'])
+@login_required
+def get_current_user():
+    """Get current logged-in user info for permission checks"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({'error': 'User not found'}), 404
+
+    return jsonify(current_user.to_dict())
+
 @bp.route('/api/users', methods=['GET'])
 @admin_required
 def get_users():
