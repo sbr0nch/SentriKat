@@ -96,23 +96,44 @@ def save_ldap_settings():
 def test_ldap_connection():
     """Test LDAP connection"""
     try:
-        from app.auth import authenticate_ldap
+        import ldap3
 
         ldap_server = get_setting('ldap_server')
+        ldap_port = int(get_setting('ldap_port', '389'))
+        ldap_bind_dn = get_setting('ldap_bind_dn')
+        ldap_bind_password = get_setting('ldap_bind_password')
+        ldap_use_tls = get_setting('ldap_use_tls', 'false') == 'true'
+
         if not ldap_server:
             return jsonify({'success': False, 'error': 'LDAP server not configured'})
 
-        # Try to bind with service account
-        # In a real test, you would attempt to bind with the service account
-        # For now, just check if settings are present
-        required_settings = ['ldap_server', 'ldap_base_dn', 'ldap_bind_dn']
-        for setting in required_settings:
-            if not get_setting(setting):
-                return jsonify({'success': False, 'error': f'Missing required setting: {setting}'})
+        if not ldap_bind_dn or not ldap_bind_password:
+            return jsonify({'success': False, 'error': 'LDAP bind credentials not configured'})
 
-        return jsonify({'success': True, 'message': 'LDAP configuration appears valid'})
+        # Parse server URL
+        server_url = ldap_server.replace('ldap://', '').replace('ldaps://', '').split(':')[0]
+
+        # Create server object
+        use_ssl = 'ldaps://' in ldap_server
+        server = ldap3.Server(server_url, port=ldap_port, use_ssl=use_ssl, get_info=ldap3.ALL)
+
+        # Try to bind with service account
+        conn = ldap3.Connection(server, user=ldap_bind_dn, password=ldap_bind_password, auto_bind=True)
+
+        if conn.bound:
+            conn.unbind()
+            return jsonify({
+                'success': True,
+                'message': f'✓ Successfully connected to LDAP server at {server_url}:{ldap_port}'
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Failed to bind to LDAP server'})
+
+    except ImportError:
+        return jsonify({'success': False, 'error': 'ldap3 library not installed. Run: pip install ldap3'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': f'LDAP connection failed: {str(e)}'})
+
 
 # ============================================================================
 # Global SMTP Settings
@@ -158,9 +179,21 @@ def save_smtp_settings():
 @settings_bp.route('/smtp/test', methods=['POST'])
 @admin_required
 def test_smtp_connection():
-    """Test global SMTP connection"""
+    """Test global SMTP connection by sending test email"""
     try:
-        from app.email_alerts import EmailAlertManager
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        # Get current user's email to send test to
+        user_id = session.get('user_id')
+        test_recipient = None
+        if user_id:
+            user = User.query.get(user_id)
+            test_recipient = user.email if user else None
+
+        if not test_recipient:
+            return jsonify({'success': False, 'error': 'No email address found for current user'})
 
         smtp_config = {
             'host': get_setting('smtp_host'),
@@ -175,10 +208,61 @@ def test_smtp_connection():
         if not smtp_config['host'] or not smtp_config['from_email']:
             return jsonify({'success': False, 'error': 'SMTP not configured'})
 
-        result = EmailAlertManager.test_smtp_connection(smtp_config)
-        return jsonify(result)
+        # Create test email
+        msg = MIMEMultipart()
+        msg['From'] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
+        msg['To'] = test_recipient
+        msg['Subject'] = 'SentriKat SMTP Test - Configuration Successful'
+
+        body = f"""
+<html>
+<body style="font-family: Arial, sans-serif;">
+    <h2 style="color: #1e40af;">✓ SMTP Configuration Test Successful</h2>
+    <p>This is a test email from <strong>SentriKat</strong> vulnerability management system.</p>
+
+    <div style="background-color: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <h3>SMTP Configuration Details:</h3>
+        <ul>
+            <li><strong>Server:</strong> {smtp_config['host']}:{smtp_config['port']}</li>
+            <li><strong>From:</strong> {smtp_config['from_email']}</li>
+            <li><strong>TLS Enabled:</strong> {'Yes' if smtp_config['use_tls'] else 'No'}</li>
+            <li><strong>Test Recipient:</strong> {test_recipient}</li>
+        </ul>
+    </div>
+
+    <p>If you received this email, your SMTP configuration is working correctly and SentriKat will be able to send vulnerability alerts.</p>
+
+    <hr style="margin: 30px 0;">
+    <p style="color: #6b7280; font-size: 12px;">
+        This is an automated test email from SentriKat.<br>
+        Sent at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
+    </p>
+</body>
+</html>
+        """
+        msg.attach(MIMEText(body, 'html'))
+
+        # Send email
+        if smtp_config['use_tls']:
+            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
+            server.starttls()
+        else:
+            server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'])
+
+        if smtp_config['username'] and smtp_config['password']:
+            server.login(smtp_config['username'], smtp_config['password'])
+
+        server.send_message(msg)
+        server.quit()
+
+        return jsonify({
+            'success': True,
+            'message': f'✓ Test email sent successfully to {test_recipient}'
+        })
+
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': f'SMTP test failed: {str(e)}'})
+
 
 # ============================================================================
 # Sync Settings

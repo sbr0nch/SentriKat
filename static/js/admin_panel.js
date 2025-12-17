@@ -20,6 +20,17 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('organizations-tab').addEventListener('shown.bs.tab', function() {
         loadOrganizations();
     });
+
+    // Settings tab handler
+    const settingsTab = document.getElementById('settings-tab');
+    if (settingsTab) {
+        settingsTab.addEventListener('shown.bs.tab', function() {
+            loadAllSettings();
+        });
+    }
+
+    // Load sync status immediately (doesn't require settings to be configured)
+    loadSyncStatus();
 });
 
 // ============================================================================
@@ -752,17 +763,6 @@ async function saveGeneralSettings() {
         showToast(`Error saving general settings: ${error.message}`, 'danger');
     }
 }
-
-// Load settings on tab switch
-document.addEventListener('DOMContentLoaded', function() {
-    // Load settings when settings tab is shown
-    const settingsTab = document.getElementById('settings-tab');
-    if (settingsTab) {
-        settingsTab.addEventListener('shown.bs.tab', function() {
-            loadAllSettings();
-        });
-    }
-});
 
 async function loadAllSettings() {
     try {

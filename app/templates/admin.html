@@ -18,27 +18,60 @@
         </div>
     </div>
 
+    <!-- Bulk Actions Toolbar (hidden by default) -->
+    <div class="alert alert-info mb-3" id="bulkActionsToolbar" style="display: none;">
+        <div class="d-flex justify-content-between align-items-center">
+            <span>
+                <i class="bi bi-check-square me-2"></i>
+                <strong><span id="selectedCount">0</span> product(s) selected</strong>
+            </span>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-primary" onclick="bulkAssignOrganization()">
+                    <i class="bi bi-building me-1"></i>Assign to Organization
+                </button>
+                <button class="btn btn-outline-success" onclick="bulkActivate()">
+                    <i class="bi bi-check-circle me-1"></i>Activate
+                </button>
+                <button class="btn btn-outline-secondary" onclick="bulkDeactivate()">
+                    <i class="bi bi-pause-circle me-1"></i>Deactivate
+                </button>
+                <button class="btn btn-outline-danger" onclick="bulkDelete()">
+                    <i class="bi bi-trash me-1"></i>Delete
+                </button>
+                <button class="btn btn-outline-secondary" onclick="clearSelection()">
+                    <i class="bi bi-x me-1"></i>Clear Selection
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div class="card">
-        <div class="card-header">
-            <i class="bi bi-list-ul me-2"></i>Product Inventory
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-list-ul me-2"></i>Product Inventory</span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="toggleSelectAll()">
+                <i class="bi bi-check-square me-1"></i>Select All
+            </button>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-hover mb-0">
                     <thead>
                         <tr>
+                            <th style="width: 40px;">
+                                <input type="checkbox" class="form-check-input" id="selectAllCheckbox" onchange="toggleSelectAll()">
+                            </th>
                             <th>Vendor</th>
                             <th>Product</th>
                             <th>Version</th>
+                            <th>Organization</th>
                             <th>Criticality</th>
-                            <th>Keywords</th>
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="productsTable">
                         <tr>
-                            <td colspan="7" class="text-center py-4">
+                            <td colspan="8" class="text-center py-4">
                                 <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
@@ -214,7 +247,7 @@
             if (products.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center py-5">
+                        <td colspan="8" class="text-center py-5">
                             <i class="bi bi-inbox text-muted" style="font-size: 3rem;"></i>
                             <h5 class="mt-3 text-muted">No products added yet</h5>
                             <p class="text-muted">Click "Add Product" to start tracking vulnerabilities for your software inventory.</p>
@@ -228,13 +261,22 @@
                         ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
                         : '<span class="badge bg-secondary"><i class="bi bi-pause-circle"></i> Inactive</span>';
 
+                    const orgDisplay = product.organization_name
+                        ? `<span class="badge bg-primary">${escapeHtml(product.organization_name)}</span>`
+                        : '<span class="text-muted">-</span>';
+
                     return `
                         <tr>
-                            <td class="fw-semibold">${product.vendor}</td>
-                            <td>${product.product_name}</td>
-                            <td>${product.version ? `<span class="badge bg-info">${product.version}</span>` : '<span class="text-muted">-</span>'}</td>
+                            <td>
+                                <input type="checkbox" class="form-check-input product-checkbox"
+                                       data-product-id="${product.id}"
+                                       onchange="toggleProductSelect(${product.id}, this)">
+                            </td>
+                            <td class="fw-semibold">${escapeHtml(product.vendor)}</td>
+                            <td>${escapeHtml(product.product_name)}</td>
+                            <td>${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
+                            <td>${orgDisplay}</td>
                             <td>${criticalityBadge}</td>
-                            <td>${product.keywords ? `<small class="text-muted">${product.keywords}</small>` : '<span class="text-muted">-</span>'}</td>
                             <td>${statusBadge}</td>
                             <td>
                                 <div class="btn-group btn-group-sm" role="group">
@@ -253,7 +295,7 @@
         } catch (error) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center text-danger py-4">
+                    <td colspan="8" class="text-center text-danger py-4">
                         <i class="bi bi-exclamation-triangle"></i> Error loading products: ${error.message}
                     </td>
                 </tr>
@@ -504,6 +546,166 @@
             ).join('');
         } catch (error) {
             console.error('Error searching products:', error);
+        }
+    }
+
+    // ============================================================================
+    // Bulk Operations
+    // ============================================================================
+
+    let selectedProducts = new Set();
+
+    function updateBulkToolbar() {
+        const toolbar = document.getElementById('bulkActionsToolbar');
+        const count = selectedProducts.size;
+        document.getElementById('selectedCount').textContent = count;
+
+        if (count > 0) {
+            toolbar.style.display = 'block';
+        } else {
+            toolbar.style.display = 'none';
+        }
+    }
+
+    function toggleProductSelect(productId, checkbox) {
+        if (checkbox.checked) {
+            selectedProducts.add(productId);
+        } else {
+            selectedProducts.delete(productId);
+        }
+        updateBulkToolbar();
+    }
+
+    function toggleSelectAll() {
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        const checkboxes = document.querySelectorAll('.product-checkbox');
+
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = selectAllCheckbox.checked;
+            const productId = parseInt(checkbox.dataset.productId);
+            if (selectAllCheckbox.checked) {
+                selectedProducts.add(productId);
+            } else {
+                selectedProducts.delete(productId);
+            }
+        });
+
+        updateBulkToolbar();
+    }
+
+    function clearSelection() {
+        selectedProducts.clear();
+        document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
+        document.getElementById('selectAllCheckbox').checked = false;
+        updateBulkToolbar();
+    }
+
+    async function bulkAssignOrganization() {
+        if (selectedProducts.size === 0) return;
+
+        // Load organizations for selection
+        const response = await fetch('/api/organizations');
+        const orgs = await response.json();
+
+        const orgOptions = orgs.map(org =>
+            `<option value="${org.id}">${org.display_name}</option>`
+        ).join('');
+
+        const orgId = prompt(`Assign ${selectedProducts.size} product(s) to organization:\n\n` +
+            orgs.map((o, i) => `${i + 1}. ${o.display_name} (ID: ${o.id})`).join('\n') +
+            `\n\nEnter Organization ID:`);
+
+        if (!orgId) return;
+
+        showLoading();
+        try {
+            const promises = Array.from(selectedProducts).map(productId =>
+                fetch(`/api/products/${productId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ organization_id: parseInt(orgId) })
+                })
+            );
+
+            await Promise.all(promises);
+            showToast(`✓ ${selectedProducts.size} product(s) assigned successfully`, 'success');
+            clearSelection();
+            loadProducts();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function bulkActivate() {
+        if (selectedProducts.size === 0) return;
+        if (!confirm(`Activate ${selectedProducts.size} product(s)?`)) return;
+
+        showLoading();
+        try {
+            const promises = Array.from(selectedProducts).map(productId =>
+                fetch(`/api/products/${productId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: true })
+                })
+            );
+
+            await Promise.all(promises);
+            showToast(`✓ ${selectedProducts.size} product(s) activated`, 'success');
+            clearSelection();
+            loadProducts();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function bulkDeactivate() {
+        if (selectedProducts.size === 0) return;
+        if (!confirm(`Deactivate ${selectedProducts.size} product(s)?`)) return;
+
+        showLoading();
+        try {
+            const promises = Array.from(selectedProducts).map(productId =>
+                fetch(`/api/products/${productId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: false })
+                })
+            );
+
+            await Promise.all(promises);
+            showToast(`✓ ${selectedProducts.size} product(s) deactivated`, 'success');
+            clearSelection();
+            loadProducts();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function bulkDelete() {
+        if (selectedProducts.size === 0) return;
+        if (!confirm(`⚠️ DELETE ${selectedProducts.size} product(s)?\n\nThis action cannot be undone.`)) return;
+
+        showLoading();
+        try {
+            const promises = Array.from(selectedProducts).map(productId =>
+                fetch(`/api/products/${productId}`, { method: 'DELETE' })
+            );
+
+            await Promise.all(promises);
+            showToast(`✓ ${selectedProducts.size} product(s) deleted`, 'success');
+            clearSelection();
+            loadProducts();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
         }
     }
 
