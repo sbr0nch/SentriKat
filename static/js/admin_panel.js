@@ -103,12 +103,25 @@ async function loadUsers() {
                     ? '<span class="badge bg-primary"><i class="bi bi-diagram-3"></i> LDAP</span>'
                     : '<span class="badge bg-secondary"><i class="bi bi-key"></i> Local</span>';
 
+                // Find organization display name from organizations array
+                let orgDisplay = '<span class="text-muted">-</span>';
+                if (user.organization_id && organizations.length > 0) {
+                    const org = organizations.find(o => o.id === user.organization_id);
+                    if (org) {
+                        orgDisplay = escapeHtml(org.display_name);
+                    } else {
+                        orgDisplay = `Org ${user.organization_id}`;
+                    }
+                } else if (user.organization_id) {
+                    orgDisplay = `Org ${user.organization_id}`;
+                }
+
                 return `
                     <tr>
                         <td class="fw-semibold">${escapeHtml(user.username)}</td>
                         <td>${user.full_name ? escapeHtml(user.full_name) : '<span class="text-muted">-</span>'}</td>
                         <td>${escapeHtml(user.email)}</td>
-                        <td>${user.organization_id ? `Org ${user.organization_id}` : '<span class="text-muted">-</span>'}</td>
+                        <td>${orgDisplay}</td>
                         <td>${authBadge}</td>
                         <td>${roleBadge}</td>
                         <td>${statusBadge}</td>
@@ -145,11 +158,10 @@ function showCreateUserModal() {
         document.getElementById('userModalTitle').innerHTML = '<i class="bi bi-person-plus me-2"></i>Create User';
         document.getElementById('userForm').reset();
 
-        // Reset to local auth by default and hide LDAP option for creation
+        // Reset to local auth and completely hide LDAP option for creation
         document.getElementById('authLocal').checked = true;
-        document.getElementById('authLdap').disabled = true;  // Disable LDAP for new users
-        document.getElementById('authLdap').parentElement.title = 'LDAP users must be discovered through LDAP authentication';
-        document.getElementById('authLdap').parentElement.classList.add('disabled');
+        document.getElementById('authLdap').style.display = 'none';
+        document.getElementById('authLdapLabel').style.display = 'none';
         document.getElementById('isActive').checked = true;
         document.getElementById('userRole').value = 'user';
         document.getElementById('canManageProducts').checked = true;
@@ -189,20 +201,20 @@ async function editUser(userId) {
         document.getElementById('canViewAllOrgs').checked = user.can_view_all_orgs;
         document.getElementById('isActive').checked = user.is_active;
 
-        // Set auth type and enable/disable LDAP option
+        // Set auth type and show/hide LDAP option for editing
         if (user.auth_type === 'ldap') {
             document.getElementById('authLdap').checked = true;
-            // Enable LDAP option for existing LDAP users (read-only display)
+            // Show LDAP option for existing LDAP users (read-only display)
+            document.getElementById('authLdap').style.display = '';
+            document.getElementById('authLdapLabel').style.display = '';
             document.getElementById('authLdap').disabled = false;
             document.getElementById('authLocal').disabled = true;  // Can't change LDAP user to local
-            document.getElementById('authLdap').parentElement.classList.remove('disabled');
         } else {
             document.getElementById('authLocal').checked = true;
-            // Allow editing but keep LDAP disabled (can't convert local to LDAP)
-            document.getElementById('authLdap').disabled = true;
+            // Hide LDAP option (can't convert local to LDAP)
+            document.getElementById('authLdap').style.display = 'none';
+            document.getElementById('authLdapLabel').style.display = 'none';
             document.getElementById('authLocal').disabled = false;
-            document.getElementById('authLdap').parentElement.title = 'Cannot convert local users to LDAP';
-            document.getElementById('authLdap').parentElement.classList.add('disabled');
         }
 
         toggleAuthFields();

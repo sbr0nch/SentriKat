@@ -482,15 +482,86 @@ def delete_organization(org_id):
 @bp.route('/api/organizations/<int:org_id>/smtp/test', methods=['POST'])
 @admin_required
 def test_smtp(org_id):
-    """Test SMTP connection for an organization"""
+    """Test SMTP connection for an organization by sending a test email"""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    from datetime import datetime
+
     org = Organization.query.get_or_404(org_id)
     smtp_config = org.get_smtp_config()
 
     if not smtp_config['host'] or not smtp_config['from_email']:
         return jsonify({'success': False, 'error': 'SMTP not configured'})
 
-    result = EmailAlertManager.test_smtp_connection(smtp_config)
-    return jsonify(result)
+    # Get current user's email to send test to
+    user_id = session.get('user_id')
+    test_recipient = None
+    if user_id:
+        user = User.query.get(user_id)
+        test_recipient = user.email if user else None
+
+    if not test_recipient:
+        return jsonify({'success': False, 'error': 'No email address found for current user'})
+
+    try:
+        # Create test email
+        msg = MIMEMultipart()
+        msg['From'] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
+        msg['To'] = test_recipient
+        msg['Subject'] = f'SentriKat SMTP Test - {org.display_name}'
+
+        body = f"""
+<html>
+<body style="font-family: Arial, sans-serif;">
+    <h2 style="color: #1e40af;">✓ SMTP Configuration Test Successful</h2>
+    <p>This is a test email from <strong>SentriKat</strong> for organization <strong>{org.display_name}</strong>.</p>
+
+    <div style="background-color: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <h3>SMTP Configuration Details:</h3>
+        <ul>
+            <li><strong>Organization:</strong> {org.display_name}</li>
+            <li><strong>Server:</strong> {smtp_config['host']}:{smtp_config['port']}</li>
+            <li><strong>From:</strong> {smtp_config['from_email']}</li>
+            <li><strong>TLS Enabled:</strong> {'Yes' if smtp_config['use_tls'] else 'No'}</li>
+            <li><strong>SSL Enabled:</strong> {'Yes' if smtp_config['use_ssl'] else 'No'}</li>
+            <li><strong>Test Recipient:</strong> {test_recipient}</li>
+        </ul>
+    </div>
+
+    <p>If you received this email, your organization's SMTP configuration is working correctly and SentriKat will be able to send vulnerability alerts.</p>
+
+    <hr style="margin: 30px 0;">
+    <p style="color: #6b7280; font-size: 12px;">
+        This is an automated test email from SentriKat.<br>
+        Sent at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
+    </p>
+</body>
+</html>
+        """
+        msg.attach(MIMEText(body, 'html'))
+
+        # Send email
+        if smtp_config['use_ssl']:
+            server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'])
+        else:
+            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
+            if smtp_config['use_tls']:
+                server.starttls()
+
+        if smtp_config['username'] and smtp_config['password']:
+            server.login(smtp_config['username'], smtp_config['password'])
+
+        server.send_message(msg)
+        server.quit()
+
+        return jsonify({
+            'success': True,
+            'message': f'✓ Test email sent successfully to {test_recipient}'
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 @bp.route('/api/organizations/<int:org_id>/alert-logs', methods=['GET'])
 @login_required
