@@ -487,7 +487,7 @@ def test_smtp(org_id):
     smtp_config = org.get_smtp_config()
 
     if not smtp_config['host'] or not smtp_config['from_email']:
-        return jsonify({'status': 'error', 'message': 'SMTP not configured'}), 400
+        return jsonify({'success': False, 'error': 'SMTP not configured'})
 
     result = EmailAlertManager.test_smtp_connection(smtp_config)
     return jsonify(result)
@@ -515,11 +515,16 @@ def get_users():
 @bp.route('/api/users', methods=['POST'])
 @admin_required
 def create_user():
-    """Create a new user"""
+    """Create a new user (local auth only - LDAP users must be discovered/invited)"""
     data = request.get_json()
 
     if not data.get('username') or not data.get('email'):
         return jsonify({'error': 'Username and email are required'}), 400
+
+    # Prevent direct LDAP user creation - LDAP users should be discovered/invited
+    auth_type = data.get('auth_type', 'local')
+    if auth_type == 'ldap':
+        return jsonify({'error': 'Cannot create LDAP users directly. LDAP users must be discovered and invited through LDAP authentication.'}), 400
 
     # Check if username or email already exists
     existing = User.query.filter(
@@ -528,13 +533,16 @@ def create_user():
     if existing:
         return jsonify({'error': 'Username or email already exists'}), 400
 
+    # Require password for local users
+    if not data.get('password'):
+        return jsonify({'error': 'Password is required for local users'}), 400
+
     user = User(
         username=data['username'],
         email=data['email'],
         full_name=data.get('full_name'),
         organization_id=data.get('organization_id'),
-        auth_type=data.get('auth_type', 'local'),
-        ldap_dn=data.get('ldap_dn'),
+        auth_type='local',  # Force local auth for created users
         role=data.get('role', 'user'),
         is_admin=data.get('is_admin', False),
         is_active=data.get('is_active', True),
@@ -543,8 +551,7 @@ def create_user():
     )
 
     # Set password for local auth
-    if user.auth_type == 'local' and data.get('password'):
-        user.set_password(data['password'])
+    user.set_password(data['password'])
 
     db.session.add(user)
     db.session.commit()

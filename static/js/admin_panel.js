@@ -145,8 +145,11 @@ function showCreateUserModal() {
         document.getElementById('userModalTitle').innerHTML = '<i class="bi bi-person-plus me-2"></i>Create User';
         document.getElementById('userForm').reset();
 
-        // Reset to local auth by default
+        // Reset to local auth by default and hide LDAP option for creation
         document.getElementById('authLocal').checked = true;
+        document.getElementById('authLdap').disabled = true;  // Disable LDAP for new users
+        document.getElementById('authLdap').parentElement.title = 'LDAP users must be discovered through LDAP authentication';
+        document.getElementById('authLdap').parentElement.classList.add('disabled');
         document.getElementById('isActive').checked = true;
         document.getElementById('userRole').value = 'user';
         document.getElementById('canManageProducts').checked = true;
@@ -186,11 +189,20 @@ async function editUser(userId) {
         document.getElementById('canViewAllOrgs').checked = user.can_view_all_orgs;
         document.getElementById('isActive').checked = user.is_active;
 
-        // Set auth type
+        // Set auth type and enable/disable LDAP option
         if (user.auth_type === 'ldap') {
             document.getElementById('authLdap').checked = true;
+            // Enable LDAP option for existing LDAP users (read-only display)
+            document.getElementById('authLdap').disabled = false;
+            document.getElementById('authLocal').disabled = true;  // Can't change LDAP user to local
+            document.getElementById('authLdap').parentElement.classList.remove('disabled');
         } else {
             document.getElementById('authLocal').checked = true;
+            // Allow editing but keep LDAP disabled (can't convert local to LDAP)
+            document.getElementById('authLdap').disabled = true;
+            document.getElementById('authLocal').disabled = false;
+            document.getElementById('authLdap').parentElement.title = 'Cannot convert local users to LDAP';
+            document.getElementById('authLdap').parentElement.classList.add('disabled');
         }
 
         toggleAuthFields();
@@ -571,9 +583,9 @@ async function testSMTP() {
         const result = await response.json();
 
         if (result.success) {
-            showToast('✓ SMTP connection successful!', 'success');
+            showToast(result.message || '✓ SMTP connection successful!', 'success');
         } else {
-            showToast(`✗ SMTP test failed: ${result.error}`, 'danger');
+            showToast(`✗ SMTP test failed: ${result.error || result.message || 'Unknown error'}`, 'danger');
         }
     } catch (error) {
         showToast(`Error testing SMTP: ${error.message}`, 'danger');
@@ -750,8 +762,18 @@ async function saveGlobalSMTPSettings() {
 async function testGlobalSMTP() {
     const btn = event.target;
     const originalText = btn.innerHTML;
+
+    // Check if required fields are filled
+    const host = document.getElementById('globalSmtpHost').value;
+    const fromEmail = document.getElementById('globalSmtpFromEmail').value;
+
+    if (!host || !fromEmail) {
+        showToast('⚠️ Please fill in SMTP Host and From Email fields before testing', 'warning');
+        return;
+    }
+
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending test email...';
 
     try {
         const response = await fetch('/api/settings/smtp/test', {

@@ -143,7 +143,9 @@
                         <div class="card-body">
                             <div class="alert alert-info">
                                 <i class="bi bi-info-circle me-2"></i>
-                                Configure global LDAP settings for user authentication. Users with auth type "LDAP" will authenticate against this server.
+                                <strong>LDAP Authentication Setup:</strong> Configure connection to your Active Directory/LDAP server.
+                                LDAP users cannot be created directly - they are discovered when they log in. You need a service account
+                                with read permissions to search for users in your directory.
                             </div>
 
                             <form id="ldapSettingsForm">
@@ -183,8 +185,8 @@
 
                                     <div class="col-md-12">
                                         <label for="ldapBindPassword" class="form-label fw-semibold">Bind Password *</label>
-                                        <input type="password" class="form-control" id="ldapBindPassword" placeholder="Enter service account password">
-                                        <small class="form-text text-muted">Password will be encrypted in database</small>
+                                        <input type="password" class="form-control" id="ldapBindPassword" placeholder="••••••••">
+                                        <small class="form-text text-muted">Service account password. Leave blank to keep existing. Encrypted and not shown for security.</small>
                                     </div>
 
                                     <div class="col-md-12">
@@ -261,8 +263,8 @@
 
                                     <div class="col-md-6">
                                         <label for="globalSmtpPassword" class="form-label fw-semibold">Password</label>
-                                        <input type="password" class="form-control" id="globalSmtpPassword">
-                                        <small class="form-text text-muted">Password will be encrypted</small>
+                                        <input type="password" class="form-control" id="globalSmtpPassword" placeholder="••••••••">
+                                        <small class="form-text text-muted">Leave blank to keep existing password. Passwords are encrypted and not shown for security.</small>
                                     </div>
 
                                     <div class="col-md-6">
@@ -308,7 +310,8 @@
                         <div class="card-body">
                             <div class="alert alert-info">
                                 <i class="bi bi-info-circle me-2"></i>
-                                Configure automatic synchronization with the CISA Known Exploited Vulnerabilities catalog.
+                                <strong>Global Sync Schedule:</strong> Configure automatic synchronization with the CISA Known Exploited Vulnerabilities catalog.
+                                This applies to all organizations system-wide and keeps the vulnerability database up-to-date.
                             </div>
 
                             <form id="syncSettingsForm">

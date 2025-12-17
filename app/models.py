@@ -38,6 +38,9 @@ class Organization(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def to_dict(self):
+        # Count active users in this organization
+        user_count = User.query.filter_by(organization_id=self.id, is_active=True).count()
+
         return {
             'id': self.id,
             'name': self.name,
@@ -54,6 +57,7 @@ class Organization(db.Model):
                 'days': self.alert_days
             },
             'smtp_configured': bool(self.smtp_host and self.smtp_from_email),
+            'user_count': user_count,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
