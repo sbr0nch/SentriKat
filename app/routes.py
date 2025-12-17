@@ -508,9 +508,11 @@ def create_user():
     user = User(
         username=data['username'],
         email=data['email'],
+        full_name=data.get('full_name'),
         organization_id=data.get('organization_id'),
         auth_type=data.get('auth_type', 'local'),
         ldap_dn=data.get('ldap_dn'),
+        role=data.get('role', 'user'),
         is_admin=data.get('is_admin', False),
         is_active=data.get('is_active', True),
         can_manage_products=data.get('can_manage_products', True),
@@ -542,8 +544,12 @@ def update_user(user_id):
 
     if 'email' in data:
         user.email = data['email']
+    if 'full_name' in data:
+        user.full_name = data['full_name']
     if 'organization_id' in data:
         user.organization_id = data['organization_id']
+    if 'role' in data:
+        user.role = data['role']
     if 'is_admin' in data:
         user.is_admin = data['is_admin']
     if 'is_active' in data:

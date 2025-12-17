@@ -13,10 +13,11 @@ def create_app(config_class=Config):
     db.init_app(app)
     migrate.init_app(app, db)
 
-    from app import routes, models, auth, setup
+    from app import routes, models, auth, setup, settings_api
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
+    app.register_blueprint(settings_api.settings_bp)
 
     # Make current user available in all templates
     @app.context_processor
