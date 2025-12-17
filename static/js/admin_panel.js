@@ -632,6 +632,60 @@ async function deleteOrganization(orgId, displayName) {
 // Utility Functions
 // ============================================================================
 
+function showToast(message, type = 'info') {
+    /**
+     * Display a Bootstrap toast notification
+     * @param {string} message - The message to display
+     * @param {string} type - Type of toast: 'success', 'danger', 'warning', 'info'
+     */
+    // Create toast container if it doesn't exist
+    let toastContainer = document.getElementById('toastContainer');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toastContainer';
+        toastContainer.className = 'toast-container position-fixed top-0 end-0 p-3';
+        toastContainer.style.zIndex = '9999';
+        document.body.appendChild(toastContainer);
+    }
+
+    // Map type to Bootstrap classes
+    const typeClasses = {
+        'success': 'bg-success text-white',
+        'danger': 'bg-danger text-white',
+        'warning': 'bg-warning text-dark',
+        'info': 'bg-info text-white'
+    };
+
+    const toastClass = typeClasses[type] || typeClasses['info'];
+
+    // Create toast element
+    const toastId = `toast-${Date.now()}`;
+    const toastHtml = `
+        <div id="${toastId}" class="toast ${toastClass}" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-body d-flex justify-content-between align-items-center">
+                <span>${message}</span>
+                <button type="button" class="btn-close btn-close-white ms-2" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    `;
+
+    toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+
+    // Show the toast
+    const toastElement = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastElement, {
+        autohide: true,
+        delay: 3000
+    });
+
+    toast.show();
+
+    // Remove toast from DOM after it's hidden
+    toastElement.addEventListener('hidden.bs.toast', function () {
+        toastElement.remove();
+    });
+}
+
 function updateRoleDescription() {
     const role = document.getElementById('userRole').value;
     const descDiv = document.getElementById('roleDescription');
@@ -970,8 +1024,12 @@ async function checkLdapPermissions() {
         const response = await fetch('/api/current-user');
         if (response.ok) {
             const user = await response.json();
-            // Show LDAP Users tab for org_admin and super_admin
-            if (user.role === 'org_admin' || user.role === 'super_admin') {
+            // Show LDAP Users tab for org_admin, super_admin, or legacy is_admin users
+            const canAccessLdap = user.role === 'org_admin' ||
+                                  user.role === 'super_admin' ||
+                                  user.is_admin === true;
+
+            if (canAccessLdap) {
                 const ldapTab = document.getElementById('ldap-users-tab-item');
                 if (ldapTab) {
                     ldapTab.style.display = 'block';
