@@ -109,16 +109,319 @@
 
         <!-- Settings Tab -->
         <div class="tab-pane fade" id="settings" role="tabpanel">
-            <div class="card">
-                <div class="card-header">
-                    <i class="bi bi-gear me-2"></i>System Settings
+            <!-- Settings Sub-Tabs -->
+            <ul class="nav nav-pills mb-4" id="settingsTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="ldap-settings-tab" data-bs-toggle="pill" data-bs-target="#ldapSettings" type="button">
+                        <i class="bi bi-diagram-3 me-2"></i>LDAP / Active Directory
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="smtp-settings-tab" data-bs-toggle="pill" data-bs-target="#smtpSettings" type="button">
+                        <i class="bi bi-envelope me-2"></i>Global SMTP
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="sync-settings-tab" data-bs-toggle="pill" data-bs-target="#syncSettings" type="button">
+                        <i class="bi bi-arrow-clockwise me-2"></i>Sync Schedule
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="general-settings-tab" data-bs-toggle="pill" data-bs-target="#generalSettings" type="button">
+                        <i class="bi bi-sliders me-2"></i>General
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content" id="settingsTabContent">
+                <!-- LDAP Settings -->
+                <div class="tab-pane fade show active" id="ldapSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-diagram-3 me-2"></i>LDAP / Active Directory Configuration
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure global LDAP settings for user authentication. Users with auth type "LDAP" will authenticate against this server.
+                            </div>
+
+                            <form id="ldapSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="ldapEnabled">
+                                            <label class="form-check-label fw-semibold" for="ldapEnabled">
+                                                Enable LDAP Authentication
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-8">
+                                        <label for="ldapServer" class="form-label fw-semibold">LDAP Server URL *</label>
+                                        <input type="text" class="form-control" id="ldapServer" placeholder="ldap://dc3.bonelabs.com:389">
+                                        <small class="form-text text-muted">Format: ldap://server:port or ldaps://server:636</small>
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label for="ldapPort" class="form-label fw-semibold">Port</label>
+                                        <input type="number" class="form-control" id="ldapPort" value="389">
+                                        <small class="form-text text-muted">389 (LDAP) or 636 (LDAPS)</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="ldapBaseDN" class="form-label fw-semibold">Base DN *</label>
+                                        <input type="text" class="form-control" id="ldapBaseDN" placeholder="DC=bonelabs,DC=com">
+                                        <small class="form-text text-muted">Base Distinguished Name for searches</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="ldapBindDN" class="form-label fw-semibold">Bind DN (Service Account) *</label>
+                                        <input type="text" class="form-control" id="ldapBindDN" placeholder="CN=Service Account,OU=Users,DC=bonelabs,DC=com">
+                                        <small class="form-text text-muted">Service account for LDAP binds</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="ldapBindPassword" class="form-label fw-semibold">Bind Password *</label>
+                                        <input type="password" class="form-control" id="ldapBindPassword" placeholder="Enter service account password">
+                                        <small class="form-text text-muted">Password will be encrypted in database</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="ldapSearchFilter" class="form-label fw-semibold">Search Filter</label>
+                                        <input type="text" class="form-control" id="ldapSearchFilter" value="(sAMAccountName={username})">
+                                        <small class="form-text text-muted">Use {username} as placeholder for login username</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="ldapUsernamAttr" class="form-label fw-semibold">Username Attribute</label>
+                                        <input type="text" class="form-control" id="ldapUsernameAttr" value="sAMAccountName">
+                                        <small class="form-text text-muted">AD: sAMAccountName, OpenLDAP: uid</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="ldapEmailAttr" class="form-label fw-semibold">Email Attribute</label>
+                                        <input type="text" class="form-control" id="ldapEmailAttr" value="mail">
+                                        <small class="form-text text-muted">Attribute containing email address</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="ldapUseTLS">
+                                            <label class="form-check-label fw-semibold" for="ldapUseTLS">
+                                                Use TLS/STARTTLS
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary me-2" onclick="saveLDAPSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save LDAP Settings
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" onclick="testLDAPConnection()">
+                                            <i class="bi bi-plug me-1"></i>Test Connection
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <h5>Sync Configuration</h5>
-                    <p class="text-muted">Configure CISA KEV sync schedule and NVD API settings</p>
-                    <div class="alert alert-info">
-                        <i class="bi bi-info-circle me-2"></i>
-                        Settings configuration will be available in the next update
+
+                <!-- Global SMTP Settings -->
+                <div class="tab-pane fade" id="smtpSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-envelope me-2"></i>Global SMTP Configuration
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Default SMTP settings for all organizations. Organizations can override these with their own SMTP config.
+                            </div>
+
+                            <form id="smtpSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-md-8">
+                                        <label for="globalSmtpHost" class="form-label fw-semibold">SMTP Server *</label>
+                                        <input type="text" class="form-control" id="globalSmtpHost" placeholder="smtp.gmail.com">
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label for="globalSmtpPort" class="form-label fw-semibold">Port *</label>
+                                        <input type="number" class="form-control" id="globalSmtpPort" value="587">
+                                        <small class="form-text text-muted">587 (TLS) or 465 (SSL)</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="globalSmtpUsername" class="form-label fw-semibold">Username</label>
+                                        <input type="text" class="form-control" id="globalSmtpUsername">
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="globalSmtpPassword" class="form-label fw-semibold">Password</label>
+                                        <input type="password" class="form-control" id="globalSmtpPassword">
+                                        <small class="form-text text-muted">Password will be encrypted</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="globalSmtpFromEmail" class="form-label fw-semibold">From Email *</label>
+                                        <input type="email" class="form-control" id="globalSmtpFromEmail" placeholder="noreply@company.com">
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="globalSmtpFromName" class="form-label fw-semibold">From Name</label>
+                                        <input type="text" class="form-control" id="globalSmtpFromName" value="SentriKat Alerts">
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="globalSmtpUseTLS" checked>
+                                            <label class="form-check-label fw-semibold" for="globalSmtpUseTLS">
+                                                Use TLS/STARTTLS
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary me-2" onclick="saveGlobalSMTPSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save SMTP Settings
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" onclick="testGlobalSMTP()">
+                                            <i class="bi bi-envelope-check me-1"></i>Send Test Email
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sync Schedule Settings -->
+                <div class="tab-pane fade" id="syncSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-arrow-clockwise me-2"></i>CISA KEV Sync Schedule
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure automatic synchronization with the CISA Known Exploited Vulnerabilities catalog.
+                            </div>
+
+                            <form id="syncSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="autoSyncEnabled">
+                                            <label class="form-check-label fw-semibold" for="autoSyncEnabled">
+                                                Enable Automatic Sync
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="syncInterval" class="form-label fw-semibold">Sync Interval</label>
+                                        <select class="form-select" id="syncInterval">
+                                            <option value="hourly">Every Hour</option>
+                                            <option value="4hours">Every 4 Hours</option>
+                                            <option value="6hours">Every 6 Hours</option>
+                                            <option value="12hours">Every 12 Hours</option>
+                                            <option value="daily" selected>Daily</option>
+                                            <option value="weekly">Weekly</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="syncTime" class="form-label fw-semibold">Preferred Time (UTC)</label>
+                                        <input type="time" class="form-control" id="syncTime" value="02:00">
+                                        <small class="form-text text-muted">Time to run daily/weekly syncs</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="nvdApiKey" class="form-label fw-semibold">NVD API Key</label>
+                                        <input type="password" class="form-control" id="nvdApiKey" placeholder="Optional - for CVSS enrichment">
+                                        <small class="form-text text-muted">Get from <a href="https://nvd.nist.gov/developers/request-an-api-key" target="_blank">NIST NVD</a></small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="cisaKevUrl" class="form-label fw-semibold">CISA KEV URL</label>
+                                        <input type="text" class="form-control" id="cisaKevUrl" value="https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json">
+                                        <small class="form-text text-muted">Usually leave as default</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <div class="alert alert-secondary">
+                                            <strong>Last Sync:</strong> <span id="lastSyncTime">Never</span><br>
+                                            <strong>Next Scheduled:</strong> <span id="nextSyncTime">Not scheduled</span><br>
+                                            <strong>Total Vulnerabilities:</strong> <span id="totalVulns">0</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary" onclick="saveSyncSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save Sync Settings
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- General Settings -->
+                <div class="tab-pane fade" id="generalSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-sliders me-2"></i>General System Settings
+                        </div>
+                        <div class="card-body">
+                            <form id="generalSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="verifySSL" checked>
+                                            <label class="form-check-label fw-semibold" for="verifySSL">
+                                                Verify SSL Certificates
+                                            </label>
+                                            <small class="form-text text-muted d-block">Disable if behind corporate proxy with SSL inspection</small>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="httpProxy" class="form-label fw-semibold">HTTP Proxy</label>
+                                        <input type="text" class="form-control" id="httpProxy" placeholder="http://proxy.company.com:3128">
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="httpsProxy" class="form-label fw-semibold">HTTPS Proxy</label>
+                                        <input type="text" class="form-control" id="httpsProxy" placeholder="http://proxy.company.com:3128">
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="noProxy" class="form-label fw-semibold">No Proxy (Bypass List)</label>
+                                        <input type="text" class="form-control" id="noProxy" placeholder="localhost,127.0.0.1,.company.com">
+                                        <small class="form-text text-muted">Comma-separated hostnames to bypass proxy</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="sessionTimeout" class="form-label fw-semibold">Session Timeout (minutes)</label>
+                                        <input type="number" class="form-control" id="sessionTimeout" value="480">
+                                        <small class="form-text text-muted">User session timeout (default: 480 = 8 hours)</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary" onclick="saveGeneralSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save General Settings
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -192,24 +495,29 @@
                             </select>
                         </div>
 
-                        <div class="col-md-6">
-                            <label class="form-label fw-semibold">Role & Permissions</label>
+                        <div class="col-md-12">
+                            <label for="userRole" class="form-label fw-semibold">Role *</label>
+                            <select class="form-select" id="userRole" onchange="updateRoleDescription()">
+                                <option value="user">User - View-only access to vulnerabilities</option>
+                                <option value="manager">Manager - Can manage products and view vulnerabilities</option>
+                                <option value="org_admin">Organization Admin - Full access within their organization</option>
+                                <option value="super_admin">Super Admin - Full system access across all organizations</option>
+                            </select>
+                            <div class="alert alert-sm mt-2" id="roleDescription"></div>
+                        </div>
+
+                        <div class="col-md-12">
+                            <label class="form-label fw-semibold">Additional Permissions</label>
                             <div class="form-check">
-                                <input type="checkbox" class="form-check-input" id="isAdmin">
-                                <label class="form-check-label" for="isAdmin">
-                                    Administrator (full system access)
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input type="checkbox" class="form-check-input" id="canManageProducts" checked>
+                                <input type="checkbox" class="form-check-input" id="canManageProducts">
                                 <label class="form-check-label" for="canManageProducts">
-                                    Can manage products
+                                    Can manage products (add/edit/delete)
                                 </label>
                             </div>
-                            <div class="form-check">
+                            <div class="form-check" id="viewAllOrgsCheck">
                                 <input type="checkbox" class="form-check-input" id="canViewAllOrgs">
                                 <label class="form-check-label" for="canViewAllOrgs">
-                                    Can view all organizations
+                                    Can view all organizations (super admin only)
                                 </label>
                             </div>
                         </div>

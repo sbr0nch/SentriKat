@@ -46,11 +46,16 @@ async function loadUsers() {
             `;
         } else {
             tbody.innerHTML = users.map(user => {
-                const roleBadge = user.is_admin
-                    ? '<span class="badge bg-danger"><i class="bi bi-shield-check"></i> Admin</span>'
-                    : user.can_manage_products
-                    ? '<span class="badge bg-info">Manager</span>'
-                    : '<span class="badge bg-secondary">Viewer</span>';
+                // Role badge based on new role system
+                const roleMap = {
+                    'super_admin': { badge: 'bg-danger', icon: 'star-fill', text: 'Super Admin' },
+                    'org_admin': { badge: 'bg-warning', icon: 'shield-check', text: 'Org Admin' },
+                    'manager': { badge: 'bg-info', icon: 'gear', text: 'Manager' },
+                    'user': { badge: 'bg-secondary', icon: 'person', text: 'User' }
+                };
+
+                const role = roleMap[user.role] || roleMap['user'];
+                const roleBadge = `<span class="badge ${role.badge}"><i class="bi bi-${role.icon}"></i> ${role.text}</span>`;
 
                 const statusBadge = user.is_active
                     ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
@@ -102,9 +107,11 @@ function showCreateUserModal() {
     // Reset to local auth by default
     document.getElementById('authLocal').checked = true;
     document.getElementById('isActive').checked = true;
+    document.getElementById('userRole').value = 'user';
     document.getElementById('canManageProducts').checked = true;
 
     toggleAuthFields();
+    updateRoleDescription();
 
     new bootstrap.Modal(document.getElementById('userModal')).show();
 }
@@ -121,7 +128,7 @@ async function editUser(userId) {
         document.getElementById('email').value = user.email;
         document.getElementById('fullName').value = user.full_name || '';
         document.getElementById('organization').value = user.organization_id || '';
-        document.getElementById('isAdmin').checked = user.is_admin;
+        document.getElementById('userRole').value = user.role || 'user';
         document.getElementById('canManageProducts').checked = user.can_manage_products;
         document.getElementById('canViewAllOrgs').checked = user.can_view_all_orgs;
         document.getElementById('isActive').checked = user.is_active;
@@ -134,6 +141,7 @@ async function editUser(userId) {
         }
 
         toggleAuthFields();
+        updateRoleDescription();
 
         // For edit mode, password is optional
         document.getElementById('password').required = false;
@@ -200,7 +208,8 @@ async function saveUser() {
         full_name: document.getElementById('fullName').value.trim(),
         organization_id: parseInt(document.getElementById('organization').value) || null,
         auth_type: authType,
-        is_admin: document.getElementById('isAdmin').checked,
+        role: document.getElementById('userRole').value,
+        is_admin: document.getElementById('userRole').value !== 'user' && document.getElementById('userRole').value !== 'manager',
         can_manage_products: document.getElementById('canManageProducts').checked,
         can_view_all_orgs: document.getElementById('canViewAllOrgs').checked,
         is_active: document.getElementById('isActive').checked
@@ -525,8 +534,287 @@ async function deleteOrganization(orgId, displayName) {
 // Utility Functions
 // ============================================================================
 
+function updateRoleDescription() {
+    const role = document.getElementById('userRole').value;
+    const descDiv = document.getElementById('roleDescription');
+    const viewAllOrgsCheck = document.getElementById('viewAllOrgsCheck');
+    const canManageProducts = document.getElementById('canManageProducts');
+
+    const descriptions = {
+        'user': {
+            text: '👁️ View-only access. Can see vulnerabilities but cannot make changes.',
+            class: 'alert-secondary',
+            canManageProducts: false,
+            showViewAllOrgs: false
+        },
+        'manager': {
+            text: '🛠️ Can manage products and vulnerabilities within their organization.',
+            class: 'alert-info',
+            canManageProducts: true,
+            showViewAllOrgs: false
+        },
+        'org_admin': {
+            text: '👑 Full administrative access within their organization. Can manage users, products, and settings.',
+            class: 'alert-warning',
+            canManageProducts: true,
+            showViewAllOrgs: false
+        },
+        'super_admin': {
+            text: '⭐ Full system access. Can manage all organizations, users, and global settings.',
+            class: 'alert-danger',
+            canManageProducts: true,
+            showViewAllOrgs: true
+        }
+    };
+
+    const desc = descriptions[role];
+    descDiv.textContent = desc.text;
+    descDiv.className = `alert alert-sm mt-2 ${desc.class}`;
+    canManageProducts.checked = desc.canManageProducts;
+    viewAllOrgsCheck.style.display = desc.showViewAllOrgs ? 'block' : 'none';
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ============================================================================
+// Settings Management
+// ============================================================================
+
+// LDAP Settings
+async function saveLDAPSettings() {
+    const settings = {
+        ldap_enabled: document.getElementById('ldapEnabled').checked,
+        ldap_server: document.getElementById('ldapServer').value,
+        ldap_port: document.getElementById('ldapPort').value,
+        ldap_base_dn: document.getElementById('ldapBaseDN').value,
+        ldap_bind_dn: document.getElementById('ldapBindDN').value,
+        ldap_bind_password: document.getElementById('ldapBindPassword').value,
+        ldap_search_filter: document.getElementById('ldapSearchFilter').value,
+        ldap_username_attr: document.getElementById('ldapUsernameAttr').value,
+        ldap_email_attr: document.getElementById('ldapEmailAttr').value,
+        ldap_use_tls: document.getElementById('ldapUseTLS').checked
+    };
+
+    try {
+        const response = await fetch('/api/settings/ldap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('✓ LDAP settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving LDAP settings: ${error.message}`, 'danger');
+    }
+}
+
+async function testLDAPConnection() {
+    try {
+        const response = await fetch('/api/settings/ldap/test', {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('✓ LDAP connection successful!', 'success');
+        } else {
+            showToast(`✗ LDAP test failed: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error testing LDAP: ${error.message}`, 'danger');
+    }
+}
+
+// Global SMTP Settings
+async function saveGlobalSMTPSettings() {
+    const settings = {
+        smtp_host: document.getElementById('globalSmtpHost').value,
+        smtp_port: document.getElementById('globalSmtpPort').value,
+        smtp_username: document.getElementById('globalSmtpUsername').value,
+        smtp_password: document.getElementById('globalSmtpPassword').value,
+        smtp_from_email: document.getElementById('globalSmtpFromEmail').value,
+        smtp_from_name: document.getElementById('globalSmtpFromName').value,
+        smtp_use_tls: document.getElementById('globalSmtpUseTLS').checked
+    };
+
+    try {
+        const response = await fetch('/api/settings/smtp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('✓ Global SMTP settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving SMTP settings: ${error.message}`, 'danger');
+    }
+}
+
+async function testGlobalSMTP() {
+    try {
+        const response = await fetch('/api/settings/smtp/test', {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('✓ Test email sent successfully!', 'success');
+        } else {
+            showToast(`✗ SMTP test failed: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error testing SMTP: ${error.message}`, 'danger');
+    }
+}
+
+// Sync Settings
+async function saveSyncSettings() {
+    const settings = {
+        auto_sync_enabled: document.getElementById('autoSyncEnabled').checked,
+        sync_interval: document.getElementById('syncInterval').value,
+        sync_time: document.getElementById('syncTime').value,
+        nvd_api_key: document.getElementById('nvdApiKey').value,
+        cisa_kev_url: document.getElementById('cisaKevUrl').value
+    };
+
+    try {
+        const response = await fetch('/api/settings/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('✓ Sync settings saved successfully', 'success');
+            loadSyncStatus();
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving sync settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadSyncStatus() {
+    try {
+        const response = await fetch('/api/settings/sync/status');
+        const status = await response.json();
+
+        document.getElementById('lastSyncTime').textContent = status.last_sync || 'Never';
+        document.getElementById('nextSyncTime').textContent = status.next_sync || 'Not scheduled';
+        document.getElementById('totalVulns').textContent = status.total_vulnerabilities || '0';
+    } catch (error) {
+        console.error('Error loading sync status:', error);
+    }
+}
+
+// General Settings
+async function saveGeneralSettings() {
+    const settings = {
+        verify_ssl: document.getElementById('verifySSL').checked,
+        http_proxy: document.getElementById('httpProxy').value,
+        https_proxy: document.getElementById('httpsProxy').value,
+        no_proxy: document.getElementById('noProxy').value,
+        session_timeout: document.getElementById('sessionTimeout').value
+    };
+
+    try {
+        const response = await fetch('/api/settings/general', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('✓ General settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving general settings: ${error.message}`, 'danger');
+    }
+}
+
+// Load settings on tab switch
+document.addEventListener('DOMContentLoaded', function() {
+    // Load settings when settings tab is shown
+    const settingsTab = document.getElementById('settings-tab');
+    if (settingsTab) {
+        settingsTab.addEventListener('shown.bs.tab', function() {
+            loadAllSettings();
+        });
+    }
+});
+
+async function loadAllSettings() {
+    try {
+        // Load LDAP settings
+        const ldapResponse = await fetch('/api/settings/ldap');
+        if (ldapResponse.ok) {
+            const ldap = await ldapResponse.json();
+            document.getElementById('ldapEnabled').checked = ldap.ldap_enabled || false;
+            document.getElementById('ldapServer').value = ldap.ldap_server || '';
+            document.getElementById('ldapPort').value = ldap.ldap_port || 389;
+            document.getElementById('ldapBaseDN').value = ldap.ldap_base_dn || '';
+            document.getElementById('ldapBindDN').value = ldap.ldap_bind_dn || '';
+            document.getElementById('ldapSearchFilter').value = ldap.ldap_search_filter || '(sAMAccountName={username})';
+            document.getElementById('ldapUsernameAttr').value = ldap.ldap_username_attr || 'sAMAccountName';
+            document.getElementById('ldapEmailAttr').value = ldap.ldap_email_attr || 'mail';
+            document.getElementById('ldapUseTLS').checked = ldap.ldap_use_tls || false;
+        }
+
+        // Load Global SMTP settings
+        const smtpResponse = await fetch('/api/settings/smtp');
+        if (smtpResponse.ok) {
+            const smtp = await smtpResponse.json();
+            document.getElementById('globalSmtpHost').value = smtp.smtp_host || '';
+            document.getElementById('globalSmtpPort').value = smtp.smtp_port || 587;
+            document.getElementById('globalSmtpUsername').value = smtp.smtp_username || '';
+            document.getElementById('globalSmtpFromEmail').value = smtp.smtp_from_email || '';
+            document.getElementById('globalSmtpFromName').value = smtp.smtp_from_name || 'SentriKat Alerts';
+            document.getElementById('globalSmtpUseTLS').checked = smtp.smtp_use_tls !== false;
+        }
+
+        // Load Sync settings
+        const syncResponse = await fetch('/api/settings/sync');
+        if (syncResponse.ok) {
+            const sync = await syncResponse.json();
+            document.getElementById('autoSyncEnabled').checked = sync.auto_sync_enabled || false;
+            document.getElementById('syncInterval').value = sync.sync_interval || 'daily';
+            document.getElementById('syncTime').value = sync.sync_time || '02:00';
+            document.getElementById('cisaKevUrl').value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+        }
+        loadSyncStatus();
+
+        // Load General settings
+        const generalResponse = await fetch('/api/settings/general');
+        if (generalResponse.ok) {
+            const general = await generalResponse.json();
+            document.getElementById('verifySSL').checked = general.verify_ssl !== false;
+            document.getElementById('httpProxy').value = general.http_proxy || '';
+            document.getElementById('httpsProxy').value = general.https_proxy || '';
+            document.getElementById('noProxy').value = general.no_proxy || '';
+            document.getElementById('sessionTimeout').value = general.session_timeout || 480;
+        }
+    } catch (error) {
+        console.error('Error loading settings:', error);
+    }
 }
