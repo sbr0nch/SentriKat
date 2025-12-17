@@ -580,8 +580,31 @@ def get_alert_logs(org_id):
 @bp.route('/api/users', methods=['GET'])
 @admin_required
 def get_users():
-    """Get all users (admin only)"""
-    users = User.query.filter_by(is_active=True).order_by(User.username).all()
+    """
+    Get users based on permissions
+
+    Permissions:
+    - Super Admin: See all users
+    - Org Admin: See only users in their organization
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    # Super admins see all users
+    if current_user.is_super_admin():
+        users = User.query.filter_by(is_active=True).order_by(User.username).all()
+    # Org admins see only their organization's users
+    elif current_user.is_org_admin():
+        users = User.query.filter_by(
+            organization_id=current_user.organization_id,
+            is_active=True
+        ).order_by(User.username).all()
+    else:
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
     return jsonify([u.to_dict() for u in users])
 
 @bp.route('/api/users', methods=['POST'])
@@ -640,25 +663,55 @@ def get_user(user_id):
 @bp.route('/api/users/<int:user_id>', methods=['PUT'])
 @admin_required
 def update_user(user_id):
-    """Update a user"""
+    """
+    Update a user
+
+    Permissions:
+    - Super Admin: Can update any user
+    - Org Admin: Can only update users in their organization (except super admins)
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions to manage this user'}), 403
+
     data = request.get_json()
 
     if 'email' in data:
         user.email = data['email']
     if 'full_name' in data:
         user.full_name = data['full_name']
+
+    # Organization assignment
     if 'organization_id' in data:
+        # Org admins can only assign to their own organization
+        if current_user.role == 'org_admin' and data['organization_id'] != current_user.organization_id:
+            return jsonify({'error': 'Org admins can only assign users to their own organization'}), 403
         user.organization_id = data['organization_id']
+
+    # Role changes
     if 'role' in data:
-        user.role = data['role']
+        new_role = data['role']
+        # Only super admins can create/modify super_admins
+        if new_role == 'super_admin' and not current_user.is_super_admin():
+            return jsonify({'error': 'Only super admins can create super admin users'}), 403
+        # Org admins cannot set org_admin or super_admin roles
+        if current_user.role == 'org_admin' and new_role in ['super_admin', 'org_admin']:
+            return jsonify({'error': 'Org admins cannot create admin users'}), 403
+        user.role = new_role
+
     if 'is_admin' in data:
         user.is_admin = data['is_admin']
     if 'is_active' in data:
         user.is_active = data['is_active']
     if 'can_manage_products' in data:
         user.can_manage_products = data['can_manage_products']
-    if 'can_view_all_orgs' in data:
+
+    # Only super admins can modify can_view_all_orgs
+    if 'can_view_all_orgs' in data and current_user.is_super_admin():
         user.can_view_all_orgs = data['can_view_all_orgs']
 
     # Update password if provided
@@ -672,9 +725,26 @@ def update_user(user_id):
 @bp.route('/api/users/<int:user_id>', methods=['DELETE'])
 @admin_required
 def delete_user(user_id):
-    """Delete a user"""
+    """
+    Delete a user (soft delete - deactivate)
+
+    Permissions:
+    - Super Admin: Can delete any user
+    - Org Admin: Can only delete users in their organization (except super admins)
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
-    db.session.delete(user)
+
+    # Cannot delete yourself
+    if user_id == current_user_id:
+        return jsonify({'error': 'Cannot delete your own account'}), 400
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions to delete this user'}), 403
+
+    user.is_active = False
     db.session.commit()
     return jsonify({'success': True})
 
