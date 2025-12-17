@@ -70,9 +70,18 @@ def org_admin_required(f):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
-        # Check if user is org_admin or super_admin
+        # Check if user is org_admin, super_admin, or legacy is_admin
         user = User.query.get(session['user_id'])
-        if not user or user.role not in ['org_admin', 'super_admin']:
+        if not user:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'User not found'}), 401
+            return redirect(url_for('auth.login'))
+
+        # Allow org_admin, super_admin roles, or legacy is_admin flag
+        has_permission = (user.role in ['org_admin', 'super_admin'] or
+                         user.is_admin == True)
+
+        if not has_permission:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Organization admin privileges required'}), 403
             return redirect(url_for('main.index'))
