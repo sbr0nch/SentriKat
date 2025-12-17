@@ -12,25 +12,47 @@ let organizations = [];
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', function() {
-    loadUsers();
-    loadOrganizations();
-    loadOrganizationsDropdown();
+    console.log('Admin Panel: DOMContentLoaded fired');
 
-    // Tab change handlers
-    document.getElementById('organizations-tab').addEventListener('shown.bs.tab', function() {
-        loadOrganizations();
-    });
-
-    // Settings tab handler
-    const settingsTab = document.getElementById('settings-tab');
-    if (settingsTab) {
-        settingsTab.addEventListener('shown.bs.tab', function() {
-            loadAllSettings();
-        });
+    // Check if Bootstrap is loaded
+    if (typeof bootstrap === 'undefined') {
+        console.error('Bootstrap is not loaded! Modals will not work.');
+        alert('Error: Bootstrap JavaScript library is not loaded. Please refresh the page.');
+        return;
     }
 
-    // Load sync status immediately (doesn't require settings to be configured)
-    loadSyncStatus();
+    try {
+        loadUsers();
+        loadOrganizations();
+        loadOrganizationsDropdown();
+
+        // Tab change handlers
+        const orgTab = document.getElementById('organizations-tab');
+        if (orgTab) {
+            orgTab.addEventListener('shown.bs.tab', function() {
+                loadOrganizations();
+            });
+        } else {
+            console.warn('organizations-tab element not found');
+        }
+
+        // Settings tab handler
+        const settingsTab = document.getElementById('settings-tab');
+        if (settingsTab) {
+            settingsTab.addEventListener('shown.bs.tab', function() {
+                loadAllSettings();
+            });
+        } else {
+            console.warn('settings-tab element not found');
+        }
+
+        // Load sync status immediately (doesn't require settings to be configured)
+        loadSyncStatus();
+
+        console.log('Admin Panel: Initialization complete');
+    } catch (error) {
+        console.error('Error during admin panel initialization:', error);
+    }
 });
 
 // ============================================================================
@@ -111,20 +133,34 @@ async function loadUsers() {
 }
 
 function showCreateUserModal() {
-    currentUserId = null;
-    document.getElementById('userModalTitle').innerHTML = '<i class="bi bi-person-plus me-2"></i>Create User';
-    document.getElementById('userForm').reset();
+    try {
+        console.log('showCreateUserModal called');
+        currentUserId = null;
+        document.getElementById('userModalTitle').innerHTML = '<i class="bi bi-person-plus me-2"></i>Create User';
+        document.getElementById('userForm').reset();
 
-    // Reset to local auth by default
-    document.getElementById('authLocal').checked = true;
-    document.getElementById('isActive').checked = true;
-    document.getElementById('userRole').value = 'user';
-    document.getElementById('canManageProducts').checked = true;
+        // Reset to local auth by default
+        document.getElementById('authLocal').checked = true;
+        document.getElementById('isActive').checked = true;
+        document.getElementById('userRole').value = 'user';
+        document.getElementById('canManageProducts').checked = true;
 
-    toggleAuthFields();
-    updateRoleDescription();
+        toggleAuthFields();
+        updateRoleDescription();
 
-    new bootstrap.Modal(document.getElementById('userModal')).show();
+        const modalElement = document.getElementById('userModal');
+        if (!modalElement) {
+            console.error('userModal element not found');
+            return;
+        }
+
+        const modal = new bootstrap.Modal(modalElement);
+        console.log('Modal created, showing...');
+        modal.show();
+    } catch (error) {
+        console.error('Error in showCreateUserModal:', error);
+        alert('Error opening user modal: ' + error.message);
+    }
 }
 
 async function editUser(userId) {
@@ -366,17 +402,31 @@ async function loadOrganizationsDropdown() {
 }
 
 function showCreateOrgModal() {
-    currentOrgId = null;
-    document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-building me-2"></i>Create Organization';
-    document.getElementById('orgForm').reset();
-    document.getElementById('orgActive').checked = true;
-    document.getElementById('alertCritical').checked = true;
-    document.getElementById('alertNewCVE').checked = true;
-    document.getElementById('alertRansomware').checked = true;
-    document.getElementById('smtpUseTls').checked = true;
-    document.getElementById('smtpPort').value = 587;
+    try {
+        console.log('showCreateOrgModal called');
+        currentOrgId = null;
+        document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-building me-2"></i>Create Organization';
+        document.getElementById('orgForm').reset();
+        document.getElementById('orgActive').checked = true;
+        document.getElementById('alertCritical').checked = true;
+        document.getElementById('alertNewCVE').checked = true;
+        document.getElementById('alertRansomware').checked = true;
+        document.getElementById('smtpUseTls').checked = true;
+        document.getElementById('smtpPort').value = 587;
 
-    new bootstrap.Modal(document.getElementById('orgModal')).show();
+        const modalElement = document.getElementById('orgModal');
+        if (!modalElement) {
+            console.error('orgModal element not found');
+            return;
+        }
+
+        const modal = new bootstrap.Modal(modalElement);
+        console.log('Modal created, showing...');
+        modal.show();
+    } catch (error) {
+        console.error('Error in showCreateOrgModal:', error);
+        alert('Error opening organization modal: ' + error.message);
+    }
 }
 
 async function editOrganization(orgId) {
