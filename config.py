@@ -25,7 +25,9 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file upload
 
     # Security settings
-    SESSION_COOKIE_SECURE = os.environ.get('FLASK_ENV') == 'production'
+    # Only use secure cookies if explicitly enabled (for HTTPS deployments)
+    # Set SESSION_COOKIE_SECURE=true in .env when using HTTPS
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)

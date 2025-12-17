@@ -118,7 +118,8 @@ def api_login():
     user.last_login_ip = request.remote_addr
     db.session.commit()
 
-    # Set session
+    # Set session as permanent (uses PERMANENT_SESSION_LIFETIME from config)
+    session.permanent = True
     session['user_id'] = user.id
     session['username'] = user.username
     session['is_admin'] = user.is_admin
