@@ -633,7 +633,10 @@
 
                                 <div class="col-md-6">
                                     <label for="smtpPort" class="form-label fw-semibold">Port</label>
-                                    <input type="number" class="form-control" id="smtpPort" value="587">
+                                    <input type="number" class="form-control" id="smtpPort" value="587" onchange="autoConfigureSmtpSecurity()">
+                                    <small class="form-text text-muted">
+                                        25 = Plain SMTP (no TLS/SSL) | 587 = TLS/STARTTLS | 465 = SSL
+                                    </small>
                                 </div>
 
                                 <div class="col-md-6">

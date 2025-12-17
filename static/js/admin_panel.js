@@ -677,6 +677,33 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function autoConfigureSmtpSecurity() {
+    const port = parseInt(document.getElementById('smtpPort').value);
+    const tlsCheckbox = document.getElementById('smtpUseTls');
+
+    // Auto-configure based on common SMTP ports
+    switch(port) {
+        case 25:
+            // Plain SMTP - no TLS/SSL
+            tlsCheckbox.checked = false;
+            showToast('ℹ️ Port 25 configured: Plain SMTP (no encryption)', 'info');
+            break;
+        case 587:
+            // STARTTLS
+            tlsCheckbox.checked = true;
+            showToast('ℹ️ Port 587 configured: TLS/STARTTLS enabled', 'info');
+            break;
+        case 465:
+            // SSL (note: we use TLS checkbox for SSL too in this implementation)
+            tlsCheckbox.checked = true;
+            showToast('ℹ️ Port 465 configured: SSL enabled', 'info');
+            break;
+        default:
+            // Unknown port, don't change settings
+            break;
+    }
+}
+
 // ============================================================================
 // Settings Management
 // ============================================================================
