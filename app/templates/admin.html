@@ -194,23 +194,33 @@
             <div class="modal-header">
                 <h5 class="modal-title">
                     <i class="bi bi-archive me-2"></i>Service Catalog Browser
+                    <span class="badge bg-primary ms-2" id="catalogSelectionCount" style="display: none;">0 selected</span>
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-3">
-                    <input type="text" class="form-control" id="catalogSearch"
-                           placeholder="Search services by vendor, product, or keywords..."
-                           oninput="filterCatalog(this.value)">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-8">
+                        <input type="text" class="form-control" id="catalogSearch"
+                               placeholder="Search services by vendor, product, or keywords..."
+                               oninput="filterCatalog(this.value)">
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select" id="catalogOrgSelect">
+                            <option value="">Assign to Organization (optional)</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
                     <table class="table table-hover">
                         <thead class="sticky-top bg-white">
                             <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="form-check-input" id="catalogSelectAll" onchange="toggleCatalogSelectAll()">
+                                </th>
                                 <th>Vendor</th>
                                 <th>Product</th>
                                 <th>Keywords</th>
-                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody id="catalogTable">
@@ -226,6 +236,12 @@
                     </table>
                 </div>
             </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="addSelectedBtn" onclick="addSelectedFromCatalog()" disabled>
+                    <i class="bi bi-plus-circle me-1"></i>Add Selected Products
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -235,6 +251,7 @@
 <script>
     let currentProductId = null;
     let serviceCatalog = [];
+    let selectedCatalogItems = new Set();
 
     async function loadProducts() {
         showLoading();
@@ -427,6 +444,19 @@
             await loadServiceCatalog();
         }
 
+        // Load organizations into dropdown
+        try {
+            const response = await fetch('/api/organizations');
+            if (response.ok) {
+                const orgs = await response.json();
+                const select = document.getElementById('catalogOrgSelect');
+                select.innerHTML = '<option value="">Assign to Organization (optional)</option>' +
+                    orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+            }
+        } catch (error) {
+            console.error('Error loading organizations:', error);
+        }
+
         // Show modal
         new bootstrap.Modal(document.getElementById('serviceCatalogModal')).show();
     }
@@ -464,18 +494,23 @@
             return;
         }
 
-        tbody.innerHTML = catalog.map(service => `
-            <tr>
-                <td class="fw-semibold">${escapeHtml(service.vendor)}</td>
-                <td>${escapeHtml(service.product_name)}</td>
-                <td><small class="text-muted">${escapeHtml(service.keywords || '')}</small></td>
-                <td>
-                    <button class="btn btn-sm btn-primary" onclick="selectFromCatalog(${service.id})">
-                        <i class="bi bi-plus-circle me-1"></i>Select
-                    </button>
-                </td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = catalog.map(service => {
+            const isChecked = selectedCatalogItems.has(service.id);
+            return `
+                <tr onclick="toggleCatalogSelection(${service.id}, event)" style="cursor: pointer;">
+                    <td onclick="event.stopPropagation();">
+                        <input type="checkbox"
+                               class="form-check-input catalog-item-checkbox"
+                               data-catalog-id="${service.id}"
+                               ${isChecked ? 'checked' : ''}
+                               onchange="toggleCatalogSelection(${service.id}, event)">
+                    </td>
+                    <td class="fw-semibold">${escapeHtml(service.vendor)}</td>
+                    <td>${escapeHtml(service.product_name)}</td>
+                    <td><small class="text-muted">${escapeHtml(service.keywords || '')}</small></td>
+                </tr>
+            `;
+        }).join('');
     }
 
     function filterCatalog(query) {
@@ -488,6 +523,125 @@
         });
 
         renderCatalog(filtered);
+    }
+
+    function toggleCatalogSelection(catalogId, event) {
+        if (event) {
+            event.stopPropagation();
+        }
+
+        if (selectedCatalogItems.has(catalogId)) {
+            selectedCatalogItems.delete(catalogId);
+        } else {
+            selectedCatalogItems.add(catalogId);
+        }
+
+        updateCatalogSelectionUI();
+    }
+
+    function toggleCatalogSelectAll() {
+        const selectAllCheckbox = document.getElementById('catalogSelectAll');
+        const checkboxes = document.querySelectorAll('.catalog-item-checkbox');
+
+        checkboxes.forEach(checkbox => {
+            const catalogId = parseInt(checkbox.dataset.catalogId);
+            if (selectAllCheckbox.checked) {
+                selectedCatalogItems.add(catalogId);
+                checkbox.checked = true;
+            } else {
+                selectedCatalogItems.delete(catalogId);
+                checkbox.checked = false;
+            }
+        });
+
+        updateCatalogSelectionUI();
+    }
+
+    function updateCatalogSelectionUI() {
+        const count = selectedCatalogItems.size;
+        const countBadge = document.getElementById('catalogSelectionCount');
+        const addBtn = document.getElementById('addSelectedBtn');
+
+        if (count > 0) {
+            countBadge.textContent = `${count} selected`;
+            countBadge.style.display = 'inline-block';
+            addBtn.disabled = false;
+        } else {
+            countBadge.style.display = 'none';
+            addBtn.disabled = true;
+        }
+    }
+
+    async function addSelectedFromCatalog() {
+        if (selectedCatalogItems.size === 0) {
+            showToast('Please select at least one service', 'warning');
+            return;
+        }
+
+        const orgId = document.getElementById('catalogOrgSelect').value;
+        const addBtn = document.getElementById('addSelectedBtn');
+        const originalText = addBtn.innerHTML;
+
+        addBtn.disabled = true;
+        addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding...';
+
+        try {
+            let successCount = 0;
+            let failCount = 0;
+
+            // Create products for all selected services
+            for (const catalogId of selectedCatalogItems) {
+                const service = serviceCatalog.find(s => s.id === catalogId);
+                if (!service) continue;
+
+                try {
+                    const productData = {
+                        vendor: service.vendor,
+                        product_name: service.product_name,
+                        keywords: service.keywords || '',
+                        service_catalog_id: catalogId,
+                        active: true,
+                        criticality: 'medium'
+                    };
+
+                    if (orgId) {
+                        productData.organization_id = parseInt(orgId);
+                    }
+
+                    const response = await fetch('/api/products', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(productData)
+                    });
+
+                    if (response.ok) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (error) {
+                    failCount++;
+                }
+            }
+
+            // Clear selection and close modal
+            selectedCatalogItems.clear();
+            updateCatalogSelectionUI();
+            bootstrap.Modal.getInstance(document.getElementById('serviceCatalogModal')).hide();
+
+            // Show results
+            if (successCount > 0) {
+                showToast(`✓ Successfully added ${successCount} product(s)${failCount > 0 ? ` (${failCount} failed)` : ''}`, 'success');
+                loadProducts();
+            } else {
+                showToast('Failed to add products', 'danger');
+            }
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            addBtn.disabled = false;
+            addBtn.innerHTML = originalText;
+        }
     }
 
     async function selectFromCatalog(catalogId) {
