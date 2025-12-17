@@ -587,7 +587,36 @@ def get_current_user():
     if not current_user:
         return jsonify({'error': 'User not found'}), 404
 
-    return jsonify(current_user.to_dict())
+    user_dict = current_user.to_dict()
+    # Add debug info to help troubleshoot permissions
+    user_dict['debug'] = {
+        'is_admin': current_user.is_admin,
+        'role': current_user.role,
+        'can_access_ldap': (current_user.role in ['org_admin', 'super_admin'] or current_user.is_admin == True)
+    }
+    return jsonify(user_dict)
+
+@bp.route('/api/fix-admin-role', methods=['POST'])
+@login_required
+def fix_admin_role():
+    """Temporary endpoint to fix legacy admin users - sets role to super_admin if is_admin=True"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user or not current_user.is_admin:
+        return jsonify({'error': 'Only admin users can use this endpoint'}), 403
+
+    # Update role to super_admin
+    old_role = current_user.role
+    current_user.role = 'super_admin'
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': 'Role updated successfully',
+        'old_role': old_role,
+        'new_role': 'super_admin'
+    })
 
 @bp.route('/api/users', methods=['GET'])
 @admin_required
