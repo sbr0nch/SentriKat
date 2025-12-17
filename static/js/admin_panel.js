@@ -65,6 +65,11 @@ async function loadUsers() {
 
     try {
         const response = await fetch('/api/users');
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
         const users = await response.json();
 
         if (users.length === 0) {
@@ -122,6 +127,7 @@ async function loadUsers() {
             }).join('');
         }
     } catch (error) {
+        console.error('Error loading users:', error);
         tbody.innerHTML = `
             <tr>
                 <td colspan="8" class="text-center text-danger py-4">
@@ -331,6 +337,11 @@ async function loadOrganizations() {
 
     try {
         const response = await fetch('/api/organizations');
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
         organizations = await response.json();
 
         if (organizations.length === 0) {
@@ -377,6 +388,7 @@ async function loadOrganizations() {
             }).join('');
         }
     } catch (error) {
+        console.error('Error loading organizations:', error);
         tbody.innerHTML = `
             <tr>
                 <td colspan="6" class="text-center text-danger py-4">
@@ -679,6 +691,11 @@ async function saveLDAPSettings() {
 }
 
 async function testLDAPConnection() {
+    const btn = event.target;
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing...';
+
     try {
         const response = await fetch('/api/settings/ldap/test', {
             method: 'POST'
@@ -687,12 +704,16 @@ async function testLDAPConnection() {
         const result = await response.json();
 
         if (result.success) {
-            showToast('✓ LDAP connection successful!', 'success');
+            showToast(result.message || '✓ LDAP connection successful!', 'success');
         } else {
             showToast(`✗ LDAP test failed: ${result.error}`, 'danger');
         }
     } catch (error) {
+        console.error('Error testing LDAP:', error);
         showToast(`Error testing LDAP: ${error.message}`, 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
     }
 }
 
@@ -727,6 +748,11 @@ async function saveGlobalSMTPSettings() {
 }
 
 async function testGlobalSMTP() {
+    const btn = event.target;
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending...';
+
     try {
         const response = await fetch('/api/settings/smtp/test', {
             method: 'POST'
@@ -735,12 +761,16 @@ async function testGlobalSMTP() {
         const result = await response.json();
 
         if (result.success) {
-            showToast('✓ Test email sent successfully!', 'success');
+            showToast(result.message || '✓ Test email sent successfully!', 'success');
         } else {
             showToast(`✗ SMTP test failed: ${result.error}`, 'danger');
         }
     } catch (error) {
+        console.error('Error testing SMTP:', error);
         showToast(`Error testing SMTP: ${error.message}`, 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
     }
 }
 
