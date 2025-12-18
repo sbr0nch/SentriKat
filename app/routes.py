@@ -15,6 +15,12 @@ def index():
     """Dashboard homepage"""
     return render_template('dashboard.html')
 
+@bp.route('/shared/<share_token>')
+@login_required
+def shared_view(share_token):
+    """View a shared filtered dashboard"""
+    return render_template('dashboard.html', share_token=share_token)
+
 @bp.route('/admin')
 @login_required
 def admin():
