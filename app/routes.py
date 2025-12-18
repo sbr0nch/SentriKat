@@ -371,8 +371,8 @@ def increment_catalog_usage(catalog_id):
 @bp.route('/api/organizations', methods=['GET'])
 @login_required
 def get_organizations():
-    """Get all organizations"""
-    orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
+    """Get all organizations (including inactive, with visual indicator)"""
+    orgs = Organization.query.order_by(Organization.display_name).all()
     return jsonify([o.to_dict() for o in orgs])
 
 @bp.route('/api/organizations', methods=['POST'])

@@ -1155,7 +1155,19 @@
                             <label class="form-label">LDAP Group DN <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="ldapGroupDn" required
                                    placeholder="CN=Admins,OU=Groups,DC=company,DC=com">
-                            <small class="text-muted">Full Distinguished Name of the LDAP group</small>
+                            <small class="text-muted d-block mb-1">
+                                <i class="bi bi-info-circle me-1"></i>Full Distinguished Name of the LDAP group
+                            </small>
+                            <small class="text-muted d-block">
+                                <strong>Examples:</strong><br>
+                                • CN=IT-Team,OU=Groups,DC=company,DC=com<br>
+                                • CN=Developers,OU=Engineering,OU=Departments,DC=corp,DC=local<br>
+                                • CN=Security-Admins,CN=Users,DC=domain,DC=com
+                            </small>
+                            <small class="text-info d-block mt-2">
+                                <i class="bi bi-lightbulb me-1"></i><strong>Tip:</strong> You can find group DNs using Active Directory Users and Computers (ADUC),
+                                or use the LDAP search feature above to browse your directory.
+                            </small>
                         </div>
 
                         <div class="col-md-6">

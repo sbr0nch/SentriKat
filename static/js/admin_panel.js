@@ -1160,13 +1160,13 @@ async function searchLdapUsers() {
                     <tbody>
                         ${results.users.map(user => {
                             const statusBadge = user.exists_in_db
-                                ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Already Invited</span>'
-                                : '<span class="badge bg-secondary">Not Invited</span>';
+                                ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Already Provisioned</span>'
+                                : '<span class="badge bg-secondary">Not Provisioned</span>';
 
                             const actionButton = user.exists_in_db
                                 ? '<button class="btn btn-sm btn-secondary" disabled>Already Exists</button>'
                                 : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
-                                       <i class="bi bi-person-plus me-1"></i>Invite
+                                       <i class="bi bi-person-plus me-1"></i>Provision User
                                    </button>`;
 
                             return `

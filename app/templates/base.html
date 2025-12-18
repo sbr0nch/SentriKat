@@ -162,6 +162,94 @@
             background: linear-gradient(to right, rgba(5, 150, 105, 0.05), white);
         }
 
+        /* Dashboard Alert Cards (Priority Cards) */
+        .alert-card {
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            background: white;
+            border: 2px solid;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.3s ease;
+            height: 100%;
+        }
+
+        .alert-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .alert-card-critical {
+            border-color: var(--critical-color);
+            background: linear-gradient(135deg, rgba(220, 38, 38, 0.08), white);
+        }
+
+        .alert-card-critical:hover {
+            border-color: #b91c1c;
+            box-shadow: 0 8px 20px rgba(220, 38, 38, 0.25);
+        }
+
+        .alert-card-high {
+            border-color: var(--high-color);
+            background: linear-gradient(135deg, rgba(234, 88, 12, 0.08), white);
+        }
+
+        .alert-card-high:hover {
+            border-color: #c2410c;
+            box-shadow: 0 8px 20px rgba(234, 88, 12, 0.25);
+        }
+
+        .alert-card-medium {
+            border-color: var(--medium-color);
+            background: linear-gradient(135deg, rgba(202, 138, 4, 0.08), white);
+        }
+
+        .alert-card-medium:hover {
+            border-color: #a16207;
+            box-shadow: 0 8px 20px rgba(202, 138, 4, 0.25);
+        }
+
+        .alert-card-low {
+            border-color: var(--low-color);
+            background: linear-gradient(135deg, rgba(5, 150, 105, 0.08), white);
+        }
+
+        .alert-card-low:hover {
+            border-color: #047857;
+            box-shadow: 0 8px 20px rgba(5, 150, 105, 0.25);
+        }
+
+        .alert-card-label {
+            font-size: 0.875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--gray-600);
+            margin-bottom: 0.75rem;
+        }
+
+        .alert-card-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            line-height: 1;
+            margin-bottom: 0.5rem;
+        }
+
+        .alert-card-critical .alert-card-value {
+            color: var(--critical-color);
+        }
+
+        .alert-card-high .alert-card-value {
+            color: var(--high-color);
+        }
+
+        .alert-card-medium .alert-card-value {
+            color: var(--medium-color);
+        }
+
+        .alert-card-low .alert-card-value {
+            color: var(--low-color);
+        }
+
         /* Stat Cards */
         .stat-card {
             padding: 1.5rem;
