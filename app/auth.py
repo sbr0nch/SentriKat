@@ -227,40 +227,44 @@ def authenticate_ldap(user, password):
     Returns:
         bool: True if authentication successful
     """
-    # LDAP configuration from environment
-    ldap_server = os.environ.get('LDAP_SERVER')  # e.g., ldap://dc3.bonelabs.com:389
-    base_dn = os.environ.get('LDAP_BASE_DN')     # e.g., DC=bonelabs,DC=com
-    bind_dn = os.environ.get('LDAP_BIND_DN')     # Service account DN
-    bind_pw = os.environ.get('LDAP_BIND_PW')     # Service account password
-    search_filter_template = os.environ.get('LDAP_SEARCH_FILTER', '(sAMAccountName={username})')
+    # LDAP configuration from database (GUI settings)
+    from app.models import SystemSettings
+
+    def get_setting(key, default=None):
+        setting = SystemSettings.query.filter_by(key=key).first()
+        return setting.value if setting else default
+
+    ldap_enabled = get_setting('ldap_enabled', 'false') == 'true'
+    if not ldap_enabled:
+        raise Exception('LDAP authentication is not enabled')
+
+    ldap_server = get_setting('ldap_server')
+    base_dn = get_setting('ldap_base_dn')
+    bind_dn = get_setting('ldap_bind_dn')
+    bind_pw = get_setting('ldap_bind_password')
+    search_filter_template = get_setting('ldap_search_filter', '(sAMAccountName={username})')
+    use_tls = get_setting('ldap_use_tls', 'false') == 'true'
+    ldap_port = int(get_setting('ldap_port', '389'))
 
     if not ldap_server:
-        raise Exception('LDAP_SERVER not configured')
+        raise Exception('LDAP server not configured in database settings')
 
     if not base_dn:
-        raise Exception('LDAP_BASE_DN not configured')
+        raise Exception('LDAP base DN not configured in database settings')
 
     try:
         import ldap3
         from ldap3 import Server, Connection, ALL, SIMPLE, SUBTREE
 
-        # Parse server URL
-        # Handle both "ldap://server:389" and "server" formats
+        # Parse server URL - handle both "ldap://server" and "server" formats
         if '://' in ldap_server:
             use_ssl = ldap_server.startswith('ldaps://')
-            server_host = ldap_server.split('://', 1)[1]
-            # Extract port if specified
-            if ':' in server_host:
-                server_host, port_str = server_host.rsplit(':', 1)
-                ldap_port = int(port_str)
-            else:
-                ldap_port = 636 if use_ssl else 389
+            server_host = ldap_server.split('://', 1)[1].split(':')[0]  # Remove protocol and port
         else:
             server_host = ldap_server
-            ldap_port = 389
-            use_ssl = False
+            use_ssl = use_tls
 
-        # Create server
+        # Create server - use port and TLS from settings
         server = Server(server_host, port=ldap_port, use_ssl=use_ssl, get_info=ALL)
 
         # Step 1: Bind with service account to search for user
