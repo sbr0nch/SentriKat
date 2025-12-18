@@ -808,7 +808,9 @@ async function saveLDAPSettings() {
         ldap_search_filter: document.getElementById('ldapSearchFilter').value,
         ldap_username_attr: document.getElementById('ldapUsernameAttr').value,
         ldap_email_attr: document.getElementById('ldapEmailAttr').value,
-        ldap_use_tls: document.getElementById('ldapUseTLS').checked
+        ldap_use_tls: document.getElementById('ldapUseTLS').checked,
+        ldap_sync_enabled: document.getElementById('ldapSyncEnabled').checked,
+        ldap_sync_interval_hours: document.getElementById('ldapSyncInterval').value
     };
 
     try {
@@ -819,7 +821,7 @@ async function saveLDAPSettings() {
         });
 
         if (response.ok) {
-            showToast('✓ LDAP settings saved successfully', 'success');
+            showToast('✓ LDAP settings saved successfully. Server restart required for scheduled sync changes.', 'success');
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
@@ -1008,6 +1010,11 @@ async function loadAllSettings() {
             document.getElementById('ldapUsernameAttr').value = ldap.ldap_username_attr || 'sAMAccountName';
             document.getElementById('ldapEmailAttr').value = ldap.ldap_email_attr || 'mail';
             document.getElementById('ldapUseTLS').checked = ldap.ldap_use_tls || false;
+            document.getElementById('ldapSyncEnabled').checked = ldap.ldap_sync_enabled || false;
+            document.getElementById('ldapSyncInterval').value = ldap.ldap_sync_interval_hours || '24';
+
+            // Load last scheduled sync time
+            loadLastScheduledSync();
         }
 
         // Load Global SMTP settings
@@ -1989,6 +1996,39 @@ function searchAuditLogs() {
     const searchInput = document.getElementById('auditSearchInput');
     if (searchInput) {
         loadAuditLogs(1, searchInput.value);
+    }
+}
+
+/**
+ * Load last scheduled sync time
+ */
+async function loadLastScheduledSync() {
+    try {
+        const response = await fetch('/api/ldap/groups/sync/history?limit=1');
+        if (response.ok) {
+            const history = await response.json();
+            const displayElement = document.getElementById('ldapLastScheduledSync');
+
+            if (displayElement) {
+                if (history.length > 0) {
+                    const lastSync = history[0];
+                    // Check if this was a scheduled sync (not manual)
+                    if (lastSync.sync_type === 'scheduled_sync') {
+                        const syncDate = new Date(lastSync.started_at);
+                        displayElement.textContent = syncDate.toLocaleString();
+                        displayElement.classList.add('text-success');
+                    } else {
+                        displayElement.textContent = 'Never';
+                        displayElement.classList.remove('text-success');
+                    }
+                } else {
+                    displayElement.textContent = 'Never';
+                    displayElement.classList.remove('text-success');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading last scheduled sync:', error);
     }
 }
 
