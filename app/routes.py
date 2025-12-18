@@ -123,6 +123,13 @@ def update_product(product_id):
         product.active = data['active']
     if 'criticality' in data:
         product.criticality = data['criticality']
+    if 'organization_id' in data:
+        # Allow setting to None or a valid organization ID
+        org_id = data['organization_id']
+        if org_id == '' or org_id is None:
+            product.organization_id = None
+        else:
+            product.organization_id = int(org_id)
 
     db.session.commit()
 

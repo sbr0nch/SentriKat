@@ -626,6 +626,9 @@
                                    class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-box-arrow-up-right"></i> View in NVD
                                 </a>
+                                <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
+                                    <i class="bi bi-share"></i> Share
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -985,6 +988,53 @@
         setTimeout(() => {
             btn.innerHTML = originalHtml;
         }, 2000);
+    }
+
+    /**
+     * Share a single CVE with a direct link
+     */
+    async function shareSingleCVE(cveId, vulnName) {
+        showLoading();
+        try {
+            // Create a share link with CVE filter
+            const response = await fetch('/api/shared/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: `${cveId} - ${vulnName}`,
+                    description: `Direct link to ${cveId}`,
+                    filters: {
+                        cve: cveId
+                    },
+                    is_public: true,
+                    expires_days: 30
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+
+                // Copy to clipboard
+                try {
+                    await navigator.clipboard.writeText(result.share_url);
+                    showToast(`✓ Share link for ${cveId} copied to clipboard!`, 'success');
+                } catch (clipboardError) {
+                    // Fallback: show URL in a prompt if clipboard API fails
+                    await showPrompt(
+                        `Share link for ${cveId}:`,
+                        result.share_url,
+                        'Share CVE Link'
+                    );
+                }
+            } else {
+                const error = await response.json();
+                showToast(`Error creating share link: ${error.error}`, 'danger');
+            }
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
     }
 
     /**
