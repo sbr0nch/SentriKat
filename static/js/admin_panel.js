@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Check if Bootstrap is loaded
     if (typeof bootstrap === 'undefined') {
         console.error('Bootstrap is not loaded! Modals will not work.');
-        alert('Error: Bootstrap JavaScript library is not loaded. Please refresh the page.');
+        showToast('Error: Bootstrap JavaScript library is not loaded. Please refresh the page.', 'danger');
         return;
     }
 
@@ -214,7 +214,7 @@ function showCreateUserModal() {
         modal.show();
     } catch (error) {
         console.error('Error in showCreateUserModal:', error);
-        alert('Error opening user modal: ' + error.message);
+        showToast('Error opening user modal: ' + error.message, 'danger');
     }
 }
 
@@ -364,7 +364,14 @@ async function saveUser() {
 }
 
 async function deleteUser(userId, username) {
-    if (!confirm(`Are you sure you want to delete user "${username}"?\n\nThis action cannot be undone.`)) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to delete user "<strong>${username}</strong>"?<br><br>This action cannot be undone.`,
+        'Delete User',
+        'Delete',
+        'btn-danger'
+    );
+
+    if (!confirmed) {
         return;
     }
 
@@ -495,7 +502,7 @@ function showCreateOrgModal() {
         modal.show();
     } catch (error) {
         console.error('Error in showCreateOrgModal:', error);
-        alert('Error opening organization modal: ' + error.message);
+        showToast('Error opening organization modal: ' + error.message, 'danger');
     }
 }
 
@@ -639,7 +646,14 @@ async function testSMTP() {
 }
 
 async function deleteOrganization(orgId, displayName) {
-    if (!confirm(`Are you sure you want to delete organization "${displayName}"?\n\nThis will also delete all users and products associated with this organization.\n\nThis action cannot be undone.`)) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to delete organization "<strong>${displayName}</strong>"?<br><br>This will also delete all users and products associated with this organization.<br><br>This action cannot be undone.`,
+        'Delete Organization',
+        'Delete',
+        'btn-danger'
+    );
+
+    if (!confirmed) {
         return;
     }
 
@@ -1518,7 +1532,14 @@ async function saveGroupMapping() {
  * Delete a group mapping
  */
 async function deleteGroupMapping(mappingId) {
-    if (!confirm('Are you sure you want to delete this group mapping? This action cannot be undone.')) {
+    const confirmed = await showConfirm(
+        'Are you sure you want to delete this group mapping?<br><br>This action cannot be undone.',
+        'Delete Group Mapping',
+        'Delete',
+        'btn-danger'
+    );
+
+    if (!confirmed) {
         return;
     }
 

@@ -429,7 +429,14 @@
     }
 
     async function deleteProduct(productId, productName) {
-        if (!confirm(`Are you sure you want to delete "${productName}"?\n\nThis will remove the product and all its vulnerability matches.`)) {
+        const confirmed = await showConfirm(
+            `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove the product and all its vulnerability matches.`,
+            'Delete Product',
+            'Delete',
+            'btn-danger'
+        );
+
+        if (!confirmed) {
             return;
         }
 
@@ -796,13 +803,13 @@
         const response = await fetch('/api/organizations');
         const orgs = await response.json();
 
-        const orgOptions = orgs.map(org =>
-            `<option value="${org.id}">${org.display_name}</option>`
-        ).join('');
+        const orgList = orgs.map((o, i) => `${i + 1}. ${escapeHtml(o.display_name)} (ID: ${o.id})`).join('<br>');
 
-        const orgId = prompt(`Assign ${selectedProducts.size} product(s) to organization:\n\n` +
-            orgs.map((o, i) => `${i + 1}. ${o.display_name} (ID: ${o.id})`).join('\n') +
-            `\n\nEnter Organization ID:`);
+        const orgId = await showPrompt(
+            `Assign ${selectedProducts.size} product(s) to organization:<br><br>${orgList}<br><br>Enter Organization ID:`,
+            '',
+            'Assign to Organization'
+        );
 
         if (!orgId) return;
 
@@ -829,7 +836,15 @@
 
     async function bulkActivate() {
         if (selectedProducts.size === 0) return;
-        if (!confirm(`Activate ${selectedProducts.size} product(s)?`)) return;
+
+        const confirmed = await showConfirm(
+            `Activate ${selectedProducts.size} product(s)?`,
+            'Activate Products',
+            'Activate',
+            'btn-success'
+        );
+
+        if (!confirmed) return;
 
         showLoading();
         try {
@@ -854,7 +869,15 @@
 
     async function bulkDeactivate() {
         if (selectedProducts.size === 0) return;
-        if (!confirm(`Deactivate ${selectedProducts.size} product(s)?`)) return;
+
+        const confirmed = await showConfirm(
+            `Deactivate ${selectedProducts.size} product(s)?`,
+            'Deactivate Products',
+            'Deactivate',
+            'btn-warning'
+        );
+
+        if (!confirmed) return;
 
         showLoading();
         try {
@@ -879,7 +902,15 @@
 
     async function bulkDelete() {
         if (selectedProducts.size === 0) return;
-        if (!confirm(`⚠️ DELETE ${selectedProducts.size} product(s)?\n\nThis action cannot be undone.`)) return;
+
+        const confirmed = await showConfirm(
+            `<strong>⚠️ DELETE ${selectedProducts.size} product(s)?</strong><br><br>This action cannot be undone.`,
+            'Delete Products',
+            'Delete All',
+            'btn-danger'
+        );
+
+        if (!confirmed) return;
 
         showLoading();
         try {

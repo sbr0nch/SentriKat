@@ -667,7 +667,14 @@
     async function bulkAcknowledge() {
         if (selectedVulns.size === 0) return;
 
-        if (!confirm(`Acknowledge ${selectedVulns.size} vulnerabilities?`)) return;
+        const confirmed = await showConfirm(
+            `Acknowledge ${selectedVulns.size} vulnerabilities?`,
+            'Bulk Acknowledge',
+            'Acknowledge',
+            'btn-primary'
+        );
+
+        if (!confirmed) return;
 
         showLoading();
         let success = 0;
@@ -951,13 +958,13 @@
                 btn.style.display = 'none';
             } else {
                 const error = await response.json();
-                alert(`Error creating share link: ${error.error}`);
+                showToast(`Error creating share link: ${error.error}`, 'danger');
                 btn.disabled = false;
                 btn.innerHTML = originalHtml;
             }
         } catch (error) {
             console.error('Error creating share link:', error);
-            alert('Error creating share link. Please try again.');
+            showToast('Error creating share link. Please try again.', 'danger');
             btn.disabled = false;
             btn.innerHTML = originalHtml;
         }
@@ -1018,10 +1025,10 @@
                 // Load vulnerabilities with these filters
                 loadVulnerabilities();
             } else if (response.status === 410) {
-                alert('This shared link has expired.');
+                showToast('This shared link has expired.', 'warning');
             } else {
                 const error = await response.json();
-                alert(`Error loading shared view: ${error.error}`);
+                showToast(`Error loading shared view: ${error.error}`, 'danger');
             }
         } catch (error) {
             console.error('Error loading shared view:', error);
