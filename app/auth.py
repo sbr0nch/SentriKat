@@ -1,6 +1,6 @@
 """
 Authentication system with local and LDAP support
-Controlled by ENABLE_AUTH environment variable
+Authentication is ENABLED by default for security
 """
 
 from functools import wraps
@@ -12,8 +12,9 @@ import os
 
 auth_bp = Blueprint('auth', __name__)
 
-# Check if authentication is enabled
-AUTH_ENABLED = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+# Authentication is ALWAYS enabled by default (security requirement)
+# Only disable for testing with DISABLE_AUTH=true (NOT recommended)
+AUTH_ENABLED = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
 
 def login_required(f):
     """Decorator to require login for routes"""
@@ -51,6 +52,56 @@ def admin_required(f):
         if not user or not user.is_admin:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Admin privileges required'}), 403
+            return redirect(url_for('main.index'))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+def org_admin_required(f):
+    """Decorator to require org admin or super admin privileges"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        import logging
+        logger = logging.getLogger('security')
+
+        # If auth is disabled, allow all requests
+        if not AUTH_ENABLED:
+            return f(*args, **kwargs)
+
+        # Check if user is logged in
+        if 'user_id' not in session:
+            logger.warning(f"Unauthorized access attempt to {request.path} - No session")
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Authentication required'}), 401
+            return redirect(url_for('auth.login', next=request.url))
+
+        # Check if user is org_admin, super_admin, or legacy is_admin
+        user = User.query.get(session['user_id'])
+        if not user:
+            logger.error(f"User {session['user_id']} not found in database")
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'User not found'}), 401
+            return redirect(url_for('auth.login'))
+
+        # Allow org_admin, super_admin roles, or legacy is_admin flag
+        has_permission = (user.role in ['org_admin', 'super_admin'] or
+                         user.is_admin == True)
+
+        if not has_permission:
+            logger.warning(
+                f"Access denied to {request.path} for user {user.username} "
+                f"(role={user.role}, is_admin={user.is_admin}) from {request.remote_addr}"
+            )
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({
+                    'error': 'Organization admin privileges required',
+                    'debug': {
+                        'user': user.username,
+                        'role': user.role,
+                        'is_admin': user.is_admin,
+                        'required': 'org_admin or super_admin'
+                    }
+                }), 403
             return redirect(url_for('main.index'))
 
         return f(*args, **kwargs)
@@ -177,40 +228,44 @@ def authenticate_ldap(user, password):
     Returns:
         bool: True if authentication successful
     """
-    # LDAP configuration from environment
-    ldap_server = os.environ.get('LDAP_SERVER')  # e.g., ldap://dc3.bonelabs.com:389
-    base_dn = os.environ.get('LDAP_BASE_DN')     # e.g., DC=bonelabs,DC=com
-    bind_dn = os.environ.get('LDAP_BIND_DN')     # Service account DN
-    bind_pw = os.environ.get('LDAP_BIND_PW')     # Service account password
-    search_filter_template = os.environ.get('LDAP_SEARCH_FILTER', '(sAMAccountName={username})')
+    # LDAP configuration from database (GUI settings)
+    from app.models import SystemSettings
+
+    def get_setting(key, default=None):
+        setting = SystemSettings.query.filter_by(key=key).first()
+        return setting.value if setting else default
+
+    ldap_enabled = get_setting('ldap_enabled', 'false') == 'true'
+    if not ldap_enabled:
+        raise Exception('LDAP authentication is not enabled')
+
+    ldap_server = get_setting('ldap_server')
+    base_dn = get_setting('ldap_base_dn')
+    bind_dn = get_setting('ldap_bind_dn')
+    bind_pw = get_setting('ldap_bind_password')
+    search_filter_template = get_setting('ldap_search_filter', '(sAMAccountName={username})')
+    use_tls = get_setting('ldap_use_tls', 'false') == 'true'
+    ldap_port = int(get_setting('ldap_port', '389'))
 
     if not ldap_server:
-        raise Exception('LDAP_SERVER not configured')
+        raise Exception('LDAP server not configured in database settings')
 
     if not base_dn:
-        raise Exception('LDAP_BASE_DN not configured')
+        raise Exception('LDAP base DN not configured in database settings')
 
     try:
         import ldap3
         from ldap3 import Server, Connection, ALL, SIMPLE, SUBTREE
 
-        # Parse server URL
-        # Handle both "ldap://server:389" and "server" formats
+        # Parse server URL - handle both "ldap://server" and "server" formats
         if '://' in ldap_server:
             use_ssl = ldap_server.startswith('ldaps://')
-            server_host = ldap_server.split('://', 1)[1]
-            # Extract port if specified
-            if ':' in server_host:
-                server_host, port_str = server_host.rsplit(':', 1)
-                ldap_port = int(port_str)
-            else:
-                ldap_port = 636 if use_ssl else 389
+            server_host = ldap_server.split('://', 1)[1].split(':')[0]  # Remove protocol and port
         else:
             server_host = ldap_server
-            ldap_port = 389
-            use_ssl = False
+            use_ssl = use_tls
 
-        # Create server
+        # Create server - use port and TLS from settings
         server = Server(server_host, port=ldap_port, use_ssl=use_ssl, get_info=ALL)
 
         # Step 1: Bind with service account to search for user

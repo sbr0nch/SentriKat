@@ -489,6 +489,6 @@ class EmailAlertManager:
                 server.login(smtp_config['username'], smtp_config['password'])
 
             server.quit()
-            return {'status': 'success', 'message': 'SMTP connection successful'}
+            return {'success': True, 'message': '✓ SMTP connection successful'}
         except Exception as e:
-            return {'status': 'error', 'message': str(e)}
+            return {'success': False, 'error': str(e)}

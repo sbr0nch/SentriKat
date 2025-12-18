@@ -683,6 +683,9 @@
             try {
                 // Get current organization
                 const currentResponse = await fetch('/api/session/organization');
+                if (!currentResponse.ok) {
+                    throw new Error(`Failed to load current organization: ${currentResponse.status}`);
+                }
                 const currentOrg = await currentResponse.json();
 
                 if (currentOrg && currentOrg.display_name) {
@@ -691,6 +694,9 @@
 
                 // Get all organizations
                 const orgsResponse = await fetch('/api/organizations');
+                if (!orgsResponse.ok) {
+                    throw new Error(`Failed to load organizations: ${orgsResponse.status}`);
+                }
                 const organizations = await orgsResponse.json();
 
                 const orgList = document.getElementById('orgList');

@@ -217,6 +217,9 @@
                         <button class="btn btn-primary" onclick="loadVulnerabilities()">
                             <i class="bi bi-search"></i> Apply Filters
                         </button>
+                        <button class="btn btn-info" onclick="shareFilteredView()">
+                            <i class="bi bi-share"></i> Share Filtered View
+                        </button>
                         <div class="dropdown export-dropdown">
                             <button class="btn btn-success dropdown-toggle" type="button" data-bs-toggle="dropdown">
                                 <i class="bi bi-download"></i> Export
@@ -293,6 +296,62 @@
                         </thead>
                         <tbody id="syncHistoryTable"></tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Filtered View Modal -->
+    <div class="modal fade" id="shareModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Share Filtered View</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Name (Optional)</label>
+                        <input type="text" class="form-control" id="shareName" placeholder="e.g., Critical Windows Vulnerabilities">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description (Optional)</label>
+                        <textarea class="form-control" id="shareDescription" rows="2" placeholder="Brief description of this filtered view"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Link Expiration</label>
+                        <select class="form-select" id="shareExpiration">
+                            <option value="">Never expires</option>
+                            <option value="7">7 days</option>
+                            <option value="30" selected>30 days</option>
+                            <option value="90">90 days</option>
+                        </select>
+                    </div>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>Current Filters:</strong>
+                        <div id="shareFiltersSummary" class="mt-2 small">
+                            <!-- Will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    <div id="shareResult" style="display: none;">
+                        <div class="alert alert-success">
+                            <i class="bi bi-check-circle me-2"></i>
+                            <strong>Shareable link created!</strong>
+                            <div class="input-group mt-2">
+                                <input type="text" class="form-control" id="shareUrl" readonly>
+                                <button class="btn btn-outline-secondary" onclick="copyShareUrl()">
+                                    <i class="bi bi-clipboard"></i> Copy
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" onclick="createShareLink()" id="createShareBtn">
+                        <i class="bi bi-share"></i> Create Share Link
+                    </button>
                 </div>
             </div>
         </div>
@@ -800,5 +859,176 @@
                 currentVulnerabilities.map(match => createVulnCard(match)).join('');
         }
     });
+
+    // ============================================================================
+    // Shared Filtered Views
+    // ============================================================================
+
+    /**
+     * Get current filter state
+     */
+    function getCurrentFilters() {
+        return {
+            priority: document.getElementById('filterPriority').value,
+            severity: document.getElementById('filterSeverity').value,
+            urgency: document.getElementById('filterUrgency').value,
+            age: document.getElementById('filterAge').value,
+            cve: document.getElementById('filterCVE').value,
+            vendor: document.getElementById('filterVendor').value,
+            product: document.getElementById('filterProduct').value,
+            ransomware: document.getElementById('filterRansomware').checked,
+            unack: document.getElementById('filterUnack').checked
+        };
+    }
+
+    /**
+     * Show share modal with current filters
+     */
+    function shareFilteredView() {
+        const filters = getCurrentFilters();
+
+        // Build summary of active filters
+        let summary = [];
+        if (filters.priority) summary.push(`Priority: ${filters.priority}`);
+        if (filters.severity) summary.push(`Severity: ${filters.severity}`);
+        if (filters.urgency) summary.push(`Urgency: ${filters.urgency}`);
+        if (filters.age) summary.push(`Age: ${filters.age}`);
+        if (filters.cve) summary.push(`CVE: ${filters.cve}`);
+        if (filters.vendor) summary.push(`Vendor: ${filters.vendor}`);
+        if (filters.product) summary.push(`Product: ${filters.product}`);
+        if (filters.ransomware) summary.push('Ransomware vulnerabilities only');
+        if (filters.unack) summary.push('Unacknowledged only');
+
+        if (summary.length === 0) {
+            summary.push('No filters applied (all vulnerabilities)');
+        }
+
+        document.getElementById('shareFiltersSummary').innerHTML = summary.map(s => `• ${s}`).join('<br>');
+
+        // Reset modal state
+        document.getElementById('shareName').value = '';
+        document.getElementById('shareDescription').value = '';
+        document.getElementById('shareExpiration').value = '30';
+        document.getElementById('shareResult').style.display = 'none';
+        document.getElementById('createShareBtn').style.display = 'block';
+
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('shareModal'));
+        modal.show();
+    }
+
+    /**
+     * Create share link via API
+     */
+    async function createShareLink() {
+        const btn = document.getElementById('createShareBtn');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
+
+        try {
+            const filters = getCurrentFilters();
+            const name = document.getElementById('shareName').value;
+            const description = document.getElementById('shareDescription').value;
+            const expiresDays = document.getElementById('shareExpiration').value;
+
+            const response = await fetch('/api/shared/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: name || null,
+                    description: description || null,
+                    filters: filters,
+                    is_public: true,
+                    expires_days: expiresDays ? parseInt(expiresDays) : null
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                document.getElementById('shareUrl').value = result.share_url;
+                document.getElementById('shareResult').style.display = 'block';
+                btn.style.display = 'none';
+            } else {
+                const error = await response.json();
+                alert(`Error creating share link: ${error.error}`);
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+        } catch (error) {
+            console.error('Error creating share link:', error);
+            alert('Error creating share link. Please try again.');
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+
+    /**
+     * Copy share URL to clipboard
+     */
+    function copyShareUrl() {
+        const input = document.getElementById('shareUrl');
+        input.select();
+        document.execCommand('copy');
+
+        // Show feedback
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-check"></i> Copied!';
+        setTimeout(() => {
+            btn.innerHTML = originalHtml;
+        }, 2000);
+    }
+
+    /**
+     * Load shared view if share_token is present
+     */
+    async function loadSharedView() {
+        const shareToken = '{{ share_token | default("") }}';
+        if (!shareToken) return;
+
+        try {
+            const response = await fetch(`/api/shared/view/${shareToken}`);
+            if (response.ok) {
+                const result = await response.json();
+                const filters = result.shared_view.filters;
+
+                // Apply filters to form
+                if (filters.priority) document.getElementById('filterPriority').value = filters.priority;
+                if (filters.severity) document.getElementById('filterSeverity').value = filters.severity;
+                if (filters.urgency) document.getElementById('filterUrgency').value = filters.urgency;
+                if (filters.age) document.getElementById('filterAge').value = filters.age;
+                if (filters.cve) document.getElementById('filterCVE').value = filters.cve || '';
+                if (filters.vendor) document.getElementById('filterVendor').value = filters.vendor || '';
+                if (filters.product) document.getElementById('filterProduct').value = filters.product || '';
+                document.getElementById('filterRansomware').checked = filters.ransomware || false;
+                document.getElementById('filterUnack').checked = filters.unack || false;
+
+                // Show notification
+                const notification = document.createElement('div');
+                notification.className = 'alert alert-info alert-dismissible fade show';
+                notification.innerHTML = `
+                    <i class="bi bi-share me-2"></i>
+                    <strong>Viewing shared filtered view:</strong> ${result.shared_view.name || 'Untitled'}
+                    ${result.shared_view.description ? `<br><small>${result.shared_view.description}</small>` : ''}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+                document.querySelector('.fade-in').insertBefore(notification, document.querySelector('.fade-in').firstChild);
+
+                // Load vulnerabilities with these filters
+                loadVulnerabilities();
+            } else if (response.status === 410) {
+                alert('This shared link has expired.');
+            } else {
+                const error = await response.json();
+                alert(`Error loading shared view: ${error.error}`);
+            }
+        } catch (error) {
+            console.error('Error loading shared view:', error);
+        }
+    }
+
+    // Load shared view on page load if token present
+    loadSharedView();
 </script>
 {% endblock %}

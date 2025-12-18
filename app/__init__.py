@@ -7,17 +7,26 @@ db = SQLAlchemy()
 migrate = Migrate()
 
 def create_app(config_class=Config):
-    app = Flask(__name__)
+    app = Flask(__name__,
+                static_folder='../static',
+                template_folder='templates')
     app.config.from_object(config_class)
 
     db.init_app(app)
     migrate.init_app(app, db)
 
-    from app import routes, models, auth, setup, settings_api
+    # Setup comprehensive logging with rotation
+    from app.logging_config import setup_logging
+    setup_logging(app)
+
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
     app.register_blueprint(settings_api.settings_bp)
+    app.register_blueprint(ldap_api.ldap_bp)
+    app.register_blueprint(ldap_group_api.ldap_group_bp)
+    app.register_blueprint(shared_views_api.shared_views_bp)
 
     # Make current user available in all templates
     @app.context_processor
