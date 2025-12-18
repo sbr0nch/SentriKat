@@ -1803,7 +1803,8 @@ async function loadSyncStats() {
             // Count successful syncs and errors from history
             const historyResponse = await fetch('/api/ldap/groups/sync/history?limit=100');
             if (historyResponse.ok) {
-                const allHistory = await historyResponse.json();
+                const result = await historyResponse.json();
+                const allHistory = result.logs || [];
                 const successCount = allHistory.filter(s => s.status === 'completed').length;
                 const errorCount = allHistory.filter(s => s.status === 'failed').length;
 
