@@ -212,17 +212,49 @@
             <div class="tab-content" id="ldapGroupsTabContent">
                 <!-- Group Mappings Sub-tab -->
                 <div class="tab-pane fade show active" id="groupMappings" role="tabpanel">
+                    <!-- Group Discovery Panel -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-search me-2"></i>Discover LDAP Groups</span>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="toggleGroupDiscovery()">
+                                    <i class="bi bi-chevron-down" id="discoveryToggleIcon"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body" id="groupDiscoveryPanel" style="display: none;">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-8">
+                                    <label class="form-label fw-semibold">Search Base DN</label>
+                                    <input type="text" class="form-control" id="groupSearchBaseInline"
+                                           placeholder="e.g., OU=Groups,DC=company,DC=com"
+                                           onkeypress="if(event.key==='Enter') performGroupDiscoveryInline()">
+                                    <small class="text-muted">The base DN where your LDAP groups are located</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label fw-semibold">&nbsp;</label>
+                                    <button class="btn btn-primary w-100" onclick="performGroupDiscoveryInline()">
+                                        <i class="bi bi-search me-1"></i>Search for Groups
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="discoveredGroupsContainerInline">
+                                <div class="text-center text-muted py-4">
+                                    <i class="bi bi-diagram-2" style="font-size: 2.5rem;"></i>
+                                    <p class="mt-3">Enter a search base DN and click Search to discover LDAP groups</p>
+                                    <p class="text-muted mb-0">Example: OU=Security Groups,DC=example,DC=com</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Existing Group Mappings Table -->
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-link-45deg me-2"></i>LDAP Group Mappings</span>
-                            <div>
-                                <button class="btn btn-success btn-sm me-2" onclick="discoverLdapGroups()">
-                                    <i class="bi bi-search me-1"></i>Discover Groups
-                                </button>
-                                <button class="btn btn-primary btn-sm" onclick="showCreateMappingModal()">
-                                    <i class="bi bi-plus-circle me-1"></i>Create Mapping
-                                </button>
-                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="showCreateMappingModal()">
+                                <i class="bi bi-plus-circle me-1"></i>Create Mapping
+                            </button>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">

@@ -1776,9 +1776,146 @@ async function loadOrganizationsForMapping() {
 /**
  * Discover LDAP groups
  */
+/**
+ * Toggle group discovery panel visibility
+ */
+function toggleGroupDiscovery() {
+    const panel = document.getElementById('groupDiscoveryPanel');
+    const icon = document.getElementById('discoveryToggleIcon');
+
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        icon.className = 'bi bi-chevron-up';
+    } else {
+        panel.style.display = 'none';
+        icon.className = 'bi bi-chevron-down';
+    }
+}
+
+/**
+ * Inline LDAP group discovery (replaces modal)
+ */
+async function performGroupDiscoveryInline() {
+    const searchBase = document.getElementById('groupSearchBaseInline').value.trim();
+    const container = document.getElementById('discoveredGroupsContainerInline');
+
+    if (!searchBase) {
+        showToast('Please enter a search base DN', 'warning');
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-3">Discovering LDAP groups in ${escapeHtml(searchBase)}...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('/api/ldap/groups/discover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ search_base: searchBase })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            const groups = result.groups || [];
+
+            if (groups.length === 0) {
+                container.innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>No groups found</strong> in the specified search base DN.
+                        <hr>
+                        <small>Try a different search base or verify your LDAP configuration.</small>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="alert alert-success mb-3">
+                    <i class="bi bi-check-circle me-2"></i>
+                    <strong>Found ${groups.length} LDAP group(s)</strong> - Click "Create Mapping" to configure role assignments
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Group Name</th>
+                                <th>Distinguished Name</th>
+                                <th>Members</th>
+                                <th>Description</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${groups.map(group => `
+                                <tr>
+                                    <td class="fw-semibold">${escapeHtml(group.cn)}</td>
+                                    <td><small class="text-muted">${escapeHtml(group.dn)}</small></td>
+                                    <td>
+                                        <span class="badge bg-info">${group.member_count || 0} members</span>
+                                    </td>
+                                    <td><small>${escapeHtml(group.description || '-')}</small></td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="createMappingFromDiscoveryInline('${escapeHtml(group.dn)}', '${escapeHtml(group.cn)}', '${escapeHtml(group.description || '')}')">
+                                            <i class="bi bi-plus-circle me-1"></i>Create Mapping
+                                        </button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        } else {
+            const error = await response.json();
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <strong>Discovery Error:</strong> ${escapeHtml(error.error)}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error discovering groups:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Error:</strong> Failed to discover groups. Please check your LDAP configuration.
+            </div>
+        `;
+    }
+}
+
+/**
+ * Create mapping from inline discovery results
+ */
+function createMappingFromDiscoveryInline(dn, cn, description) {
+    // Pre-fill the create mapping modal with discovered group info
+    document.getElementById('groupDN').value = dn;
+    document.getElementById('groupName').value = cn;
+    if (description) {
+        document.getElementById('mappingDescription').value = description;
+    }
+
+    // Show the create mapping modal
+    showCreateMappingModal();
+
+    // Optionally collapse the discovery panel
+    const panel = document.getElementById('groupDiscoveryPanel');
+    const icon = document.getElementById('discoveryToggleIcon');
+    panel.style.display = 'none';
+    icon.className = 'bi bi-chevron-down';
+}
+
+// Keep old function for backward compatibility
 function discoverLdapGroups() {
-    const modal = new bootstrap.Modal(document.getElementById('ldapDiscoveryModal'));
-    modal.show();
+    // Deprecated - now using inline discovery
+    toggleGroupDiscovery();
 }
 
 /**
