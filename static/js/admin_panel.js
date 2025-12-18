@@ -1464,6 +1464,12 @@ async function inviteLdapUser() {
         return;
     }
 
+    // Get the invite button and show loading state
+    const inviteBtn = event.target;
+    const originalHtml = inviteBtn.innerHTML;
+    inviteBtn.disabled = true;
+    inviteBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Inviting...';
+
     try {
         const response = await fetch('/api/ldap/invite', {
             method: 'POST',
@@ -1480,27 +1486,49 @@ async function inviteLdapUser() {
 
         if (response.ok) {
             const result = await response.json();
+
+            // Show success state
+            inviteBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Invited!';
+            inviteBtn.classList.remove('btn-primary');
+            inviteBtn.classList.add('btn-success');
+
             showToast('✓ LDAP user invited successfully', 'success');
 
-            // Close the invite modal
-            const inviteModal = bootstrap.Modal.getInstance(document.getElementById('ldapInviteModal'));
-            inviteModal.hide();
+            // Close the invite modal after a brief delay
+            setTimeout(() => {
+                const inviteModal = bootstrap.Modal.getInstance(document.getElementById('ldapInviteModal'));
+                inviteModal.hide();
+
+                // Reset button state
+                inviteBtn.disabled = false;
+                inviteBtn.innerHTML = originalHtml;
+                inviteBtn.classList.remove('btn-success');
+                inviteBtn.classList.add('btn-primary');
+            }, 1000);
 
             // Refresh user list
             loadUsers();
 
-            // Refresh search results if search modal is still open
-            const searchQuery = document.getElementById('ldapSearchQuery').value;
+            // Refresh search results if search is active
+            const searchQuery = document.getElementById('ldapUserSearchQuery').value;
             if (searchQuery) {
-                searchLdapUsers();
+                searchLdapUsersInline();
             }
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
+
+            // Reset button state on error
+            inviteBtn.disabled = false;
+            inviteBtn.innerHTML = originalHtml;
         }
     } catch (error) {
         console.error('Error inviting LDAP user:', error);
         showToast(`Error inviting user: ${error.message}`, 'danger');
+
+        // Reset button state on error
+        inviteBtn.disabled = false;
+        inviteBtn.innerHTML = originalHtml;
     }
 }
 

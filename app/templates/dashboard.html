@@ -1061,6 +1061,11 @@
      */
     async function shareSingleCVE(cveId, vulnName) {
         showLoading();
+
+        // Add timeout to prevent indefinite hanging
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
         try {
             // Create a share link with CVE filter
             const response = await fetch('/api/shared/create', {
@@ -1074,8 +1079,11 @@
                     },
                     is_public: true,
                     expires_days: 30
-                })
+                }),
+                signal: controller.signal
             });
+
+            clearTimeout(timeoutId);
 
             if (response.ok) {
                 const result = await response.json();
@@ -1097,7 +1105,12 @@
                 showToast(`Error creating share link: ${error.error}`, 'danger');
             }
         } catch (error) {
-            showToast(`Error: ${error.message}`, 'danger');
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                showToast('Request timeout - The server is taking too long to respond. Please try again.', 'warning');
+            } else {
+                showToast(`Error: ${error.message}`, 'danger');
+            }
         } finally {
             hideLoading();
         }
