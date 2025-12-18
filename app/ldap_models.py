@@ -212,7 +212,7 @@ class LDAPAuditLog(db.Model):
     description = db.Column(db.Text, nullable=True)
 
     # Additional Context
-    metadata = db.Column(db.Text, nullable=True)
+    extra_metadata = db.Column(db.Text, nullable=True)
     # JSON object for additional context
 
     # Relationships
@@ -229,9 +229,9 @@ class LDAPAuditLog(db.Model):
                 pass
 
         metadata_dict = {}
-        if self.metadata:
+        if self.extra_metadata:
             try:
-                metadata_dict = json.loads(self.metadata)
+                metadata_dict = json.loads(self.extra_metadata)
             except:
                 pass
 
