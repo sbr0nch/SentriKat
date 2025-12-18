@@ -276,3 +276,66 @@ class LDAPManager:
         except Exception as e:
             logger.error(f"Error syncing user groups: {e}")
             return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def search_groups(search_base='', search_filter='(objectClass=group)'):
+        """
+        Search LDAP directory for groups
+
+        Args:
+            search_base: Base DN to search from (e.g., 'OU=Groups,DC=company,DC=com')
+            search_filter: LDAP filter for groups (default: all groups)
+
+        Returns:
+            dict with 'success' and either 'groups' or 'error'
+        """
+        try:
+            import ldap3
+            from ldap3 import Server, Connection, ALL, SUBTREE
+
+            config = LDAPManager.get_ldap_config()
+
+            if not config['enabled']:
+                return {'success': False, 'error': 'LDAP is not enabled'}
+
+            # Use provided search_base or fall back to base_dn
+            base_dn = search_base if search_base else config['base_dn']
+
+            # Connect to LDAP
+            server = Server(config['server'], port=config['port'], get_info=ALL, use_ssl=config['use_tls'])
+            conn = Connection(
+                server,
+                user=config['bind_dn'],
+                password=config['bind_password'],
+                auto_bind=True
+            )
+
+            # Search for groups
+            conn.search(
+                search_base=base_dn,
+                search_filter=search_filter,
+                search_scope=SUBTREE,
+                attributes=['cn', 'distinguishedName', 'description', 'member', 'memberOf']
+            )
+
+            groups = []
+            for entry in conn.entries:
+                group_data = {
+                    'dn': str(entry.distinguishedName) if hasattr(entry, 'distinguishedName') else str(entry.entry_dn),
+                    'cn': str(entry.cn) if hasattr(entry, 'cn') else '',
+                    'description': str(entry.description) if hasattr(entry, 'description') else '',
+                    'member_count': len(entry.member) if hasattr(entry, 'member') and entry.member else 0
+                }
+                groups.append(group_data)
+
+            conn.unbind()
+
+            return {
+                'success': True,
+                'groups': groups,
+                'count': len(groups)
+            }
+
+        except Exception as e:
+            logger.error(f"Error searching LDAP groups: {e}")
+            return {'success': False, 'error': str(e)}

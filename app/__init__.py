@@ -15,6 +15,10 @@ def create_app(config_class=Config):
     db.init_app(app)
     migrate.init_app(app, db)
 
+    # Setup comprehensive logging with rotation
+    from app.logging_config import setup_logging
+    setup_logging(app)
+
     from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)

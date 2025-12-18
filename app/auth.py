@@ -60,12 +60,16 @@ def org_admin_required(f):
     """Decorator to require org admin or super admin privileges"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        import logging
+        logger = logging.getLogger('security')
+
         # If auth is disabled, allow all requests
         if not AUTH_ENABLED:
             return f(*args, **kwargs)
 
         # Check if user is logged in
         if 'user_id' not in session:
+            logger.warning(f"Unauthorized access attempt to {request.path} - No session")
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
@@ -73,6 +77,7 @@ def org_admin_required(f):
         # Check if user is org_admin, super_admin, or legacy is_admin
         user = User.query.get(session['user_id'])
         if not user:
+            logger.error(f"User {session['user_id']} not found in database")
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'User not found'}), 401
             return redirect(url_for('auth.login'))
@@ -82,8 +87,20 @@ def org_admin_required(f):
                          user.is_admin == True)
 
         if not has_permission:
+            logger.warning(
+                f"Access denied to {request.path} for user {user.username} "
+                f"(role={user.role}, is_admin={user.is_admin}) from {request.remote_addr}"
+            )
             if request.is_json or request.path.startswith('/api/'):
-                return jsonify({'error': 'Organization admin privileges required'}), 403
+                return jsonify({
+                    'error': 'Organization admin privileges required',
+                    'debug': {
+                        'user': user.username,
+                        'role': user.role,
+                        'is_admin': user.is_admin,
+                        'required': 'org_admin or super_admin'
+                    }
+                }), 403
             return redirect(url_for('main.index'))
 
         return f(*args, **kwargs)
