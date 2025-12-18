@@ -1826,7 +1826,8 @@ async function loadSyncHistory() {
     try {
         const response = await fetch('/api/ldap/groups/sync/history?limit=20');
         if (response.ok) {
-            const history = await response.json();
+            const result = await response.json();
+            const history = result.logs || [];
 
             if (history.length === 0) {
                 tableBody.innerHTML = `
@@ -1863,9 +1864,25 @@ async function loadSyncHistory() {
                     </tr>
                 `;
             }).join('');
+        } else {
+            // Handle API errors (403, 500, etc.)
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="9" class="text-center py-4 text-danger">
+                        Error loading sync history: ${response.status} ${response.statusText}
+                    </td>
+                </tr>
+            `;
         }
     } catch (error) {
         console.error('Error loading sync history:', error);
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="9" class="text-center py-4 text-danger">
+                    Error loading sync history: ${error.message}
+                </td>
+            </tr>
+        `;
     }
 }
 
@@ -1947,7 +1964,7 @@ async function loadAuditLogs(page = 1, search = '') {
             tableBody.innerHTML = `
                 <tr>
                     <td colspan="7" class="text-center py-4 text-danger">
-                        Error loading audit logs
+                        Error loading audit logs: ${response.status} ${response.statusText}
                     </td>
                 </tr>
             `;
@@ -1957,7 +1974,7 @@ async function loadAuditLogs(page = 1, search = '') {
         tableBody.innerHTML = `
             <tr>
                 <td colspan="7" class="text-center py-4 text-danger">
-                    Error loading audit logs
+                    Error loading audit logs: ${error.message}
                 </td>
             </tr>
         `;
