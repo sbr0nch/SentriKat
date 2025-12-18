@@ -3,6 +3,72 @@
 {% block title %}Dashboard - SentriKat{% endblock %}
 
 {% block content %}
+<style>
+    /* Priority Alert Cards */
+    .alert-card {
+        border-radius: 12px;
+        padding: 1.25rem;
+        transition: all 0.3s ease;
+        border: 1px solid transparent;
+        background: linear-gradient(135deg, var(--card-bg-start) 0%, var(--card-bg-end) 100%);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        height: 100%;
+    }
+
+    .alert-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    }
+
+    .alert-card-critical {
+        --card-bg-start: #fef2f2;
+        --card-bg-end: #fee2e2;
+        border-left: 4px solid #dc2626;
+    }
+
+    .alert-card-high {
+        --card-bg-start: #fef3c7;
+        --card-bg-end: #fde68a;
+        border-left: 4px solid #f59e0b;
+    }
+
+    .alert-card-medium {
+        --card-bg-start: #dbeafe;
+        --card-bg-end: #bfdbfe;
+        border-left: 4px solid #3b82f6;
+    }
+
+    .alert-card-low {
+        --card-bg-start: #f0fdf4;
+        --card-bg-end: #dcfce7;
+        border-left: 4px solid #10b981;
+    }
+
+    .alert-card-label {
+        font-size: 0.875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.5rem;
+        color: #374151;
+    }
+
+    .alert-card-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        line-height: 1;
+        margin-bottom: 0.25rem;
+    }
+
+    .alert-card-critical .alert-card-value { color: #dc2626; }
+    .alert-card-high .alert-card-value { color: #f59e0b; }
+    .alert-card-medium .alert-card-value { color: #3b82f6; }
+    .alert-card-low .alert-card-value { color: #10b981; }
+
+    .alert-card i {
+        color: inherit;
+    }
+</style>
 <div class="fade-in">
     <!-- Page Header -->
     <div class="row mb-4">

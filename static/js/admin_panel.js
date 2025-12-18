@@ -1138,7 +1138,7 @@ async function searchLdapUsersInline(page = 1) {
             const response = await fetch('/api/ldap/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ search_query: query })
+                body: JSON.stringify({ query: query })
             });
 
             if (!response.ok) {
@@ -1331,7 +1331,7 @@ async function searchLdapUsers() {
         const response = await fetch('/api/ldap/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ search_query: query })
+            body: JSON.stringify({ query: query })
         });
 
         if (!response.ok) {

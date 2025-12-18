@@ -634,6 +634,23 @@
 
         function hideLoading() {
             document.getElementById('loadingOverlay').classList.remove('show');
+            // Clean up any lingering modal backdrops
+            cleanupModalBackdrops();
+        }
+
+        /**
+         * Remove any lingering modal backdrops from the DOM
+         * This fixes the issue where grey backdrop layers remain after bulk operations
+         */
+        function cleanupModalBackdrops() {
+            // Remove all modal backdrops
+            document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+                backdrop.remove();
+            });
+            // Remove modal-open class from body to restore scrolling
+            document.body.classList.remove('modal-open');
+            // Reset body padding that Bootstrap adds
+            document.body.style.removeProperty('padding-right');
         }
 
         function showToast(message, type = 'success') {
@@ -814,6 +831,13 @@
             });
         }
 
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function getPriorityBadgeClass(priority) {
             const badges = {
                 'critical': 'badge-critical',
@@ -847,6 +871,12 @@
         // Organization Switcher Functions
         async function loadOrganizations() {
             try {
+                // Show cached organization name immediately to avoid "Loading..." flash
+                const cachedOrgName = localStorage.getItem('currentOrgName');
+                if (cachedOrgName) {
+                    document.getElementById('currentOrgName').textContent = cachedOrgName;
+                }
+
                 // Get current organization
                 const currentResponse = await fetch('/api/session/organization');
                 if (!currentResponse.ok) {
@@ -856,6 +886,8 @@
 
                 if (currentOrg && currentOrg.display_name) {
                     document.getElementById('currentOrgName').textContent = currentOrg.display_name;
+                    // Cache for next page load
+                    localStorage.setItem('currentOrgName', currentOrg.display_name);
                 }
 
                 // Get all organizations
@@ -893,6 +925,8 @@
 
                 if (response.ok) {
                     document.getElementById('currentOrgName').textContent = orgName;
+                    // Cache the new organization name
+                    localStorage.setItem('currentOrgName', orgName);
                     showToast(`Switched to ${orgName}`, 'success');
 
                     // Reload page to refresh data
