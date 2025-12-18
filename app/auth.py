@@ -1,6 +1,6 @@
 """
 Authentication system with local and LDAP support
-Controlled by ENABLE_AUTH environment variable
+Authentication is ENABLED by default for security
 """
 
 from functools import wraps
@@ -12,8 +12,9 @@ import os
 
 auth_bp = Blueprint('auth', __name__)
 
-# Check if authentication is enabled
-AUTH_ENABLED = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+# Authentication is ALWAYS enabled by default (security requirement)
+# Only disable for testing with DISABLE_AUTH=true (NOT recommended)
+AUTH_ENABLED = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
 
 def login_required(f):
     """Decorator to require login for routes"""
