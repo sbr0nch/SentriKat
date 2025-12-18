@@ -25,6 +25,11 @@
                 <i class="bi bi-diagram-3 me-2"></i>LDAP Users
             </button>
         </li>
+        <li class="nav-item" role="presentation" id="ldap-groups-tab-item" style="display: none;">
+            <button class="nav-link" id="ldap-groups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button">
+                <i class="bi bi-diagram-2 me-2"></i>LDAP Groups
+            </button>
+        </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button">
                 <i class="bi bi-building me-2"></i>Organizations
@@ -132,6 +137,217 @@
                                 </tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LDAP Groups Tab -->
+        <div class="tab-pane fade" id="ldapGroups" role="tabpanel">
+            <div class="row">
+                <div class="col-12">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>Enterprise LDAP Group Management:</strong> Map LDAP/Active Directory groups to SentriKat roles. Users are automatically assigned roles based on their group memberships.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-tabs for LDAP Groups -->
+            <ul class="nav nav-pills mb-4" id="ldapGroupsTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="group-mappings-tab" data-bs-toggle="pill" data-bs-target="#groupMappings" type="button">
+                        <i class="bi bi-link-45deg me-2"></i>Group Mappings
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="sync-dashboard-tab" data-bs-toggle="pill" data-bs-target="#syncDashboard" type="button">
+                        <i class="bi bi-arrow-repeat me-2"></i>Sync Dashboard
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="audit-log-tab" data-bs-toggle="pill" data-bs-target="#auditLog" type="button">
+                        <i class="bi bi-journal-text me-2"></i>Audit Log
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content" id="ldapGroupsTabContent">
+                <!-- Group Mappings Sub-tab -->
+                <div class="tab-pane fade show active" id="groupMappings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-link-45deg me-2"></i>LDAP Group Mappings</span>
+                            <div>
+                                <button class="btn btn-success btn-sm me-2" onclick="discoverLdapGroups()">
+                                    <i class="bi bi-search me-1"></i>Discover Groups
+                                </button>
+                                <button class="btn btn-primary btn-sm" onclick="showCreateMappingModal()">
+                                    <i class="bi bi-plus-circle me-1"></i>Create Mapping
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>LDAP Group</th>
+                                            <th>Organization</th>
+                                            <th>Role</th>
+                                            <th>Priority</th>
+                                            <th>Auto-Provision</th>
+                                            <th>Members</th>
+                                            <th>Last Sync</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="groupMappingsTable">
+                                        <tr>
+                                            <td colspan="9" class="text-center py-4">
+                                                <div class="spinner-border text-primary" role="status"></div>
+                                                <p class="text-muted mt-2">Loading group mappings...</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sync Dashboard Sub-tab -->
+                <div class="tab-pane fade" id="syncDashboard" role="tabpanel">
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <i class="bi bi-people-fill text-primary" style="font-size: 2rem;"></i>
+                                    <h5 class="mt-2" id="syncStatsTotal">-</h5>
+                                    <p class="text-muted mb-0">Total LDAP Users</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <i class="bi bi-clock-history text-info" style="font-size: 2rem;"></i>
+                                    <h5 class="mt-2" id="syncStatsLastSync">Never</h5>
+                                    <p class="text-muted mb-0">Last Sync</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <i class="bi bi-check-circle-fill text-success" style="font-size: 2rem;"></i>
+                                    <h5 class="mt-2" id="syncStatsSuccess">-</h5>
+                                    <p class="text-muted mb-0">Successful Syncs</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <i class="bi bi-exclamation-triangle-fill text-warning" style="font-size: 2rem;"></i>
+                                    <h5 class="mt-2" id="syncStatsErrors">-</h5>
+                                    <p class="text-muted mb-0">Errors</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-arrow-repeat me-2"></i>Manual Synchronization</span>
+                            <button class="btn btn-primary btn-sm" onclick="triggerManualSync()" id="syncButton">
+                                <i class="bi bi-arrow-repeat me-1"></i>Sync Now
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="syncStatus" class="text-center text-muted py-4">
+                                <i class="bi bi-info-circle" style="font-size: 3rem;"></i>
+                                <p class="mt-3">Click "Sync Now" to synchronize all LDAP users with their group memberships</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <span><i class="bi bi-clock-history me-2"></i>Sync History</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Sync ID</th>
+                                            <th>Type</th>
+                                            <th>Started</th>
+                                            <th>Duration</th>
+                                            <th>Status</th>
+                                            <th>Added</th>
+                                            <th>Updated</th>
+                                            <th>Deactivated</th>
+                                            <th>Errors</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="syncHistoryTable">
+                                        <tr>
+                                            <td colspan="9" class="text-center py-4">
+                                                <div class="spinner-border text-primary" role="status"></div>
+                                                <p class="text-muted mt-2">Loading sync history...</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Audit Log Sub-tab -->
+                <div class="tab-pane fade" id="auditLog" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-journal-text me-2"></i>LDAP Audit Log</span>
+                            <div class="input-group" style="width: 300px;">
+                                <input type="text" class="form-control form-control-sm" id="auditSearchInput" placeholder="Search audit logs...">
+                                <button class="btn btn-outline-secondary btn-sm" type="button" onclick="searchAuditLogs()">
+                                    <i class="bi bi-search"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Timestamp</th>
+                                            <th>Event Type</th>
+                                            <th>User</th>
+                                            <th>Target User</th>
+                                            <th>LDAP DN</th>
+                                            <th>Change</th>
+                                            <th>IP Address</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="auditLogTable">
+                                        <tr>
+                                            <td colspan="7" class="text-center py-4">
+                                                <div class="spinner-border text-primary" role="status"></div>
+                                                <p class="text-muted mt-2">Loading audit logs...</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <nav aria-label="Audit log pagination">
+                                <ul class="pagination pagination-sm justify-content-center mt-3" id="auditPagination">
+                                </ul>
+                            </nav>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -871,6 +1087,137 @@
                 <button type="button" class="btn btn-primary" onclick="inviteLdapUser()">
                     <i class="bi bi-check-circle me-1"></i>Invite User
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Group Mapping Modal -->
+<div class="modal fade" id="groupMappingModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="groupMappingModalTitle">Create Group Mapping</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="groupMappingForm">
+                    <input type="hidden" id="mappingId">
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label class="form-label">LDAP Group DN <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="ldapGroupDn" required
+                                   placeholder="CN=Admins,OU=Groups,DC=company,DC=com">
+                            <small class="text-muted">Full Distinguished Name of the LDAP group</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Group Common Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="ldapGroupCn" required
+                                   placeholder="Admins">
+                            <small class="text-muted">Display name for the group</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Organization</label>
+                            <select class="form-select" id="mappingOrganization">
+                                <option value="">All Organizations</option>
+                            </select>
+                            <small class="text-muted">Leave blank for system-wide mapping</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Assigned Role <span class="text-danger">*</span></label>
+                            <select class="form-select" id="mappingRole" required>
+                                <option value="">Select Role...</option>
+                                <option value="user">User - Basic access</option>
+                                <option value="manager">Manager - Team management</option>
+                                <option value="org_admin">Organization Admin - Full org access</option>
+                                <option value="super_admin">Super Admin - Full system access</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Priority</label>
+                            <input type="number" class="form-control" id="mappingPriority" value="0" min="0" max="100">
+                            <small class="text-muted">Higher priority wins if user is in multiple groups</small>
+                        </div>
+
+                        <div class="col-md-12">
+                            <label class="form-label">Description (Optional)</label>
+                            <textarea class="form-control" id="ldapGroupDescription" rows="2"
+                                      placeholder="Optional description of this group mapping"></textarea>
+                        </div>
+
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="autoProvision" checked>
+                                <label class="form-check-label" for="autoProvision">
+                                    Auto-Provision Users
+                                </label>
+                            </div>
+                            <small class="text-muted">Automatically create accounts when users login</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="autoDeprovision">
+                                <label class="form-check-label" for="autoDeprovision">
+                                    Auto-Deprovision Users
+                                </label>
+                            </div>
+                            <small class="text-muted">Deactivate users when they leave the group</small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="syncEnabled" checked>
+                                <label class="form-check-label" for="syncEnabled">
+                                    Sync Enabled
+                                </label>
+                            </div>
+                            <small class="text-muted">Include in automatic synchronization</small>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveGroupMapping()">Save Mapping</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- LDAP Group Discovery Modal -->
+<div class="modal fade" id="ldapDiscoveryModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Discover LDAP Groups</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-8">
+                        <input type="text" class="form-control" id="groupSearchBase"
+                               placeholder="Search base DN (e.g., OU=Groups,DC=company,DC=com)">
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-primary w-100" onclick="performGroupDiscovery()">
+                            <i class="bi bi-search me-1"></i>Search
+                        </button>
+                    </div>
+                </div>
+                <div id="discoveredGroupsContainer">
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-diagram-2" style="font-size: 3rem;"></i>
+                        <p class="mt-3">Enter a search base DN and click Search to discover LDAP groups</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
