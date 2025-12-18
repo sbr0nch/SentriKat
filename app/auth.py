@@ -13,7 +13,9 @@ import os
 auth_bp = Blueprint('auth', __name__)
 
 # Check if authentication is enabled
-AUTH_ENABLED = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+# SECURITY: Authentication is ENABLED by default
+# Set ENABLE_AUTH=false in .env ONLY for development/testing
+AUTH_ENABLED = os.environ.get('ENABLE_AUTH', 'true').lower() == 'true'
 
 def login_required(f):
     """Decorator to require login for routes"""

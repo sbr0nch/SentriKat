@@ -21,7 +21,7 @@ def is_setup_complete():
 
         # Setup is complete if we have at least one organization
         # and either auth is disabled or we have at least one user
-        auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+        auth_enabled = os.environ.get('ENABLE_AUTH', 'true').lower() == 'true'
 
         if auth_enabled:
             return org_count > 0 and user_count > 0
@@ -39,7 +39,7 @@ def setup_wizard():
         return redirect(url_for('main.index'))
 
     # Check auth status
-    auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+    auth_enabled = os.environ.get('ENABLE_AUTH', 'true').lower() == 'true'
 
     return render_template('setup.html', auth_enabled=auth_enabled)
 
@@ -48,7 +48,7 @@ def setup_status():
     """Check setup status"""
     return jsonify({
         'setup_complete': is_setup_complete(),
-        'auth_enabled': os.environ.get('ENABLE_AUTH', 'false').lower() == 'true',
+        'auth_enabled': os.environ.get('ENABLE_AUTH', 'true').lower() == 'true',
         'org_count': Organization.query.count(),
         'user_count': User.query.count(),
         'service_count': ServiceCatalog.query.count()
