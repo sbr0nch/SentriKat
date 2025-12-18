@@ -356,9 +356,13 @@ def sync_single_user(user_id):
 def get_audit_logs():
     """Get LDAP audit logs"""
     current_user = User.query.get(session.get('user_id'))
-    limit = request.args.get('limit', 100, type=int)
-    offset = request.args.get('offset', 0, type=int)
+    limit = request.args.get('limit', 50, type=int)
+    page = request.args.get('page', 1, type=int)
+    search = request.args.get('search', '', type=str)
     event_type = request.args.get('event_type')
+
+    # Calculate offset from page
+    offset = (page - 1) * limit
 
     query = LDAPAuditLog.query.order_by(LDAPAuditLog.timestamp.desc())
 
@@ -370,12 +374,24 @@ def get_audit_logs():
     if event_type:
         query = query.filter_by(event_type=event_type)
 
-    logs = query.limit(limit).offset(offset).all()
+    # Search filter
+    if search:
+        query = query.filter(
+            db.or_(
+                LDAPAuditLog.description.ilike(f'%{search}%'),
+                LDAPAuditLog.event_type.ilike(f'%{search}%')
+            )
+        )
+
     total = query.count()
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+    logs = query.limit(limit).offset(offset).all()
 
     return jsonify({
         'logs': [log.to_dict() for log in logs],
         'total': total,
-        'limit': limit,
-        'offset': offset
+        'page': page,
+        'total_pages': total_pages,
+        'limit': limit
     })

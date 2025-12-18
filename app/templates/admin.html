@@ -266,7 +266,8 @@
         const tbody = document.getElementById('productsTable');
 
         try {
-            const response = await fetch('/api/products');
+            // Add cache-busting timestamp to ensure fresh data
+            const response = await fetch(`/api/products?_t=${Date.now()}`);
             const products = await response.json();
 
             if (products.length === 0) {
