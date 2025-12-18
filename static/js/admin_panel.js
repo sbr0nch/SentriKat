@@ -1100,23 +1100,216 @@ async function checkLdapPermissions() {
     }
 }
 
-function showLdapSearchModal() {
+// Store LDAP search results for pagination
+let ldapSearchCache = {
+    results: [],
+    currentPage: 1,
+    pageSize: 25,
+    query: ''
+};
+
+/**
+ * Inline LDAP user search with pagination
+ */
+async function searchLdapUsersInline(page = 1) {
+    const query = document.getElementById('ldapUserSearchQuery').value.trim();
+    const pageSize = parseInt(document.getElementById('ldapSearchPageSize').value) || 25;
+
+    if (!query) {
+        showToast('Please enter a search query', 'warning');
+        return;
+    }
+
+    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    const statsDiv = document.getElementById('ldapSearchStats');
+
+    // Show loading
+    resultsDiv.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-2">Searching LDAP directory for "${escapeHtml(query)}"...</p>
+        </div>
+    `;
+    statsDiv.style.display = 'none';
+
     try {
-        document.getElementById('ldapSearchQuery').value = '';
-        document.getElementById('ldapSearchResultsTable').innerHTML = `
-            <div class="text-center text-muted py-4">
-                <i class="bi bi-search" style="font-size: 2rem;"></i>
-                <p class="mt-2">Enter a search query and click Search</p>
+        // Only fetch if query changed or cache is empty
+        if (query !== ldapSearchCache.query || ldapSearchCache.results.length === 0) {
+            const response = await fetch('/api/ldap/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ search_query: query })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Search failed');
+            }
+
+            const results = await response.json();
+            ldapSearchCache.results = results.users;
+            ldapSearchCache.query = query;
+        }
+
+        ldapSearchCache.pageSize = pageSize;
+        ldapSearchCache.currentPage = page;
+
+        const allResults = ldapSearchCache.results;
+
+        if (allResults.length === 0) {
+            resultsDiv.innerHTML = `
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                    <p class="mt-3">No users found matching "${escapeHtml(query)}"</p>
+                    <p class="text-muted">Try a different search term or wildcard pattern (e.g., "*${escapeHtml(query)}*")</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Calculate pagination
+        const totalPages = Math.ceil(allResults.length / pageSize);
+        const startIdx = (page - 1) * pageSize;
+        const endIdx = Math.min(startIdx + pageSize, allResults.length);
+        const pageResults = allResults.slice(startIdx, endIdx);
+
+        // Update stats
+        document.getElementById('ldapResultCount').textContent =
+            `${startIdx + 1}-${endIdx} of ${allResults.length}`;
+        statsDiv.style.display = 'block';
+
+        // Build pagination controls
+        const paginationHtml = buildLdapPagination(page, totalPages);
+        document.getElementById('ldapPagination').innerHTML = paginationHtml;
+
+        // Display results in table
+        const tableHtml = `
+            <div class="table-responsive">
+                <table class="table table-hover table-sm">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Username</th>
+                            <th>Full Name</th>
+                            <th>Email</th>
+                            <th>DN</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${pageResults.map(user => {
+                            const statusBadge = user.exists_in_db
+                                ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Invited</span>'
+                                : '<span class="badge bg-secondary">Not Invited</span>';
+
+                            const actionButton = user.exists_in_db
+                                ? '<button class="btn btn-sm btn-outline-secondary" disabled>Already Exists</button>'
+                                : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
+                                       <i class="bi bi-person-plus me-1"></i>Invite
+                                   </button>`;
+
+                            return `
+                                <tr>
+                                    <td class="fw-semibold">${escapeHtml(user.username)}</td>
+                                    <td>${user.full_name ? escapeHtml(user.full_name) : '<span class="text-muted">-</span>'}</td>
+                                    <td>${escapeHtml(user.email)}</td>
+                                    <td><small class="text-muted">${escapeHtml(user.dn).substring(0, 60)}${user.dn.length > 60 ? '...' : ''}</small></td>
+                                    <td>${statusBadge}</td>
+                                    <td>${actionButton}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
             </div>
         `;
 
-        const modalElement = document.getElementById('ldapSearchModal');
-        const modal = new bootstrap.Modal(modalElement);
-        modal.show();
+        resultsDiv.innerHTML = tableHtml;
+
     } catch (error) {
-        console.error('Error showing LDAP search modal:', error);
-        showToast('Error opening search modal: ' + error.message, 'danger');
+        console.error('LDAP search error:', error);
+        resultsDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Search Error:</strong> ${escapeHtml(error.message)}
+            </div>
+        `;
     }
+}
+
+/**
+ * Build pagination controls for LDAP search
+ */
+function buildLdapPagination(currentPage, totalPages) {
+    if (totalPages <= 1) return '';
+
+    let html = '';
+
+    // Previous button
+    html += `
+        <button class="btn btn-outline-secondary ${currentPage === 1 ? 'disabled' : ''}"
+                onclick="searchLdapUsersInline(${currentPage - 1})"
+                ${currentPage === 1 ? 'disabled' : ''}>
+            <i class="bi bi-chevron-left"></i>
+        </button>
+    `;
+
+    // Page numbers (show max 5 pages)
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+
+    if (startPage > 1) {
+        html += `<button class="btn btn-outline-secondary" onclick="searchLdapUsersInline(1)">1</button>`;
+        if (startPage > 2) {
+            html += `<button class="btn btn-outline-secondary" disabled>...</button>`;
+        }
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        html += `
+            <button class="btn ${i === currentPage ? 'btn-primary' : 'btn-outline-secondary'}"
+                    onclick="searchLdapUsersInline(${i})">
+                ${i}
+            </button>
+        `;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            html += `<button class="btn btn-outline-secondary" disabled>...</button>`;
+        }
+        html += `<button class="btn btn-outline-secondary" onclick="searchLdapUsersInline(${totalPages})">${totalPages}</button>`;
+    }
+
+    // Next button
+    html += `
+        <button class="btn btn-outline-secondary ${currentPage === totalPages ? 'disabled' : ''}"
+                onclick="searchLdapUsersInline(${currentPage + 1})"
+                ${currentPage === totalPages ? 'disabled' : ''}>
+            <i class="bi bi-chevron-right"></i>
+        </button>
+    `;
+
+    return html;
+}
+
+/**
+ * Show invite modal for inline search
+ */
+function showInviteLdapUserModalInline(user) {
+    document.getElementById('inviteUsername').value = user.username;
+    document.getElementById('inviteEmail').value = user.email;
+    document.getElementById('inviteFullName').value = user.full_name || '';
+    document.getElementById('ldapUserDN').value = user.dn;
+
+    const modal = new bootstrap.Modal(document.getElementById('ldapInviteModal'));
+    modal.show();
+}
+
+// Keep old function for backward compatibility
+function showLdapSearchModal() {
+    // Deprecated - now using inline search
+    showToast('Please use the search box above', 'info');
 }
 
 async function searchLdapUsers() {
