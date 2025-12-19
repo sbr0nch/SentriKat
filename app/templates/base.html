@@ -917,13 +917,8 @@
                 });
 
                 if (response.ok) {
-                    document.getElementById('currentOrgName').textContent = orgName;
-                    // Cache the new organization name
-                    localStorage.setItem('currentOrgName', orgName);
-                    showToast(`Switched to ${orgName}`, 'success');
-
-                    // Reload page to refresh data
-                    setTimeout(() => location.reload(), 500);
+                    // Reload immediately to show new org data
+                    location.reload();
                 } else {
                     showToast('Failed to switch organization', 'danger');
                 }
@@ -931,11 +926,6 @@
                 showToast(`Error: ${error.message}`, 'danger');
             }
         }
-
-        // Load organizations on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            loadOrganizations();
-        });
     </script>
     {% block extra_js %}{% endblock %}
 </body>
