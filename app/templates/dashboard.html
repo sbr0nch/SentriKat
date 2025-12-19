@@ -1102,59 +1102,19 @@
      * Share a single CVE with a direct link
      */
     async function shareSingleCVE(cveId, vulnName) {
-        showLoading();
-
-        // Add timeout to prevent indefinite hanging
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
         try {
-            // Create a share link with CVE filter
-            const response = await fetch('/api/shared/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: `${cveId} - ${vulnName}`,
-                    description: `Direct link to ${cveId}`,
-                    filters: {
-                        cve: cveId
-                    },
-                    is_public: true,
-                    expires_days: 30
-                }),
-                signal: controller.signal
-            });
+            // Create simple share link with CVE parameter
+            const currentUrl = window.location.origin;
+            const shareUrl = `${currentUrl}/?cve=${encodeURIComponent(cveId)}`;
 
-            clearTimeout(timeoutId);
-
-            if (response.ok) {
-                const result = await response.json();
-
-                // Copy to clipboard
-                try {
-                    await navigator.clipboard.writeText(result.share_url);
-                    showToast(`✓ Share link for ${cveId} copied to clipboard!`, 'success');
-                } catch (clipboardError) {
-                    // Fallback: show URL in a prompt if clipboard API fails
-                    await showPrompt(
-                        `Share link for ${cveId}:`,
-                        result.share_url,
-                        'Share CVE Link'
-                    );
-                }
-            } else {
-                const error = await response.json();
-                showToast(`Error creating share link: ${error.error}`, 'danger');
-            }
+            // Copy to clipboard
+            await navigator.clipboard.writeText(shareUrl);
+            showToast(`✓ Share link for ${cveId} copied to clipboard!`, 'success');
         } catch (error) {
-            clearTimeout(timeoutId);
-            if (error.name === 'AbortError') {
-                showToast('Request timeout - The server is taking too long to respond. Please try again.', 'warning');
-            } else {
-                showToast(`Error: ${error.message}`, 'danger');
-            }
-        } finally {
-            hideLoading();
+            // Fallback: show URL in alert
+            const currentUrl = window.location.origin;
+            const shareUrl = `${currentUrl}/?cve=${encodeURIComponent(cveId)}`;
+            prompt(`Copy this link to share ${cveId}:`, shareUrl);
         }
     }
 
