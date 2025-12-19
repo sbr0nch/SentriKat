@@ -499,7 +499,7 @@
                     <!-- Organization Switcher -->
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="orgDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-building"></i> <span id="currentOrgName">Loading...</span>
+                            <i class="bi bi-building"></i> <span id="currentOrgName">{% if current_user and current_user.organization %}{{ current_user.organization.display_name }}{% else %}Organization{% endif %}</span>
                         </button>
                         <ul class="dropdown-menu" id="orgList">
                             <li><span class="dropdown-item-text text-muted small">Loading organizations...</span></li>
