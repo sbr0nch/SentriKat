@@ -69,6 +69,21 @@ def create_product():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
+    # Check for duplicate product
+    target_org_id = data.get('organization_id', org_id)
+    existing_product = Product.query.filter_by(
+        organization_id=target_org_id,
+        vendor=data['vendor'],
+        product_name=data['product_name'],
+        version=data.get('version')
+    ).first()
+
+    if existing_product:
+        return jsonify({
+            'error': 'This product already exists in the organization',
+            'existing_product': existing_product.to_dict()
+        }), 409
+
     product = Product(
         organization_id=data.get('organization_id', org_id),
         service_catalog_id=data.get('service_catalog_id'),

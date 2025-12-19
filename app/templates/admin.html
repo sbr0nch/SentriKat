@@ -419,7 +419,9 @@
                 loadProducts();
             } else {
                 const error = await response.json();
-                showToast(`Error: ${error.error}`, 'danger');
+                // Show warning for duplicates, danger for other errors
+                const toastType = response.status === 409 ? 'warning' : 'danger';
+                showToast(`⚠ ${error.error}`, toastType);
             }
         } catch (error) {
             showToast(`Error saving product: ${error.message}`, 'danger');
@@ -622,12 +624,13 @@
 
         try {
             let successCount = 0;
+            let duplicateCount = 0;
             let failCount = 0;
 
-            // Create products for all selected services
-            for (const catalogId of selectedCatalogItems) {
+            // Create products for all selected services in parallel for better performance
+            const requests = Array.from(selectedCatalogItems).map(async catalogId => {
                 const service = serviceCatalog.find(s => s.id === catalogId);
-                if (!service) continue;
+                if (!service) return { status: 'failed' };
 
                 try {
                     const productData = {
@@ -650,24 +653,41 @@
                     });
 
                     if (response.ok) {
-                        successCount++;
+                        return { status: 'success' };
+                    } else if (response.status === 409) {
+                        return { status: 'duplicate' };
                     } else {
-                        failCount++;
+                        return { status: 'failed' };
                     }
                 } catch (error) {
-                    failCount++;
+                    return { status: 'failed' };
                 }
-            }
+            });
+
+            // Wait for all requests to complete
+            const results = await Promise.all(requests);
+
+            results.forEach(result => {
+                if (result.status === 'success') successCount++;
+                else if (result.status === 'duplicate') duplicateCount++;
+                else if (result.status === 'failed') failCount++;
+            });
 
             // Clear selection and close modal
             selectedCatalogItems.clear();
             updateCatalogSelectionUI();
             bootstrap.Modal.getInstance(document.getElementById('serviceCatalogModal')).hide();
 
-            // Show results
+            // Show results with detailed message
+            let message = '';
             if (successCount > 0) {
-                showToast(`✓ Successfully added ${successCount} product(s)${failCount > 0 ? ` (${failCount} failed)` : ''}`, 'success');
+                message = `✓ Successfully added ${successCount} product(s)`;
+                if (duplicateCount > 0) message += `, ${duplicateCount} already existed`;
+                if (failCount > 0) message += `, ${failCount} failed`;
+                showToast(message, 'success');
                 loadProducts();
+            } else if (duplicateCount > 0) {
+                showToast(`⚠ ${duplicateCount} product(s) already existed`, 'warning');
             } else {
                 showToast('Failed to add products', 'danger');
             }
