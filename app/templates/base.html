@@ -870,36 +870,48 @@
 
         // Organization Switcher Functions
         async function loadOrganizations() {
+            const orgNameEl = document.getElementById('currentOrgName');
+            const orgListEl = document.getElementById('orgList');
+
             try {
                 // Show cached organization name immediately to avoid "Loading..." flash
                 const cachedOrgName = localStorage.getItem('currentOrgName');
                 if (cachedOrgName) {
-                    document.getElementById('currentOrgName').textContent = cachedOrgName;
+                    orgNameEl.textContent = cachedOrgName;
                 }
 
-                // Get current organization
-                const currentResponse = await fetch('/api/session/organization');
+                // Get current organization with timeout
+                const currentResponse = await Promise.race([
+                    fetch('/api/session/organization'),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+                ]);
+
                 if (!currentResponse.ok) {
                     throw new Error(`Failed to load current organization: ${currentResponse.status}`);
                 }
                 const currentOrg = await currentResponse.json();
 
                 if (currentOrg && currentOrg.display_name) {
-                    document.getElementById('currentOrgName').textContent = currentOrg.display_name;
-                    // Cache for next page load
+                    orgNameEl.textContent = currentOrg.display_name;
                     localStorage.setItem('currentOrgName', currentOrg.display_name);
+                } else if (!cachedOrgName) {
+                    // Fallback if no data
+                    orgNameEl.textContent = 'Default Organization';
                 }
 
-                // Get all organizations
-                const orgsResponse = await fetch('/api/organizations');
+                // Get all organizations with timeout
+                const orgsResponse = await Promise.race([
+                    fetch('/api/organizations'),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+                ]);
+
                 if (!orgsResponse.ok) {
                     throw new Error(`Failed to load organizations: ${orgsResponse.status}`);
                 }
                 const organizations = await orgsResponse.json();
 
-                const orgList = document.getElementById('orgList');
                 if (organizations.length > 0) {
-                    orgList.innerHTML = organizations.map(org => `
+                    orgListEl.innerHTML = organizations.map(org => `
                         <li>
                             <a class="dropdown-item ${org.id === currentOrg.id ? 'active' : ''}"
                                href="#"
@@ -909,11 +921,15 @@
                         </li>
                     `).join('');
                 } else {
-                    orgList.innerHTML = '<li><span class="dropdown-item-text text-muted small">No organizations available</span></li>';
+                    orgListEl.innerHTML = '<li><span class="dropdown-item-text text-muted small">No organizations available</span></li>';
                 }
             } catch (error) {
                 console.error('Error loading organizations:', error);
-                document.getElementById('currentOrgName').textContent = 'Error';
+                // Set fallback values
+                if (!orgNameEl.textContent || orgNameEl.textContent === 'Loading...') {
+                    orgNameEl.textContent = localStorage.getItem('currentOrgName') || 'Default';
+                }
+                orgListEl.innerHTML = '<li><span class="dropdown-item-text text-danger small">Failed to load</span></li>';
             }
         }
 
