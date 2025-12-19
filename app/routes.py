@@ -1,10 +1,11 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
 from app import db
-from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog
+from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, SharedView
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required
+from datetime import datetime, timedelta
 import json
 
 bp = Blueprint('main', __name__)
@@ -900,7 +901,7 @@ def debug_login_admin():
     import os
     if os.environ.get('DISABLE_DEBUG_LOGIN', 'false').lower() == 'true':
         return jsonify({'error': 'Debug login is disabled'}), 403
-    
+
     admin = User.query.filter_by(username='admin').first()
     if admin:
         session.clear()
@@ -910,3 +911,65 @@ def debug_login_admin():
         session.permanent = True
         return redirect(url_for('main.index'))
     return jsonify({'error': 'Admin user not found'}), 404
+
+@bp.route('/api/shared/create', methods=['POST'])
+@login_required
+def create_shared_view():
+    """Create a shared filtered view"""
+    import secrets
+    from datetime import timedelta
+
+    data = request.get_json()
+    user_id = session.get('user_id')
+    org_id = session.get('organization_id')
+
+    if not org_id:
+        return jsonify({'error': 'No organization found'}), 400
+
+    # Generate unique token
+    token = secrets.token_urlsafe(32)
+
+    # Calculate expiration
+    expires_at = None
+    if data.get('expires_days'):
+        expires_at = datetime.utcnow() + timedelta(days=int(data['expires_days']))
+
+    shared_view = SharedView(
+        token=token,
+        name=data.get('name'),
+        description=data.get('description'),
+        filters=json.dumps(data.get('filters', {})),
+        is_public=data.get('is_public', True),
+        created_by=user_id,
+        organization_id=org_id,
+        expires_at=expires_at
+    )
+
+    db.session.add(shared_view)
+    db.session.commit()
+
+    # Build share URL
+    share_url = request.host_url.rstrip('/') + url_for('main.shared_view', share_token=token)
+
+    return jsonify({
+        'success': True,
+        'share_url': share_url,
+        'token': token,
+        'expires_at': expires_at.isoformat() if expires_at else None
+    })
+
+@bp.route('/api/shared/<token>', methods=['GET'])
+@login_required
+def get_shared_view(token):
+    """Get shared view details"""
+    shared_view = SharedView.query.filter_by(token=token).first_or_404()
+
+    # Check if expired
+    if shared_view.is_expired():
+        return jsonify({'error': 'This shared view has expired'}), 410
+
+    # Increment view count
+    shared_view.view_count += 1
+    db.session.commit()
+
+    return jsonify(shared_view.to_dict())
