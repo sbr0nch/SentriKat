@@ -165,11 +165,6 @@
                         <i class="bi bi-arrow-repeat me-2"></i>Sync Dashboard
                     </button>
                 </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="audit-log-tab" data-bs-toggle="pill" data-bs-target="#auditLog" type="button">
-                        <i class="bi bi-journal-text me-2"></i>Audit Log
-                    </button>
-                </li>
             </ul>
 
             <div class="tab-content" id="ldapGroupsTabContent">
@@ -303,50 +298,6 @@
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Audit Log Sub-tab -->
-                <div class="tab-pane fade" id="auditLog" role="tabpanel">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-journal-text me-2"></i>LDAP Audit Log</span>
-                            <div class="input-group" style="width: 300px;">
-                                <input type="text" class="form-control form-control-sm" id="auditSearchInput" placeholder="Search audit logs...">
-                                <button class="btn btn-outline-secondary btn-sm" type="button" onclick="searchAuditLogs()">
-                                    <i class="bi bi-search"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-hover table-sm">
-                                    <thead>
-                                        <tr>
-                                            <th>Timestamp</th>
-                                            <th>Event Type</th>
-                                            <th>User</th>
-                                            <th>Target User</th>
-                                            <th>LDAP DN</th>
-                                            <th>Change</th>
-                                            <th>IP Address</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="auditLogTable">
-                                        <tr>
-                                            <td colspan="7" class="text-center py-4">
-                                                <div class="spinner-border text-primary" role="status"></div>
-                                                <p class="text-muted mt-2">Loading audit logs...</p>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <nav aria-label="Audit log pagination">
-                                <ul class="pagination pagination-sm justify-content-center mt-3" id="auditPagination">
-                                </ul>
-                            </nav>
                         </div>
                     </div>
                 </div>

@@ -134,8 +134,13 @@ def update_product(product_id):
 @bp.route('/api/products/<int:product_id>', methods=['DELETE'])
 @login_required
 def delete_product(product_id):
-    """Delete a product"""
+    """Delete a product and all related vulnerability matches"""
     product = Product.query.get_or_404(product_id)
+
+    # Delete all related vulnerability matches first
+    VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+
+    # Now delete the product
     db.session.delete(product)
     db.session.commit()
     return jsonify({'success': True})
