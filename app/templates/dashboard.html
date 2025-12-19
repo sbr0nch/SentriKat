@@ -361,6 +361,37 @@
 
 {% block extra_js %}
 <script>
+    // Helper functions for priority styling
+    function getPriorityBadgeClass(priority) {
+        const classes = {
+            'critical': 'bg-danger',
+            'high': 'bg-warning text-dark',
+            'medium': 'bg-info text-dark',
+            'low': 'bg-secondary'
+        };
+        return classes[priority?.toLowerCase()] || 'bg-secondary';
+    }
+
+    function getPriorityIcon(priority) {
+        const icons = {
+            'critical': 'bi-exclamation-triangle-fill',
+            'high': 'bi-exclamation-circle-fill',
+            'medium': 'bi-info-circle-fill',
+            'low': 'bi-dash-circle'
+        };
+        return icons[priority?.toLowerCase()] || 'bi-circle';
+    }
+
+    function getPriorityColor(priority) {
+        const colors = {
+            'critical': '#dc2626',
+            'high': '#f59e0b',
+            'medium': '#3b82f6',
+            'low': '#6b7280'
+        };
+        return colors[priority?.toLowerCase()] || '#6b7280';
+    }
+
     let currentVulnerabilities = [];
     let selectedVulns = new Set();
 
