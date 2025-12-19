@@ -158,14 +158,29 @@ async function saveOrganization() {
     const orgId = document.getElementById('orgId').value;
     const isEdit = !!orgId;
 
+    // Collect notification emails
+    const emailsInput = document.getElementById('orgEmails').value.trim();
+    const emailsList = emailsInput ? emailsInput.split(',').map(e => e.trim()).filter(e => e) : [];
+
     const orgData = {
         name: document.getElementById('orgName').value.trim(),
+        display_name: document.getElementById('orgDisplayName').value.trim(),
         description: document.getElementById('orgDescription').value.trim(),
+        notification_emails: emailsList,
+        alert_on_critical: document.getElementById('alertCritical')?.checked || true,
+        alert_on_high: document.getElementById('alertHigh')?.checked || false,
+        alert_on_new_cve: document.getElementById('alertNewCVE')?.checked || true,
+        alert_on_ransomware: document.getElementById('alertRansomware')?.checked || true,
         active: document.getElementById('orgActive').checked
     };
 
     if (!orgData.name) {
         showToast('Organization name is required', 'warning');
+        return;
+    }
+
+    if (!orgData.display_name) {
+        showToast('Display name is required', 'warning');
         return;
     }
 
@@ -246,11 +261,30 @@ async function editOrganization(orgId) {
         const response = await fetch(`/api/organizations/${orgId}`);
         const org = await response.json();
 
-        // Populate form
+        // Populate basic info
         document.getElementById('orgId').value = org.id;
         document.getElementById('orgName').value = org.name || '';
+        document.getElementById('orgDisplayName').value = org.display_name || '';
         document.getElementById('orgDescription').value = org.description || '';
         document.getElementById('orgActive').checked = org.active;
+
+        // Populate notification emails
+        const emails = org.notification_emails ? (Array.isArray(org.notification_emails) ? org.notification_emails : JSON.parse(org.notification_emails || '[]')) : [];
+        document.getElementById('orgEmails').value = emails.join(', ');
+
+        // Populate alert settings
+        if (document.getElementById('alertCritical')) {
+            document.getElementById('alertCritical').checked = org.alert_on_critical !== false;
+        }
+        if (document.getElementById('alertHigh')) {
+            document.getElementById('alertHigh').checked = org.alert_on_high || false;
+        }
+        if (document.getElementById('alertNewCVE')) {
+            document.getElementById('alertNewCVE').checked = org.alert_on_new_cve !== false;
+        }
+        if (document.getElementById('alertRansomware')) {
+            document.getElementById('alertRansomware').checked = org.alert_on_ransomware !== false;
+        }
 
         // Update modal title
         document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Organization';
