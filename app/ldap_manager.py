@@ -205,16 +205,48 @@ class LDAPManager:
         Returns:
             dict with 'success' and either 'user' or 'error'
         """
+        from app.logging_config import log_audit_event, log_ldap_operation
+        from app.email_alerts import send_user_invite_email
+
         try:
             # Check if user already exists
             existing_user = User.query.filter_by(username=username).first()
             if existing_user:
                 # Reactivate if inactive
                 if not existing_user.is_active:
+                    old_state = {
+                        'is_active': False,
+                        'organization_id': existing_user.organization_id,
+                        'role': existing_user.role
+                    }
+
                     existing_user.is_active = True
                     existing_user.organization_id = organization_id
                     existing_user.role = role
                     db.session.commit()
+
+                    # Log audit event
+                    log_audit_event(
+                        'REACTIVATE',
+                        'users',
+                        existing_user.id,
+                        old_value=old_state,
+                        new_value={
+                            'is_active': True,
+                            'organization_id': organization_id,
+                            'role': role
+                        },
+                        details=f"Reactivated LDAP user {username}"
+                    )
+
+                    log_ldap_operation('USER_REACTIVATE', f"{username} reactivated and invited", True)
+
+                    # Send welcome email
+                    try:
+                        send_user_invite_email(existing_user)
+                    except Exception as email_error:
+                        logger.warning(f"Failed to send invite email to {email}: {email_error}")
+
                     return {'success': True, 'message': f'User {username} reactivated', 'user': existing_user.to_dict()}
                 else:
                     return {'success': False, 'error': f'User {username} already exists and is active'}
@@ -235,11 +267,35 @@ class LDAPManager:
             db.session.add(user)
             db.session.commit()
 
+            # Log audit event
+            log_audit_event(
+                'INVITE',
+                'users',
+                user.id,
+                new_value={
+                    'username': username,
+                    'email': email,
+                    'role': role,
+                    'organization_id': organization_id,
+                    'auth_type': 'ldap'
+                },
+                details=f"Invited LDAP user {username}"
+            )
+
+            log_ldap_operation('USER_INVITE', f"{username} invited to organization {organization_id}", True)
+
+            # Send welcome email
+            try:
+                send_user_invite_email(user)
+            except Exception as email_error:
+                logger.warning(f"Failed to send invite email to {email}: {email_error}")
+
             return {'success': True, 'message': f'User {username} invited successfully', 'user': user.to_dict()}
 
         except Exception as e:
             db.session.rollback()
             logger.error(f"Error inviting LDAP user: {e}")
+            log_ldap_operation('USER_INVITE', f"Failed to invite {username}: {str(e)}", False)
             return {'success': False, 'error': str(e)}
 
     @staticmethod
