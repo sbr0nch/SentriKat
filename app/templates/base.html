@@ -499,10 +499,10 @@
                     <!-- Organization Switcher -->
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="orgDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-building"></i> <span id="currentOrgName">Loading...</span>
+                            <i class="bi bi-building"></i> <span id="currentOrgName">{{ current_user.organization.display_name if current_user and current_user.organization else 'Organization' }}</span>
                         </button>
                         <ul class="dropdown-menu" id="orgList">
-                            <li><span class="dropdown-item-text text-muted small">Loading organizations...</span></li>
+                            <li><span class="dropdown-item-text text-muted small">Click to load...</span></li>
                         </ul>
                     </div>
 
@@ -869,69 +869,46 @@
         }
 
         // Organization Switcher Functions
+        let orgsLoaded = false;
+
         async function loadOrganizations() {
-            const orgNameEl = document.getElementById('currentOrgName');
+            if (orgsLoaded) return; // Only load once
+
             const orgListEl = document.getElementById('orgList');
+            orgListEl.innerHTML = '<li><span class="dropdown-item-text text-muted small"><span class="spinner-border spinner-border-sm"></span> Loading...</span></li>';
 
             try {
-                // Show cached organization name immediately to avoid "Loading..." flash
-                const cachedOrgName = localStorage.getItem('currentOrgName');
-                if (cachedOrgName) {
-                    orgNameEl.textContent = cachedOrgName;
-                }
+                const response = await fetch('/api/organizations', {
+                    signal: AbortSignal.timeout(3000) // 3 second timeout
+                });
 
-                // Get current organization with timeout
-                const currentResponse = await Promise.race([
-                    fetch('/api/session/organization'),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
-                ]);
+                if (!response.ok) throw new Error('Failed to load');
 
-                if (!currentResponse.ok) {
-                    throw new Error(`Failed to load current organization: ${currentResponse.status}`);
-                }
-                const currentOrg = await currentResponse.json();
+                const orgs = await response.json();
+                const currentOrgName = document.getElementById('currentOrgName').textContent;
 
-                if (currentOrg && currentOrg.display_name) {
-                    orgNameEl.textContent = currentOrg.display_name;
-                    localStorage.setItem('currentOrgName', currentOrg.display_name);
-                } else if (!cachedOrgName) {
-                    // Fallback if no data
-                    orgNameEl.textContent = 'Default Organization';
-                }
-
-                // Get all organizations with timeout
-                const orgsResponse = await Promise.race([
-                    fetch('/api/organizations'),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
-                ]);
-
-                if (!orgsResponse.ok) {
-                    throw new Error(`Failed to load organizations: ${orgsResponse.status}`);
-                }
-                const organizations = await orgsResponse.json();
-
-                if (organizations.length > 0) {
-                    orgListEl.innerHTML = organizations.map(org => `
+                if (orgs.length > 0) {
+                    orgListEl.innerHTML = orgs.map(org => `
                         <li>
-                            <a class="dropdown-item ${org.id === currentOrg.id ? 'active' : ''}"
+                            <a class="dropdown-item ${org.display_name === currentOrgName ? 'active' : ''}"
                                href="#"
-                               onclick="switchOrganization(${org.id}, '${org.display_name}'); return false;">
-                                <i class="bi bi-building me-2"></i>${org.display_name}
+                               onclick="switchOrganization(${org.id}, '${escapeHtml(org.display_name)}'); return false;">
+                                <i class="bi bi-building me-2"></i>${escapeHtml(org.display_name)}
                             </a>
                         </li>
                     `).join('');
+                    orgsLoaded = true;
                 } else {
-                    orgListEl.innerHTML = '<li><span class="dropdown-item-text text-muted small">No organizations available</span></li>';
+                    orgListEl.innerHTML = '<li><span class="dropdown-item-text text-muted small">No organizations</span></li>';
                 }
             } catch (error) {
                 console.error('Error loading organizations:', error);
-                // Set fallback values
-                if (!orgNameEl.textContent || orgNameEl.textContent === 'Loading...') {
-                    orgNameEl.textContent = localStorage.getItem('currentOrgName') || 'Default';
-                }
                 orgListEl.innerHTML = '<li><span class="dropdown-item-text text-danger small">Failed to load</span></li>';
             }
         }
+
+        // Load organizations when dropdown is opened
+        document.getElementById('orgDropdown')?.addEventListener('click', loadOrganizations);
 
         async function switchOrganization(orgId, orgName) {
             try {

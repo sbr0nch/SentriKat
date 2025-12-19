@@ -16,17 +16,13 @@ async function saveUser() {
 
     // Collect form data
     const userData = {
+        username: document.getElementById('username').value.trim(),
         email: document.getElementById('email').value.trim(),
         full_name: document.getElementById('fullName').value.trim(),
         organization_id: parseInt(document.getElementById('organization').value),
         role: document.getElementById('userRole').value,
         is_active: document.getElementById('isActive').checked
     };
-
-    // Add username for new users
-    if (!isEdit) {
-        userData.username = document.getElementById('username').value.trim();
-    }
 
     // Add password if provided (required for new local users)
     const authType = document.querySelector('input[name="authType"]:checked').value;
@@ -112,6 +108,7 @@ async function editUser(userId) {
 
         // Populate form
         document.getElementById('userId').value = user.id;
+        document.getElementById('username').value = user.username || '';
         document.getElementById('email').value = user.email || '';
         document.getElementById('fullName').value = user.full_name || '';
         document.getElementById('organization').value = user.organization_id || '';
