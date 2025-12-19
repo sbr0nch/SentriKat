@@ -35,7 +35,7 @@ echo ""
 read -p "Delete existing database and start fresh? (y/N): " response
 if [[ "$response" =~ ^[Yy]$ ]]; then
     echo "✓ Removing old database..."
-    rm -rf data/sentrikat.db
+    rm -rf instance/sentrikat.db
     echo "✓ Database removed"
 else
     echo "✓ Keeping existing database"

@@ -196,7 +196,7 @@
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-funnel me-2"></i>Advanced Filters</span>
-            <button class="btn btn-sm btn-outline-secondary" onclick="resetFilters()">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetFilters()">
                 <i class="bi bi-arrow-counterclockwise"></i> Reset
             </button>
         </div>
@@ -280,10 +280,10 @@
                 </div>
                 <div class="col-md-12">
                     <div class="d-flex gap-2">
-                        <button class="btn btn-primary" onclick="loadVulnerabilities()">
+                        <button type="button" class="btn btn-primary" onclick="loadVulnerabilities()">
                             <i class="bi bi-search"></i> Apply Filters
                         </button>
-                        <button class="btn btn-info" onclick="shareFilteredView()">
+                        <button type="button" class="btn btn-info" onclick="shareFilteredView()">
                             <i class="bi bi-share"></i> Share Filtered View
                         </button>
                         <div class="dropdown export-dropdown">
@@ -427,6 +427,37 @@
 
 {% block extra_js %}
 <script>
+    // Helper functions for priority styling
+    function getPriorityBadgeClass(priority) {
+        const classes = {
+            'critical': 'bg-danger',
+            'high': 'bg-warning text-dark',
+            'medium': 'bg-info text-dark',
+            'low': 'bg-secondary'
+        };
+        return classes[priority?.toLowerCase()] || 'bg-secondary';
+    }
+
+    function getPriorityIcon(priority) {
+        const icons = {
+            'critical': 'bi-exclamation-triangle-fill',
+            'high': 'bi-exclamation-circle-fill',
+            'medium': 'bi-info-circle-fill',
+            'low': 'bi-dash-circle'
+        };
+        return icons[priority?.toLowerCase()] || 'bi-circle';
+    }
+
+    function getPriorityColor(priority) {
+        const colors = {
+            'critical': '#dc2626',
+            'high': '#f59e0b',
+            'medium': '#3b82f6',
+            'low': '#6b7280'
+        };
+        return colors[priority?.toLowerCase()] || '#6b7280';
+    }
+
     let currentVulnerabilities = [];
     let selectedVulns = new Set();
 
@@ -904,8 +935,19 @@
 
     // Load data on page load
     document.addEventListener('DOMContentLoaded', function() {
+        // Check for shared CVE in URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const sharedCVE = urlParams.get('cve');
+
+        if (sharedCVE) {
+            // Auto-fill CVE filter and apply
+            document.getElementById('filterCVE').value = sharedCVE;
+            loadVulnerabilities();
+        } else {
+            loadVulnerabilities();
+        }
+
         loadStats();
-        loadVulnerabilities();
         loadLastSync();
 
         // Auto-refresh stats every 5 minutes
