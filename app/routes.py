@@ -142,10 +142,40 @@ def update_product(product_id):
 @login_required
 def delete_product(product_id):
     """Delete a product"""
+    from app.logging_config import log_audit_event
+
     product = Product.query.get_or_404(product_id)
-    db.session.delete(product)
-    db.session.commit()
-    return jsonify({'success': True})
+
+    # Store product info for audit log
+    product_info = {
+        'name': product.name,
+        'vendor': product.vendor,
+        'version': product.version,
+        'organization_id': product.organization_id
+    }
+
+    try:
+        # Delete associated vulnerability matches first
+        VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+
+        # Now delete the product
+        db.session.delete(product)
+        db.session.commit()
+
+        # Log audit event
+        log_audit_event(
+            'DELETE',
+            'products',
+            product_id,
+            old_value=product_info,
+            details=f"Deleted product {product.vendor} {product.name}"
+        )
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/vulnerabilities', methods=['GET'])
 @login_required

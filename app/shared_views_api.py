@@ -33,6 +33,11 @@ def create_shared_view():
         "expires_days": 30  # Optional, null for no expiration
     }
     """
+    import time
+    from app.logging_config import log_performance, log_audit_event
+
+    start_time = time.time()
+
     try:
         data = request.get_json()
         current_user_id = session.get('user_id')
@@ -43,10 +48,20 @@ def create_shared_view():
 
         filters = data.get('filters', {})
 
-        # Generate unique token
-        token = SharedView.generate_token()
-        while SharedView.query.filter_by(share_token=token).first():
-            token = SharedView.generate_token()
+        # Generate unique token (more efficient with retry limit)
+        max_retries = 10
+        token = None
+        for attempt in range(max_retries):
+            candidate_token = SharedView.generate_token()
+            # Use EXISTS for faster check (doesn't fetch the whole row)
+            if not db.session.query(
+                db.exists().where(SharedView.share_token == candidate_token)
+            ).scalar():
+                token = candidate_token
+                break
+
+        if not token:
+            return jsonify({'error': 'Failed to generate unique token, please try again'}), 500
 
         # Calculate expiration
         expires_at = None
@@ -78,6 +93,24 @@ def create_shared_view():
 
         share_url = request.host_url.rstrip('/') + shared_view.get_share_url()
 
+        # Log audit event
+        log_audit_event(
+            'CREATE',
+            'shared_views',
+            shared_view.id,
+            new_value={
+                'name': shared_view.name,
+                'filters': filters,
+                'is_public': shared_view.is_public
+            },
+            details=f"Created shared view: {shared_view.name}"
+        )
+
+        # Log performance if slow
+        duration_ms = (time.time() - start_time) * 1000
+        if duration_ms > 1000:
+            log_performance('/api/shared/create', duration_ms)
+
         return jsonify({
             'success': True,
             'shared_view': shared_view.to_dict(),
@@ -87,6 +120,8 @@ def create_shared_view():
 
     except Exception as e:
         db.session.rollback()
+        import logging
+        logging.error(f"Error creating shared view: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
