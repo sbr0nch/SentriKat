@@ -787,15 +787,30 @@
 
     function toggleSelectAll() {
         const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        if (!selectAllCheckbox) {
+            console.error('Select all checkbox not found');
+            return;
+        }
+
         const checkboxes = document.querySelectorAll('.product-checkbox');
 
+        if (checkboxes.length === 0) {
+            console.warn('No product checkboxes found');
+            return;
+        }
+
+        const isChecked = selectAllCheckbox.checked;
+
         checkboxes.forEach(checkbox => {
-            checkbox.checked = selectAllCheckbox.checked;
+            checkbox.checked = isChecked;
             const productId = parseInt(checkbox.dataset.productId);
-            if (selectAllCheckbox.checked) {
-                selectedProducts.add(productId);
-            } else {
-                selectedProducts.delete(productId);
+
+            if (!isNaN(productId)) {
+                if (isChecked) {
+                    selectedProducts.add(productId);
+                } else {
+                    selectedProducts.delete(productId);
+                }
             }
         });
 
