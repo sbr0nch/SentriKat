@@ -764,6 +764,16 @@ def update_user(user_id):
 
     data = request.get_json()
 
+    # Username update (only for super admins and must be unique)
+    if 'username' in data and data['username'] != user.username:
+        if not current_user.is_super_admin():
+            return jsonify({'error': 'Only super admins can change usernames'}), 403
+        # Check if new username is already taken
+        existing = User.query.filter_by(username=data['username']).first()
+        if existing and existing.id != user_id:
+            return jsonify({'error': 'Username already exists'}), 400
+        user.username = data['username']
+
     if 'email' in data:
         user.email = data['email']
     if 'full_name' in data:
