@@ -20,7 +20,7 @@ async function saveUser() {
         full_name: document.getElementById('fullName').value.trim(),
         organization_id: parseInt(document.getElementById('organization').value),
         role: document.getElementById('userRole').value,
-        active: document.getElementById('isActive').checked
+        is_active: document.getElementById('isActive').checked
     };
 
     // Add username for new users
@@ -87,7 +87,7 @@ async function loadUsers() {
                 <td>${escapeHtml(user.username)}</td>
                 <td>${escapeHtml(user.email || '')}</td>
                 <td>${escapeHtml(user.full_name || '')}</td>
-                <td><span class="badge bg-${user.active ? 'success' : 'secondary'}">${user.active ? 'Active' : 'Inactive'}</span></td>
+                <td><span class="badge bg-${user.is_active ? 'success' : 'secondary'}">${user.is_active ? 'Active' : 'Inactive'}</span></td>
                 <td><span class="badge bg-info">${user.role}</span></td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary" onclick="editUser(${user.id})">
@@ -116,7 +116,7 @@ async function editUser(userId) {
         document.getElementById('fullName').value = user.full_name || '';
         document.getElementById('organization').value = user.organization_id || '';
         document.getElementById('userRole').value = user.role || 'user';
-        document.getElementById('isActive').checked = user.active;
+        document.getElementById('isActive').checked = user.is_active;
 
         // Clear password fields for edit
         document.getElementById('password').value = '';
