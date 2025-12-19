@@ -492,3 +492,250 @@ class EmailAlertManager:
             return {'success': True, 'message': '✓ SMTP connection successful'}
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+
+# ============================================================================
+# User Invite Email
+# ============================================================================
+
+def send_user_invite_email(user):
+    """
+    Send welcome email to newly invited LDAP user
+
+    Args:
+        user: User object that was just invited
+
+    Returns:
+        bool: True if sent successfully, False otherwise
+    """
+    from app.models import Organization
+
+    try:
+        # Get user's organization
+        organization = Organization.query.get(user.organization_id)
+        if not organization:
+            return False
+
+        # Get SMTP config
+        smtp_config = organization.get_smtp_config()
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            # No SMTP configured, skip email
+            return False
+
+        # Build welcome email
+        subject = f"Welcome to SentriKat - {organization.display_name}"
+        html_body = _build_user_invite_email_html(user, organization)
+
+        # Send email
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=[user.email],
+            subject=subject,
+            html_body=html_body
+        )
+
+        return True
+
+    except Exception as e:
+        # Log but don't fail the invitation process
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to send invite email to {user.email}: {e}")
+        return False
+
+
+def _build_user_invite_email_html(user, organization):
+    """Build HTML email body for user invitation"""
+
+    role_descriptions = {
+        'super_admin': 'Super Administrator - Full system access',
+        'org_admin': 'Organization Administrator - Full organization access',
+        'manager': 'Manager - Can manage products and vulnerabilities',
+        'user': 'User - View-only access to vulnerabilities'
+    }
+
+    role_desc = role_descriptions.get(user.role, 'User')
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f9fafb;
+            margin: 0;
+            padding: 0;
+        }}
+        .container {{
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0 0 10px 0;
+            font-size: 28px;
+        }}
+        .header p {{
+            margin: 5px 0;
+            opacity: 0.9;
+            font-size: 16px;
+        }}
+        .content {{
+            padding: 40px 30px;
+        }}
+        .welcome-box {{
+            background: #f0f9ff;
+            border-left: 4px solid #3b82f6;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }}
+        .info-box {{
+            background: #f3f4f6;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }}
+        .info-box h3 {{
+            margin: 0 0 10px 0;
+            color: #1e40af;
+            font-size: 16px;
+        }}
+        .info-row {{
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }}
+        .info-row:last-child {{
+            border-bottom: none;
+        }}
+        .info-label {{
+            font-weight: 600;
+            width: 120px;
+            color: #6b7280;
+        }}
+        .info-value {{
+            flex: 1;
+            color: #111827;
+        }}
+        .button {{
+            display: inline-block;
+            background: #3b82f6;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-weight: 600;
+        }}
+        .footer {{
+            background: #f9fafb;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+        }}
+        .features {{
+            margin: 30px 0;
+        }}
+        .feature {{
+            padding: 10px 0;
+            display: flex;
+            align-items: flex-start;
+        }}
+        .feature-icon {{
+            color: #3b82f6;
+            margin-right: 10px;
+            font-size: 20px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ Welcome to SentriKat</h1>
+            <p>Vulnerability Management Platform</p>
+        </div>
+
+        <div class="content">
+            <div class="welcome-box">
+                <h2 style="margin: 0 0 10px 0; color: #1e40af;">Hello {user.full_name or user.username}!</h2>
+                <p style="margin: 0;">You've been granted access to SentriKat for <strong>{organization.display_name}</strong>.</p>
+            </div>
+
+            <p>You can now log in using your Active Directory credentials to access the vulnerability management platform.</p>
+
+            <div class="info-box">
+                <h3>Your Account Details</h3>
+                <div class="info-row">
+                    <div class="info-label">Username:</div>
+                    <div class="info-value"><strong>{user.username}</strong></div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Email:</div>
+                    <div class="info-value">{user.email}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Role:</div>
+                    <div class="info-value">{role_desc}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Organization:</div>
+                    <div class="info-value">{organization.display_name}</div>
+                </div>
+            </div>
+
+            <div style="text-align: center;">
+                <a href="https://your-sentrikat-url.com/login" class="button">Login to SentriKat</a>
+            </div>
+
+            <div class="features">
+                <h3 style="color: #1e40af; margin-bottom: 15px;">What you can do with SentriKat:</h3>
+                <div class="feature">
+                    <div class="feature-icon">✓</div>
+                    <div>Monitor CISA KEV (Known Exploited Vulnerabilities) affecting your products</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">✓</div>
+                    <div>Track and acknowledge critical vulnerabilities in real-time</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">✓</div>
+                    <div>Receive automated email alerts for critical threats</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">✓</div>
+                    <div>Filter and prioritize vulnerabilities by severity and impact</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">✓</div>
+                    <div>Share vulnerability views with stakeholders</div>
+                </div>
+            </div>
+
+            <p style="margin-top: 30px; color: #6b7280; font-size: 14px;">
+                <strong>Note:</strong> Use your Active Directory credentials to log in. No separate password is required.
+            </p>
+        </div>
+
+        <div class="footer">
+            <p>This is an automated message from SentriKat</p>
+            <p>© {datetime.now().year} {organization.display_name} - Vulnerability Management</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    return html
