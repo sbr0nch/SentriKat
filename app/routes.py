@@ -301,19 +301,52 @@ def remove_product_organization(product_id, org_id):
     org = Organization.query.get_or_404(org_id)
 
     try:
+        removed = False
+
+        # Check many-to-many relationship
         if org in product.organizations.all():
             product.organizations.remove(org)
+            removed = True
+
+        # Also check legacy organization_id
+        if product.organization_id == org_id:
+            product.organization_id = None
+            removed = True
+
+        if not removed:
+            return jsonify({'error': 'Organization not assigned to this product'}), 404
+
+        db.session.commit()
+
+        # Send email notification
+        try:
+            send_product_assignment_notification(product, org, 'removed')
+        except Exception as e:
+            print(f"Failed to send notification to {org.name}: {str(e)}")
+
+        # Check if product has any organizations left
+        remaining_orgs = product.organizations.count()
+        has_legacy_org = product.organization_id is not None
+
+        # If no organizations left, delete the product entirely
+        if remaining_orgs == 0 and not has_legacy_org:
+            # Delete associated vulnerability matches first
+            VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+
+            db.session.delete(product)
             db.session.commit()
 
-            # Send email notification
-            try:
-                send_product_assignment_notification(product, org, 'removed')
-            except Exception as e:
-                print(f"Failed to send notification to {org.name}: {str(e)}")
+            return jsonify({
+                'success': True,
+                'message': f'Organization removed. Product deleted (no organizations remaining).',
+                'product_deleted': True
+            })
 
-            return jsonify({'success': True, 'message': f'Organization {org.display_name} removed from product'})
-        else:
-            return jsonify({'error': 'Organization not assigned to this product'}), 404
+        return jsonify({
+            'success': True,
+            'message': f'Organization {org.display_name} removed from product',
+            'product_deleted': False
+        })
 
     except Exception as e:
         db.session.rollback()

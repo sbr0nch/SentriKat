@@ -1261,7 +1261,19 @@
 
             if (response.ok) {
                 showToast(data.message || 'Organization removed successfully', 'success');
-                await loadAssignedOrganizations(currentOrgProductId);
+
+                // If product was deleted (no orgs left), close the modal
+                if (data.product_deleted) {
+                    const modalElement = document.getElementById('orgManagementModal');
+                    const modal = bootstrap.Modal.getInstance(modalElement);
+                    if (modal) {
+                        modal.hide();
+                    }
+                } else {
+                    // Just reload the org list
+                    await loadAssignedOrganizations(currentOrgProductId);
+                }
+
                 loadProducts(); // Refresh product list
             } else {
                 showToast(data.error || 'Failed to remove organization', 'danger');
