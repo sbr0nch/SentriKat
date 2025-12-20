@@ -111,43 +111,6 @@ def create_initial_organization():
             org.smtp_use_tls = data.get('smtp_use_tls', True)
 
         db.session.add(org)
-        db.session.flush()  # Get org.id without committing yet
-
-        # Save proxy settings if provided
-        if data.get('proxy_enabled'):
-            from app.models import SystemSettings
-
-            # Build proxy URL
-            proxy_protocol = data.get('proxy_protocol', 'http')
-            proxy_server = data.get('proxy_server')
-            proxy_port = data.get('proxy_port', '8080')
-            proxy_username = data.get('proxy_username', '')
-            proxy_password = data.get('proxy_password', '')
-
-            if proxy_server:
-                # Create proxy URL with or without auth
-                if proxy_username and proxy_password:
-                    proxy_url = f"{proxy_protocol}://{proxy_username}:{proxy_password}@{proxy_server}:{proxy_port}"
-                else:
-                    proxy_url = f"{proxy_protocol}://{proxy_server}:{proxy_port}"
-
-                # Save to system settings
-                proxy_settings = [
-                    SystemSettings(key='proxy_enabled', value='true'),
-                    SystemSettings(key='proxy_url', value=proxy_url),
-                    SystemSettings(key='proxy_server', value=proxy_server),
-                    SystemSettings(key='proxy_port', value=str(proxy_port)),
-                    SystemSettings(key='proxy_protocol', value=proxy_protocol),
-                ]
-
-                if proxy_username:
-                    proxy_settings.append(SystemSettings(key='proxy_username', value=proxy_username))
-                if proxy_password:
-                    proxy_settings.append(SystemSettings(key='proxy_password', value=proxy_password))
-
-                for setting in proxy_settings:
-                    db.session.add(setting)
-
         db.session.commit()
 
         # Set in session
@@ -232,6 +195,57 @@ def create_admin_user():
             'success': True,
             'user': admin.to_dict()
         }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@setup_bp.route('/api/setup/save-proxy', methods=['POST'])
+def save_proxy_settings():
+    """Save proxy settings to system settings"""
+    try:
+        from app.models import SystemSettings
+        data = request.get_json()
+
+        proxy_server = data.get('proxy_server', '').strip()
+        proxy_port = data.get('proxy_port', '8080')
+        proxy_username = data.get('proxy_username', '').strip()
+        proxy_password = data.get('proxy_password', '')
+
+        if not proxy_server:
+            return jsonify({'error': 'Proxy server is required'}), 400
+
+        # Build proxy URL
+        if proxy_username and proxy_password:
+            proxy_url = f"http://{proxy_username}:{proxy_password}@{proxy_server}:{proxy_port}"
+        else:
+            proxy_url = f"http://{proxy_server}:{proxy_port}"
+
+        # Delete existing proxy settings
+        SystemSettings.query.filter(SystemSettings.key.like('proxy_%')).delete()
+
+        # Save new proxy settings
+        proxy_settings = [
+            SystemSettings(key='proxy_enabled', value='true'),
+            SystemSettings(key='proxy_url', value=proxy_url),
+            SystemSettings(key='proxy_server', value=proxy_server),
+            SystemSettings(key='proxy_port', value=str(proxy_port)),
+        ]
+
+        if proxy_username:
+            proxy_settings.append(SystemSettings(key='proxy_username', value=proxy_username))
+        if proxy_password:
+            proxy_settings.append(SystemSettings(key='proxy_password', value=proxy_password))
+
+        for setting in proxy_settings:
+            db.session.add(setting)
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Proxy settings saved'
+        })
 
     except Exception as e:
         db.session.rollback()

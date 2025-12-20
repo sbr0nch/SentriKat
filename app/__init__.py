@@ -41,7 +41,8 @@ def create_app(config_class=Config):
         current_user = None
         if 'user_id' in session:
             current_user = User.query.get(session['user_id'])
-        auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+        # Match auth.py: AUTH_ENABLED = DISABLE_AUTH != 'true'
+        auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
         return dict(current_user=current_user, auth_enabled=auth_enabled)
 
     # Setup wizard redirect
