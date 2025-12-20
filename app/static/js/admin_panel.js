@@ -303,16 +303,8 @@ function showToast(message, type = 'info') {
 // INITIALIZATION
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', function() {
-    // Load initial data if on admin panel page
-    if (document.getElementById('usersTable')) {
-        loadUsers();
-    }
-    if (document.getElementById('organizationsTable')) {
-        loadOrganizations();
-    }
-
-    // Handle hash-based tab activation (for deep linking from dropdown menu)
+// Function to activate tab based on URL hash
+function activateTabFromHash() {
     const hash = window.location.hash;
     if (hash) {
         const tabId = hash.substring(1); // Remove the # symbol
@@ -323,4 +315,20 @@ document.addEventListener('DOMContentLoaded', function() {
             tab.show();
         }
     }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Load initial data if on admin panel page
+    if (document.getElementById('usersTable')) {
+        loadUsers();
+    }
+    if (document.getElementById('organizationsTable')) {
+        loadOrganizations();
+    }
+
+    // Handle hash-based tab activation on page load
+    activateTabFromHash();
+
+    // Listen for hash changes (when clicking dropdown links while already on page)
+    window.addEventListener('hashchange', activateTabFromHash);
 });
