@@ -598,8 +598,13 @@
             console.error('Error loading organizations:', error);
         }
 
-        // Show modal
-        new bootstrap.Modal(document.getElementById('serviceCatalogModal')).show();
+        // Show modal - reuse existing instance or create new one
+        const modalElement = document.getElementById('serviceCatalogModal');
+        let modal = bootstrap.Modal.getInstance(modalElement);
+        if (!modal) {
+            modal = new bootstrap.Modal(modalElement);
+        }
+        modal.show();
     }
 
     async function loadServiceCatalog() {
@@ -1116,8 +1121,12 @@
             // Load all organizations
             await loadAllOrganizations();
 
-            // Show modal
-            const modal = new bootstrap.Modal(document.getElementById('orgManagementModal'));
+            // Show modal - reuse existing instance or create new one
+            const modalElement = document.getElementById('orgManagementModal');
+            let modal = bootstrap.Modal.getInstance(modalElement);
+            if (!modal) {
+                modal = new bootstrap.Modal(modalElement);
+            }
             modal.show();
         } catch (error) {
             showToast(`Error loading organizations: ${error.message}`, 'danger');
@@ -1200,7 +1209,14 @@
 
     function showConfirmation(message, onConfirm) {
         document.getElementById('confirmationMessage').textContent = message;
-        const modal = new bootstrap.Modal(document.getElementById('confirmationModal'));
+
+        // Reuse existing modal instance or create new one
+        const modalElement = document.getElementById('confirmationModal');
+        let modal = bootstrap.Modal.getInstance(modalElement);
+        if (!modal) {
+            modal = new bootstrap.Modal(modalElement);
+        }
+
         const confirmBtn = document.getElementById('confirmActionBtn');
 
         // Remove any existing event listeners by cloning the button

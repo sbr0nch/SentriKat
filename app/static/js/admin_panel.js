@@ -306,13 +306,21 @@ function showToast(message, type = 'info') {
 // Function to activate tab based on URL hash
 function activateTabFromHash() {
     const hash = window.location.hash;
+    console.log('Hash detected:', hash);
+
     if (hash) {
         const tabId = hash.substring(1); // Remove the # symbol
-        const tabButton = document.getElementById(tabId + '-tab');
+        const tabButtonId = tabId + '-tab';
+        console.log('Looking for tab button:', tabButtonId);
+
+        const tabButton = document.getElementById(tabButtonId);
         if (tabButton) {
+            console.log('Tab button found, activating tab');
             // Activate the tab
             const tab = new bootstrap.Tab(tabButton);
             tab.show();
+        } else {
+            console.warn('Tab button not found:', tabButtonId);
         }
     }
 }
