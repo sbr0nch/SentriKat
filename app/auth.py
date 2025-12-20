@@ -123,10 +123,93 @@ def login():
     if not AUTH_ENABLED:
         return redirect(url_for('main.index'))
 
+    # Check if setup is needed (no users exist)
+    if User.query.count() == 0:
+        return redirect(url_for('auth.setup'))
+
     if 'user_id' in session:
         return redirect(url_for('main.index'))
 
     return render_template('login.html')
+
+@auth_bp.route('/setup', methods=['GET'])
+def setup():
+    """First-time setup wizard"""
+    # Only allow if no users exist
+    if User.query.count() > 0:
+        return redirect(url_for('auth.login'))
+
+    return render_template('setup.html')
+
+@auth_bp.route('/api/auth/setup', methods=['POST'])
+def api_setup():
+    """Handle first-time setup"""
+    # Only allow if no users exist
+    if User.query.count() > 0:
+        return jsonify({'error': 'Setup already completed'}), 400
+
+    data = request.get_json()
+
+    # Validate required fields
+    required = ['username', 'password', 'email', 'organization_name']
+    for field in required:
+        if not data.get(field):
+            return jsonify({'error': f'{field} is required'}), 400
+
+    try:
+        # Create default organization
+        org = Organization(
+            name=data['organization_name'].lower().replace(' ', '_'),
+            display_name=data['organization_name'],
+            description='Default organization',
+            active=True
+        )
+        db.session.add(org)
+        db.session.flush()  # Get org.id
+
+        # Create super admin user
+        user = User(
+            username=data['username'],
+            email=data['email'],
+            full_name=data.get('full_name', data['username']),
+            role='super_admin',
+            is_admin=True,
+            is_active=True,
+            auth_type='local',
+            organization_id=org.id,
+            can_view_all_orgs=True
+        )
+        user.set_password(data['password'])
+        db.session.add(user)
+
+        # Save proxy settings if provided
+        if data.get('proxy_enabled') and data.get('proxy_server'):
+            from app.models import SystemSettings
+
+            proxy_settings = [
+                ('proxy_enabled', 'true'),
+                ('proxy_server', data['proxy_server']),
+                ('proxy_port', str(data.get('proxy_port', '8080'))),
+                ('proxy_username', data.get('proxy_username', '')),
+                ('proxy_password', data.get('proxy_password', ''))
+            ]
+
+            for key, value in proxy_settings:
+                setting = SystemSettings(key=key, value=value)
+                db.session.add(setting)
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Setup completed successfully',
+            'redirect': url_for('auth.login')
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Setup failed: {str(e)}'}), 500
+
 
 @auth_bp.route('/api/auth/login', methods=['POST'])
 def api_login():

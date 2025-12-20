@@ -151,6 +151,7 @@ def create_admin_user():
             # Update existing user instead of error
             existing.email = data.get('email', existing.email)
             existing.full_name = data.get('full_name', existing.full_name)
+            existing.role = 'super_admin'
             existing.is_admin = True
             existing.is_active = True
             existing.can_manage_products = True
@@ -175,6 +176,7 @@ def create_admin_user():
             username=data['username'],
             email=data.get('email', f"{data['username']}@localhost"),
             full_name=data.get('full_name', 'System Administrator'),
+            role='super_admin',
             is_admin=True,
             is_active=True,
             auth_type='local',
