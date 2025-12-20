@@ -265,6 +265,55 @@
                         <strong>Note:</strong> You can configure SMTP settings later in the organization settings.
                     </div>
 
+                    <!-- Proxy Configuration -->
+                    <hr class="my-4">
+                    <h5><i class="bi bi-globe"></i> Proxy Configuration <span class="optional-badge">OPTIONAL</span></h5>
+                    <p class="text-muted small">Configure if your network requires a proxy for CVE downloads</p>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="proxy_enabled">
+                            <label class="form-check-label" for="proxy_enabled">
+                                Use HTTP/HTTPS Proxy
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="proxyFields" style="display: none;">
+                        <div class="mb-3">
+                            <label for="proxy_server" class="form-label">Proxy Server *</label>
+                            <input type="text" class="form-control" id="proxy_server"
+                                   placeholder="proxy.company.com or 192.168.1.10">
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="proxy_port" class="form-label">Proxy Port *</label>
+                                <input type="number" class="form-control" id="proxy_port"
+                                       placeholder="8080" value="8080">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="proxy_protocol" class="form-label">Protocol</label>
+                                <select class="form-control" id="proxy_protocol">
+                                    <option value="http">HTTP</option>
+                                    <option value="https">HTTPS</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="proxy_username" class="form-label">Username <span class="optional-badge">OPTIONAL</span></label>
+                            <input type="text" class="form-control" id="proxy_username"
+                                   placeholder="Leave blank if no authentication required">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="proxy_password" class="form-label">Password <span class="optional-badge">OPTIONAL</span></label>
+                            <input type="password" class="form-control" id="proxy_password"
+                                   placeholder="Leave blank if no authentication required">
+                        </div>
+                    </div>
+
                     <div class="text-center mt-4">
                         <button type="button" class="btn btn-secondary me-2" onclick="previousStep()">
                             <i class="bi bi-arrow-left"></i> Back
@@ -504,6 +553,12 @@
         }
 
         // Create Organization
+        // Toggle proxy fields visibility
+        document.getElementById('proxy_enabled').addEventListener('change', function() {
+            const proxyFields = document.getElementById('proxyFields');
+            proxyFields.style.display = this.checked ? 'block' : 'none';
+        });
+
         document.getElementById('orgForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             clearAlert();
@@ -515,15 +570,29 @@
             const emails = document.getElementById('org_emails').value;
             const emailArray = emails ? emails.split(',').map(e => e.trim()).filter(e => e) : [];
 
+            // Collect form data
+            const orgData = {
+                display_name: document.getElementById('org_display_name').value,
+                description: document.getElementById('org_description').value,
+                notification_emails: JSON.stringify(emailArray)
+            };
+
+            // Add proxy settings if enabled
+            const proxyEnabled = document.getElementById('proxy_enabled').checked;
+            if (proxyEnabled) {
+                orgData.proxy_enabled = true;
+                orgData.proxy_server = document.getElementById('proxy_server').value;
+                orgData.proxy_port = document.getElementById('proxy_port').value;
+                orgData.proxy_protocol = document.getElementById('proxy_protocol').value;
+                orgData.proxy_username = document.getElementById('proxy_username').value;
+                orgData.proxy_password = document.getElementById('proxy_password').value;
+            }
+
             try {
                 const response = await fetch('/api/setup/create-organization', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        display_name: document.getElementById('org_display_name').value,
-                        description: document.getElementById('org_description').value,
-                        notification_emails: JSON.stringify(emailArray)
-                    })
+                    body: JSON.stringify(orgData)
                 });
 
                 const data = await response.json();
