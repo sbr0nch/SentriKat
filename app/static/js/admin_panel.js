@@ -311,4 +311,16 @@ document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('organizationsTable')) {
         loadOrganizations();
     }
+
+    // Handle hash-based tab activation (for deep linking from dropdown menu)
+    const hash = window.location.hash;
+    if (hash) {
+        const tabId = hash.substring(1); // Remove the # symbol
+        const tabButton = document.getElementById(tabId + '-tab');
+        if (tabButton) {
+            // Activate the tab
+            const tab = new bootstrap.Tab(tabButton);
+            tab.show();
+        }
+    }
 });

@@ -571,9 +571,16 @@
 
     // Service Catalog Functions
     async function showServiceCatalog() {
+        // Clear previous selection state
+        selectedCatalogItems.clear();
+        updateCatalogSelectionUI();
+
         // Load catalog if not already loaded
         if (serviceCatalog.length === 0) {
             await loadServiceCatalog();
+        } else {
+            // Re-render to clear visual checkboxes
+            renderCatalog(serviceCatalog);
         }
 
         // Load organizations into dropdown
@@ -582,8 +589,9 @@
             if (response.ok) {
                 const orgs = await response.json();
                 const select = document.getElementById('catalogOrgSelect');
-                select.innerHTML = '<option value="">Assign to Organization (optional)</option>' +
-                    orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+                select.innerHTML = orgs.map(org =>
+                    `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`
+                ).join('');
             }
         } catch (error) {
             console.error('Error loading organizations:', error);
