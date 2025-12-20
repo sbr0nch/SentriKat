@@ -70,11 +70,11 @@ def create_product():
         org_id = default_org.id if default_org else None
 
     # Check for duplicate product
-    target_org_id = data.get('organization_id', org_id)
+    # For multi-org support, check if product exists globally (regardless of org)
+    # since products can now be assigned to multiple organizations
     version = data.get('version')
 
     duplicate_query = Product.query.filter_by(
-        organization_id=target_org_id,
         vendor=data['vendor'],
         product_name=data['product_name']
     )
@@ -89,7 +89,7 @@ def create_product():
 
     if existing_product:
         return jsonify({
-            'error': 'A product with the same vendor, name, and version already exists for this organization'
+            'error': 'A product with the same vendor, name, and version already exists. You can assign it to additional organizations from the product list.'
         }), 409
 
     product = Product(
@@ -133,16 +133,15 @@ def update_product(product_id):
     data = request.get_json()
 
     # Check for duplicate product if vendor, product_name, or version is being updated
+    # For multi-org support, check globally (not just within one org)
     if 'vendor' in data or 'product_name' in data or 'version' in data:
         new_vendor = data.get('vendor', product.vendor)
         new_product_name = data.get('product_name', product.product_name)
         new_version = data.get('version', product.version)
-        target_org_id = data.get('organization_id', product.organization_id)
 
         # Query for existing products with same details (excluding current product)
         duplicate_query = Product.query.filter(
             Product.id != product_id,
-            Product.organization_id == target_org_id,
             Product.vendor == new_vendor,
             Product.product_name == new_product_name
         )
@@ -157,7 +156,7 @@ def update_product(product_id):
 
         if existing_product:
             return jsonify({
-                'error': 'A product with the same vendor, name, and version already exists for this organization'
+                'error': 'A product with the same vendor, name, and version already exists. Products are unique globally.'
             }), 409
 
     if 'vendor' in data:
