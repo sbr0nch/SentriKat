@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # MailHog - SMTP testing server with web UI
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: sentrikat-mailhog
+    ports:
+      - "1025:1025"   # SMTP server
+      - "8025:8025"   # Web UI
+    networks:
+      - sentrikat-test
+
+  # OpenLDAP - LDAP testing server
+  openldap:
+    image: osixia/openldap:latest
+    container_name: sentrikat-ldap
+    environment:
+      LDAP_ORGANISATION: "SentriKat Test"
+      LDAP_DOMAIN: "sentrikat.local"
+      LDAP_ADMIN_PASSWORD: "admin123"
+      LDAP_CONFIG_PASSWORD: "config123"
+      LDAP_RFC2307BIS_SCHEMA: "true"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "true"
+      LDAP_TLS: "false"
+    ports:
+      - "389:389"     # LDAP
+      - "636:636"     # LDAPS
+    volumes:
+      - ldap-data:/var/lib/ldap
+      - ldap-config:/etc/ldap/slapd.d
+    networks:
+      - sentrikat-test
+
+  # phpLDAPadmin - Web UI for managing LDAP
+  phpldapadmin:
+    image: osixia/phpldapadmin:latest
+    container_name: sentrikat-ldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8080:80"
+    depends_on:
+      - openldap
+    networks:
+      - sentrikat-test
+
+networks:
+  sentrikat-test:
+    driver: bridge
+
+volumes:
+  ldap-data:
+  ldap-config:
