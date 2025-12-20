@@ -4,7 +4,7 @@ from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Orga
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
-from app.auth import admin_required, login_required
+from app.auth import admin_required, login_required, org_admin_required
 import json
 
 bp = Blueprint('main', __name__)
