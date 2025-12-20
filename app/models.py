@@ -3,6 +3,13 @@ from app import db
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 
+# Association table for many-to-many relationship between products and organizations
+product_organizations = db.Table('product_organizations',
+    db.Column('product_id', db.Integer, db.ForeignKey('products.id'), primary_key=True),
+    db.Column('organization_id', db.Integer, db.ForeignKey('organizations.id'), primary_key=True),
+    db.Column('assigned_at', db.DateTime, default=datetime.utcnow)
+)
+
 class Organization(db.Model):
     """Represents a team, vault, or organizational unit with separate settings"""
     __tablename__ = 'organizations'
@@ -93,13 +100,25 @@ class Product(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    organization = db.relationship('Organization', backref='products')
+    organization = db.relationship('Organization', backref='products')  # Legacy single org (deprecated)
+    organizations = db.relationship('Organization', secondary=product_organizations, backref='assigned_products', lazy='dynamic')  # Multi-org support
     catalog_entry = db.relationship('ServiceCatalog', backref='deployed_instances')
 
     def to_dict(self):
+        # Get assigned organizations
+        assigned_orgs = [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
+                         for org in self.organizations.all()]
+
+        # Include legacy organization_id for backwards compatibility
+        if self.organization_id and not assigned_orgs:
+            # If using legacy single org, add it to the list
+            if self.organization:
+                assigned_orgs = [{'id': self.organization.id, 'name': self.organization.name, 'display_name': self.organization.display_name}]
+
         return {
             'id': self.id,
-            'organization_id': self.organization_id,
+            'organization_id': self.organization_id,  # Legacy field
+            'organizations': assigned_orgs,  # New multi-org field
             'service_catalog_id': self.service_catalog_id,
             'vendor': self.vendor,
             'product_name': self.product_name,

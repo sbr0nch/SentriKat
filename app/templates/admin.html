@@ -46,11 +46,8 @@
     </div>
 
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header">
             <span><i class="bi bi-list-ul me-2"></i>Product Inventory</span>
-            <button class="btn btn-sm btn-outline-secondary" onclick="toggleSelectAll()">
-                <i class="bi bi-check-square me-1"></i>Select All
-            </button>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -253,6 +250,50 @@
         </div>
     </div>
 </div>
+
+<!-- Organization Management Modal -->
+<div class="modal fade" id="orgManagementModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-building me-2"></i>Manage Organizations
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <p class="text-muted">Product: <strong id="orgModalProductName"></strong></p>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Assigned Organizations</label>
+                    <div id="assignedOrgsList" class="border rounded p-2" style="min-height: 100px; max-height: 200px; overflow-y: auto;">
+                        <div class="text-center text-muted py-3">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Add Organizations</label>
+                    <select class="form-select" id="addOrgSelect" multiple size="5">
+                        <option value="">Loading...</option>
+                    </select>
+                    <small class="text-muted">Hold Ctrl/Cmd to select multiple organizations</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" onclick="assignOrganizations()">
+                    <i class="bi bi-check-circle me-1"></i>Assign Selected
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -286,13 +327,22 @@
                         ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
                         : '<span class="badge bg-secondary"><i class="bi bi-pause-circle"></i> Inactive</span>';
 
-                    const orgDisplay = product.organization_name
-                        ? `<span class="badge bg-primary">${escapeHtml(product.organization_name)}</span>`
-                        : '<span class="text-muted">-</span>';
+                    // Display multiple organizations
+                    let orgDisplay;
+                    if (product.organizations && product.organizations.length > 0) {
+                        orgDisplay = product.organizations.map(org =>
+                            `<span class="badge bg-primary me-1">${escapeHtml(org.display_name)}</span>`
+                        ).join('');
+                    } else if (product.organization_name) {
+                        // Legacy single org support
+                        orgDisplay = `<span class="badge bg-primary">${escapeHtml(product.organization_name)}</span>`;
+                    } else {
+                        orgDisplay = '<span class="text-muted">-</span>';
+                    }
 
                     return `
-                        <tr>
-                            <td>
+                        <tr onclick="toggleProductRow(${product.id}, event)" style="cursor: pointer;">
+                            <td onclick="event.stopPropagation();">
                                 <input type="checkbox" class="form-check-input product-checkbox"
                                        data-product-id="${product.id}"
                                        onchange="toggleProductSelect(${product.id}, this)">
@@ -303,10 +353,13 @@
                             <td>${orgDisplay}</td>
                             <td>${criticalityBadge}</td>
                             <td>${statusBadge}</td>
-                            <td>
+                            <td onclick="event.stopPropagation();">
                                 <div class="btn-group btn-group-sm" role="group">
                                     <button class="btn btn-outline-primary" onclick="editProduct(${product.id})" title="Edit">
                                         <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-outline-info" onclick="manageOrganizations(${product.id})" title="Manage Organizations">
+                                        <i class="bi bi-building"></i>
                                     </button>
                                     <button class="btn btn-outline-danger" onclick="deleteProduct(${product.id}, '${escapeHtml(product.vendor)} ${escapeHtml(product.product_name)}')" title="Delete">
                                         <i class="bi bi-trash"></i>
@@ -720,8 +773,10 @@
             // Close catalog modal
             bootstrap.Modal.getInstance(document.getElementById('serviceCatalogModal')).hide();
 
-            // Show success toast
-            showToast('✓ Service selected from catalog', 'success');
+            // Automatically save the product and close the form modal
+            setTimeout(async () => {
+                await saveProduct();
+            }, 300);
         } catch (error) {
             showToast(`Error loading service: ${error.message}`, 'danger');
         }
@@ -790,6 +845,15 @@
             selectedProducts.delete(productId);
         }
         updateBulkToolbar();
+    }
+
+    function toggleProductRow(productId, event) {
+        if (event) event.stopPropagation();
+        const checkbox = document.querySelector(`.product-checkbox[data-product-id="${productId}"]`);
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            toggleProductSelect(productId, checkbox);
+        }
     }
 
     function toggleSelectAll() {
@@ -957,6 +1021,136 @@
             showToast(`✓ ${selectedProducts.size} product(s) deleted`, 'success');
             clearSelection();
             loadProducts();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Organization management functions
+    let currentOrgProductId = null;
+    let currentOrgProductName = '';
+    let allOrganizations = [];
+
+    async function manageOrganizations(productId) {
+        currentOrgProductId = productId;
+
+        // Get product details
+        try {
+            const productResponse = await fetch(`/api/products/${productId}`);
+            const product = await productResponse.json();
+            currentOrgProductName = `${product.vendor} ${product.product_name}`;
+            document.getElementById('orgModalProductName').textContent = currentOrgProductName;
+
+            // Load assigned organizations
+            await loadAssignedOrganizations(productId);
+
+            // Load all organizations
+            await loadAllOrganizations();
+
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('orgManagementModal'));
+            modal.show();
+        } catch (error) {
+            showToast(`Error loading organizations: ${error.message}`, 'danger');
+        }
+    }
+
+    async function loadAssignedOrganizations(productId) {
+        const container = document.getElementById('assignedOrgsList');
+        container.innerHTML = '<div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+
+        try {
+            const response = await fetch(`/api/products/${productId}/organizations`);
+            const data = await response.json();
+            const assignedOrgs = data.organizations || [];
+
+            if (assignedOrgs.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted py-3">No organizations assigned</div>';
+            } else {
+                container.innerHTML = assignedOrgs.map(org => `
+                    <div class="d-flex justify-content-between align-items-center p-2 border-bottom">
+                        <span><i class="bi bi-building text-primary me-2"></i>${escapeHtml(org.display_name)}</span>
+                        <button class="btn btn-sm btn-outline-danger" onclick="removeOrganization(${org.id})">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            container.innerHTML = '<div class="text-center text-danger py-3">Error loading assigned organizations</div>';
+        }
+    }
+
+    async function loadAllOrganizations() {
+        try {
+            const response = await fetch('/api/organizations');
+            allOrganizations = await response.json();
+
+            const select = document.getElementById('addOrgSelect');
+            select.innerHTML = allOrganizations.map(org =>
+                `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`
+            ).join('');
+        } catch (error) {
+            showToast(`Error loading organizations: ${error.message}`, 'danger');
+        }
+    }
+
+    async function assignOrganizations() {
+        const select = document.getElementById('addOrgSelect');
+        const selectedOptions = Array.from(select.selectedOptions);
+        const orgIds = selectedOptions.map(opt => parseInt(opt.value));
+
+        if (orgIds.length === 0) {
+            showToast('Please select at least one organization', 'warning');
+            return;
+        }
+
+        try {
+            showLoading();
+            const response = await fetch(`/api/products/${currentOrgProductId}/organizations`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ organization_ids: orgIds })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showToast(data.message || 'Organizations assigned successfully', 'success');
+                await loadAssignedOrganizations(currentOrgProductId);
+                loadProducts(); // Refresh product list
+            } else {
+                showToast(data.error || 'Failed to assign organizations', 'danger');
+            }
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function removeOrganization(orgId) {
+        if (!confirm('Remove this organization from the product? Org admins will be notified.')) {
+            return;
+        }
+
+        try {
+            showLoading();
+            const response = await fetch(`/api/products/${currentOrgProductId}/organizations/${orgId}`, {
+                method: 'DELETE'
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showToast(data.message || 'Organization removed successfully', 'success');
+                await loadAssignedOrganizations(currentOrgProductId);
+                loadProducts(); // Refresh product list
+            } else {
+                showToast(data.error || 'Failed to remove organization', 'danger');
+            }
         } catch (error) {
             showToast(`Error: ${error.message}`, 'danger');
         } finally {

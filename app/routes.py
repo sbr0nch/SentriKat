@@ -69,6 +69,29 @@ def create_product():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
+    # Check for duplicate product
+    target_org_id = data.get('organization_id', org_id)
+    version = data.get('version')
+
+    duplicate_query = Product.query.filter_by(
+        organization_id=target_org_id,
+        vendor=data['vendor'],
+        product_name=data['product_name']
+    )
+
+    # Only check version if it's provided
+    if version:
+        duplicate_query = duplicate_query.filter_by(version=version)
+    else:
+        duplicate_query = duplicate_query.filter(Product.version.is_(None))
+
+    existing_product = duplicate_query.first()
+
+    if existing_product:
+        return jsonify({
+            'error': 'A product with the same vendor, name, and version already exists for this organization'
+        }), 409
+
     product = Product(
         organization_id=data.get('organization_id', org_id),
         service_catalog_id=data.get('service_catalog_id'),
@@ -109,6 +132,34 @@ def update_product(product_id):
     product = Product.query.get_or_404(product_id)
     data = request.get_json()
 
+    # Check for duplicate product if vendor, product_name, or version is being updated
+    if 'vendor' in data or 'product_name' in data or 'version' in data:
+        new_vendor = data.get('vendor', product.vendor)
+        new_product_name = data.get('product_name', product.product_name)
+        new_version = data.get('version', product.version)
+        target_org_id = data.get('organization_id', product.organization_id)
+
+        # Query for existing products with same details (excluding current product)
+        duplicate_query = Product.query.filter(
+            Product.id != product_id,
+            Product.organization_id == target_org_id,
+            Product.vendor == new_vendor,
+            Product.product_name == new_product_name
+        )
+
+        # Check version match
+        if new_version:
+            duplicate_query = duplicate_query.filter_by(version=new_version)
+        else:
+            duplicate_query = duplicate_query.filter(Product.version.is_(None))
+
+        existing_product = duplicate_query.first()
+
+        if existing_product:
+            return jsonify({
+                'error': 'A product with the same vendor, name, and version already exists for this organization'
+            }), 409
+
     if 'vendor' in data:
         product.vendor = data['vendor']
     if 'product_name' in data:
@@ -148,7 +199,7 @@ def delete_product(product_id):
 
     # Store product info for audit log
     product_info = {
-        'name': product.name,
+        'name': product.product_name,
         'vendor': product.vendor,
         'version': product.version,
         'organization_id': product.organization_id
@@ -168,7 +219,7 @@ def delete_product(product_id):
             'products',
             product_id,
             old_value=product_info,
-            details=f"Deleted product {product.vendor} {product.name}"
+            details=f"Deleted product {product.vendor} {product.product_name}"
         )
 
         return jsonify({'success': True})
@@ -176,6 +227,98 @@ def delete_product(product_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
+@login_required
+def get_product_organizations(product_id):
+    """Get organizations assigned to a product"""
+    product = Product.query.get_or_404(product_id)
+
+    # Get assigned organizations from many-to-many relationship
+    assigned_orgs = [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
+                     for org in product.organizations.all()]
+
+    # Include legacy organization_id for backwards compatibility
+    if product.organization_id and not assigned_orgs:
+        if product.organization:
+            assigned_orgs = [{'id': product.organization.id, 'name': product.organization.name,
+                             'display_name': product.organization.display_name}]
+
+    return jsonify({'organizations': assigned_orgs})
+
+@bp.route('/api/products/<int:product_id>/organizations', methods=['POST'])
+@org_admin_required
+def assign_product_organizations(product_id):
+    """Assign product to multiple organizations"""
+    from app.email_service import send_product_assignment_notification
+
+    product = Product.query.get_or_404(product_id)
+    data = request.get_json()
+    org_ids = data.get('organization_ids', [])
+
+    if not org_ids:
+        return jsonify({'error': 'No organizations specified'}), 400
+
+    try:
+        added_orgs = []
+        for org_id in org_ids:
+            org = Organization.query.get(org_id)
+            if not org:
+                continue
+
+            # Check if already assigned
+            if org not in product.organizations.all():
+                product.organizations.append(org)
+                added_orgs.append(org)
+
+        db.session.commit()
+
+        # Send email notifications to org admins
+        for org in added_orgs:
+            try:
+                send_product_assignment_notification(product, org, 'assigned')
+            except Exception as e:
+                # Log but don't fail the request
+                print(f"Failed to send notification to {org.name}: {str(e)}")
+
+        return jsonify({
+            'success': True,
+            'message': f'Product assigned to {len(added_orgs)} organization(s)',
+            'organizations': [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
+                             for org in product.organizations.all()]
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/products/<int:product_id>/organizations/<int:org_id>', methods=['DELETE'])
+@org_admin_required
+def remove_product_organization(product_id, org_id):
+    """Remove an organization from a product"""
+    from app.email_service import send_product_assignment_notification
+
+    product = Product.query.get_or_404(product_id)
+    org = Organization.query.get_or_404(org_id)
+
+    try:
+        if org in product.organizations.all():
+            product.organizations.remove(org)
+            db.session.commit()
+
+            # Send email notification
+            try:
+                send_product_assignment_notification(product, org, 'removed')
+            except Exception as e:
+                print(f"Failed to send notification to {org.name}: {str(e)}")
+
+            return jsonify({'success': True, 'message': f'Organization {org.display_name} removed from product'})
+        else:
+            return jsonify({'error': 'Organization not assigned to this product'}), 404
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/vulnerabilities', methods=['GET'])
 @login_required
