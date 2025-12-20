@@ -253,8 +253,8 @@
     </div>
 </div>
 
-<!-- Confirmation Modal -->
-<div class="modal fade" id="confirmationModal" tabindex="-1">
+<!-- Confirmation Modal (higher z-index to appear above other modals) -->
+<div class="modal fade" id="confirmationModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
@@ -275,6 +275,16 @@
         </div>
     </div>
 </div>
+
+<style>
+/* Fix z-index for confirmation modal to appear above other modals */
+#confirmationModal {
+    z-index: 1060 !important;
+}
+.modal-backdrop.show:last-of-type {
+    z-index: 1055 !important;
+}
+</style>
 
 <!-- Organization Management Modal -->
 <div class="modal fade" id="orgManagementModal" tabindex="-1">
