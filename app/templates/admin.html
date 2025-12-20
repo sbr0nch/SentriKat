@@ -1108,6 +1108,11 @@
     async function manageOrganizations(productId) {
         currentOrgProductId = productId;
 
+        // Clean up any existing backdrops first
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('padding-right');
+
         // Get product details
         try {
             const productResponse = await fetch(`/api/products/${productId}`);
@@ -1121,12 +1126,18 @@
             // Load all organizations
             await loadAllOrganizations();
 
-            // Show modal - reuse existing instance or create new one
+            // Dispose of any existing modal instance and create fresh
             const modalElement = document.getElementById('orgManagementModal');
-            let modal = bootstrap.Modal.getInstance(modalElement);
-            if (!modal) {
-                modal = new bootstrap.Modal(modalElement);
+            const existingModal = bootstrap.Modal.getInstance(modalElement);
+            if (existingModal) {
+                existingModal.dispose();
             }
+
+            // Create and show new modal
+            const modal = new bootstrap.Modal(modalElement, {
+                backdrop: true,
+                keyboard: true
+            });
             modal.show();
         } catch (error) {
             showToast(`Error loading organizations: ${error.message}`, 'danger');

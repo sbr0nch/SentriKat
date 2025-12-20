@@ -476,17 +476,17 @@
                             </li>
                             <li><hr class="dropdown-divider"></li>
                             <li>
-                                <a class="dropdown-item" href="/admin-panel#users">
+                                <a class="dropdown-item" href="#" onclick="switchToAdminTab('users'); return false;">
                                     <i class="bi bi-people me-2"></i>User Management
                                 </a>
                             </li>
                             <li>
-                                <a class="dropdown-item" href="/admin-panel#organizations">
+                                <a class="dropdown-item" href="#" onclick="switchToAdminTab('organizations'); return false;">
                                     <i class="bi bi-building me-2"></i>Organizations
                                 </a>
                             </li>
                             <li>
-                                <a class="dropdown-item" href="/admin-panel#settings">
+                                <a class="dropdown-item" href="#" onclick="switchToAdminTab('settings'); return false;">
                                     <i class="bi bi-sliders me-2"></i>Settings
                                 </a>
                             </li>
@@ -651,6 +651,26 @@
             document.body.classList.remove('modal-open');
             // Reset body padding that Bootstrap adds
             document.body.style.removeProperty('padding-right');
+        }
+
+        /**
+         * Switch to a specific admin panel tab
+         * Used by the admin dropdown menu
+         */
+        function switchToAdminTab(tabId) {
+            // Check if we're on the admin panel page
+            if (window.location.pathname !== '/admin-panel') {
+                // Navigate to admin panel with hash
+                window.location.href = '/admin-panel#' + tabId;
+                return;
+            }
+
+            // We're already on the page, just switch the tab
+            const tabButton = document.getElementById(tabId + '-tab');
+            if (tabButton) {
+                const tab = new bootstrap.Tab(tabButton);
+                tab.show();
+            }
         }
 
         function showToast(message, type = 'success') {
