@@ -149,7 +149,8 @@ def get_smtp_settings():
         'smtp_username': get_setting('smtp_username', ''),
         'smtp_from_email': get_setting('smtp_from_email', ''),
         'smtp_from_name': get_setting('smtp_from_name', 'SentriKat Alerts'),
-        'smtp_use_tls': get_setting('smtp_use_tls', 'true') == 'true'
+        'smtp_use_tls': get_setting('smtp_use_tls', 'false') == 'true',
+        'smtp_use_ssl': get_setting('smtp_use_ssl', 'false') == 'true'
     }
     return jsonify(settings)
 
@@ -171,6 +172,7 @@ def save_smtp_settings():
         set_setting('smtp_from_email', data.get('smtp_from_email', ''), 'smtp', 'From email address')
         set_setting('smtp_from_name', data.get('smtp_from_name', 'SentriKat Alerts'), 'smtp', 'From name')
         set_setting('smtp_use_tls', 'true' if data.get('smtp_use_tls') else 'false', 'smtp', 'Use TLS/STARTTLS')
+        set_setting('smtp_use_ssl', 'true' if data.get('smtp_use_ssl') else 'false', 'smtp', 'Use SSL/TLS')
 
         return jsonify({'success': True, 'message': 'SMTP settings saved successfully'})
     except Exception as e:
@@ -202,7 +204,8 @@ def test_smtp_connection():
             'password': get_setting('smtp_password'),
             'from_email': get_setting('smtp_from_email'),
             'from_name': get_setting('smtp_from_name', 'SentriKat Alerts'),
-            'use_tls': get_setting('smtp_use_tls', 'true') == 'true'
+            'use_tls': get_setting('smtp_use_tls', 'false') == 'true',
+            'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true'
         }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
@@ -226,6 +229,7 @@ def test_smtp_connection():
             <li><strong>Server:</strong> {smtp_config['host']}:{smtp_config['port']}</li>
             <li><strong>From:</strong> {smtp_config['from_email']}</li>
             <li><strong>TLS Enabled:</strong> {'Yes' if smtp_config['use_tls'] else 'No'}</li>
+            <li><strong>SSL Enabled:</strong> {'Yes' if smtp_config['use_ssl'] else 'No'}</li>
             <li><strong>Test Recipient:</strong> {test_recipient}</li>
         </ul>
     </div>
@@ -242,12 +246,13 @@ def test_smtp_connection():
         """
         msg.attach(MIMEText(body, 'html'))
 
-        # Send email
-        if smtp_config['use_tls']:
-            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
-            server.starttls()
-        else:
+        # Send email - check SSL first, then plain SMTP with optional TLS
+        if smtp_config['use_ssl']:
             server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'])
+        else:
+            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
+            if smtp_config['use_tls']:
+                server.starttls()
 
         if smtp_config['username'] and smtp_config['password']:
             server.login(smtp_config['username'], smtp_config['password'])
