@@ -1459,6 +1459,12 @@ async function showInviteLdapUserModalInline(user) {
     document.getElementById('ldapInviteFullName').value = user.full_name || '';
     document.getElementById('ldapUserDN').value = user.dn;
 
+    // Set groups loading state
+    const groupsSpan = document.getElementById('ldapGroupsList');
+    if (groupsSpan) {
+        groupsSpan.textContent = 'Loading...';
+    }
+
     // Load organizations dropdown
     try {
         const response = await fetch('/api/organizations');
@@ -1472,6 +1478,53 @@ async function showInviteLdapUserModalInline(user) {
         }
     } catch (error) {
         console.error('Error loading organizations:', error);
+    }
+
+    // Load LDAP groups for this user
+    try {
+        // First check if user object has groups from search
+        if (user.groups && user.groups.length > 0) {
+            // Extract CN from DN format (e.g., "cn=GroupName,ou=Groups,..." -> "GroupName")
+            const groupNames = user.groups.map(g => {
+                const match = g.match(/^cn=([^,]+)/i);
+                return match ? match[1] : g;
+            });
+            if (groupsSpan) {
+                groupsSpan.textContent = groupNames.join(', ');
+            }
+        } else {
+            // Fetch groups from API
+            const groupsResponse = await fetch('/api/ldap/user-groups', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user.username })
+            });
+
+            if (groupsResponse.ok) {
+                const groupsData = await groupsResponse.json();
+                if (groupsSpan) {
+                    if (groupsData.groups && groupsData.groups.length > 0) {
+                        // Extract CN from DN format
+                        const groupNames = groupsData.groups.map(g => {
+                            const match = g.match(/^cn=([^,]+)/i);
+                            return match ? match[1] : g;
+                        });
+                        groupsSpan.textContent = groupNames.join(', ');
+                    } else {
+                        groupsSpan.textContent = 'No groups found';
+                    }
+                }
+            } else {
+                if (groupsSpan) {
+                    groupsSpan.textContent = 'Could not load groups';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading LDAP groups:', error);
+        if (groupsSpan) {
+            groupsSpan.textContent = 'Error loading groups';
+        }
     }
 
     const modal = new bootstrap.Modal(document.getElementById('ldapInviteModal'));
