@@ -66,8 +66,9 @@ class LDAPManager:
 
             # Build search filter
             if search_query and search_query != '*':
-                # Search for users matching the query
-                search_filter = f"(&(objectClass=person)(|(cn=*{search_query}*)(mail=*{search_query}*)(sAMAccountName=*{search_query}*)))"
+                # Search for users matching the query - use configured username attribute
+                username_attr = config['username_attr']
+                search_filter = f"(&(objectClass=person)(|(cn=*{search_query}*)(mail=*{search_query}*)({username_attr}=*{search_query}*)))"
             else:
                 # Get all users
                 search_filter = "(objectClass=person)"
