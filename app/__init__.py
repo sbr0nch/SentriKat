@@ -12,6 +12,9 @@ def create_app(config_class=Config):
                 template_folder='templates')
     app.config.from_object(config_class)
 
+    # Disable static file caching for development
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
     db.init_app(app)
     migrate.init_app(app, db)
 
