@@ -1043,6 +1043,7 @@ def toggle_user_active(user_id):
     - Org Admin: Can only toggle users in their organization (except super admins)
     """
     from app.logging_config import log_audit_event
+    from app.email_alerts import send_user_status_email
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -1058,11 +1059,12 @@ def toggle_user_active(user_id):
 
     old_status = user.is_active
     user.is_active = not user.is_active
+    is_blocked = not user.is_active
     action = 'unblocked' if user.is_active else 'blocked'
 
     # Log the action
     log_audit_event(
-        'BLOCK' if not user.is_active else 'UNBLOCK',
+        'BLOCK' if is_blocked else 'UNBLOCK',
         'users',
         user.id,
         old_value={'is_active': old_status},
@@ -1071,6 +1073,14 @@ def toggle_user_active(user_id):
     )
 
     db.session.commit()
+
+    # Send email notification to the user
+    try:
+        send_user_status_email(user, is_blocked, current_user.username)
+    except Exception as e:
+        # Log but don't fail the operation
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to send status email: {e}")
 
     return jsonify({
         'success': True,

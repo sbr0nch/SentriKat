@@ -1375,15 +1375,22 @@ function displayLDAPUserResults(page = 1) {
                 </thead>
                 <tbody>
                     ${pageResults.map(user => {
-                        const statusBadge = user.exists_in_db
-                            ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Invited</span>'
-                            : '<span class="badge bg-secondary">Not Invited</span>';
-
-                        const actionButton = user.exists_in_db
-                            ? '<button class="btn btn-sm btn-outline-secondary" disabled>Already Exists</button>'
-                            : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
+                        // Determine status badge based on exists_in_db and is_active
+                        let statusBadge, actionButton;
+                        if (user.exists_in_db && user.is_active) {
+                            statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>';
+                            actionButton = '<button class="btn btn-sm btn-outline-secondary" disabled>Already Active</button>';
+                        } else if (user.exists_in_db && !user.is_active) {
+                            statusBadge = '<span class="badge bg-warning"><i class="bi bi-pause-circle"></i> Blocked</span>';
+                            actionButton = `<button class="btn btn-sm btn-success" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
+                                   <i class="bi bi-arrow-clockwise me-1"></i>Reactivate
+                               </button>`;
+                        } else {
+                            statusBadge = '<span class="badge bg-secondary">Not Invited</span>';
+                            actionButton = `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
                                    <i class="bi bi-person-plus me-1"></i>Invite
                                </button>`;
+                        }
 
                         return `
                             <tr>
@@ -1527,15 +1534,22 @@ async function searchLdapUsersInline(page = 1) {
                     </thead>
                     <tbody>
                         ${pageResults.map(user => {
-                            const statusBadge = user.exists_in_db
-                                ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Invited</span>'
-                                : '<span class="badge bg-secondary">Not Invited</span>';
-
-                            const actionButton = user.exists_in_db
-                                ? '<button class="btn btn-sm btn-outline-secondary" disabled>Already Exists</button>'
-                                : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
+                            // Determine status badge based on exists_in_db and is_active
+                            let statusBadge, actionButton;
+                            if (user.exists_in_db && user.is_active) {
+                                statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>';
+                                actionButton = '<button class="btn btn-sm btn-outline-secondary" disabled>Already Active</button>';
+                            } else if (user.exists_in_db && !user.is_active) {
+                                statusBadge = '<span class="badge bg-warning"><i class="bi bi-pause-circle"></i> Blocked</span>';
+                                actionButton = `<button class="btn btn-sm btn-success" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
+                                       <i class="bi bi-arrow-clockwise me-1"></i>Reactivate
+                                   </button>`;
+                            } else {
+                                statusBadge = '<span class="badge bg-secondary">Not Invited</span>';
+                                actionButton = `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
                                        <i class="bi bi-person-plus me-1"></i>Invite
                                    </button>`;
+                            }
 
                             return `
                                 <tr>
@@ -1764,15 +1778,22 @@ async function searchLdapUsers() {
                     </thead>
                     <tbody>
                         ${results.users.map(user => {
-                            const statusBadge = user.exists_in_db
-                                ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Already Invited</span>'
-                                : '<span class="badge bg-secondary">Not Invited</span>';
-
-                            const actionButton = user.exists_in_db
-                                ? '<button class="btn btn-sm btn-secondary" disabled>Already Exists</button>'
-                                : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
+                            // Determine status badge based on exists_in_db and is_active
+                            let statusBadge, actionButton;
+                            if (user.exists_in_db && user.is_active) {
+                                statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>';
+                                actionButton = '<button class="btn btn-sm btn-secondary" disabled>Already Active</button>';
+                            } else if (user.exists_in_db && !user.is_active) {
+                                statusBadge = '<span class="badge bg-warning"><i class="bi bi-pause-circle"></i> Blocked</span>';
+                                actionButton = `<button class="btn btn-sm btn-success" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
+                                       <i class="bi bi-arrow-clockwise me-1"></i>Reactivate
+                                   </button>`;
+                            } else {
+                                statusBadge = '<span class="badge bg-secondary">Not Invited</span>';
+                                actionButton = `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
                                        <i class="bi bi-person-plus me-1"></i>Invite
                                    </button>`;
+                            }
 
                             return `
                                 <tr>

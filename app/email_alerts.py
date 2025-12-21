@@ -766,3 +766,143 @@ def _build_user_invite_email_html(user, organization):
 """
 
     return html
+
+
+# ============================================================================
+# User Status Change Emails (Block/Unblock)
+# ============================================================================
+
+def send_user_status_email(user, is_blocked, blocked_by_username=None):
+    """
+    Send email notification when a user is blocked or unblocked
+
+    Args:
+        user: User object whose status changed
+        is_blocked: True if user was blocked, False if unblocked
+        blocked_by_username: Username of admin who performed the action
+
+    Returns:
+        bool: True if sent successfully, False otherwise
+    """
+    from app.models import Organization, SystemSettings
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get user's organization
+        organization = Organization.query.get(user.organization_id)
+        if not organization:
+            logger.warning(f"No organization found for user {user.username}")
+            return False
+
+        # Try organization SMTP first, then fall back to global SMTP
+        smtp_config = organization.get_smtp_config()
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            # Try global SMTP settings
+            def get_setting(key, default=None):
+                setting = SystemSettings.query.filter_by(key=key).first()
+                return setting.value if setting else default
+
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587')),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat')
+            }
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            logger.warning(f"No SMTP configured - cannot send status email to {user.email}")
+            return False
+
+        action = "blocked" if is_blocked else "unblocked"
+        subject = f"SentriKat Account {action.title()} - {organization.display_name}"
+        html_body = _build_user_status_email_html(user, organization, is_blocked, blocked_by_username)
+
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=[user.email],
+            subject=subject,
+            html_body=html_body
+        )
+
+        logger.info(f"Status change email sent to {user.email} (account {action})")
+        return True
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to send status email to {user.email}: {e}")
+        return False
+
+
+def _build_user_status_email_html(user, organization, is_blocked, blocked_by_username=None):
+    """Build HTML email for user status change notification"""
+    from datetime import datetime
+
+    if is_blocked:
+        status_color = "#dc2626"
+        status_icon = "🚫"
+        status_text = "Account Blocked"
+        message = """
+            <p>Your SentriKat account has been <strong style="color: #dc2626;">blocked</strong> by an administrator.</p>
+            <p>You will not be able to log in to SentriKat until your account is unblocked.</p>
+            <p>If you believe this was done in error, please contact your organization administrator.</p>
+        """
+    else:
+        status_color = "#16a34a"
+        status_icon = "✅"
+        status_text = "Account Unblocked"
+        message = """
+            <p>Your SentriKat account has been <strong style="color: #16a34a;">unblocked</strong> and restored.</p>
+            <p>You can now log in to SentriKat and access the vulnerability management dashboard.</p>
+        """
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background: {status_color}; padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
+            <div style="font-size: 48px; margin-bottom: 10px;">{status_icon}</div>
+            <h1 style="color: white; margin: 0; font-size: 24px;">{status_text}</h1>
+        </div>
+
+        <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+            <p style="font-size: 16px; color: #374151;">Hello <strong>{user.full_name or user.username}</strong>,</p>
+
+            {message}
+
+            <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <div style="margin-bottom: 10px;">
+                    <strong>Username:</strong> {user.username}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Organization:</strong> {organization.display_name}
+                </div>
+                <div>
+                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </div>
+            </div>
+
+            {'<p style="color: #6b7280; font-size: 14px;">If your account was unblocked, you can log in using your Active Directory credentials.</p>' if not is_blocked else ''}
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>This is an automated message from SentriKat</p>
+            <p>© {datetime.now().year} {organization.display_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    return html
