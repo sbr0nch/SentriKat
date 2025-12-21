@@ -391,13 +391,13 @@ async function searchLdapUsersInline() {
                 ? `<small class="text-muted">${groupNames}${user.groups.length > 3 ? '...' : ''}</small>`
                 : `<small class="text-muted">None</small>`;
 
-            const actionButton = user.exists_in_db
-                ? `<button class="btn btn-sm btn-outline-secondary ldap-manage-btn" data-user-index="${index}">
-                       <i class="bi bi-gear me-1"></i>Manage
-                   </button>`
-                : `<button class="btn btn-sm btn-primary ldap-invite-btn" data-user-index="${index}">
-                       <i class="bi bi-envelope-plus me-1"></i>Invite
-                   </button>`;
+            const actionCell = user.exists_in_db
+                ? `<span class="badge bg-success">Invited</span>`
+                : `<div id="invite-cell-${index}">
+                       <button class="btn btn-sm btn-primary" onclick="showInviteForm(${index})">
+                           <i class="bi bi-envelope-plus me-1"></i>Invite
+                       </button>
+                   </div>`;
 
             tableHTML += `
                 <tr>
@@ -406,7 +406,7 @@ async function searchLdapUsersInline() {
                     <td>${user.email}</td>
                     <td>${groupsDisplay}</td>
                     <td>${statusBadge}</td>
-                    <td>${actionButton}</td>
+                    <td>${actionCell}</td>
                 </tr>
             `;
         });
@@ -419,21 +419,6 @@ async function searchLdapUsersInline() {
 
         resultsDiv.innerHTML = tableHTML;
 
-        // Add event listeners for invite and manage buttons
-        document.querySelectorAll('.ldap-invite-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const index = parseInt(this.getAttribute('data-user-index'));
-                showInviteLdapUserModal(index);
-            });
-        });
-
-        document.querySelectorAll('.ldap-manage-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const index = parseInt(this.getAttribute('data-user-index'));
-                manageLdapUser(index);
-            });
-        });
-
     } catch (error) {
         console.error('LDAP search error:', error);
         resultsDiv.innerHTML = `
@@ -443,6 +428,79 @@ async function searchLdapUsersInline() {
             </div>
         `;
         statsDiv.style.display = 'none';
+    }
+}
+
+// Simple inline invite - no modal needed
+async function showInviteForm(userIndex) {
+    const user = ldapSearchResults[userIndex];
+    if (!user) return;
+
+    // Get organizations
+    try {
+        const response = await fetch('/api/organizations');
+        const orgs = await response.json();
+
+        const orgOptions = orgs.map(org =>
+            `<option value="${org.id}">${org.display_name}</option>`
+        ).join('');
+
+        // Replace button with inline form
+        const cell = document.getElementById(`invite-cell-${userIndex}`);
+        cell.innerHTML = `
+            <div class="d-flex gap-1 align-items-center">
+                <select class="form-select form-select-sm" id="org-select-${userIndex}" style="width: 150px;">
+                    <option value="">Select Org...</option>
+                    ${orgOptions}
+                </select>
+                <button class="btn btn-sm btn-success" onclick="confirmInvite(${userIndex})">
+                    <i class="bi bi-check"></i>
+                </button>
+                <button class="btn btn-sm btn-secondary" onclick="searchLdapUsersInline()">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+        `;
+    } catch (error) {
+        showToast('Error loading organizations', 'danger');
+    }
+}
+
+async function confirmInvite(userIndex) {
+    const user = ldapSearchResults[userIndex];
+    const orgId = parseInt(document.getElementById(`org-select-${userIndex}`).value);
+
+    if (!orgId) {
+        showToast('Please select an organization', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/ldap/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: user.username,
+                email: user.email,
+                full_name: user.full_name,
+                dn: user.dn,
+                organization_id: orgId,
+                role: 'user'
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            showToast(`Failed: ${data.error || 'Unknown error'}`, 'danger');
+            return;
+        }
+
+        showToast(`✓ ${user.username} invited! Email sent to ${user.email}`, 'success', 5000);
+        await searchLdapUsersInline();
+
+    } catch (error) {
+        showToast('Network error', 'danger');
     }
 }
 
