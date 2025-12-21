@@ -300,6 +300,318 @@ function showToast(message, type = 'info') {
 }
 
 // ============================================================================
+// LDAP USER MANAGEMENT
+// ============================================================================
+
+let ldapSearchResults = [];
+
+async function searchLdapUsersInline() {
+    const query = document.getElementById('ldapUserSearchQuery').value.trim() || '*';
+    const maxResults = parseInt(document.getElementById('ldapSearchPageSize').value);
+
+    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    const statsDiv = document.getElementById('ldapSearchStats');
+
+    // Show loading
+    resultsDiv.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-3">Searching LDAP directory...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('/api/ldap/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, max_results: maxResults })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            resultsDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    Search Error: ${data.error || 'Unknown error'}
+                </div>
+            `;
+            statsDiv.style.display = 'none';
+            return;
+        }
+
+        ldapSearchResults = data.users || [];
+
+        if (ldapSearchResults.length === 0) {
+            resultsDiv.innerHTML = `
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-search" style="font-size: 3rem;"></i>
+                    <p class="mt-3">No users found matching "${query}"</p>
+                    <p class="text-muted">Try a different search term</p>
+                </div>
+            `;
+            statsDiv.style.display = 'none';
+            return;
+        }
+
+        // Show results count
+        document.getElementById('ldapResultCount').textContent = ldapSearchResults.length;
+        statsDiv.style.display = 'block';
+
+        // Build results table
+        let tableHTML = `
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Full Name</th>
+                            <th>Email</th>
+                            <th>Groups</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        ldapSearchResults.forEach(user => {
+            const statusBadge = user.exists_in_db
+                ? `<span class="badge bg-success">In SentriKat</span>`
+                : `<span class="badge bg-secondary">Not Invited</span>`;
+
+            const groupNames = user.groups.map(g => {
+                const parts = g.split(',');
+                const cn = parts[0].replace('cn=', '').replace('CN=', '');
+                return cn;
+            }).slice(0, 3).join(', ');
+
+            const groupsDisplay = user.groups.length > 0
+                ? `<small class="text-muted">${groupNames}${user.groups.length > 3 ? '...' : ''}</small>`
+                : `<small class="text-muted">None</small>`;
+
+            const actionButton = user.exists_in_db
+                ? `<button class="btn btn-sm btn-outline-secondary" onclick='manageLdapUser(${JSON.stringify(user)})'>
+                       <i class="bi bi-gear me-1"></i>Manage
+                   </button>`
+                : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
+                       <i class="bi bi-envelope-plus me-1"></i>Invite
+                   </button>`;
+
+            tableHTML += `
+                <tr>
+                    <td><strong>${user.username}</strong></td>
+                    <td>${user.full_name || '<span class="text-muted">N/A</span>'}</td>
+                    <td>${user.email}</td>
+                    <td>${groupsDisplay}</td>
+                    <td>${statusBadge}</td>
+                    <td>${actionButton}</td>
+                </tr>
+            `;
+        });
+
+        tableHTML += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        resultsDiv.innerHTML = tableHTML;
+
+    } catch (error) {
+        console.error('LDAP search error:', error);
+        resultsDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                Connection error. Please check your LDAP configuration.
+            </div>
+        `;
+        statsDiv.style.display = 'none';
+    }
+}
+
+async function showInviteLdapUserModal(user) {
+    // Create modal HTML
+    const modalHTML = `
+        <div class="modal fade" id="inviteLdapUserModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="bi bi-envelope-plus me-2"></i>Invite LDAP User
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>
+                            Inviting <strong>${user.username}</strong> (${user.email})
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Assign to Organization *</label>
+                            <select class="form-select" id="inviteOrgSelect">
+                                <option value="">Loading organizations...</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Role *</label>
+                            <select class="form-select" id="inviteRoleSelect">
+                                <option value="user">User</option>
+                                <option value="manager">Manager</option>
+                                <option value="org_admin">Organization Admin</option>
+                                <option value="super_admin">Super Admin</option>
+                            </select>
+                            <small class="text-muted">
+                                User role determines permissions within the organization
+                            </small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">LDAP Groups</label>
+                            <div class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
+                                ${user.groups.length > 0
+                                    ? user.groups.map(g => `<div class="small text-muted">${g}</div>`).join('')
+                                    : '<span class="text-muted small">No LDAP groups</span>'}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="inviteLdapUser(${JSON.stringify(user)})">
+                            <i class="bi bi-envelope-plus me-1"></i>Send Invitation
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('inviteLdapUserModal');
+    if (existingModal) existingModal.remove();
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    // Load organizations
+    try {
+        const response = await fetch('/api/organizations');
+        const orgs = await response.json();
+
+        const select = document.getElementById('inviteOrgSelect');
+        select.innerHTML = '<option value="">-- Select Organization --</option>' +
+            orgs.map(org => `<option value="${org.id}">${org.display_name}</option>`).join('');
+    } catch (error) {
+        console.error('Error loading organizations:', error);
+    }
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('inviteLdapUserModal'));
+    modal.show();
+}
+
+async function inviteLdapUser(user) {
+    const orgId = parseInt(document.getElementById('inviteOrgSelect').value);
+    const role = document.getElementById('inviteRoleSelect').value;
+
+    if (!orgId) {
+        showToast('Please select an organization', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/ldap/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: user.username,
+                email: user.email,
+                full_name: user.full_name,
+                dn: user.dn,
+                organization_id: orgId,
+                role: role
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            showToast(`Invitation failed: ${data.error || 'Unknown error'}`, 'danger');
+            return;
+        }
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('inviteLdapUserModal'));
+        modal.hide();
+
+        // Show success message
+        showToast(
+            `✓ Invitation sent to ${user.email}! User can now log in with LDAP credentials.`,
+            'success',
+            5000
+        );
+
+        // Refresh search results
+        await searchLdapUsersInline();
+
+    } catch (error) {
+        console.error('Invitation error:', error);
+        showToast('Network error. Please try again.', 'danger');
+    }
+}
+
+function manageLdapUser(user) {
+    // TODO: Open user management modal for existing LDAP users
+    showToast('User management coming soon!', 'info');
+}
+
+function showToast(message, type = 'info', duration = 3000) {
+    // Create toast container if it doesn't exist
+    let toastContainer = document.getElementById('toastContainer');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toastContainer';
+        toastContainer.className = 'toast-container position-fixed top-0 end-0 p-3';
+        toastContainer.style.zIndex = '9999';
+        document.body.appendChild(toastContainer);
+    }
+
+    // Map type to Bootstrap color
+    const bgClass = {
+        'success': 'bg-success',
+        'danger': 'bg-danger',
+        'warning': 'bg-warning',
+        'info': 'bg-info'
+    }[type] || 'bg-info';
+
+    // Create toast
+    const toastId = 'toast-' + Date.now();
+    const toastHTML = `
+        <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">
+                    ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+
+    toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+
+    const toastElement = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastElement, { delay: duration });
+    toast.show();
+
+    // Remove toast after it's hidden
+    toastElement.addEventListener('hidden.bs.toast', () => {
+        toastElement.remove();
+    });
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
