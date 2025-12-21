@@ -946,7 +946,11 @@
                 }
             } catch (error) {
                 console.error('Error loading organizations:', error);
-                document.getElementById('currentOrgName').textContent = 'Error';
+                // Update both the button and the dropdown list on error
+                const orgList = document.getElementById('orgList');
+                if (orgList) {
+                    orgList.innerHTML = `<li><span class="dropdown-item-text text-danger small">Error: ${error.message}</span></li>`;
+                }
             }
         }
 
