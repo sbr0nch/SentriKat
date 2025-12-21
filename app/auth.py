@@ -326,7 +326,9 @@ def authenticate_ldap(user, password):
     base_dn = get_setting('ldap_base_dn')
     bind_dn = get_setting('ldap_bind_dn')
     bind_pw = get_setting('ldap_bind_password')
-    search_filter_template = get_setting('ldap_search_filter', '(sAMAccountName={username})')
+    search_filter_template = get_setting('ldap_search_filter', '(uid={username})')
+    username_attr = get_setting('ldap_username_attr', 'uid')
+    email_attr = get_setting('ldap_email_attr', 'mail')
     use_tls = get_setting('ldap_use_tls', 'false') == 'true'
     ldap_port = int(get_setting('ldap_port', '389'))
 
@@ -363,22 +365,22 @@ def authenticate_ldap(user, password):
             if not search_conn.bind():
                 raise Exception('Failed to bind anonymously. Configure LDAP_BIND_DN and LDAP_BIND_PW')
 
-        # Step 2: Search for user by username (sAMAccountName)
+        # Step 2: Search for user by username
         search_filter = search_filter_template.replace('{username}', user.username)
         search_conn.search(
             search_base=base_dn,
             search_filter=search_filter,
             search_scope=SUBTREE,
-            attributes=['distinguishedName', 'sAMAccountName', 'mail', 'displayName']
+            attributes=[username_attr, email_attr, 'cn', 'displayName']
         )
 
         if not search_conn.entries:
             search_conn.unbind()
             return False
 
-        # Get user's DN
+        # Get user's DN (works with both AD and OpenLDAP)
         user_entry = search_conn.entries[0]
-        user_dn = user_entry.distinguishedName.value
+        user_dn = str(user_entry.entry_dn)
 
         # Update user's LDAP DN in database if not set or changed
         if user.ldap_dn != user_dn:
