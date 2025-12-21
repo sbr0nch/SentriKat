@@ -172,6 +172,11 @@ async function loadUsers() {
                                 <button class="btn btn-outline-primary" onclick="editUser(${user.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
+                                <button class="btn ${user.is_active ? 'btn-outline-warning' : 'btn-outline-success'}"
+                                        onclick="toggleUserActive(${user.id}, '${escapeHtml(user.username)}', ${user.is_active})"
+                                        title="${user.is_active ? 'Block User' : 'Unblock User'}">
+                                    <i class="bi bi-${user.is_active ? 'slash-circle' : 'check-circle'}"></i>
+                                </button>
                                 <button class="btn btn-outline-danger" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="Delete">
                                     <i class="bi bi-trash"></i>
                                 </button>
@@ -397,6 +402,42 @@ async function deleteUser(userId, username) {
         }
     } catch (error) {
         showToast(`Error deleting user: ${error.message}`, 'danger');
+    }
+}
+
+async function toggleUserActive(userId, username, isCurrentlyActive) {
+    const action = isCurrentlyActive ? 'block' : 'unblock';
+    const actionVerb = isCurrentlyActive ? 'blocked' : 'unblocked';
+
+    const confirmed = await showConfirm(
+        `Are you sure you want to ${action} user "<strong>${username}</strong>"?<br><br>` +
+        (isCurrentlyActive
+            ? 'The user will not be able to log in until unblocked.'
+            : 'The user will be able to log in again.'),
+        `${action.charAt(0).toUpperCase() + action.slice(1)} User`,
+        action.charAt(0).toUpperCase() + action.slice(1),
+        isCurrentlyActive ? 'btn-warning' : 'btn-success'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/toggle-active`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast(`✓ User ${username} has been ${actionVerb}`, 'success');
+            loadUsers();
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error toggling user status: ${error.message}`, 'danger');
     }
 }
 
@@ -1014,6 +1055,138 @@ async function saveGeneralSettings() {
         }
     } catch (error) {
         showToast(`Error saving general settings: ${error.message}`, 'danger');
+    }
+}
+
+// ============================================================================
+// Audit Logs
+// ============================================================================
+
+async function loadAuditLogs() {
+    const tbody = document.getElementById('auditLogsTable');
+    const statsDiv = document.getElementById('auditLogsStats');
+    const countSpan = document.getElementById('auditLogsCount');
+
+    // Show loading
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="6" class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="text-muted mt-2">Loading audit logs...</p>
+            </td>
+        </tr>
+    `;
+
+    // Get filter values
+    const action = document.getElementById('auditActionFilter')?.value || '';
+    const resource = document.getElementById('auditResourceFilter')?.value || '';
+    const limit = document.getElementById('auditLimitFilter')?.value || '100';
+
+    // Build query string
+    const params = new URLSearchParams();
+    if (action) params.append('action', action);
+    if (resource) params.append('resource', resource);
+    params.append('limit', limit);
+
+    try {
+        const response = await fetch(`/api/audit-logs?${params.toString()}`);
+
+        if (!response.ok) {
+            if (response.status === 403) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center py-5">
+                            <i class="bi bi-shield-lock text-warning" style="font-size: 3rem;"></i>
+                            <h5 class="mt-3 text-muted">Access Denied</h5>
+                            <p class="text-muted">Only super administrators can view audit logs.</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.logs || data.logs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-5">
+                        <i class="bi bi-journal-text text-muted" style="font-size: 3rem;"></i>
+                        <h5 class="mt-3 text-muted">No audit logs found</h5>
+                        <p class="text-muted">Audit events will appear here as actions are performed.</p>
+                    </td>
+                </tr>
+            `;
+            statsDiv.style.display = 'none';
+            return;
+        }
+
+        // Render audit logs
+        tbody.innerHTML = data.logs.map(log => {
+            // Format timestamp
+            const timestamp = log.timestamp
+                ? new Date(log.timestamp).toLocaleString()
+                : '-';
+
+            // Action badge color
+            const actionColors = {
+                'CREATE': 'bg-success',
+                'UPDATE': 'bg-primary',
+                'DELETE': 'bg-danger',
+                'INVITE': 'bg-info',
+                'BLOCK': 'bg-warning',
+                'UNBLOCK': 'bg-success',
+                'LOGIN': 'bg-secondary',
+                'SYNC': 'bg-info'
+            };
+            const actionBadge = `<span class="badge ${actionColors[log.action] || 'bg-secondary'}">${escapeHtml(log.action || '-')}</span>`;
+
+            // Format resource
+            const resource = log.resource || '-';
+
+            // Format details
+            let details = log.message || '';
+            if (log.old_value || log.new_value) {
+                if (log.old_value && log.new_value) {
+                    details += ` (${JSON.stringify(log.old_value)} → ${JSON.stringify(log.new_value)})`;
+                } else if (log.new_value) {
+                    details += ` (${JSON.stringify(log.new_value)})`;
+                }
+            }
+            // Truncate long details
+            if (details.length > 100) {
+                details = details.substring(0, 100) + '...';
+            }
+
+            return `
+                <tr>
+                    <td><small>${timestamp}</small></td>
+                    <td>${actionBadge}</td>
+                    <td><code>${escapeHtml(resource)}</code></td>
+                    <td>${log.user_id || '-'}</td>
+                    <td><small>${escapeHtml(details)}</small></td>
+                    <td><small class="text-muted">${escapeHtml(log.ip_address || '-')}</small></td>
+                </tr>
+            `;
+        }).join('');
+
+        // Update stats
+        countSpan.textContent = data.logs.length;
+        statsDiv.style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading audit logs:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-5">
+                    <i class="bi bi-exclamation-triangle text-danger" style="font-size: 3rem;"></i>
+                    <h5 class="mt-3 text-muted">Error loading audit logs</h5>
+                    <p class="text-muted">${escapeHtml(error.message)}</p>
+                </td>
+            </tr>
+        `;
     }
 }
 

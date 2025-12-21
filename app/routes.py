@@ -583,8 +583,23 @@ def increment_catalog_usage(catalog_id):
 @bp.route('/api/organizations', methods=['GET'])
 @login_required
 def get_organizations():
-    """Get all organizations"""
-    orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
+    """Get organizations based on user permissions"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({'error': 'User not found'}), 404
+
+    # Super admins and users with can_view_all_orgs see all organizations
+    if current_user.is_super_admin() or current_user.can_view_all_orgs:
+        orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
+    else:
+        # Regular users only see their own organization
+        if current_user.organization_id:
+            orgs = Organization.query.filter_by(id=current_user.organization_id, active=True).all()
+        else:
+            orgs = []
+
     return jsonify([o.to_dict() for o in orgs])
 
 @bp.route('/api/organizations', methods=['POST'])
@@ -1017,6 +1032,52 @@ def delete_user(user_id):
     db.session.commit()
     return jsonify({'success': True})
 
+@bp.route('/api/users/<int:user_id>/toggle-active', methods=['POST'])
+@admin_required
+def toggle_user_active(user_id):
+    """
+    Toggle user active status (block/unblock)
+
+    Permissions:
+    - Super Admin: Can toggle any user
+    - Org Admin: Can only toggle users in their organization (except super admins)
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Cannot toggle yourself
+    if user_id == current_user_id:
+        return jsonify({'error': 'Cannot block/unblock your own account'}), 400
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions to modify this user'}), 403
+
+    old_status = user.is_active
+    user.is_active = not user.is_active
+    action = 'unblocked' if user.is_active else 'blocked'
+
+    # Log the action
+    log_audit_event(
+        'BLOCK' if not user.is_active else 'UNBLOCK',
+        'users',
+        user.id,
+        old_value={'is_active': old_status},
+        new_value={'is_active': user.is_active},
+        details=f"User {user.username} {action} by {current_user.username}"
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'is_active': user.is_active,
+        'message': f'User {user.username} has been {action}'
+    })
+
 # ============================================================================
 # DEBUG & DIAGNOSTICS
 # ============================================================================
@@ -1049,6 +1110,81 @@ def debug_auth_status():
     })
 
 # ============================================================================
+# AUDIT LOGS API
+# ============================================================================
+
+@bp.route('/api/audit-logs', methods=['GET'])
+@admin_required
+def get_audit_logs():
+    """
+    Get audit logs from the audit.log file
+    Only accessible by super admins
+    """
+    import os
+    import json
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Only super admins can view audit logs
+    if not current_user or not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can view audit logs'}), 403
+
+    # Get query parameters
+    limit = request.args.get('limit', 100, type=int)
+    action_filter = request.args.get('action')
+    resource_filter = request.args.get('resource')
+    user_filter = request.args.get('user_id')
+
+    # Find the audit log file
+    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    if not os.path.exists(log_dir):
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+
+    audit_log_path = os.path.join(log_dir, 'audit.log')
+
+    if not os.path.exists(audit_log_path):
+        return jsonify({'logs': [], 'total': 0, 'message': 'No audit logs found'})
+
+    logs = []
+    try:
+        # Read the file in reverse to get most recent first
+        with open(audit_log_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Parse JSON lines (most recent first)
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            try:
+                log_entry = json.loads(line.strip())
+
+                # Apply filters
+                if action_filter and log_entry.get('action') != action_filter:
+                    continue
+                if resource_filter and not log_entry.get('resource', '').startswith(resource_filter):
+                    continue
+                if user_filter and str(log_entry.get('user_id')) != str(user_filter):
+                    continue
+
+                logs.append(log_entry)
+
+                if len(logs) >= limit:
+                    break
+
+            except json.JSONDecodeError:
+                continue
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
+
+    return jsonify({
+        'logs': logs,
+        'total': len(logs),
+        'limit': limit
+    })
+
+# ============================================================================
 # SESSION MANAGEMENT (Organization Switching)
 # ============================================================================
 
@@ -1072,8 +1208,21 @@ def get_current_organization():
 @bp.route('/api/session/organization/<int:org_id>', methods=['POST'])
 @login_required
 def switch_organization(org_id):
-    """Switch to a different organization"""
+    """Switch to a different organization (with permission check)"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({'error': 'User not found'}), 404
+
     org = Organization.query.get_or_404(org_id)
+
+    # Check if user has permission to switch to this organization
+    if not current_user.is_super_admin() and not current_user.can_view_all_orgs:
+        # Regular users can only access their own organization
+        if current_user.organization_id != org_id:
+            return jsonify({'error': 'You do not have permission to access this organization'}), 403
+
     session['organization_id'] = org_id
     return jsonify({'success': True, 'organization': org.to_dict()})
 

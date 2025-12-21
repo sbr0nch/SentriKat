@@ -397,6 +397,11 @@
                         <i class="bi bi-sliders me-2"></i>General
                     </button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="audit-logs-tab" data-bs-toggle="pill" data-bs-target="#auditLogs" type="button">
+                        <i class="bi bi-journal-text me-2"></i>Audit Logs
+                    </button>
+                </li>
             </ul>
 
             <div class="tab-content" id="settingsTabContent">
@@ -737,6 +742,94 @@
                                     </div>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Audit Logs -->
+                <div class="tab-pane fade" id="auditLogs" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-journal-text me-2"></i>Audit Logs</span>
+                            <button class="btn btn-sm btn-outline-primary" onclick="loadAuditLogs()">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>Audit Trail:</strong> Track all data modifications, user actions, and system events.
+                            </div>
+
+                            <!-- Filters -->
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-3">
+                                    <label class="form-label fw-semibold">Action Type</label>
+                                    <select class="form-select" id="auditActionFilter">
+                                        <option value="">All Actions</option>
+                                        <option value="CREATE">Create</option>
+                                        <option value="UPDATE">Update</option>
+                                        <option value="DELETE">Delete</option>
+                                        <option value="INVITE">Invite</option>
+                                        <option value="BLOCK">Block</option>
+                                        <option value="UNBLOCK">Unblock</option>
+                                        <option value="LOGIN">Login</option>
+                                        <option value="SYNC">Sync</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-semibold">Resource Type</label>
+                                    <select class="form-select" id="auditResourceFilter">
+                                        <option value="">All Resources</option>
+                                        <option value="users">Users</option>
+                                        <option value="products">Products</option>
+                                        <option value="organizations">Organizations</option>
+                                        <option value="ldap">LDAP</option>
+                                        <option value="settings">Settings</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-semibold">Limit</label>
+                                    <select class="form-select" id="auditLimitFilter">
+                                        <option value="50">50 entries</option>
+                                        <option value="100" selected>100 entries</option>
+                                        <option value="200">200 entries</option>
+                                        <option value="500">500 entries</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button class="btn btn-primary w-100" onclick="loadAuditLogs()">
+                                        <i class="bi bi-funnel me-1"></i>Apply Filters
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Audit Logs Table -->
+                            <div class="table-responsive">
+                                <table class="table table-hover table-sm">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width: 180px;">Timestamp</th>
+                                            <th style="width: 100px;">Action</th>
+                                            <th style="width: 150px;">Resource</th>
+                                            <th style="width: 100px;">User</th>
+                                            <th>Details</th>
+                                            <th style="width: 120px;">IP Address</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="auditLogsTable">
+                                        <tr>
+                                            <td colspan="6" class="text-center py-5">
+                                                <div class="spinner-border text-primary" role="status"></div>
+                                                <p class="text-muted mt-2">Loading audit logs...</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div id="auditLogsStats" class="text-muted small mt-2" style="display: none;">
+                                Showing <span id="auditLogsCount">0</span> entries
+                            </div>
                         </div>
                     </div>
                 </div>
