@@ -168,17 +168,17 @@ async function loadUsers() {
                         <td>${roleBadge}</td>
                         <td>${statusBadge}</td>
                         <td>
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" onclick="editUser(${user.id})" title="Edit">
-                                    <i class="bi bi-pencil"></i>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-sm btn-outline-primary" onclick="editUser(${user.id})" title="Edit User">
+                                    <i class="bi bi-pencil-square"></i>
                                 </button>
-                                <button class="btn ${user.is_active ? 'btn-outline-warning' : 'btn-outline-success'}"
+                                <button class="btn btn-sm ${user.is_active ? 'btn-outline-warning' : 'btn-outline-success'}"
                                         onclick="toggleUserActive(${user.id}, '${escapeHtml(user.username)}', ${user.is_active})"
                                         title="${user.is_active ? 'Block User' : 'Unblock User'}">
-                                    <i class="bi bi-${user.is_active ? 'slash-circle' : 'check-circle'}"></i>
+                                    <i class="bi bi-${user.is_active ? 'person-dash' : 'person-check'}"></i>
                                 </button>
-                                <button class="btn btn-outline-danger" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="Delete">
-                                    <i class="bi bi-trash"></i>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="Delete User">
+                                    <i class="bi bi-trash3"></i>
                                 </button>
                             </div>
                         </td>
@@ -486,13 +486,13 @@ async function loadOrganizations() {
                         <td>${smtpBadge}</td>
                         <td>${statusBadge}</td>
                         <td>
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" onclick="editOrganization(${org.id})" title="Edit">
-                                    <i class="bi bi-pencil"></i>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-sm btn-outline-primary" onclick="editOrganization(${org.id})" title="Edit Organization">
+                                    <i class="bi bi-pencil-square"></i>
                                 </button>
                                 ${org.name !== 'default' ? `
-                                <button class="btn btn-outline-danger" onclick="deleteOrganization(${org.id}, '${escapeHtml(org.display_name)}')" title="Delete">
-                                    <i class="bi bi-trash"></i>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteOrganization(${org.id}, '${escapeHtml(org.display_name)}')" title="Delete Organization">
+                                    <i class="bi bi-trash3"></i>
                                 </button>
                                 ` : ''}
                             </div>
@@ -582,7 +582,9 @@ async function editOrganization(orgId) {
         document.getElementById('smtpHost').value = org.smtp_host || '';
         document.getElementById('smtpPort').value = org.smtp_port || 587;
         document.getElementById('smtpUsername').value = org.smtp_username || '';
-        document.getElementById('smtpPassword').value = org.smtp_password || '';
+        // Don't pre-fill masked password - leave blank so user can enter new one if needed
+        document.getElementById('smtpPassword').value = '';
+        document.getElementById('smtpPassword').placeholder = org.smtp_password ? '(password saved - leave blank to keep)' : 'Password';
         document.getElementById('smtpFromEmail').value = org.smtp_from_email || '';
         document.getElementById('smtpFromName').value = org.smtp_from_name || 'SentriKat Alerts';
         document.getElementById('smtpUseTls').checked = org.smtp_use_tls !== false;
@@ -1378,17 +1380,17 @@ function displayLDAPUserResults(page = 1) {
                         // Determine status badge based on exists_in_db and is_active
                         let statusBadge, actionButton;
                         if (user.exists_in_db && user.is_active) {
-                            statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>';
-                            actionButton = '<button class="btn btn-sm btn-outline-secondary" disabled>Already Active</button>';
+                            statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Active</span>';
+                            actionButton = '<button class="btn btn-sm btn-outline-secondary" disabled title="User is already active in SentriKat"><i class="bi bi-check2-circle me-1"></i>Active</button>';
                         } else if (user.exists_in_db && !user.is_active) {
-                            statusBadge = '<span class="badge bg-warning"><i class="bi bi-pause-circle"></i> Blocked</span>';
-                            actionButton = `<button class="btn btn-sm btn-success" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
-                                   <i class="bi bi-arrow-clockwise me-1"></i>Reactivate
+                            statusBadge = '<span class="badge bg-warning text-dark"><i class="bi bi-person-dash-fill me-1"></i>Blocked</span>';
+                            actionButton = `<button class="btn btn-sm btn-success" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})' title="Reactivate this user">
+                                   <i class="bi bi-person-check me-1"></i>Reactivate
                                </button>`;
                         } else {
-                            statusBadge = '<span class="badge bg-secondary">Not Invited</span>';
-                            actionButton = `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
-                                   <i class="bi bi-person-plus me-1"></i>Invite
+                            statusBadge = '<span class="badge bg-secondary"><i class="bi bi-person-x me-1"></i>Not Invited</span>';
+                            actionButton = `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})' title="Invite this user to SentriKat">
+                                   <i class="bi bi-person-plus-fill me-1"></i>Invite
                                </button>`;
                         }
 

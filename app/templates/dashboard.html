@@ -1099,22 +1099,20 @@
     }
 
     /**
-     * Share a single CVE with a direct link
+     * Share a single CVE with NVD link
      */
     async function shareSingleCVE(cveId, vulnName) {
         try {
-            // Create simple share link with CVE parameter
-            const currentUrl = window.location.origin;
-            const shareUrl = `${currentUrl}/?cve=${encodeURIComponent(cveId)}`;
+            // Use NVD URL for sharing
+            const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}`;
 
             // Copy to clipboard
-            await navigator.clipboard.writeText(shareUrl);
-            showToast(`✓ Share link for ${cveId} copied to clipboard!`, 'success');
+            await navigator.clipboard.writeText(nvdUrl);
+            showToast(`✓ NVD link for ${cveId} copied to clipboard!`, 'success');
         } catch (error) {
-            // Fallback: show URL in alert
-            const currentUrl = window.location.origin;
-            const shareUrl = `${currentUrl}/?cve=${encodeURIComponent(cveId)}`;
-            prompt(`Copy this link to share ${cveId}:`, shareUrl);
+            // Fallback: show URL in prompt
+            const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}`;
+            prompt(`Copy this NVD link for ${cveId}:`, nvdUrl);
         }
     }
 

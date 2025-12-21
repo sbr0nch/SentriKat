@@ -243,12 +243,25 @@ class LDAPManager:
                     log_ldap_operation('USER_REACTIVATE', f"{username} reactivated and invited", True)
 
                     # Send welcome email
+                    email_sent = False
+                    email_error_msg = None
                     try:
-                        send_user_invite_email(existing_user)
+                        email_sent = send_user_invite_email(existing_user)
+                        if not email_sent:
+                            email_error_msg = "Email sending returned False - check SMTP configuration"
                     except Exception as email_error:
+                        email_error_msg = str(email_error)
                         logger.warning(f"Failed to send invite email to {email}: {email_error}")
 
-                    return {'success': True, 'message': f'User {username} reactivated', 'user': existing_user.to_dict()}
+                    result_message = f'User {username} reactivated'
+                    if email_sent:
+                        result_message += ' (welcome email sent)'
+                    elif email_error_msg:
+                        result_message += f' (email failed: {email_error_msg})'
+                    else:
+                        result_message += ' (no email sent - SMTP not configured)'
+
+                    return {'success': True, 'message': result_message, 'user': existing_user.to_dict(), 'email_sent': email_sent}
                 else:
                     return {'success': False, 'error': f'User {username} already exists and is active'}
 
@@ -286,12 +299,25 @@ class LDAPManager:
             log_ldap_operation('USER_INVITE', f"{username} invited to organization {organization_id}", True)
 
             # Send welcome email
+            email_sent = False
+            email_error_msg = None
             try:
-                send_user_invite_email(user)
+                email_sent = send_user_invite_email(user)
+                if not email_sent:
+                    email_error_msg = "Email sending returned False - check SMTP configuration"
             except Exception as email_error:
+                email_error_msg = str(email_error)
                 logger.warning(f"Failed to send invite email to {email}: {email_error}")
 
-            return {'success': True, 'message': f'User {username} invited successfully', 'user': user.to_dict()}
+            result_message = f'User {username} invited successfully'
+            if email_sent:
+                result_message += ' (welcome email sent)'
+            elif email_error_msg:
+                result_message += f' (email failed: {email_error_msg})'
+            else:
+                result_message += ' (no email sent - SMTP not configured)'
+
+            return {'success': True, 'message': result_message, 'user': user.to_dict(), 'email_sent': email_sent}
 
         except Exception as e:
             db.session.rollback()

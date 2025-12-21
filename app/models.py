@@ -63,7 +63,21 @@ class Organization(db.Model):
                 'time_end': self.alert_time_end,
                 'days': self.alert_days
             },
+            # SMTP Settings (return all except password for security)
+            'smtp_host': self.smtp_host,
+            'smtp_port': self.smtp_port,
+            'smtp_username': self.smtp_username,
+            'smtp_password': '********' if self.smtp_password else '',  # Mask password
+            'smtp_use_tls': self.smtp_use_tls,
+            'smtp_use_ssl': self.smtp_use_ssl,
+            'smtp_from_email': self.smtp_from_email,
+            'smtp_from_name': self.smtp_from_name,
             'smtp_configured': bool(self.smtp_host and self.smtp_from_email),
+            # Alert settings (flat)
+            'alert_on_critical': self.alert_on_critical,
+            'alert_on_high': self.alert_on_high,
+            'alert_on_new_cve': self.alert_on_new_cve,
+            'alert_on_ransomware': self.alert_on_ransomware,
             'user_count': user_count,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None
