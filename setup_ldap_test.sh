@@ -12,17 +12,17 @@ echo "SentriKat LDAP Test Environment"
 echo "=========================================="
 echo ""
 
-# Check for docker-compose
-if ! command -v docker-compose &> /dev/null; then
-    if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-        COMPOSE_CMD="docker compose"
-    else
-        echo "Error: docker-compose is not installed"
-        exit 1
-    fi
-else
+# Prefer 'docker compose' (v2) over 'docker-compose' (v1) for compatibility
+if command -v docker &> /dev/null && docker compose version &> /dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+elif command -v docker-compose &> /dev/null; then
     COMPOSE_CMD="docker-compose"
+else
+    echo "Error: Neither 'docker compose' nor 'docker-compose' is available"
+    exit 1
 fi
+
+echo "Using: $COMPOSE_CMD"
 
 # Parse arguments
 case "${1:-start}" in
