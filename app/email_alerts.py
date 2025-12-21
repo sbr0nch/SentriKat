@@ -508,19 +508,45 @@ def send_user_invite_email(user):
     Returns:
         bool: True if sent successfully, False otherwise
     """
-    from app.models import Organization
+    from app.models import Organization, SystemSettings
+    import logging
+    logger = logging.getLogger(__name__)
 
     try:
         # Get user's organization
         organization = Organization.query.get(user.organization_id)
         if not organization:
+            logger.warning(f"No organization found for user {user.username}")
             return False
 
-        # Get SMTP config
+        # Try organization SMTP first, then fall back to global SMTP
         smtp_config = organization.get_smtp_config()
+
+        # Check if organization SMTP is configured
         if not smtp_config['host'] or not smtp_config['from_email']:
-            # No SMTP configured, skip email
+            logger.info(f"Organization SMTP not configured, trying global SMTP")
+            # Try global SMTP settings
+            def get_setting(key, default=None):
+                setting = SystemSettings.query.filter_by(key=key).first()
+                return setting.value if setting else default
+
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587')),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat')
+            }
+
+        # Final check - SMTP must be configured
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            logger.warning(f"No SMTP configured (neither org nor global) - cannot send invite email to {user.email}")
             return False
+
+        logger.info(f"Sending invite email to {user.email} via {smtp_config['host']}:{smtp_config['port']}")
 
         # Build welcome email
         subject = f"Welcome to SentriKat - {organization.display_name}"
@@ -534,6 +560,7 @@ def send_user_invite_email(user):
             html_body=html_body
         )
 
+        logger.info(f"Invite email sent successfully to {user.email}")
         return True
 
     except Exception as e:
