@@ -244,20 +244,18 @@ class LDAPManager:
 
                     # Send welcome email
                     email_sent = False
-                    email_error_msg = None
+                    email_details = None
                     try:
-                        email_sent = send_user_invite_email(existing_user)
-                        if not email_sent:
-                            email_error_msg = "Email sending returned False - check SMTP configuration"
+                        email_sent, email_details = send_user_invite_email(existing_user)
                     except Exception as email_error:
-                        email_error_msg = str(email_error)
+                        email_details = str(email_error)
                         logger.warning(f"Failed to send invite email to {email}: {email_error}")
 
                     result_message = f'User {username} reactivated'
                     if email_sent:
-                        result_message += ' (welcome email sent)'
-                    elif email_error_msg:
-                        result_message += f' (email failed: {email_error_msg})'
+                        result_message += f' ({email_details})'
+                    elif email_details:
+                        result_message += f' (email failed: {email_details})'
                     else:
                         result_message += ' (no email sent - SMTP not configured)'
 
@@ -300,20 +298,18 @@ class LDAPManager:
 
             # Send welcome email
             email_sent = False
-            email_error_msg = None
+            email_details = None
             try:
-                email_sent = send_user_invite_email(user)
-                if not email_sent:
-                    email_error_msg = "Email sending returned False - check SMTP configuration"
+                email_sent, email_details = send_user_invite_email(user)
             except Exception as email_error:
-                email_error_msg = str(email_error)
+                email_details = str(email_error)
                 logger.warning(f"Failed to send invite email to {email}: {email_error}")
 
             result_message = f'User {username} invited successfully'
             if email_sent:
-                result_message += ' (welcome email sent)'
-            elif email_error_msg:
-                result_message += f' (email failed: {email_error_msg})'
+                result_message += f' ({email_details})'
+            elif email_details:
+                result_message += f' (email failed: {email_details})'
             else:
                 result_message += ' (no email sent - SMTP not configured)'
 

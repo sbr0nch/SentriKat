@@ -1076,21 +1076,19 @@ def toggle_user_active(user_id):
 
     # Send email notification to the user
     email_sent = False
-    email_error_msg = None
+    email_details = None
     try:
-        email_sent = send_user_status_email(user, is_blocked, current_user.username)
-        if not email_sent:
-            email_error_msg = "SMTP not configured"
+        email_sent, email_details = send_user_status_email(user, is_blocked, current_user.username)
     except Exception as e:
-        email_error_msg = str(e)
+        email_details = str(e)
         import logging
         logging.getLogger(__name__).warning(f"Failed to send status email: {e}")
 
     message = f'User {user.username} has been {action}'
     if email_sent:
-        message += ' (notification sent)'
-    elif email_error_msg:
-        message += f' (email failed: {email_error_msg})'
+        message += f' ({email_details})'
+    elif email_details:
+        message += f' (email failed: {email_details})'
 
     return jsonify({
         'success': True,

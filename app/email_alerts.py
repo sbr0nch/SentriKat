@@ -506,7 +506,7 @@ def send_user_invite_email(user):
         user: User object that was just invited
 
     Returns:
-        bool: True if sent successfully, False otherwise
+        tuple: (success: bool, details: str) - success status and details message
     """
     from app.models import Organization, SystemSettings
     import logging
@@ -516,15 +516,18 @@ def send_user_invite_email(user):
         # Get user's organization
         organization = Organization.query.get(user.organization_id)
         if not organization:
-            logger.warning(f"No organization found for user {user.username}")
-            return False
+            msg = f"No organization found for user {user.username}"
+            logger.warning(msg)
+            return False, msg
 
         # Try organization SMTP first, then fall back to global SMTP
         smtp_config = organization.get_smtp_config()
+        smtp_source = "organization"
 
         # Check if organization SMTP is configured
         if not smtp_config['host'] or not smtp_config['from_email']:
             logger.info(f"Organization SMTP not configured, trying global SMTP")
+            smtp_source = "global"
             # Try global SMTP settings
             def get_setting(key, default=None):
                 setting = SystemSettings.query.filter_by(key=key).first()
@@ -532,7 +535,7 @@ def send_user_invite_email(user):
 
             smtp_config = {
                 'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587')),
+                'port': int(get_setting('smtp_port', '587') or '587'),
                 'username': get_setting('smtp_username'),
                 'password': get_setting('smtp_password'),
                 'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
@@ -543,10 +546,12 @@ def send_user_invite_email(user):
 
         # Final check - SMTP must be configured
         if not smtp_config['host'] or not smtp_config['from_email']:
-            logger.warning(f"No SMTP configured (neither org nor global) - cannot send invite email to {user.email}")
-            return False
+            msg = f"No SMTP configured (neither org nor global)"
+            logger.warning(f"{msg} - cannot send invite email to {user.email}")
+            return False, msg
 
-        logger.info(f"Sending invite email to {user.email} via {smtp_config['host']}:{smtp_config['port']}")
+        logger.info(f"Sending invite email to {user.email} via {smtp_source} SMTP: {smtp_config['host']}:{smtp_config['port']}")
+        logger.info(f"SMTP config: host={smtp_config['host']}, port={smtp_config['port']}, from={smtp_config['from_email']}, tls={smtp_config['use_tls']}, ssl={smtp_config['use_ssl']}, user={smtp_config['username'] or 'none'}")
 
         # Build welcome email
         subject = f"Welcome to SentriKat - {organization.display_name}"
@@ -560,15 +565,17 @@ def send_user_invite_email(user):
             html_body=html_body
         )
 
-        logger.info(f"Invite email sent successfully to {user.email}")
-        return True
+        msg = f"Email sent via {smtp_source} SMTP ({smtp_config['host']}:{smtp_config['port']}) to {user.email}"
+        logger.info(msg)
+        return True, msg
 
     except Exception as e:
-        # Log but don't fail the invitation process
-        import logging
+        import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f"Failed to send invite email to {user.email}: {e}")
-        return False
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"Failed to send invite email to {user.email}: {error_detail}")
+        logger.error(traceback.format_exc())
+        return False, error_detail
 
 
 def _build_user_invite_email_html(user, organization):
@@ -782,7 +789,7 @@ def send_user_status_email(user, is_blocked, blocked_by_username=None):
         blocked_by_username: Username of admin who performed the action
 
     Returns:
-        bool: True if sent successfully, False otherwise
+        tuple: (success: bool, details: str) - success status and details message
     """
     from app.models import Organization, SystemSettings
     import logging
@@ -792,13 +799,16 @@ def send_user_status_email(user, is_blocked, blocked_by_username=None):
         # Get user's organization
         organization = Organization.query.get(user.organization_id)
         if not organization:
-            logger.warning(f"No organization found for user {user.username}")
-            return False
+            msg = f"No organization found for user {user.username}"
+            logger.warning(msg)
+            return False, msg
 
         # Try organization SMTP first, then fall back to global SMTP
         smtp_config = organization.get_smtp_config()
+        smtp_source = "organization"
 
         if not smtp_config['host'] or not smtp_config['from_email']:
+            smtp_source = "global"
             # Try global SMTP settings
             def get_setting(key, default=None):
                 setting = SystemSettings.query.filter_by(key=key).first()
@@ -806,7 +816,7 @@ def send_user_status_email(user, is_blocked, blocked_by_username=None):
 
             smtp_config = {
                 'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587')),
+                'port': int(get_setting('smtp_port', '587') or '587'),
                 'username': get_setting('smtp_username'),
                 'password': get_setting('smtp_password'),
                 'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
@@ -816,12 +826,15 @@ def send_user_status_email(user, is_blocked, blocked_by_username=None):
             }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
-            logger.warning(f"No SMTP configured - cannot send status email to {user.email}")
-            return False
+            msg = "No SMTP configured (neither org nor global)"
+            logger.warning(f"{msg} - cannot send status email to {user.email}")
+            return False, msg
 
         action = "blocked" if is_blocked else "unblocked"
         subject = f"SentriKat Account {action.title()} - {organization.display_name}"
         html_body = _build_user_status_email_html(user, organization, is_blocked, blocked_by_username)
+
+        logger.info(f"Sending status email to {user.email} via {smtp_source} SMTP: {smtp_config['host']}:{smtp_config['port']}")
 
         EmailAlertManager._send_email(
             smtp_config=smtp_config,
@@ -830,14 +843,17 @@ def send_user_status_email(user, is_blocked, blocked_by_username=None):
             html_body=html_body
         )
 
-        logger.info(f"Status change email sent to {user.email} (account {action})")
-        return True
+        msg = f"Email sent via {smtp_source} SMTP ({smtp_config['host']}:{smtp_config['port']}) to {user.email}"
+        logger.info(msg)
+        return True, msg
 
     except Exception as e:
-        import logging
+        import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f"Failed to send status email to {user.email}: {e}")
-        return False
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"Failed to send status email to {user.email}: {error_detail}")
+        logger.error(traceback.format_exc())
+        return False, error_detail
 
 
 def _build_user_status_email_html(user, organization, is_blocked, blocked_by_username=None):
