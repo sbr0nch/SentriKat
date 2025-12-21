@@ -47,6 +47,14 @@ document.addEventListener('DOMContentLoaded', function() {
             console.warn('settings-tab element not found');
         }
 
+        // LDAP Users tab handler - auto-load users when tab is shown
+        const ldapUsersTab = document.getElementById('ldap-users-tab');
+        if (ldapUsersTab) {
+            ldapUsersTab.addEventListener('shown.bs.tab', function() {
+                loadLDAPUsersDefault();
+            });
+        }
+
         // LDAP Groups tab handler
         const ldapGroupsTab = document.getElementById('ldap-groups-tab');
         if (ldapGroupsTab) {
@@ -1072,6 +1080,154 @@ async function loadAllSettings() {
 // ============================================================================
 // LDAP User Management
 // ============================================================================
+
+/**
+ * Load LDAP users by default when tab is shown (uses wildcard search)
+ */
+async function loadLDAPUsersDefault() {
+    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    const statsDiv = document.getElementById('ldapSearchStats');
+    const searchInput = document.getElementById('ldapUserSearchQuery');
+
+    // Set default search to wildcard if empty
+    if (searchInput && !searchInput.value.trim()) {
+        searchInput.value = '*';
+    }
+
+    // Show loading
+    if (resultsDiv) {
+        resultsDiv.innerHTML = `
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="text-muted mt-2">Loading LDAP users...</p>
+            </div>
+        `;
+    }
+    if (statsDiv) {
+        statsDiv.style.display = 'none';
+    }
+
+    try {
+        const response = await fetch('/api/ldap/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: '*' })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to load users');
+        }
+
+        const results = await response.json();
+        ldapSearchCache.results = results.users;
+        ldapSearchCache.query = '*';
+        ldapSearchCache.currentPage = 1;
+
+        // Display first page of results
+        displayLDAPUserResults(1);
+
+    } catch (error) {
+        console.error('Error loading LDAP users:', error);
+        if (resultsDiv) {
+            resultsDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>Could not load LDAP users:</strong> ${escapeHtml(error.message)}
+                    <hr>
+                    <small>Make sure LDAP is configured in Settings. Use the search box above to find specific users.</small>
+                </div>
+            `;
+        }
+    }
+}
+
+/**
+ * Display paginated LDAP user results from cache
+ */
+function displayLDAPUserResults(page = 1) {
+    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    const statsDiv = document.getElementById('ldapSearchStats');
+    const pageSize = parseInt(document.getElementById('ldapSearchPageSize')?.value) || 25;
+
+    const allResults = ldapSearchCache.results || [];
+    ldapSearchCache.currentPage = page;
+    ldapSearchCache.pageSize = pageSize;
+
+    if (allResults.length === 0) {
+        resultsDiv.innerHTML = `
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                <p class="mt-3">No LDAP users found</p>
+                <p class="text-muted">Check your LDAP configuration in Settings</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Calculate pagination
+    const totalPages = Math.ceil(allResults.length / pageSize);
+    const startIdx = (page - 1) * pageSize;
+    const endIdx = Math.min(startIdx + pageSize, allResults.length);
+    const pageResults = allResults.slice(startIdx, endIdx);
+
+    // Update stats
+    if (document.getElementById('ldapResultCount')) {
+        document.getElementById('ldapResultCount').textContent =
+            `${startIdx + 1}-${endIdx} of ${allResults.length}`;
+    }
+    if (statsDiv) {
+        statsDiv.style.display = 'block';
+    }
+
+    // Build pagination controls
+    const paginationHtml = buildLdapPagination(page, totalPages);
+    if (document.getElementById('ldapPagination')) {
+        document.getElementById('ldapPagination').innerHTML = paginationHtml;
+    }
+
+    // Display results in table
+    resultsDiv.innerHTML = `
+        <div class="table-responsive">
+            <table class="table table-hover table-sm">
+                <thead class="table-light">
+                    <tr>
+                        <th>Username</th>
+                        <th>Full Name</th>
+                        <th>Email</th>
+                        <th>DN</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pageResults.map(user => {
+                        const statusBadge = user.exists_in_db
+                            ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Invited</span>'
+                            : '<span class="badge bg-secondary">Not Invited</span>';
+
+                        const actionButton = user.exists_in_db
+                            ? '<button class="btn btn-sm btn-outline-secondary" disabled>Already Exists</button>'
+                            : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
+                                   <i class="bi bi-person-plus me-1"></i>Invite
+                               </button>`;
+
+                        return `
+                            <tr>
+                                <td class="fw-semibold">${escapeHtml(user.username)}</td>
+                                <td>${user.full_name ? escapeHtml(user.full_name) : '<span class="text-muted">-</span>'}</td>
+                                <td>${escapeHtml(user.email)}</td>
+                                <td><small class="text-muted">${escapeHtml(user.dn).substring(0, 60)}${user.dn.length > 60 ? '...' : ''}</small></td>
+                                <td>${statusBadge}</td>
+                                <td>${actionButton}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
 
 async function checkLdapPermissions() {
     try {

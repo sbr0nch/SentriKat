@@ -1,0 +1,69 @@
+version: '3.8'
+
+# LDAP Test Environment for SentriKat
+# Provides OpenLDAP server with test users for development and testing
+#
+# Quick Start:
+#   docker-compose -f docker-compose.ldap.yml up -d
+#
+# Access:
+#   - LDAP Server: ldap://localhost:389
+#   - phpLDAPadmin: http://localhost:8080
+#
+# Default Credentials:
+#   - Admin DN: cn=admin,dc=sentrikat,dc=local
+#   - Admin Password: admin123
+#
+# Test Users: See ldap/bootstrap.ldif for full list
+
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: sentrikat-openldap
+    environment:
+      LDAP_ORGANISATION: "SentriKat Test"
+      LDAP_DOMAIN: "sentrikat.local"
+      LDAP_ADMIN_PASSWORD: "admin123"
+      LDAP_CONFIG_PASSWORD: "config123"
+      LDAP_READONLY_USER: "false"
+      LDAP_RFC2307BIS_SCHEMA: "false"
+      LDAP_BACKEND: "mdb"
+      LDAP_TLS: "false"
+      LDAP_REPLICATION: "false"
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
+      - ./ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-bootstrap.ldif:ro
+    networks:
+      - sentrikat-ldap
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost:389", "-b", "dc=sentrikat,dc=local", "-D", "cn=admin,dc=sentrikat,dc=local", "-w", "admin123"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    container_name: sentrikat-phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8080:80"
+    depends_on:
+      - openldap
+    networks:
+      - sentrikat-ldap
+    restart: unless-stopped
+
+volumes:
+  ldap_data:
+  ldap_config:
+
+networks:
+  sentrikat-ldap:
+    driver: bridge

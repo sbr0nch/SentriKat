@@ -1,0 +1,388 @@
+# SentriKat LDAP Test Data
+# This file creates test users and groups for development
+#
+# Organization: dc=sentrikat,dc=local
+# Admin: cn=admin,dc=sentrikat,dc=local (password: admin123)
+
+# ============================================================================
+# Organizational Units
+# ============================================================================
+
+dn: ou=Users,dc=sentrikat,dc=local
+objectClass: organizationalUnit
+ou: Users
+description: All user accounts
+
+dn: ou=Groups,dc=sentrikat,dc=local
+objectClass: organizationalUnit
+ou: Groups
+description: All groups
+
+dn: ou=IT,ou=Users,dc=sentrikat,dc=local
+objectClass: organizationalUnit
+ou: IT
+description: IT Department
+
+dn: ou=Security,ou=Users,dc=sentrikat,dc=local
+objectClass: organizationalUnit
+ou: Security
+description: Security Team
+
+dn: ou=Engineering,ou=Users,dc=sentrikat,dc=local
+objectClass: organizationalUnit
+ou: Engineering
+description: Engineering Department
+
+dn: ou=Management,ou=Users,dc=sentrikat,dc=local
+objectClass: organizationalUnit
+ou: Management
+description: Management Team
+
+# ============================================================================
+# Groups
+# ============================================================================
+
+dn: cn=SentriKat-Admins,ou=Groups,dc=sentrikat,dc=local
+objectClass: groupOfNames
+cn: SentriKat-Admins
+description: SentriKat Super Administrators
+member: uid=admin.user,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=sarah.chen,ou=Security,ou=Users,dc=sentrikat,dc=local
+
+dn: cn=SentriKat-OrgAdmins,ou=Groups,dc=sentrikat,dc=local
+objectClass: groupOfNames
+cn: SentriKat-OrgAdmins
+description: Organization Administrators
+member: uid=mike.johnson,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=emma.wilson,ou=Security,ou=Users,dc=sentrikat,dc=local
+
+dn: cn=SentriKat-Managers,ou=Groups,dc=sentrikat,dc=local
+objectClass: groupOfNames
+cn: SentriKat-Managers
+description: SentriKat Managers
+member: uid=david.brown,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+member: uid=lisa.taylor,ou=Management,ou=Users,dc=sentrikat,dc=local
+member: uid=james.anderson,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+
+dn: cn=SentriKat-Users,ou=Groups,dc=sentrikat,dc=local
+objectClass: groupOfNames
+cn: SentriKat-Users
+description: Regular SentriKat Users
+member: uid=john.doe,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=jane.smith,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+member: uid=bob.williams,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+member: uid=alice.jones,ou=Security,ou=Users,dc=sentrikat,dc=local
+member: uid=charlie.davis,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=diana.miller,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+member: uid=frank.garcia,ou=Security,ou=Users,dc=sentrikat,dc=local
+member: uid=grace.martinez,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=henry.rodriguez,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+member: uid=ivy.hernandez,ou=Security,ou=Users,dc=sentrikat,dc=local
+
+dn: cn=IT-Team,ou=Groups,dc=sentrikat,dc=local
+objectClass: groupOfNames
+cn: IT-Team
+description: IT Department Group
+member: uid=admin.user,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=mike.johnson,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=john.doe,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=charlie.davis,ou=IT,ou=Users,dc=sentrikat,dc=local
+member: uid=grace.martinez,ou=IT,ou=Users,dc=sentrikat,dc=local
+
+dn: cn=Security-Team,ou=Groups,dc=sentrikat,dc=local
+objectClass: groupOfNames
+cn: Security-Team
+description: Security Department Group
+member: uid=sarah.chen,ou=Security,ou=Users,dc=sentrikat,dc=local
+member: uid=emma.wilson,ou=Security,ou=Users,dc=sentrikat,dc=local
+member: uid=alice.jones,ou=Security,ou=Users,dc=sentrikat,dc=local
+member: uid=frank.garcia,ou=Security,ou=Users,dc=sentrikat,dc=local
+member: uid=ivy.hernandez,ou=Security,ou=Users,dc=sentrikat,dc=local
+
+# ============================================================================
+# Test Users - IT Department
+# ============================================================================
+
+dn: uid=admin.user,ou=IT,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: admin.user
+sn: User
+givenName: Admin
+cn: Admin User
+displayName: Admin User
+mail: admin.user@sentrikat.local
+uidNumber: 10001
+gidNumber: 10001
+homeDirectory: /home/admin.user
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=mike.johnson,ou=IT,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: mike.johnson
+sn: Johnson
+givenName: Mike
+cn: Mike Johnson
+displayName: Mike Johnson
+mail: mike.johnson@sentrikat.local
+uidNumber: 10002
+gidNumber: 10001
+homeDirectory: /home/mike.johnson
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=john.doe,ou=IT,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: john.doe
+sn: Doe
+givenName: John
+cn: John Doe
+displayName: John Doe
+mail: john.doe@sentrikat.local
+uidNumber: 10003
+gidNumber: 10001
+homeDirectory: /home/john.doe
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=charlie.davis,ou=IT,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: charlie.davis
+sn: Davis
+givenName: Charlie
+cn: Charlie Davis
+displayName: Charlie Davis
+mail: charlie.davis@sentrikat.local
+uidNumber: 10004
+gidNumber: 10001
+homeDirectory: /home/charlie.davis
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=grace.martinez,ou=IT,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: grace.martinez
+sn: Martinez
+givenName: Grace
+cn: Grace Martinez
+displayName: Grace Martinez
+mail: grace.martinez@sentrikat.local
+uidNumber: 10005
+gidNumber: 10001
+homeDirectory: /home/grace.martinez
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+# ============================================================================
+# Test Users - Security Department
+# ============================================================================
+
+dn: uid=sarah.chen,ou=Security,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: sarah.chen
+sn: Chen
+givenName: Sarah
+cn: Sarah Chen
+displayName: Sarah Chen
+mail: sarah.chen@sentrikat.local
+uidNumber: 10101
+gidNumber: 10002
+homeDirectory: /home/sarah.chen
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=emma.wilson,ou=Security,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: emma.wilson
+sn: Wilson
+givenName: Emma
+cn: Emma Wilson
+displayName: Emma Wilson
+mail: emma.wilson@sentrikat.local
+uidNumber: 10102
+gidNumber: 10002
+homeDirectory: /home/emma.wilson
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=alice.jones,ou=Security,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: alice.jones
+sn: Jones
+givenName: Alice
+cn: Alice Jones
+displayName: Alice Jones
+mail: alice.jones@sentrikat.local
+uidNumber: 10103
+gidNumber: 10002
+homeDirectory: /home/alice.jones
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=frank.garcia,ou=Security,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: frank.garcia
+sn: Garcia
+givenName: Frank
+cn: Frank Garcia
+displayName: Frank Garcia
+mail: frank.garcia@sentrikat.local
+uidNumber: 10104
+gidNumber: 10002
+homeDirectory: /home/frank.garcia
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=ivy.hernandez,ou=Security,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: ivy.hernandez
+sn: Hernandez
+givenName: Ivy
+cn: Ivy Hernandez
+displayName: Ivy Hernandez
+mail: ivy.hernandez@sentrikat.local
+uidNumber: 10105
+gidNumber: 10002
+homeDirectory: /home/ivy.hernandez
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+# ============================================================================
+# Test Users - Engineering Department
+# ============================================================================
+
+dn: uid=jane.smith,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: jane.smith
+sn: Smith
+givenName: Jane
+cn: Jane Smith
+displayName: Jane Smith
+mail: jane.smith@sentrikat.local
+uidNumber: 10201
+gidNumber: 10003
+homeDirectory: /home/jane.smith
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=bob.williams,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: bob.williams
+sn: Williams
+givenName: Bob
+cn: Bob Williams
+displayName: Bob Williams
+mail: bob.williams@sentrikat.local
+uidNumber: 10202
+gidNumber: 10003
+homeDirectory: /home/bob.williams
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=david.brown,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: david.brown
+sn: Brown
+givenName: David
+cn: David Brown
+displayName: David Brown
+mail: david.brown@sentrikat.local
+uidNumber: 10203
+gidNumber: 10003
+homeDirectory: /home/david.brown
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=james.anderson,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: james.anderson
+sn: Anderson
+givenName: James
+cn: James Anderson
+displayName: James Anderson
+mail: james.anderson@sentrikat.local
+uidNumber: 10204
+gidNumber: 10003
+homeDirectory: /home/james.anderson
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=diana.miller,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: diana.miller
+sn: Miller
+givenName: Diana
+cn: Diana Miller
+displayName: Diana Miller
+mail: diana.miller@sentrikat.local
+uidNumber: 10205
+gidNumber: 10003
+homeDirectory: /home/diana.miller
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+dn: uid=henry.rodriguez,ou=Engineering,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: henry.rodriguez
+sn: Rodriguez
+givenName: Henry
+cn: Henry Rodriguez
+displayName: Henry Rodriguez
+mail: henry.rodriguez@sentrikat.local
+uidNumber: 10206
+gidNumber: 10003
+homeDirectory: /home/henry.rodriguez
+loginShell: /bin/bash
+userPassword: {SSHA}test123
+
+# ============================================================================
+# Test Users - Management
+# ============================================================================
+
+dn: uid=lisa.taylor,ou=Management,ou=Users,dc=sentrikat,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: lisa.taylor
+sn: Taylor
+givenName: Lisa
+cn: Lisa Taylor
+displayName: Lisa Taylor
+mail: lisa.taylor@sentrikat.local
+uidNumber: 10301
+gidNumber: 10004
+homeDirectory: /home/lisa.taylor
+loginShell: /bin/bash
+userPassword: {SSHA}test123
