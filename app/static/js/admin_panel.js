@@ -304,6 +304,7 @@ function showToast(message, type = 'info') {
 // ============================================================================
 
 let ldapSearchResults = [];
+let currentLdapUserIndex = null;
 
 async function searchLdapUsersInline() {
     const query = document.getElementById('ldapUserSearchQuery').value.trim() || '*';
@@ -375,7 +376,7 @@ async function searchLdapUsersInline() {
                     <tbody>
         `;
 
-        ldapSearchResults.forEach(user => {
+        ldapSearchResults.forEach((user, index) => {
             const statusBadge = user.exists_in_db
                 ? `<span class="badge bg-success">In SentriKat</span>`
                 : `<span class="badge bg-secondary">Not Invited</span>`;
@@ -391,10 +392,10 @@ async function searchLdapUsersInline() {
                 : `<small class="text-muted">None</small>`;
 
             const actionButton = user.exists_in_db
-                ? `<button class="btn btn-sm btn-outline-secondary" onclick='manageLdapUser(${JSON.stringify(user)})'>
+                ? `<button class="btn btn-sm btn-outline-secondary" onclick="manageLdapUser(${index})">
                        <i class="bi bi-gear me-1"></i>Manage
                    </button>`
-                : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
+                : `<button class="btn btn-sm btn-primary" onclick="showInviteLdapUserModal(${index})">
                        <i class="bi bi-envelope-plus me-1"></i>Invite
                    </button>`;
 
@@ -430,7 +431,16 @@ async function searchLdapUsersInline() {
     }
 }
 
-async function showInviteLdapUserModal(user) {
+async function showInviteLdapUserModal(userIndex) {
+    const user = ldapSearchResults[userIndex];
+    if (!user) {
+        console.error('User not found at index:', userIndex);
+        return;
+    }
+
+    // Store index for invite function
+    currentLdapUserIndex = userIndex;
+
     // Create modal HTML
     const modalHTML = `
         <div class="modal fade" id="inviteLdapUserModal" tabindex="-1">
@@ -479,7 +489,7 @@ async function showInviteLdapUserModal(user) {
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" onclick="inviteLdapUser(${JSON.stringify(user)})">
+                        <button type="button" class="btn btn-primary" onclick="inviteLdapUser()">
                             <i class="bi bi-envelope-plus me-1"></i>Send Invitation
                         </button>
                     </div>
@@ -512,7 +522,13 @@ async function showInviteLdapUserModal(user) {
     modal.show();
 }
 
-async function inviteLdapUser(user) {
+async function inviteLdapUser() {
+    const user = ldapSearchResults[currentLdapUserIndex];
+    if (!user) {
+        showToast('Error: User data not found', 'danger');
+        return;
+    }
+
     const orgId = parseInt(document.getElementById('inviteOrgSelect').value);
     const role = document.getElementById('inviteRoleSelect').value;
 
@@ -544,7 +560,7 @@ async function inviteLdapUser(user) {
 
         // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('inviteLdapUserModal'));
-        modal.hide();
+        if (modal) modal.hide();
 
         // Show success message
         showToast(
@@ -562,7 +578,10 @@ async function inviteLdapUser(user) {
     }
 }
 
-function manageLdapUser(user) {
+function manageLdapUser(userIndex) {
+    const user = ldapSearchResults[userIndex];
+    if (!user) return;
+
     // TODO: Open user management modal for existing LDAP users
     showToast('User management coming soon!', 'info');
 }
@@ -644,6 +663,22 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (document.getElementById('organizationsTable')) {
         loadOrganizations();
+    }
+
+    // Auto-load LDAP users when tab is shown
+    const ldapUsersTab = document.getElementById('ldap-users-tab');
+    if (ldapUsersTab) {
+        ldapUsersTab.addEventListener('shown.bs.tab', function() {
+            // Only search if we haven't searched yet
+            if (ldapSearchResults.length === 0) {
+                searchLdapUsersInline();
+            }
+        });
+
+        // If LDAP tab is active on page load, search immediately
+        if (ldapUsersTab.classList.contains('active')) {
+            searchLdapUsersInline();
+        }
     }
 
     // Handle hash-based tab activation on page load
