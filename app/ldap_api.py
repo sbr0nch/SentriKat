@@ -94,6 +94,46 @@ def get_user_ldap_groups(username):
     return jsonify(result)
 
 
+@ldap_bp.route('/user-groups', methods=['POST'])
+@org_admin_required
+def get_user_ldap_groups_post():
+    """
+    Get LDAP groups for a specific user (POST version)
+
+    Body:
+    {
+        "username": "jdoe"
+    }
+
+    Permissions:
+    - Super Admin: Can view any user's groups
+    - Org Admin: Can view users in their organization
+    """
+    current_user = get_current_user()
+    if not can_manage_ldap_users(current_user):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    data = request.get_json()
+    username = data.get('username')
+
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+
+    # Check if user exists and permissions
+    user = User.query.filter_by(username=username).first()
+    if user and current_user.role == 'org_admin':
+        # Org admins can only view users in their organization
+        if user.organization_id != current_user.organization_id:
+            return jsonify({'error': 'Cannot view users from other organizations'}), 403
+
+    result = LDAPManager.get_user_groups(username)
+
+    if not result['success']:
+        return jsonify(result), 400
+
+    return jsonify(result)
+
+
 # ============================================================================
 # LDAP User Invitation
 # ============================================================================
