@@ -3,6 +3,8 @@
  * Handles user management, organization management, and LDAP functionality
  */
 
+console.log('Admin Panel JS Loading...');
+
 let currentUserId = null;
 let currentOrgId = null;
 
@@ -433,8 +435,12 @@ async function searchLdapUsersInline() {
 
 // Simple inline invite - no modal needed
 async function showInviteForm(userIndex) {
+    console.log('showInviteForm called with index:', userIndex);
     const user = ldapSearchResults[userIndex];
-    if (!user) return;
+    if (!user) {
+        console.error('User not found at index:', userIndex);
+        return;
+    }
 
     // Get organizations
     try {
@@ -447,24 +453,32 @@ async function showInviteForm(userIndex) {
 
         // Replace button with inline form
         const cell = document.getElementById(`invite-cell-${userIndex}`);
+        if (!cell) {
+            console.error('Cell not found:', `invite-cell-${userIndex}`);
+            return;
+        }
+
         cell.innerHTML = `
             <div class="d-flex gap-1 align-items-center">
                 <select class="form-select form-select-sm" id="org-select-${userIndex}" style="width: 150px;">
                     <option value="">Select Org...</option>
                     ${orgOptions}
                 </select>
-                <button class="btn btn-sm btn-success" onclick="confirmInvite(${userIndex})">
+                <button class="btn btn-sm btn-success" onclick="window.confirmInvite(${userIndex})">
                     <i class="bi bi-check"></i>
                 </button>
-                <button class="btn btn-sm btn-secondary" onclick="searchLdapUsersInline()">
+                <button class="btn btn-sm btn-secondary" onclick="window.searchLdapUsersInline()">
                     <i class="bi bi-x"></i>
                 </button>
             </div>
         `;
     } catch (error) {
+        console.error('Error in showInviteForm:', error);
         showToast('Error loading organizations', 'danger');
     }
 }
+// Make function globally accessible
+window.showInviteForm = showInviteForm;
 
 async function confirmInvite(userIndex) {
     const user = ldapSearchResults[userIndex];
@@ -500,9 +514,13 @@ async function confirmInvite(userIndex) {
         await searchLdapUsersInline();
 
     } catch (error) {
+        console.error('Invite error:', error);
         showToast('Network error', 'danger');
     }
 }
+// Make function globally accessible
+window.confirmInvite = confirmInvite;
+window.searchLdapUsersInline = searchLdapUsersInline;
 
 async function showInviteLdapUserModal(userIndex) {
     const user = ldapSearchResults[userIndex];
