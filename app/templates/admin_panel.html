@@ -21,7 +21,7 @@
             </button>
         </li>
         <li class="nav-item" role="presentation" id="ldap-users-tab-item" style="display: none;">
-            <button class="nav-link" id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button">
+            <button class="nav-link" id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button" onclick="setTimeout(searchLdapUsersInline, 100)">
                 <i class="bi bi-diagram-3 me-2"></i>LDAP Users
             </button>
         </li>
@@ -101,13 +101,17 @@
                                 <span class="input-group-text"><i class="bi bi-search"></i></span>
                                 <input type="text" class="form-control" id="ldapUserSearchQuery"
                                        placeholder="Search by username, email, or display name..."
+                                       value="*"
                                        onkeypress="if(event.key==='Enter') searchLdapUsersInline()">
                                 <button class="btn btn-primary" onclick="searchLdapUsersInline()">
                                     <i class="bi bi-search me-1"></i>Search
                                 </button>
+                                <button class="btn btn-success" onclick="document.getElementById('ldapUserSearchQuery').value='*'; searchLdapUsersInline()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Load All
+                                </button>
                             </div>
                             <small class="text-muted">
-                                Examples: "john", "john.doe", "john*", "*admin*"
+                                Examples: "john", "john.doe", "john*", "*admin*" or "*" for all users
                             </small>
                         </div>
                         <div class="col-md-4">
@@ -1292,5 +1296,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/admin_panel.js') }}?v=20250121"></script>
+<script src="{{ url_for('static', filename='js/admin_panel.js') }}?v=20250121b"></script>
 {% endblock %}
