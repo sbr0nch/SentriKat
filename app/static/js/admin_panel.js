@@ -392,10 +392,10 @@ async function searchLdapUsersInline() {
                 : `<small class="text-muted">None</small>`;
 
             const actionButton = user.exists_in_db
-                ? `<button class="btn btn-sm btn-outline-secondary" onclick="manageLdapUser(${index})">
+                ? `<button class="btn btn-sm btn-outline-secondary ldap-manage-btn" data-user-index="${index}">
                        <i class="bi bi-gear me-1"></i>Manage
                    </button>`
-                : `<button class="btn btn-sm btn-primary" onclick="showInviteLdapUserModal(${index})">
+                : `<button class="btn btn-sm btn-primary ldap-invite-btn" data-user-index="${index}">
                        <i class="bi bi-envelope-plus me-1"></i>Invite
                    </button>`;
 
@@ -418,6 +418,21 @@ async function searchLdapUsersInline() {
         `;
 
         resultsDiv.innerHTML = tableHTML;
+
+        // Add event listeners for invite and manage buttons
+        document.querySelectorAll('.ldap-invite-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const index = parseInt(this.getAttribute('data-user-index'));
+                showInviteLdapUserModal(index);
+            });
+        });
+
+        document.querySelectorAll('.ldap-manage-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const index = parseInt(this.getAttribute('data-user-index'));
+                manageLdapUser(index);
+            });
+        });
 
     } catch (error) {
         console.error('LDAP search error:', error);
