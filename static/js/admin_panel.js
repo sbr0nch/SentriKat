@@ -1686,21 +1686,23 @@ async function checkLdapPermissions() {
         const response = await fetch('/api/current-user');
         if (response.ok) {
             const user = await response.json();
-            // Show LDAP tabs for org_admin, super_admin, or legacy is_admin users
-            const canAccessLdap = user.role === 'org_admin' ||
-                                  user.role === 'super_admin' ||
-                                  user.is_admin === true;
 
-            if (canAccessLdap) {
-                const ldapUsersTab = document.getElementById('ldap-users-tab-item');
-                const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+            // LDAP Users tab: visible to org_admin, super_admin, or legacy is_admin
+            const canAccessLdapUsers = user.role === 'org_admin' ||
+                                       user.role === 'super_admin' ||
+                                       user.is_admin === true;
 
-                if (ldapUsersTab) {
-                    ldapUsersTab.style.display = 'block';
-                }
-                if (ldapGroupsTab) {
-                    ldapGroupsTab.style.display = 'block';
-                }
+            // LDAP Groups tab: only visible to super_admin (system-level config)
+            const canAccessLdapGroups = user.role === 'super_admin' || user.is_admin === true;
+
+            const ldapUsersTab = document.getElementById('ldap-users-tab-item');
+            const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+
+            if (ldapUsersTab && canAccessLdapUsers) {
+                ldapUsersTab.style.display = 'block';
+            }
+            if (ldapGroupsTab && canAccessLdapGroups) {
+                ldapGroupsTab.style.display = 'block';
             }
         }
     } catch (error) {

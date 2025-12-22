@@ -43,19 +43,36 @@ def admin_panel():
 @bp.route('/api/products', methods=['GET'])
 @login_required
 def get_products():
-    """Get all products for current organization"""
-    # Get current organization
-    org_id = session.get('organization_id')
-    if not org_id:
-        default_org = Organization.query.filter_by(name='default').first()
-        org_id = default_org.id if default_org else None
+    """Get products based on user permissions.
 
-    # Filter by organization
-    query = Product.query
-    if org_id:
-        query = query.filter_by(organization_id=org_id)
+    - Super Admin: See all products
+    - Others: Only see products assigned to their organization
+    """
+    from app.models import product_organizations
 
-    products = query.order_by(Product.vendor, Product.product_name).all()
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({'error': 'User not found'}), 401
+
+    # Super admins see all products
+    if current_user.is_super_admin():
+        products = Product.query.order_by(Product.vendor, Product.product_name).all()
+    else:
+        # Get user's organization
+        org_id = session.get('organization_id') or current_user.organization_id
+        if not org_id:
+            return jsonify([])  # No org = no products
+
+        # Filter products that are assigned to user's organization (via many-to-many)
+        products = Product.query.join(
+            product_organizations,
+            Product.id == product_organizations.c.product_id
+        ).filter(
+            product_organizations.c.organization_id == org_id
+        ).order_by(Product.vendor, Product.product_name).all()
+
     return jsonify([p.to_dict() for p in products])
 
 @bp.route('/api/products', methods=['POST'])
@@ -232,12 +249,13 @@ def update_product(product_id):
 @manager_required
 def delete_product(product_id):
     """
-    Delete a product
+    Delete a product or remove it from current organization.
 
     Permissions:
-    - Super Admin: Can delete any product
-    - Org Admin: Can delete products in their organization
-    - Manager: Can delete products in their organization
+    - Super Admin: Deletes product globally from all organizations
+    - Org Admin/Manager: Removes product from their org only.
+      If product is in multiple orgs, it stays in others.
+      If product is only in their org, it gets deleted globally.
     """
     from app.logging_config import log_audit_event
 
@@ -245,12 +263,15 @@ def delete_product(product_id):
     current_user = User.query.get(current_user_id)
     product = Product.query.get_or_404(product_id)
 
-    # Permission check: org admins can only delete products in their org
+    # Get user's current organization
+    user_org_id = session.get('organization_id') or current_user.organization_id
+
+    # Get all organizations this product is assigned to
+    product_org_ids = [org.id for org in product.organizations.all()]
+
+    # Permission check: non-super-admins can only manage products in their org
     if not current_user.is_super_admin():
-        product_org_ids = [org.id for org in product.organizations.all()]
-        if product.organization_id:
-            product_org_ids.append(product.organization_id)
-        if current_user.organization_id not in product_org_ids:
+        if user_org_id not in product_org_ids:
             return jsonify({'error': 'You can only delete products in your organization'}), 403
 
     # Store product info for audit log
@@ -258,26 +279,61 @@ def delete_product(product_id):
         'name': product.product_name,
         'vendor': product.vendor,
         'version': product.version,
-        'organization_id': product.organization_id,
-        'deleted_by': current_user.username
+        'organizations': product_org_ids,
+        'action_by': current_user.username
     }
 
     try:
-        # Delete associated vulnerability matches first
-        VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+        if current_user.is_super_admin():
+            # Super admin: delete product globally
+            VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+            db.session.delete(product)
+            db.session.commit()
 
-        # Now delete the product
-        db.session.delete(product)
-        db.session.commit()
+            log_audit_event(
+                'DELETE',
+                'products',
+                product_id,
+                old_value=product_info,
+                details=f"Super admin deleted product {product.vendor} {product.product_name} globally"
+            )
+            return jsonify({'success': True, 'message': 'Product deleted globally'})
 
-        # Log audit event
-        log_audit_event(
-            'DELETE',
-            'products',
-            product_id,
-            old_value=product_info,
-            details=f"Deleted product {product.vendor} {product.product_name}"
-        )
+        else:
+            # Org admin/manager: remove from their org only
+            user_org = Organization.query.get(user_org_id)
+
+            if len(product_org_ids) > 1:
+                # Product is in multiple orgs - just remove from this org
+                if user_org in product.organizations:
+                    product.organizations.remove(user_org)
+                    db.session.commit()
+
+                    log_audit_event(
+                        'REMOVE_ORG',
+                        'products',
+                        product_id,
+                        old_value={'organization_id': user_org_id},
+                        details=f"Removed product {product.vendor} {product.product_name} from {user_org.display_name}"
+                    )
+                    return jsonify({
+                        'success': True,
+                        'message': f'Product removed from {user_org.display_name} (still exists in other organizations)'
+                    })
+            else:
+                # Product only in this org - delete it globally
+                VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+                db.session.delete(product)
+                db.session.commit()
+
+                log_audit_event(
+                    'DELETE',
+                    'products',
+                    product_id,
+                    old_value=product_info,
+                    details=f"Deleted product {product.vendor} {product.product_name}"
+                )
+                return jsonify({'success': True, 'message': 'Product deleted'})
 
         return jsonify({'success': True})
 
