@@ -126,24 +126,24 @@ async function loadUsers() {
             `;
         } else {
             tbody.innerHTML = users.map(user => {
-                // Role badge based on new role system
+                // Role badge - professional style
                 const roleMap = {
-                    'super_admin': { badge: 'bg-danger', icon: 'star-fill', text: 'Super Admin' },
-                    'org_admin': { badge: 'bg-warning', icon: 'shield-check', text: 'Org Admin' },
-                    'manager': { badge: 'bg-info', icon: 'gear', text: 'Manager' },
-                    'user': { badge: 'bg-secondary', icon: 'person', text: 'User' }
+                    'super_admin': { badge: 'badge-role-super', text: 'Super Admin' },
+                    'org_admin': { badge: 'badge-role-admin', text: 'Org Admin' },
+                    'manager': { badge: 'badge-role-manager', text: 'Manager' },
+                    'user': { badge: 'badge-role-user', text: 'User' }
                 };
 
                 const role = roleMap[user.role] || roleMap['user'];
-                const roleBadge = `<span class="badge ${role.badge}"><i class="bi bi-${role.icon}"></i> ${role.text}</span>`;
+                const roleBadge = `<span class="badge ${role.badge}">${role.text}</span>`;
 
                 const statusBadge = user.is_active
-                    ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
-                    : '<span class="badge bg-secondary"><i class="bi bi-pause-circle"></i> Inactive</span>';
+                    ? '<span class="badge badge-status-active">Active</span>'
+                    : '<span class="badge badge-status-inactive">Inactive</span>';
 
                 const authBadge = user.auth_type === 'ldap'
-                    ? '<span class="badge bg-primary"><i class="bi bi-diagram-3"></i> LDAP</span>'
-                    : '<span class="badge bg-secondary"><i class="bi bi-key"></i> Local</span>';
+                    ? '<span class="badge badge-auth-ldap">LDAP</span>'
+                    : '<span class="badge badge-auth-local">Local</span>';
 
                 // Find organization display name from organizations array
                 let orgDisplay = '<span class="text-muted">-</span>';
@@ -169,15 +169,15 @@ async function loadUsers() {
                         <td>${statusBadge}</td>
                         <td>
                             <div class="d-flex gap-1">
-                                <button class="btn btn-sm btn-outline-primary" onclick="editUser(${user.id})" title="Edit User">
-                                    <i class="bi bi-pencil-square"></i>
+                                <button class="btn-action btn-action-edit" onclick="editUser(${user.id})" title="Edit">
+                                    <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-sm ${user.is_active ? 'btn-outline-warning' : 'btn-outline-success'}"
+                                <button class="btn-action ${user.is_active ? 'btn-action-block' : 'btn-action-success'}"
                                         onclick="toggleUserActive(${user.id}, '${escapeHtml(user.username)}', ${user.is_active})"
-                                        title="${user.is_active ? 'Block User' : 'Unblock User'}">
-                                    <i class="bi bi-${user.is_active ? 'person-dash' : 'person-check'}"></i>
+                                        title="${user.is_active ? 'Block' : 'Unblock'}">
+                                    <i class="bi bi-${user.is_active ? 'slash-circle' : 'check-circle'}"></i>
                                 </button>
-                                <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="Delete User">
+                                <button class="btn-action btn-action-delete" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="Delete">
                                     <i class="bi bi-trash3"></i>
                                 </button>
                             </div>
@@ -304,10 +304,10 @@ async function loadUserOrgMemberships(userId) {
         }
 
         const roleLabels = {
-            'super_admin': '<span class="badge bg-danger">Super Admin</span>',
-            'org_admin': '<span class="badge bg-warning text-dark">Org Admin</span>',
-            'manager': '<span class="badge bg-info">Manager</span>',
-            'user': '<span class="badge bg-secondary">User</span>'
+            'super_admin': '<span class="badge badge-role-super">Super Admin</span>',
+            'org_admin': '<span class="badge badge-role-admin">Org Admin</span>',
+            'manager': '<span class="badge badge-role-manager">Manager</span>',
+            'user': '<span class="badge badge-role-user">User</span>'
         };
 
         tbody.innerHTML = memberships.map(m => `
@@ -652,27 +652,27 @@ async function loadOrganizations() {
         } else {
             tbody.innerHTML = organizations.map(org => {
                 const smtpBadge = org.smtp_host
-                    ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Yes</span>'
-                    : '<span class="badge bg-secondary">No</span>';
+                    ? '<span class="badge badge-status-active">Configured</span>'
+                    : '<span class="badge badge-status-inactive">Not Set</span>';
 
                 const statusBadge = org.active
-                    ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
-                    : '<span class="badge bg-secondary"><i class="bi bi-pause-circle"></i> Inactive</span>';
+                    ? '<span class="badge badge-status-active">Active</span>'
+                    : '<span class="badge badge-status-inactive">Inactive</span>';
 
                 return `
                     <tr>
                         <td class="fw-semibold">${escapeHtml(org.name)}</td>
                         <td>${escapeHtml(org.display_name)}</td>
-                        <td><span class="badge bg-info">${org.user_count || 0}</span></td>
+                        <td><span class="badge badge-role-manager">${org.user_count || 0}</span></td>
                         <td>${smtpBadge}</td>
                         <td>${statusBadge}</td>
                         <td>
                             <div class="d-flex gap-1">
-                                <button class="btn btn-sm btn-outline-primary" onclick="editOrganization(${org.id})" title="Edit Organization">
-                                    <i class="bi bi-pencil-square"></i>
+                                <button class="btn-action btn-action-edit" onclick="editOrganization(${org.id})" title="Edit">
+                                    <i class="bi bi-pencil"></i>
                                 </button>
                                 ${org.name !== 'default' ? `
-                                <button class="btn btn-sm btn-outline-danger" onclick="deleteOrganization(${org.id}, '${escapeHtml(org.display_name)}')" title="Delete Organization">
+                                <button class="btn-action btn-action-delete" onclick="deleteOrganization(${org.id}, '${escapeHtml(org.display_name)}')" title="Delete">
                                     <i class="bi bi-trash3"></i>
                                 </button>
                                 ` : ''}
@@ -2191,19 +2191,19 @@ async function loadGroupMappings() {
 
             tableBody.innerHTML = mappings.map(mapping => {
                 const statusBadge = mapping.is_active ?
-                    '<span class="badge bg-success">Active</span>' :
-                    '<span class="badge bg-secondary">Inactive</span>';
+                    '<span class="badge badge-status-active">Active</span>' :
+                    '<span class="badge badge-status-inactive">Inactive</span>';
 
                 const roleBadge = {
-                    'super_admin': '<span class="badge bg-danger">Super Admin</span>',
-                    'org_admin': '<span class="badge bg-warning">Org Admin</span>',
-                    'manager': '<span class="badge bg-info">Manager</span>',
-                    'user': '<span class="badge bg-secondary">User</span>'
+                    'super_admin': '<span class="badge badge-role-super">Super Admin</span>',
+                    'org_admin': '<span class="badge badge-role-admin">Org Admin</span>',
+                    'manager': '<span class="badge badge-role-manager">Manager</span>',
+                    'user': '<span class="badge badge-role-user">User</span>'
                 }[mapping.role] || mapping.role;
 
                 const autoProvisionIcon = mapping.auto_provision ?
-                    '<i class="bi bi-check-circle-fill text-success" title="Auto-provision enabled"></i>' :
-                    '<i class="bi bi-x-circle-fill text-muted" title="Auto-provision disabled"></i>';
+                    '<span class="badge badge-status-active">Yes</span>' :
+                    '<span class="badge badge-status-inactive">No</span>';
 
                 const lastSync = mapping.last_sync ?
                     new Date(mapping.last_sync).toLocaleString() :
@@ -2225,12 +2225,14 @@ async function loadGroupMappings() {
                         <td><small>${lastSync}</small></td>
                         <td>${statusBadge}</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editGroupMapping(${mapping.id})" title="Edit">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteGroupMapping(${mapping.id})" title="Delete">
-                                <i class="bi bi-trash"></i>
-                            </button>
+                            <div class="d-flex gap-1">
+                                <button class="btn-action btn-action-edit" onclick="editGroupMapping(${mapping.id})" title="Edit">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn-action btn-action-delete" onclick="deleteGroupMapping(${mapping.id})" title="Delete">
+                                    <i class="bi bi-trash3"></i>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 `;
