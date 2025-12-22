@@ -237,7 +237,7 @@ class VulnerabilityReportGenerator:
 
             table_data.append([
                 vuln.cve_id if vuln else 'N/A',
-                f"{product.vendor} {product.product}"[:30] if product else 'N/A',
+                f"{product.vendor} {product.product_name}"[:30] if product else 'N/A',
                 priority.upper() if priority else 'N/A',
                 severity or 'N/A',
                 status,
