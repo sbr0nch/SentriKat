@@ -11,13 +11,16 @@
             </h1>
             <p class="text-muted">Manage your software inventory for vulnerability tracking</p>
         </div>
+        {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
         <div class="col-auto">
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#productModal" onclick="showAddProduct()">
                 <i class="bi bi-plus-circle me-2"></i>Add Product
             </button>
         </div>
+        {% endif %}
     </div>
 
+    {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
     <!-- Bulk Actions Toolbar (hidden by default) -->
     <div class="alert alert-info mb-3" id="bulkActionsToolbar" style="display: none;">
         <div class="d-flex justify-content-between align-items-center">
@@ -26,9 +29,11 @@
                 <strong><span id="selectedCount">0</span> product(s) selected</strong>
             </span>
             <div class="btn-group btn-group-sm">
+                {% if current_user.role in ['org_admin', 'super_admin'] or current_user.is_admin %}
                 <button class="btn btn-outline-primary" onclick="bulkAssignOrganization()">
                     <i class="bi bi-building me-1"></i>Assign to Organization
                 </button>
+                {% endif %}
                 <button class="btn btn-outline-success" onclick="bulkActivate()">
                     <i class="bi bi-check-circle me-1"></i>Activate
                 </button>
@@ -44,6 +49,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -360,6 +366,13 @@
 
 {% block extra_js %}
 <script>
+    // User permission flags for UI visibility
+    const userPermissions = {
+        canManageProducts: {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}true{% else %}false{% endif %},
+        canAssignOrgs: {% if current_user and (current_user.role in ['org_admin', 'super_admin'] or current_user.is_admin) %}true{% else %}false{% endif %},
+        isSuperAdmin: {% if current_user and current_user.is_super_admin() %}true{% else %}false{% endif %}
+    };
+
     let currentProductId = null;
     let serviceCatalog = [];
     let selectedCatalogItems = new Set();
@@ -418,15 +431,18 @@
                             <td data-column="status">${statusBadge}</td>
                             <td onclick="event.stopPropagation();">
                                 <div class="d-flex gap-1">
+                                    ${userPermissions.canManageProducts ? `
                                     <button class="btn-action btn-action-edit" onclick="editProduct(${product.id})" title="Edit">
                                         <i class="bi bi-pencil"></i>
-                                    </button>
+                                    </button>` : ''}
+                                    ${userPermissions.canAssignOrgs ? `
                                     <button class="btn-action btn-action-edit" onclick="manageOrganizations(${product.id})" title="Organizations">
                                         <i class="bi bi-building"></i>
-                                    </button>
+                                    </button>` : ''}
+                                    ${userPermissions.canManageProducts ? `
                                     <button class="btn-action btn-action-delete" onclick="deleteProduct(${product.id}, '${escapeHtml(product.vendor)} ${escapeHtml(product.product_name)}')" title="Delete">
                                         <i class="bi bi-trash3"></i>
-                                    </button>
+                                    </button>` : ''}
                                 </div>
                             </td>
                         </tr>

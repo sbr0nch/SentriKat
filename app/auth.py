@@ -34,7 +34,12 @@ def login_required(f):
     return decorated_function
 
 def admin_required(f):
-    """Decorator to require admin privileges"""
+    """Decorator to require super admin privileges.
+
+    Allows access for users with:
+    - role: super_admin
+    - is_admin=True (legacy flag)
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         # If auth is disabled, allow all requests
@@ -47,11 +52,19 @@ def admin_required(f):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
-        # Check if user is admin
+        # Check if user is super_admin or has legacy is_admin flag
         user = User.query.get(session['user_id'])
-        if not user or not user.is_admin:
+        if not user:
             if request.is_json or request.path.startswith('/api/'):
-                return jsonify({'error': 'Admin privileges required'}), 403
+                return jsonify({'error': 'User not found'}), 401
+            return redirect(url_for('auth.login'))
+
+        # Allow super_admin role or legacy is_admin flag
+        has_permission = user.role == 'super_admin' or user.is_admin == True
+
+        if not has_permission:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Super admin privileges required'}), 403
             return redirect(url_for('main.index'))
 
         return f(*args, **kwargs)

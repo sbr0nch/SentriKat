@@ -28,9 +28,14 @@ def admin():
     return render_template('admin.html')
 
 @bp.route('/admin-panel')
-@admin_required
+@org_admin_required
 def admin_panel():
-    """Full administration panel for users, organizations, and settings"""
+    """Full administration panel for users, organizations, and settings.
+
+    Access:
+    - super_admin: Full access to all tabs
+    - org_admin: Limited access (users in their org, LDAP, SMTP/Sync settings only)
+    """
     return render_template('admin_panel.html')
 
 # API Endpoints
