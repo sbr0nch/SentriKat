@@ -54,9 +54,18 @@ def get_products():
     return jsonify([p.to_dict() for p in products])
 
 @bp.route('/api/products', methods=['POST'])
-@login_required
+@org_admin_required
 def create_product():
-    """Create a new product"""
+    """
+    Create a new product
+
+    Permissions:
+    - Super Admin: Can create products for any org
+    - Org Admin: Can create products for their org only
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
     data = request.get_json()
 
     if not data.get('vendor') or not data.get('product_name'):
@@ -126,10 +135,28 @@ def get_product(product_id):
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['PUT'])
-@login_required
+@org_admin_required
 def update_product(product_id):
-    """Update a product"""
+    """
+    Update a product
+
+    Permissions:
+    - Super Admin: Can update any product
+    - Org Admin: Can update products in their organization
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     product = Product.query.get_or_404(product_id)
+
+    # Permission check: org admins can only edit products in their org
+    if not current_user.is_super_admin():
+        # Check if product belongs to user's org (via primary or multi-org assignment)
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if current_user.organization_id not in product_org_ids:
+            return jsonify({'error': 'You can only edit products in your organization'}), 403
+
     data = request.get_json()
 
     # Check for duplicate product if vendor, product_name, or version is being updated
@@ -189,19 +216,36 @@ def update_product(product_id):
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['DELETE'])
-@login_required
+@org_admin_required
 def delete_product(product_id):
-    """Delete a product"""
+    """
+    Delete a product
+
+    Permissions:
+    - Super Admin: Can delete any product
+    - Org Admin: Can delete products in their organization
+    """
     from app.logging_config import log_audit_event
 
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     product = Product.query.get_or_404(product_id)
+
+    # Permission check: org admins can only delete products in their org
+    if not current_user.is_super_admin():
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if current_user.organization_id not in product_org_ids:
+            return jsonify({'error': 'You can only delete products in your organization'}), 403
 
     # Store product info for audit log
     product_info = {
         'name': product.product_name,
         'vendor': product.vendor,
         'version': product.version,
-        'organization_id': product.organization_id
+        'organization_id': product.organization_id,
+        'deleted_by': current_user.username
     }
 
     try:
@@ -451,9 +495,14 @@ def unacknowledge_match(match_id):
     return jsonify(match.to_dict())
 
 @bp.route('/api/sync', methods=['POST'])
-@login_required
+@admin_required
 def trigger_sync():
-    """Manually trigger CISA KEV sync"""
+    """
+    Manually trigger CISA KEV sync
+
+    Permissions:
+    - Super Admin only: Can trigger manual sync of CISA KEV data
+    """
     result = sync_cisa_kev()
     return jsonify(result)
 
@@ -639,15 +688,43 @@ def create_organization():
 @bp.route('/api/organizations/<int:org_id>', methods=['GET'])
 @login_required
 def get_organization(org_id):
-    """Get a specific organization"""
+    """
+    Get a specific organization
+
+    Permissions:
+    - Super Admin: Can view any organization
+    - Org Admin/Manager/User: Can only view organizations they belong to
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Permission check: non-super admins can only view their own orgs
+    if not current_user.is_super_admin():
+        if not current_user.has_access_to_org(org_id):
+            return jsonify({'error': 'You do not have access to this organization'}), 403
+
     org = Organization.query.get_or_404(org_id)
     return jsonify(org.to_dict())
 
 @bp.route('/api/organizations/<int:org_id>', methods=['PUT'])
-@admin_required
+@org_admin_required
 def update_organization(org_id):
-    """Update an organization"""
+    """
+    Update an organization
+
+    Permissions:
+    - Super Admin: Can update any organization
+    - Org Admin: Can update their own organization only
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     org = Organization.query.get_or_404(org_id)
+
+    # Permission check: org admins can only edit their own org
+    if not current_user.is_super_admin():
+        if not current_user.is_org_admin_for(org_id):
+            return jsonify({'error': 'You can only edit your own organization'}), 403
+
     data = request.get_json()
 
     if 'display_name' in data:
