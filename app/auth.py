@@ -286,6 +286,9 @@ def api_setup():
 @auth_bp.route('/api/auth/login', methods=['POST'])
 def api_login():
     """Handle login via API"""
+    import logging
+    logger = logging.getLogger('security')
+
     if not AUTH_ENABLED:
         return jsonify({'error': 'Authentication is disabled'}), 400
 
@@ -293,14 +296,25 @@ def api_login():
     username = data.get('username')
     password = data.get('password')
 
+    logger.info(f"Login attempt for username: {username} from {request.remote_addr}")
+
     if not username or not password:
+        logger.warning(f"Login failed: missing username or password from {request.remote_addr}")
         return jsonify({'error': 'Username and password required'}), 400
 
     # Find user
     user = User.query.filter_by(username=username, is_active=True).first()
 
     if not user:
+        # Also check for inactive user to provide better error
+        inactive_user = User.query.filter_by(username=username, is_active=False).first()
+        if inactive_user:
+            logger.warning(f"Login failed: user {username} is inactive/disabled")
+            return jsonify({'error': 'Account is disabled. Contact administrator.'}), 401
+        logger.warning(f"Login failed: user {username} not found")
         return jsonify({'error': 'Invalid username or password'}), 401
+
+    logger.info(f"User found: {user.username} (id={user.id}, auth_type={user.auth_type}, role={user.role})")
 
     # Check authentication type
     if user.auth_type == 'local':
@@ -315,21 +329,31 @@ def api_login():
             if auth_result is not True:
                 # auth_result contains error details if it's a dict
                 if isinstance(auth_result, dict):
-                    return jsonify({
+                    response = {
                         'error': 'Invalid LDAP credentials',
                         'detail': auth_result.get('detail', 'Unknown error')
-                    }), 401
+                    }
+                    # Include LDAP error details for debugging
+                    if 'ldap_error' in auth_result:
+                        response['ldap_error'] = auth_result['ldap_error']
+                    return jsonify(response), 401
                 return jsonify({'error': 'Invalid LDAP credentials'}), 401
         except Exception as e:
+            import logging
+            logger = logging.getLogger('security')
+            logger.exception(f"LDAP authentication exception for {username}")
             return jsonify({'error': f'LDAP authentication failed: {str(e)}'}), 500
 
     else:
+        logger.error(f"Login failed: unknown auth_type '{user.auth_type}' for user {username}")
         return jsonify({'error': 'Invalid authentication type'}), 500
 
     # Update last login
+    logger.info(f"Authentication successful for {username}, updating last login")
     user.last_login = datetime.utcnow()
     user.last_login_ip = request.remote_addr
     db.session.commit()
+    logger.info(f"Last login updated for {username}")
 
     # Set session as permanent (uses PERMANENT_SESSION_LIFETIME from config)
     session.permanent = True
@@ -390,6 +414,16 @@ def authenticate_ldap(user, password):
     Returns:
         bool: True if authentication successful
     """
+    import logging
+    logger = logging.getLogger('security')
+
+    # Refresh user from database to ensure we have current data
+    db.session.refresh(user)
+
+    logger.info(f"LDAP: Starting authentication for user {user.username} (id={user.id}, auth_type={user.auth_type})")
+    logger.info(f"LDAP: User active={user.is_active}, organization_id={user.organization_id}")
+    logger.info(f"LDAP: Password length: {len(password) if password else 0}, contains special chars: {any(not c.isalnum() for c in password) if password else False}")
+
     # LDAP configuration from database (GUI settings)
     from app.models import SystemSettings
 
@@ -445,7 +479,12 @@ def authenticate_ldap(user, password):
                 raise Exception('Failed to bind anonymously. Configure LDAP_BIND_DN and LDAP_BIND_PW')
 
         # Step 2: Search for user by username
+        import logging
+        logger = logging.getLogger('security')
+
         search_filter = search_filter_template.replace('{username}', user.username)
+        logger.info(f"LDAP: Searching for user {user.username} with filter: {search_filter}")
+
         search_conn.search(
             search_base=base_dn,
             search_filter=search_filter,
@@ -455,31 +494,92 @@ def authenticate_ldap(user, password):
 
         if not search_conn.entries:
             search_conn.unbind()
+            logger.warning(f"LDAP: User {user.username} not found in LDAP directory")
             return {
                 'success': False,
                 'detail': f'User "{user.username}" not found in LDAP. Check if username matches AD sAMAccountName.'
             }
 
+        # Log number of entries found (should be 1)
+        num_entries = len(search_conn.entries)
+        if num_entries > 1:
+            logger.warning(f"LDAP: Multiple entries ({num_entries}) found for {user.username}")
+            for i, entry in enumerate(search_conn.entries):
+                logger.warning(f"LDAP:   Entry {i}: {entry.entry_dn}")
+
         # Get user's DN (works with both AD and OpenLDAP)
         user_entry = search_conn.entries[0]
         user_dn = str(user_entry.entry_dn)
 
+        logger.info(f"LDAP: Found user {user.username}, DN: {user_dn}")
+        logger.info(f"LDAP: Stored DN in database: {user.ldap_dn}")
+
         # Update user's LDAP DN in database if not set or changed
         if user.ldap_dn != user_dn:
+            logger.info(f"LDAP: Updating stored DN from '{user.ldap_dn}' to '{user_dn}'")
             user.ldap_dn = user_dn
             db.session.commit()
 
         search_conn.unbind()
 
         # Step 3: Attempt bind with user's credentials
+        import logging
+        logger = logging.getLogger('security')
+
+        logger.info(f"LDAP: Attempting user bind for DN: {user_dn}")
         user_conn = Connection(server, user=user_dn, password=password, authentication=SIMPLE)
 
         if not user_conn.bind():
+            # Capture detailed LDAP error information
+            ldap_result = user_conn.result
+            result_code = ldap_result.get('result', 'unknown')
+            result_desc = ldap_result.get('description', 'unknown')
+            result_msg = ldap_result.get('message', '')
+
+            logger.error(
+                f"LDAP bind failed for {user.username}: "
+                f"result_code={result_code}, description={result_desc}, message={result_msg}, "
+                f"DN={user_dn}"
+            )
+
+            # Build detailed error message based on LDAP error code
+            error_details = f'Password verification failed for DN: {user_dn}.'
+
+            # Common LDAP error codes
+            if result_code == 49:
+                # Invalid credentials - check sub-error in message
+                if '52e' in str(result_msg).lower() or 'invalid credentials' in str(result_desc).lower():
+                    error_details += ' Invalid username or password.'
+                elif '530' in str(result_msg):
+                    error_details += ' Account not permitted to logon at this time.'
+                elif '531' in str(result_msg):
+                    error_details += ' Account not permitted to logon at this workstation.'
+                elif '532' in str(result_msg):
+                    error_details += ' Password has expired.'
+                elif '533' in str(result_msg):
+                    error_details += ' Account disabled.'
+                elif '701' in str(result_msg):
+                    error_details += ' Account expired.'
+                elif '773' in str(result_msg):
+                    error_details += ' User must reset password.'
+                elif '775' in str(result_msg):
+                    error_details += ' Account locked out.'
+                else:
+                    error_details += f' LDAP error: {result_desc}. {result_msg}'
+            else:
+                error_details += f' LDAP result: {result_code} - {result_desc}. {result_msg}'
+
             return {
                 'success': False,
-                'detail': f'Password verification failed for DN: {user_dn}. Check password or AD account status (locked/disabled).'
+                'detail': error_details,
+                'ldap_error': {
+                    'code': result_code,
+                    'description': result_desc,
+                    'message': result_msg
+                }
             }
 
+        logger.info(f"LDAP: Successful bind for {user.username}")
         user_conn.unbind()
         return True
 
