@@ -32,28 +32,34 @@
         }
         .setup-container {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border-radius: 16px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
             padding: 0;
             max-width: 800px;
             width: 90%;
             overflow: hidden;
         }
         .setup-header {
-            background: var(--primary-color);
-            color: white;
-            padding: 30px;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            color: #111827;
+            padding: 40px 30px;
             text-align: center;
-            border-bottom: 3px solid var(--primary-dark);
+            border-bottom: 1px solid var(--gray-200);
         }
         .setup-header h1 {
             margin: 0;
-            font-size: 2rem;
-            font-weight: 700;
+            font-size: 2.25rem;
+            font-weight: 800;
+            color: #111827;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
         }
         .setup-header p {
-            margin: 10px 0 0 0;
-            opacity: 0.9;
+            margin: 12px 0 0 0;
+            color: var(--gray-700);
+            font-size: 1.1rem;
         }
         .setup-body {
             padding: 40px;
@@ -70,7 +76,7 @@
             to { opacity: 1; }
         }
         .progress-bar-custom {
-            height: 6px;
+            height: 8px;
             background: var(--gray-200);
             border-radius: 10px;
             margin-bottom: 30px;
@@ -78,52 +84,80 @@
         }
         .progress-fill {
             height: 100%;
-            background: var(--primary-color);
+            background: linear-gradient(90deg, var(--primary-color) 0%, var(--primary-light) 100%);
             border-radius: 10px;
-            transition: width 0.4s ease;
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .step-indicator {
             display: flex;
             justify-content: space-between;
             margin-bottom: 30px;
+            position: relative;
+        }
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--gray-200);
+            transform: translateY(-50%);
+            z-index: 0;
         }
         .step-dot {
-            width: 40px;
-            height: 40px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
-            background: var(--gray-200);
+            background: white;
+            border: 3px solid var(--gray-200);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: 600;
+            font-weight: 700;
+            font-size: 1rem;
             color: var(--gray-700);
-            transition: all 0.3s;
+            transition: all 0.3s ease;
+            z-index: 1;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
         .step-dot.active {
             background: var(--primary-color);
+            border-color: var(--primary-color);
             color: white;
-            transform: scale(1.1);
+            transform: scale(1.15);
+            box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
         }
         .step-dot.completed {
             background: var(--success-color);
+            border-color: var(--success-color);
             color: white;
         }
         .btn-setup {
-            background: var(--primary-color);
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
             border: none;
             color: white;
-            padding: 12px 30px;
+            padding: 14px 36px;
             font-weight: 600;
-            border-radius: 6px;
-            transition: all 0.2s;
+            font-size: 1rem;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(30, 64, 175, 0.25);
         }
         .btn-setup:hover {
-            background: var(--primary-dark);
+            background: linear-gradient(135deg, var(--primary-dark) 0%, #172554 100%);
             color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(30, 64, 175, 0.35);
+        }
+        .btn-setup:active {
+            transform: translateY(0);
         }
         .btn-setup:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
         .form-control:focus {
             border-color: var(--primary-color);
@@ -137,25 +171,55 @@
             padding: 40px;
         }
         .success-icon {
-            font-size: 80px;
+            font-size: 100px;
             color: var(--success-color);
-            animation: scaleIn 0.5s;
+            animation: scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            filter: drop-shadow(0 8px 16px rgba(16, 185, 129, 0.3));
         }
         @keyframes scaleIn {
-            from { transform: scale(0); }
-            to { transform: scale(1); }
+            from { transform: scale(0) rotate(-20deg); opacity: 0; }
+            to { transform: scale(1) rotate(0deg); opacity: 1; }
         }
         .feature-card {
-            background: var(--gray-50);
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 15px;
-            border-left: 4px solid var(--primary-color);
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-bottom: 16px;
+            border: 1px solid var(--gray-200);
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            transition: all 0.2s ease;
         }
-        .feature-card i {
-            font-size: 24px;
-            color: var(--primary-color);
-            margin-right: 15px;
+        .feature-card:hover {
+            transform: translateX(4px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .feature-card .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .feature-card .feature-icon i {
+            font-size: 22px;
+            color: white;
+        }
+        .feature-card .feature-content {
+            flex: 1;
+        }
+        .feature-card .feature-content strong {
+            font-size: 1rem;
+            color: var(--gray-900);
+        }
+        .feature-card .feature-content p {
+            margin: 4px 0 0 0;
+            font-size: 0.9rem;
+            color: var(--gray-700);
         }
         .optional-badge {
             background: var(--gray-200);
@@ -171,8 +235,11 @@
 <body>
     <div class="setup-container">
         <div class="setup-header">
-            <h1><img src="/static/images/favicon-128x128.png" alt="SentriKat" style="width: 128px; height: 128px; vertical-align: middle; margin-right: 16px;">SentriKat</h1>
-            <p>Vulnerability Management System - First Time Setup</p>
+            <h1>
+                <img src="/static/images/favicon-128x128.png" alt="SentriKat" style="width: 128px; height: 128px;">
+                <span>SentriKat</span>
+            </h1>
+            <p>Enterprise Vulnerability Management - First Time Setup</p>
         </div>
 
         <div class="setup-body">
@@ -206,27 +273,43 @@
                 <p class="lead">Let's get your vulnerability management system up and running.</p>
 
                 <div class="feature-card">
-                    <i class="bi bi-lightning-charge-fill float-start"></i>
-                    <strong>Automated CVE Tracking</strong>
-                    <p class="mb-0 mt-2">Automatically sync with CISA's Known Exploited Vulnerabilities catalog</p>
+                    <div class="feature-icon">
+                        <i class="bi bi-lightning-charge-fill"></i>
+                    </div>
+                    <div class="feature-content">
+                        <strong>Automated CVE Tracking</strong>
+                        <p>Automatically sync with CISA's Known Exploited Vulnerabilities catalog</p>
+                    </div>
                 </div>
 
                 <div class="feature-card">
-                    <i class="bi bi-bell-fill float-start"></i>
-                    <strong>Email Alerts</strong>
-                    <p class="mb-0 mt-2">Get notified when new critical vulnerabilities affect your products</p>
+                    <div class="feature-icon">
+                        <i class="bi bi-bell-fill"></i>
+                    </div>
+                    <div class="feature-content">
+                        <strong>Email Alerts</strong>
+                        <p>Get notified when new critical vulnerabilities affect your products</p>
+                    </div>
                 </div>
 
                 <div class="feature-card">
-                    <i class="bi bi-graph-up-arrow float-start"></i>
-                    <strong>Priority System</strong>
-                    <p class="mb-0 mt-2">CVSS-based prioritization with CISA urgency consideration</p>
+                    <div class="feature-icon">
+                        <i class="bi bi-graph-up-arrow"></i>
+                    </div>
+                    <div class="feature-content">
+                        <strong>Priority System</strong>
+                        <p>CVSS-based prioritization with CISA urgency consideration</p>
+                    </div>
                 </div>
 
                 <div class="feature-card">
-                    <i class="bi bi-building float-start"></i>
-                    <strong>Multi-Tenancy</strong>
-                    <p class="mb-0 mt-2">Manage multiple organizations with separate product catalogs</p>
+                    <div class="feature-icon">
+                        <i class="bi bi-building"></i>
+                    </div>
+                    <div class="feature-content">
+                        <strong>Multi-Tenancy</strong>
+                        <p>Manage multiple organizations with separate product catalogs</p>
+                    </div>
                 </div>
 
                 <div class="mt-4">
