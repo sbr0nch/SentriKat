@@ -263,12 +263,13 @@
                                 </th>
                                 <th>Vendor</th>
                                 <th>Product</th>
-                                <th>Keywords</th>
+                                <th>Version</th>
+                                <th>Category</th>
                             </tr>
                         </thead>
                         <tbody id="catalogTable">
                             <tr>
-                                <td colspan="4" class="text-center py-4">
+                                <td colspan="5" class="text-center py-4">
                                     <div class="spinner-border text-primary" role="status">
                                         <span class="visually-hidden">Loading...</span>
                                     </div>
@@ -362,6 +363,7 @@
     let currentProductId = null;
     let serviceCatalog = [];
     let selectedCatalogItems = new Set();
+    let selectedVersions = {};  // Store selected versions by catalog ID
 
     async function loadProducts() {
         showLoading();
@@ -659,7 +661,7 @@
         if (catalog.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="4" class="text-center py-4 text-muted">
+                    <td colspan="5" class="text-center py-4 text-muted">
                         No services found matching your search
                     </td>
                 </tr>
@@ -669,6 +671,19 @@
 
         tbody.innerHTML = catalog.map(service => {
             const isChecked = selectedCatalogItems.has(service.id);
+            let versions = [];
+            try {
+                versions = service.typical_versions ? JSON.parse(service.typical_versions) : [];
+            } catch (e) {
+                versions = [];
+            }
+
+            // Build version dropdown options
+            const selectedVersion = selectedVersions[service.id] || (versions.length > 0 ? versions[0] : '');
+            const versionOptions = versions.length > 0
+                ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === selectedVersion ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
+                : '<option value="">N/A</option>';
+
             return `
                 <tr onclick="toggleCatalogRow(${service.id}, event)" style="cursor: pointer;">
                     <td onclick="event.stopPropagation();">
@@ -680,10 +695,22 @@
                     </td>
                     <td class="fw-semibold">${escapeHtml(service.vendor)}</td>
                     <td>${escapeHtml(service.product_name)}</td>
-                    <td><small class="text-muted">${escapeHtml(service.keywords || '')}</small></td>
+                    <td onclick="event.stopPropagation();">
+                        <select class="form-select form-select-sm version-select"
+                                data-catalog-id="${service.id}"
+                                onchange="updateSelectedVersion(${service.id}, this.value)"
+                                style="min-width: 100px;">
+                            ${versionOptions}
+                        </select>
+                    </td>
+                    <td><small class="text-muted">${escapeHtml(service.category || '')}</small></td>
                 </tr>
             `;
         }).join('');
+    }
+
+    function updateSelectedVersion(catalogId, version) {
+        selectedVersions[catalogId] = version;
     }
 
     function filterCatalog(query) {
@@ -778,9 +805,19 @@
                 if (!service) return { status: 'failed' };
 
                 try {
+                    // Get selected version for this catalog item
+                    let versions = [];
+                    try {
+                        versions = service.typical_versions ? JSON.parse(service.typical_versions) : [];
+                    } catch (e) {
+                        versions = [];
+                    }
+                    const version = selectedVersions[catalogId] || (versions.length > 0 ? versions[0] : '');
+
                     const productData = {
                         vendor: service.vendor,
                         product_name: service.product_name,
+                        version: version,
                         keywords: service.keywords || '',
                         service_catalog_id: catalogId,
                         active: true,
