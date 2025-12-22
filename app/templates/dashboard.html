@@ -381,8 +381,8 @@
                 </div>
                 <!-- Page Size -->
                 <select class="form-select form-select-sm" id="pageSize" style="width: 75px;" onchange="changePageSize()" title="Items per page">
-                    <option value="25">25</option>
-                    <option value="50" selected>50</option>
+                    <option value="15" selected>15</option>
+                    <option value="50">50</option>
                     <option value="100">100</option>
                     <option value="all">All</option>
                 </select>
@@ -659,7 +659,7 @@
     let currentVulnerabilities = [];
     let selectedVulns = new Set();
     let currentPage = 1;
-    let pageSize = 50;
+    let pageSize = 15;
 
     function changePageSize() {
         const select = document.getElementById('pageSize');
