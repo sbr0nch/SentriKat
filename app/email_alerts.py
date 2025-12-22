@@ -63,10 +63,26 @@ class EmailAlertManager:
         if not EmailAlertManager.should_send_alert_now(organization):
             return {'status': 'skipped', 'reason': 'Outside alert time window'}
 
-        # Get SMTP config
+        # Get SMTP config - try organization first, then fall back to global
         smtp_config = organization.get_smtp_config()
+
+        # Fall back to global SMTP if organization SMTP not configured
         if not smtp_config['host'] or not smtp_config['from_email']:
-            return {'status': 'error', 'reason': 'SMTP not configured'}
+            from app.settings_api import get_setting
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587') or '587'),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat Alerts')
+            }
+
+        # Check if any SMTP is configured
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            return {'status': 'error', 'reason': 'SMTP not configured (neither org nor global)'}
 
         # Get recipient emails
         recipients = json.loads(organization.notification_emails) if organization.notification_emails else []
