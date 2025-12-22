@@ -690,10 +690,10 @@ def trigger_critical_cve_alerts():
                 .all()
             )
 
-            # Filter for critical/high priority only
+            # Filter for CRITICAL priority ONLY (not high - too many alerts cause spam)
             critical_matches = [
                 m for m in unack_matches
-                if m.calculate_effective_priority() in ['critical', 'high']
+                if m.calculate_effective_priority() == 'critical'
             ]
 
             if not critical_matches:

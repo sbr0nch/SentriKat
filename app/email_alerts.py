@@ -81,14 +81,16 @@ class EmailAlertManager:
 
             should_alert = False
 
-            # Check alert settings
+            # Check alert settings - CRITICAL ONLY (high priority disabled to prevent spam)
             if organization.alert_on_critical and priority == 'critical':
                 should_alert = True
-            elif organization.alert_on_high and priority in ['high', 'critical']:
+            # Note: alert_on_high is intentionally disabled - too many alerts cause spam
+            # elif organization.alert_on_high and priority == 'high':
+            #     should_alert = True
+            elif organization.alert_on_ransomware and vuln.known_ransomware and priority == 'critical':
+                # Ransomware alerts only for critical severity
                 should_alert = True
-            elif organization.alert_on_ransomware and vuln.known_ransomware:
-                should_alert = True
-            elif organization.alert_on_new_cve:
+            elif organization.alert_on_new_cve and priority == 'critical':
                 # New CVE within 7 days
                 days_old = (date.today() - vuln.date_added).days if vuln.date_added else 999
                 if days_old <= 7:
