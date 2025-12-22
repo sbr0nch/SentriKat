@@ -310,15 +310,33 @@
 
     <!-- Vulnerabilities List -->
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <span><i class="bi bi-shield-exclamation me-2"></i>Matched Vulnerabilities (<span id="vulnCount">0</span>)</span>
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
-                <label class="form-check-label" for="selectAll">Select All</label>
+            <div class="d-flex align-items-center gap-3">
+                <div class="d-flex align-items-center gap-2">
+                    <label class="form-label mb-0 small">Show:</label>
+                    <select class="form-select form-select-sm" id="pageSize" style="width: auto;" onchange="changePageSize()">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="all">All</option>
+                    </select>
+                </div>
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+                    <label class="form-check-label" for="selectAll">Select All</label>
+                </div>
             </div>
         </div>
         <div class="card-body p-0">
             <div id="vulnerabilitiesContainer" class="p-3"></div>
+            <!-- Pagination Controls -->
+            <div id="paginationControls" class="d-flex justify-content-between align-items-center p-3 border-top" style="display: none !important;">
+                <div class="text-muted small" id="paginationInfo">Showing 1-50 of 0</div>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0" id="paginationNav"></ul>
+                </nav>
+            </div>
         </div>
     </div>
 
@@ -460,6 +478,94 @@
 
     let currentVulnerabilities = [];
     let selectedVulns = new Set();
+    let currentPage = 1;
+    let pageSize = 50;
+
+    function changePageSize() {
+        const select = document.getElementById('pageSize');
+        pageSize = select.value === 'all' ? Infinity : parseInt(select.value);
+        currentPage = 1;
+        renderCurrentPage();
+    }
+
+    function goToPage(page) {
+        currentPage = page;
+        renderCurrentPage();
+        // Scroll to top of vulnerabilities container
+        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function renderCurrentPage() {
+        const container = document.getElementById('vulnerabilitiesContainer');
+        const total = currentVulnerabilities.length;
+
+        if (total === 0) {
+            container.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-shield-check text-success" style="font-size: 4rem;"></i>
+                    <h4 class="mt-3">No vulnerabilities found</h4>
+                    <p class="text-muted">No matches found with the current filter criteria.</p>
+                </div>
+            `;
+            document.getElementById('paginationControls').style.display = 'none';
+            return;
+        }
+
+        const effectivePageSize = pageSize === Infinity ? total : pageSize;
+        const totalPages = Math.ceil(total / effectivePageSize);
+        const startIdx = (currentPage - 1) * effectivePageSize;
+        const endIdx = Math.min(startIdx + effectivePageSize, total);
+        const pageItems = currentVulnerabilities.slice(startIdx, endIdx);
+
+        container.innerHTML = pageItems.map(match => createVulnCard(match)).join('');
+
+        // Update pagination info and controls
+        const paginationControls = document.getElementById('paginationControls');
+        const paginationInfo = document.getElementById('paginationInfo');
+        const paginationNav = document.getElementById('paginationNav');
+
+        if (totalPages > 1) {
+            paginationControls.style.display = 'flex';
+            paginationInfo.textContent = `Showing ${startIdx + 1}-${endIdx} of ${total}`;
+
+            // Build pagination nav
+            let navHtml = '';
+
+            // Previous button
+            navHtml += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="goToPage(${currentPage - 1}); return false;">&laquo;</a>
+            </li>`;
+
+            // Page numbers (show max 5 pages around current)
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, currentPage + 2);
+
+            if (startPage > 1) {
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(1); return false;">1</a></li>`;
+                if (startPage > 2) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                navHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="goToPage(${i}); return false;">${i}</a>
+                </li>`;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(${totalPages}); return false;">${totalPages}</a></li>`;
+            }
+
+            // Next button
+            navHtml += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="goToPage(${currentPage + 1}); return false;">&raquo;</a>
+            </li>`;
+
+            paginationNav.innerHTML = navHtml;
+        } else {
+            paginationControls.style.display = 'none';
+        }
+    }
 
     async function loadStats() {
         try {
@@ -513,17 +619,9 @@
 
             document.getElementById('vulnCount').textContent = currentVulnerabilities.length;
 
-            if (currentVulnerabilities.length === 0) {
-                container.innerHTML = `
-                    <div class="text-center py-5">
-                        <i class="bi bi-shield-check text-success" style="font-size: 4rem;"></i>
-                        <h4 class="mt-3">No vulnerabilities found</h4>
-                        <p class="text-muted">No matches found with the current filter criteria.</p>
-                    </div>
-                `;
-            } else {
-                container.innerHTML = currentVulnerabilities.map(match => createVulnCard(match)).join('');
-            }
+            // Reset to page 1 and render
+            currentPage = 1;
+            renderCurrentPage();
         } catch (error) {
             container.innerHTML = `
                 <div class="alert alert-danger">

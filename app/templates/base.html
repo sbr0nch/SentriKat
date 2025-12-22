@@ -1043,7 +1043,7 @@
         <div class="container-fluid px-4">
             <div class="d-flex justify-content-between align-items-center">
                 <a class="navbar-brand" href="/">
-                    <i class="bi bi-shield-lock-fill"></i>
+                    <img src="/static/images/favicon-32x32.png" alt="SentriKat" style="width: 28px; height: 28px;">
                     <span>SentriKat</span>
                 </a>
                 <div class="d-flex align-items-center gap-3">
@@ -1165,17 +1165,15 @@
     <!-- Footer -->
     <footer class="app-footer">
         <div class="container-fluid px-4">
-            <div class="d-flex justify-content-between align-items-center flex-wrap">
-                <div>
-                    <p class="mb-1">
-                        <strong>SentriKat</strong> - Enterprise Vulnerability Management Platform
-                    </p>
-                    <p class="copyright-notice mb-0">
-                        Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
-                    </p>
-                </div>
+            <div class="text-center">
+                <p class="mb-1">
+                    <strong>SentriKat</strong> - Enterprise Vulnerability Management Platform
+                </p>
+                <p class="copyright-notice mb-1">
+                    Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
+                </p>
                 <!-- CVE Service Status Indicator -->
-                <div class="d-flex align-items-center" id="cveServiceStatus" title="CVE Service Status">
+                <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
                     <span class="status-led status-led-yellow" id="cveStatusLed"></span>
                     <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
                 </div>
