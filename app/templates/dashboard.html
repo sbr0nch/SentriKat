@@ -4,60 +4,60 @@
 
 {% block content %}
 <style>
-    /* Priority Alert Cards */
+    /* Priority Alert Cards - Compact */
     .alert-card {
-        border-radius: 12px;
-        padding: 1.25rem;
-        transition: all 0.3s ease;
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        transition: all 0.2s ease;
         border: 1px solid transparent;
         background: linear-gradient(135deg, var(--card-bg-start) 0%, var(--card-bg-end) 100%);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
         height: 100%;
     }
 
     .alert-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
 
     .alert-card-critical {
         --card-bg-start: #fef2f2;
         --card-bg-end: #fee2e2;
-        border-left: 4px solid #dc2626;
+        border-left: 3px solid #dc2626;
     }
 
     .alert-card-high {
         --card-bg-start: #fef3c7;
         --card-bg-end: #fde68a;
-        border-left: 4px solid #f59e0b;
+        border-left: 3px solid #f59e0b;
     }
 
     .alert-card-medium {
         --card-bg-start: #dbeafe;
         --card-bg-end: #bfdbfe;
-        border-left: 4px solid #3b82f6;
+        border-left: 3px solid #3b82f6;
     }
 
     .alert-card-low {
         --card-bg-start: #f0fdf4;
         --card-bg-end: #dcfce7;
-        border-left: 4px solid #10b981;
+        border-left: 3px solid #10b981;
     }
 
     .alert-card-label {
-        font-size: 0.875rem;
+        font-size: 0.7rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-bottom: 0.5rem;
+        letter-spacing: 0.03em;
+        margin-bottom: 0.25rem;
         color: #374151;
     }
 
     .alert-card-value {
-        font-size: 2.5rem;
+        font-size: 1.75rem;
         font-weight: 700;
         line-height: 1;
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.15rem;
     }
 
     .alert-card-critical .alert-card-value { color: #dc2626; }
@@ -65,8 +65,42 @@
     .alert-card-medium .alert-card-value { color: #3b82f6; }
     .alert-card-low .alert-card-value { color: #10b981; }
 
-    .alert-card i {
-        color: inherit;
+    .alert-card i.alert-icon {
+        font-size: 1.25rem;
+        opacity: 0.4;
+    }
+
+    .alert-card small {
+        font-size: 0.65rem;
+    }
+
+    /* Compact Stat Cards */
+    .stat-card-compact {
+        border-radius: 8px;
+    }
+
+    .stat-label-sm {
+        font-size: 0.65rem;
+        font-weight: 600;
+        color: #6b7280;
+        letter-spacing: 0.02em;
+        margin-bottom: 0.15rem;
+    }
+
+    .stat-value-sm {
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.1;
+        margin-bottom: 0.1rem;
+    }
+
+    .stat-icon-sm {
+        position: absolute;
+        right: 0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 1.25rem;
+        opacity: 0.15;
     }
 </style>
 <div class="fade-in">
@@ -81,112 +115,96 @@
     </div>
 
     <!-- Priority Alert Cards -->
-    <div class="row g-3 mb-4" id="priorityAlerts">
+    <div class="row g-2 mb-3" id="priorityAlerts">
         <div class="col-xl-3 col-md-6">
             <div class="alert-card alert-card-critical">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <div class="alert-card-label">Critical Priority</div>
-                        <div class="alert-card-value" id="criticalCount">
-                            <div class="spinner-border spinner-border-sm" role="status"></div>
-                        </div>
-                        <small class="text-muted">Immediate action required</small>
+                        <div class="alert-card-label">Critical</div>
+                        <div class="alert-card-value" id="criticalCount">-</div>
+                        <small class="text-muted">Immediate action</small>
                     </div>
-                    <i class="bi bi-exclamation-octagon-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                    <i class="bi bi-exclamation-octagon-fill alert-icon"></i>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="alert-card alert-card-high">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <div class="alert-card-label">High Priority</div>
-                        <div class="alert-card-value" id="highCount">
-                            <div class="spinner-border spinner-border-sm" role="status"></div>
-                        </div>
-                        <small class="text-muted">Urgent attention needed</small>
+                        <div class="alert-card-label">High</div>
+                        <div class="alert-card-value" id="highCount">-</div>
+                        <small class="text-muted">Urgent attention</small>
                     </div>
-                    <i class="bi bi-exclamation-triangle-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                    <i class="bi bi-exclamation-triangle-fill alert-icon"></i>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="alert-card alert-card-medium">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <div class="alert-card-label">Medium Priority</div>
-                        <div class="alert-card-value" id="mediumCount">
-                            <div class="spinner-border spinner-border-sm" role="status"></div>
-                        </div>
+                        <div class="alert-card-label">Medium</div>
+                        <div class="alert-card-value" id="mediumCount">-</div>
                         <small class="text-muted">Plan remediation</small>
                     </div>
-                    <i class="bi bi-info-circle-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                    <i class="bi bi-info-circle-fill alert-icon"></i>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="alert-card alert-card-low">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <div class="alert-card-label">Low Priority</div>
-                        <div class="alert-card-value" id="lowCount">
-                            <div class="spinner-border spinner-border-sm" role="status"></div>
-                        </div>
-                        <small class="text-muted">Monitor and review</small>
+                        <div class="alert-card-label">Low</div>
+                        <div class="alert-card-value" id="lowCount">-</div>
+                        <small class="text-muted">Monitor</small>
                     </div>
-                    <i class="bi bi-shield-check" style="font-size: 2rem; opacity: 0.3;"></i>
+                    <i class="bi bi-shield-check alert-icon"></i>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Statistics Cards -->
-    <div class="row g-4 mb-4" id="statsContainer">
+    <div class="row g-2 mb-3" id="statsContainer">
         <div class="col-xl-3 col-md-6">
-            <div class="card stat-card" style="border-left-color: #3b82f6;">
-                <div class="card-body position-relative">
-                    <i class="bi bi-database stat-icon"></i>
-                    <div class="stat-label">Total Vulnerabilities</div>
-                    <div class="stat-value text-primary" id="totalVulns">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                    </div>
-                    <small class="text-muted">In CISA KEV Catalog</small>
+            <div class="card stat-card stat-card-compact" style="border-left-color: #3b82f6;">
+                <div class="card-body py-2 px-3 position-relative">
+                    <i class="bi bi-database stat-icon-sm"></i>
+                    <div class="stat-label-sm text-uppercase">Total Vulnerabilities</div>
+                    <div class="stat-value-sm text-primary" id="totalVulns">-</div>
+                    <small class="text-muted" style="font-size: 0.65rem;">In CISA KEV Catalog</small>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card stat-card" style="border-left-color: #ef4444;">
-                <div class="card-body position-relative">
-                    <i class="bi bi-exclamation-triangle stat-icon"></i>
-                    <div class="stat-label">Affecting Your Products</div>
-                    <div class="stat-value text-danger" id="totalMatches">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                    </div>
-                    <small class="text-muted">Direct matches found</small>
+            <div class="card stat-card stat-card-compact" style="border-left-color: #ef4444;">
+                <div class="card-body py-2 px-3 position-relative">
+                    <i class="bi bi-exclamation-triangle stat-icon-sm"></i>
+                    <div class="stat-label-sm text-uppercase">Affecting Products</div>
+                    <div class="stat-value-sm text-danger" id="totalMatches">-</div>
+                    <small class="text-muted" style="font-size: 0.65rem;">Direct matches found</small>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card stat-card" style="border-left-color: #f59e0b;">
-                <div class="card-body position-relative">
-                    <i class="bi bi-clock-history stat-icon"></i>
-                    <div class="stat-label">Needs Review</div>
-                    <div class="stat-value text-warning" id="unacknowledged">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                    </div>
-                    <small class="text-muted">Unacknowledged items</small>
+            <div class="card stat-card stat-card-compact" style="border-left-color: #f59e0b;">
+                <div class="card-body py-2 px-3 position-relative">
+                    <i class="bi bi-clock-history stat-icon-sm"></i>
+                    <div class="stat-label-sm text-uppercase">Needs Review</div>
+                    <div class="stat-value-sm text-warning" id="unacknowledged">-</div>
+                    <small class="text-muted" style="font-size: 0.65rem;">Unacknowledged items</small>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card stat-card" style="border-left-color: #10b981;">
-                <div class="card-body position-relative">
-                    <i class="bi bi-gear-fill stat-icon"></i>
-                    <div class="stat-label">Products Tracked</div>
-                    <div class="stat-value text-success" id="productsTracked">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                    </div>
-                    <small class="text-muted">Active inventory items</small>
+            <div class="card stat-card stat-card-compact" style="border-left-color: #10b981;">
+                <div class="card-body py-2 px-3 position-relative">
+                    <i class="bi bi-gear-fill stat-icon-sm"></i>
+                    <div class="stat-label-sm text-uppercase">Products Tracked</div>
+                    <div class="stat-value-sm text-success" id="productsTracked">-</div>
+                    <small class="text-muted" style="font-size: 0.65rem;">Active inventory</small>
                 </div>
             </div>
         </div>
