@@ -210,8 +210,66 @@ class LDAPManager:
         from app.email_alerts import send_user_invite_email
 
         try:
-            # Check if user already exists
+            # Check if user already exists by username
             existing_user = User.query.filter_by(username=username).first()
+
+            # Also check by email (different username but same email)
+            if not existing_user:
+                existing_user = User.query.filter_by(email=email).first()
+                if existing_user:
+                    # User exists with different username but same email
+                    if not existing_user.is_active:
+                        # Reactivate and update username
+                        old_state = {
+                            'is_active': False,
+                            'username': existing_user.username,
+                            'organization_id': existing_user.organization_id,
+                            'role': existing_user.role
+                        }
+
+                        existing_user.username = username
+                        existing_user.is_active = True
+                        existing_user.organization_id = organization_id
+                        existing_user.role = role
+                        existing_user.ldap_dn = dn
+                        existing_user.full_name = full_name
+                        db.session.commit()
+
+                        log_audit_event(
+                            'REACTIVATE',
+                            'users',
+                            existing_user.id,
+                            old_value=old_state,
+                            new_value={
+                                'is_active': True,
+                                'username': username,
+                                'organization_id': organization_id,
+                                'role': role
+                            },
+                            details=f"Reactivated LDAP user {username} (email: {email})"
+                        )
+
+                        log_ldap_operation('USER_REACTIVATE', f"{username} reactivated (email match)", True)
+
+                        # Send welcome email
+                        email_sent = False
+                        email_details = None
+                        try:
+                            email_sent, email_details = send_user_invite_email(existing_user)
+                        except Exception as email_error:
+                            email_details = str(email_error)
+                            logger.warning(f"Failed to send invite email to {email}: {email_error}")
+
+                        result_message = f'User {username} reactivated (matched by email)'
+                        if email_sent:
+                            result_message += f' ({email_details})'
+                        elif email_details:
+                            result_message += f' (email failed: {email_details})'
+
+                        return {'success': True, 'message': result_message, 'user': existing_user.to_dict(), 'email_sent': email_sent}
+                    else:
+                        return {'success': False, 'error': f'Email {email} is already used by another active user ({existing_user.username})'}
+
             if existing_user:
                 # Reactivate if inactive
                 if not existing_user.is_active:
