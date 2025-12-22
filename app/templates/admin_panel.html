@@ -686,6 +686,36 @@
                             </form>
                         </div>
                     </div>
+
+                    <!-- Manual Email Alerts -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <i class="bi bi-envelope-exclamation me-2"></i>Manual Alert Triggers
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                <strong>Manual Alerts:</strong> Use this to manually send critical CVE email alerts to all organizations.
+                                This will send emails for all unacknowledged critical and high priority vulnerabilities.
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-md-12">
+                                    <button type="button" class="btn btn-danger" onclick="triggerCriticalCVEAlerts()">
+                                        <i class="bi bi-envelope-exclamation me-1"></i>Send Critical CVE Alerts Now
+                                    </button>
+                                    <small class="text-muted ms-2">Sends alert emails to all organizations with unacknowledged critical CVEs</small>
+                                </div>
+
+                                <div class="col-md-12" id="alertResultsContainer" style="display: none;">
+                                    <div class="alert alert-info">
+                                        <h6 class="alert-heading"><i class="bi bi-info-circle me-2"></i>Alert Results</h6>
+                                        <div id="alertResultsContent"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- General Settings -->

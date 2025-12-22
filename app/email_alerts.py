@@ -143,7 +143,7 @@ class EmailAlertManager:
 
     @staticmethod
     def _build_alert_email_html(organization, matches):
-        """Build HTML email body"""
+        """Build HTML email body - Professional enterprise design"""
 
         # Group by priority
         by_priority = {'critical': [], 'high': [], 'medium': [], 'low': []}
@@ -158,195 +158,128 @@ class EmailAlertManager:
             'low': '#059669'
         }
 
+        app_url = get_app_url()
+
         html = f"""
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f9fafb;
-            margin: 0;
-            padding: 0;
-        }}
-        .container {{
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-        }}
-        .header {{
-            background-color: #1e40af;
-            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-            color: #ffffff;
-            padding: 30px 20px;
-            text-align: center;
-        }}
-        .header h1 {{
-            margin: 0 0 10px 0;
-            font-size: 28px;
-            color: #ffffff;
-        }}
-        .header p {{
-            margin: 5px 0;
-            color: #e0e7ff;
-        }}
-        .content {{
-            padding: 30px 20px;
-        }}
-        .summary-box {{
-            background: #f3f4f6;
-            border-left: 4px solid #1e40af;
-            padding: 20px;
-            margin: 20px 0;
-            border-radius: 4px;
-        }}
-        .summary-box h2 {{
-            margin-top: 0;
-            color: #1e40af;
-        }}
-        .priority-stats {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin: 15px 0;
-        }}
-        .priority-badge {{
-            flex: 1;
-            min-width: 150px;
-            padding: 10px;
-            border-radius: 6px;
-            text-align: center;
-            color: white;
-            font-weight: bold;
-        }}
-        .vuln-card {{
-            border-left: 4px solid #ccc;
-            padding: 20px;
-            margin: 20px 0;
-            background: #f9fafb;
-            border-radius: 4px;
-            transition: box-shadow 0.2s;
-        }}
-        .vuln-card:hover {{
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }}
-        .vuln-card.critical {{
-            border-left-color: {priority_colors['critical']};
-            background: #fef2f2;
-        }}
-        .vuln-card.high {{
-            border-left-color: {priority_colors['high']};
-            background: #fff7ed;
-        }}
-        .vuln-card.medium {{
-            border-left-color: {priority_colors['medium']};
-            background: #fffbeb;
-        }}
-        .vuln-card h3 {{
-            margin-top: 0;
-            color: #111827;
-        }}
-        .badge {{
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: bold;
-            color: white;
-            margin-right: 8px;
-            margin-bottom: 5px;
-        }}
-        .badge-critical {{ background: {priority_colors['critical']}; }}
-        .badge-high {{ background: {priority_colors['high']}; }}
-        .badge-medium {{ background: {priority_colors['medium']}; }}
-        .badge-low {{ background: {priority_colors['low']}; }}
-        .badge-gray {{ background: #6b7280; }}
-        .badge-dark {{ background: #111827; }}
-        .info-row {{
-            margin: 10px 0;
-            padding: 8px 0;
-            border-bottom: 1px solid #e5e7eb;
-        }}
-        .info-row:last-child {{
-            border-bottom: none;
-        }}
-        .info-label {{
-            font-size: 11px;
-            text-transform: uppercase;
-            color: #6b7280;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }}
-        .info-value {{
-            color: #111827;
-            margin-top: 3px;
-        }}
-        .action-required {{
-            color: {priority_colors['critical']};
-            font-weight: 600;
-        }}
-        .footer {{
-            background: #f3f4f6;
-            padding: 20px;
-            text-align: center;
-            font-size: 13px;
-            color: #6b7280;
-        }}
-        .footer p {{
-            margin: 5px 0;
-        }}
-        .cta-button {{
-            display: inline-block;
-            padding: 12px 24px;
-            background: #1e40af;
-            color: white;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: bold;
-            margin: 10px 0;
-        }}
-        .more-vulns {{
-            padding: 20px;
-            background: #e5e7eb;
-            border-radius: 6px;
-            text-align: center;
-            margin: 20px 0;
-        }}
-    </style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>SentriKat Security Alert</h1>
-            <p><strong>Organization:</strong> {organization.display_name}</p>
-            <p><strong>Alert Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-        </div>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+    <!-- Wrapper -->
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9;">
+        <tr>
+            <td align="center" style="padding: 40px 20px;">
+                <!-- Main Container -->
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 680px; background: white; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); overflow: hidden;">
 
-        <div class="content">
-            <div class="summary-box">
-                <h2>Action Required</h2>
-                <p><strong>{len(matches)}</strong> critical vulnerabilities require your immediate attention:</p>
-                <div class="priority-stats">
-                    <div class="priority-badge" style="background: {priority_colors['critical']};">
-                        <div style="font-size: 24px;">{len(by_priority['critical'])}</div>
-                        <div>Critical Priority</div>
-                    </div>
-                    <div class="priority-badge" style="background: {priority_colors['high']};">
-                        <div style="font-size: 24px;">{len(by_priority['high'])}</div>
-                        <div>High Priority</div>
-                    </div>
-                    <div class="priority-badge" style="background: {priority_colors['medium']};">
-                        <div style="font-size: 24px;">{len(by_priority['medium'])}</div>
-                        <div>Medium Priority</div>
-                    </div>
-                </div>
-            </div>
+                    <!-- Header with Logo -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #3b82f6 100%); padding: 40px 30px; text-align: center;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                <tr>
+                                    <td align="center">
+                                        <!-- Logo Text -->
+                                        <h1 style="margin: 0; font-size: 32px; font-weight: 800; color: white; letter-spacing: -0.5px;">
+                                            SentriKat
+                                        </h1>
+                                        <p style="margin: 8px 0 0 0; font-size: 14px; color: #bfdbfe; text-transform: uppercase; letter-spacing: 2px;">
+                                            Security Alert
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
 
-            <h2 style="color: #111827; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">Vulnerability Details</h2>
+                    <!-- Alert Banner -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); padding: 20px 30px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                <tr>
+                                    <td align="center">
+                                        <p style="margin: 0; font-size: 18px; font-weight: 700; color: white;">
+                                            ⚠️ {len(matches)} Critical Vulnerabilities Detected
+                                        </p>
+                                        <p style="margin: 8px 0 0 0; font-size: 14px; color: #fecaca;">
+                                            Immediate action required for {organization.display_name}
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Priority Summary Cards -->
+                    <tr>
+                        <td style="padding: 30px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                <tr>
+                                    <td style="padding-bottom: 20px;">
+                                        <p style="margin: 0 0 5px 0; font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">
+                                            Priority Breakdown
+                                        </p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                            <tr>
+                                                <!-- Critical -->
+                                                <td width="33%" style="padding: 0 5px 0 0;">
+                                                    <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-left: 4px solid #dc2626; border-radius: 8px; padding: 15px; text-align: center;">
+                                                        <div style="font-size: 28px; font-weight: 800; color: #dc2626;">{len(by_priority['critical'])}</div>
+                                                        <div style="font-size: 11px; font-weight: 600; color: #991b1b; text-transform: uppercase; letter-spacing: 0.5px;">Critical</div>
+                                                    </div>
+                                                </td>
+                                                <!-- High -->
+                                                <td width="33%" style="padding: 0 5px;">
+                                                    <div style="background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); border-left: 4px solid #ea580c; border-radius: 8px; padding: 15px; text-align: center;">
+                                                        <div style="font-size: 28px; font-weight: 800; color: #ea580c;">{len(by_priority['high'])}</div>
+                                                        <div style="font-size: 11px; font-weight: 600; color: #9a3412; text-transform: uppercase; letter-spacing: 0.5px;">High</div>
+                                                    </div>
+                                                </td>
+                                                <!-- Medium -->
+                                                <td width="33%" style="padding: 0 0 0 5px;">
+                                                    <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #ca8a04; border-radius: 8px; padding: 15px; text-align: center;">
+                                                        <div style="font-size: 28px; font-weight: 800; color: #ca8a04;">{len(by_priority['medium'])}</div>
+                                                        <div style="font-size: 11px; font-weight: 600; color: #854d0e; text-transform: uppercase; letter-spacing: 0.5px;">Medium</div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- CTA Button -->
+                    <tr>
+                        <td style="padding: 0 30px 30px 30px;" align="center">
+                            <a href="{app_url}" style="display: inline-block; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px; box-shadow: 0 4px 6px -1px rgba(30, 64, 175, 0.3);">
+                                View in SentriKat Dashboard →
+                            </a>
+                        </td>
+                    </tr>
+
+                    <!-- Divider -->
+                    <tr>
+                        <td style="padding: 0 30px;">
+                            <div style="height: 1px; background: linear-gradient(to right, transparent, #e5e7eb, transparent);"></div>
+                        </td>
+                    </tr>
+
+                    <!-- Vulnerability Details Header -->
+                    <tr>
+                        <td style="padding: 30px 30px 20px 30px;">
+                            <h2 style="margin: 0; font-size: 18px; font-weight: 700; color: #111827;">
+                                Vulnerability Details
+                            </h2>
+                        </td>
+                    </tr>
 """
 
         # Add vulnerability cards (show top 15 to avoid huge emails)
@@ -355,82 +288,126 @@ class EmailAlertManager:
             product = match.product
             priority = match.calculate_effective_priority()
 
-            ransomware_badge = '🦠 <span class="badge badge-critical">RANSOMWARE</span> ' if vuln.known_ransomware else ''
-            severity_badge = f'<span class="badge badge-gray">CVSS: {vuln.severity} ({vuln.cvss_score})</span>' if vuln.severity else ''
+            border_color = priority_colors.get(priority, '#6b7280')
+            bg_colors = {
+                'critical': '#fef2f2',
+                'high': '#fff7ed',
+                'medium': '#fffbeb',
+                'low': '#f0fdf4'
+            }
+            bg_color = bg_colors.get(priority, '#f9fafb')
+
+            ransomware_badge = '<span style="display: inline-block; background: #7c2d12; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-left: 8px;">🦠 RANSOMWARE</span>' if vuln.known_ransomware else ''
+            severity_badge = f'<span style="display: inline-block; background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-left: 8px;">CVSS {vuln.cvss_score}</span>' if vuln.cvss_score else ''
 
             days_old = (date.today() - vuln.date_added).days if vuln.date_added else 0
-            new_badge = '<span class="badge" style="background:#10b981;">NEW</span>' if days_old <= 7 else ''
+            new_badge = '<span style="display: inline-block; background: #059669; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-left: 8px;">NEW</span>' if days_old <= 7 else ''
 
             html += f"""
-            <div class="vuln-card {priority}">
-                <h3>{vuln.cve_id} - {vuln.vulnerability_name[:80]}</h3>
-                <div style="margin: 10px 0;">
-                    <span class="badge badge-{priority}">{priority.upper()} PRIORITY</span>
-                    {ransomware_badge}
-                    {severity_badge}
-                    {new_badge}
-                </div>
+                    <!-- Vulnerability Card -->
+                    <tr>
+                        <td style="padding: 0 30px 20px 30px;">
+                            <div style="border-left: 4px solid {border_color}; background: {bg_color}; border-radius: 8px; padding: 20px;">
+                                <!-- CVE Header -->
+                                <div style="margin-bottom: 15px;">
+                                    <span style="display: inline-block; background: {border_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase;">{priority}</span>
+                                    {ransomware_badge}
+                                    {severity_badge}
+                                    {new_badge}
+                                </div>
+                                <h3 style="margin: 0 0 5px 0; font-size: 16px; font-weight: 700; color: #111827;">
+                                    {vuln.cve_id}
+                                </h3>
+                                <p style="margin: 0 0 15px 0; font-size: 14px; color: #374151;">
+                                    {vuln.vulnerability_name[:100]}
+                                </p>
 
-                <div class="info-row">
-                    <div class="info-label">Affected Product</div>
-                    <div class="info-value"><strong>{vuln.vendor_project}</strong> - {vuln.product}</div>
-                </div>
+                                <!-- Info Grid -->
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size: 13px;">
+                                    <tr>
+                                        <td style="padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Affected Product</span><br>
+                                            <span style="color: #111827;"><strong>{vuln.vendor_project}</strong> - {vuln.product}</span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Your Product</span><br>
+                                            <span style="color: #111827;"><strong>{product.vendor}</strong> - {product.product_name}{f' (v{product.version})' if product.version else ''}</span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Description</span><br>
+                                            <span style="color: #374151;">{vuln.short_description[:200]}{'...' if len(vuln.short_description) > 200 else ''}</span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Required Action</span><br>
+                                            <span style="color: #dc2626; font-weight: 600;">{vuln.required_action}</span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0;">
+                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Timeline</span><br>
+                                            <span style="color: #374151;">Added: {vuln.date_added} ({days_old} days ago){f' | <strong style="color:#dc2626;">Due: {vuln.due_date}</strong>' if vuln.due_date else ''}</span>
+                                        </td>
+                                    </tr>
+                                </table>
 
-                <div class="info-row">
-                    <div class="info-label">Your Product</div>
-                    <div class="info-value">
-                        <strong>{product.vendor}</strong> - {product.product_name}
-                        {f' (v{product.version})' if product.version else ''}
-                        <span class="badge badge-{product.criticality}">{product.criticality.upper()} Criticality</span>
-                    </div>
-                </div>
-
-                <div class="info-row">
-                    <div class="info-label">Description</div>
-                    <div class="info-value">{vuln.short_description}</div>
-                </div>
-
-                <div class="info-row">
-                    <div class="info-label">Required Action</div>
-                    <div class="info-value action-required">{vuln.required_action}</div>
-                </div>
-
-                <div class="info-row">
-                    <div class="info-label">Timeline</div>
-                    <div class="info-value">
-                        Added: {vuln.date_added} ({days_old} days ago)
-                        {f' | <strong style="color:{priority_colors["critical"]};">Due: {vuln.due_date}</strong>' if vuln.due_date else ''}
-                    </div>
-                </div>
-
-                <div style="margin-top: 15px;">
-                    <a href="https://nvd.nist.gov/vuln/detail/{vuln.cve_id}" target="_blank"
-                       style="color: #1e40af; text-decoration: none; font-weight: 600;">
-                        → View in NVD Database
-                    </a>
-                </div>
-            </div>
+                                <!-- NVD Link -->
+                                <div style="margin-top: 15px;">
+                                    <a href="https://nvd.nist.gov/vuln/detail/{vuln.cve_id}" style="color: #1e40af; text-decoration: none; font-size: 13px; font-weight: 600;">
+                                        View in NVD Database →
+                                    </a>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
 """
 
         if len(matches) > 15:
             html += f"""
-            <div class="more-vulns">
-                <p style="font-size: 16px; font-weight: bold; margin: 0;">+ {len(matches) - 15} more vulnerabilities</p>
-                <p style="margin: 10px 0 0 0;">Login to SentriKat to view all vulnerabilities</p>
-            </div>
+                    <!-- More Vulnerabilities Notice -->
+                    <tr>
+                        <td style="padding: 0 30px 30px 30px;">
+                            <div style="background: #f3f4f6; border-radius: 8px; padding: 20px; text-align: center;">
+                                <p style="margin: 0; font-size: 16px; font-weight: 700; color: #374151;">
+                                    + {len(matches) - 15} more vulnerabilities
+                                </p>
+                                <p style="margin: 8px 0 0 0; font-size: 14px; color: #6b7280;">
+                                    Login to SentriKat to view all vulnerabilities
+                                </p>
+                            </div>
+                        </td>
+                    </tr>
 """
 
-        html += """
-        </div>
+        html += f"""
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e5e7eb;">
+                            <p style="margin: 0 0 10px 0; font-size: 14px; font-weight: 700; color: #1e40af;">
+                                SentriKat
+                            </p>
+                            <p style="margin: 0 0 5px 0; font-size: 12px; color: #6b7280;">
+                                Enterprise Vulnerability Management Platform
+                            </p>
+                            <p style="margin: 15px 0 0 0; font-size: 11px; color: #9ca3af;">
+                                This is an automated security alert from SentriKat.<br>
+                                Please do not reply to this email. Contact your administrator for support.
+                            </p>
+                            <p style="margin: 15px 0 0 0; font-size: 10px; color: #9ca3af;">
+                                © {datetime.now().year} {organization.display_name}
+                            </p>
+                        </td>
+                    </tr>
 
-        <div class="footer">
-            <p><strong>SentriKat</strong> - Enterprise Vulnerability Management Platform</p>
-            <p style="margin-top: 15px; font-size: 11px;">
-                This is an automated security alert. Please do not reply to this email.<br>
-                For support, contact your system administrator.
-            </p>
-        </div>
-    </div>
+                </table>
+            </td>
+        </tr>
+    </table>
 </body>
 </html>
 """

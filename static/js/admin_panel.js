@@ -1206,6 +1206,83 @@ async function loadSyncStatus() {
     }
 }
 
+// Manual Critical CVE Alert Trigger
+async function triggerCriticalCVEAlerts() {
+    const confirmed = await showConfirm(
+        'This will send email alerts for all unacknowledged critical and high priority CVEs to all configured organizations.\n\nAre you sure you want to proceed?',
+        'Send Critical CVE Alerts',
+        'Send Alerts',
+        'btn-danger'
+    );
+
+    if (!confirmed) return;
+
+    showLoading();
+
+    try {
+        const response = await fetch('/api/alerts/trigger-critical', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        hideLoading();
+
+        if (result.status === 'success') {
+            const summary = result.summary;
+            let html = `
+                <div class="mb-2">
+                    <strong>Summary:</strong><br>
+                    Organizations processed: ${summary.total_orgs}<br>
+                    Emails sent: <span class="text-success">${summary.emails_sent}</span><br>
+                    Skipped: <span class="text-muted">${summary.skipped}</span><br>
+                    Errors: <span class="text-danger">${summary.errors}</span>
+                </div>
+                <hr>
+                <strong>Details by Organization:</strong>
+                <ul class="mb-0 mt-2">
+            `;
+
+            for (const detail of result.details) {
+                let statusIcon = '';
+                let statusClass = '';
+
+                if (detail.status === 'success') {
+                    statusIcon = '<i class="bi bi-check-circle text-success"></i>';
+                    statusClass = 'text-success';
+                } else if (detail.status === 'skipped') {
+                    statusIcon = '<i class="bi bi-dash-circle text-muted"></i>';
+                    statusClass = 'text-muted';
+                } else {
+                    statusIcon = '<i class="bi bi-x-circle text-danger"></i>';
+                    statusClass = 'text-danger';
+                }
+
+                html += `<li class="${statusClass}">${statusIcon} <strong>${detail.organization}</strong>: `;
+                if (detail.status === 'success') {
+                    html += `Sent ${detail.matches_count} CVEs to ${detail.sent_to} recipients`;
+                } else {
+                    html += detail.reason || detail.status;
+                }
+                html += '</li>';
+            }
+
+            html += '</ul>';
+
+            document.getElementById('alertResultsContent').innerHTML = html;
+            document.getElementById('alertResultsContainer').style.display = 'block';
+
+            showToast(`Critical CVE alerts processed: ${summary.emails_sent} emails sent`, 'success');
+        } else {
+            showToast(`Error: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        hideLoading();
+        showToast(`Error triggering alerts: ${error.message}`, 'danger');
+    }
+}
+
 // General Settings
 async function saveGeneralSettings() {
     const settings = {

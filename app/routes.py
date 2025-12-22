@@ -529,6 +529,79 @@ def sync_history():
     syncs = SyncLog.query.order_by(SyncLog.sync_date.desc()).limit(limit).all()
     return jsonify([s.to_dict() for s in syncs])
 
+@bp.route('/api/alerts/trigger-critical', methods=['POST'])
+@admin_required
+def trigger_critical_cve_alerts():
+    """
+    Manually trigger critical CVE email alerts for all organizations
+
+    Permissions:
+    - Super Admin only: Can manually trigger critical CVE alert emails
+    """
+    from app.email_alerts import EmailAlertManager
+
+    try:
+        results = []
+        organizations = Organization.query.filter_by(active=True).all()
+
+        for org in organizations:
+            # Get unacknowledged critical/high priority vulnerabilities
+            unack_matches = (
+                VulnerabilityMatch.query
+                .join(Product)
+                .filter(
+                    Product.organization_id == org.id,
+                    VulnerabilityMatch.acknowledged == False
+                )
+                .all()
+            )
+
+            # Filter for critical/high priority only
+            critical_matches = [
+                m for m in unack_matches
+                if m.calculate_effective_priority() in ['critical', 'high']
+            ]
+
+            if not critical_matches:
+                results.append({
+                    'organization': org.name,
+                    'status': 'skipped',
+                    'reason': 'No unacknowledged critical CVEs'
+                })
+                continue
+
+            # Send alert
+            result = EmailAlertManager.send_critical_cve_alert(org, critical_matches)
+            results.append({
+                'organization': org.name,
+                'status': result.get('status'),
+                'matches_count': result.get('matches_count', 0),
+                'sent_to': result.get('sent_to', 0),
+                'reason': result.get('reason', '')
+            })
+
+        # Count successes
+        sent_count = sum(1 for r in results if r['status'] == 'success')
+        skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+        error_count = sum(1 for r in results if r['status'] == 'error')
+
+        return jsonify({
+            'status': 'success',
+            'summary': {
+                'total_orgs': len(organizations),
+                'emails_sent': sent_count,
+                'skipped': skipped_count,
+                'errors': error_count
+            },
+            'details': results
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
 # ============================================================================
 # SERVICE CATALOG API ENDPOINTS
 # ============================================================================

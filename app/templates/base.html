@@ -165,12 +165,42 @@
             background-color: var(--gray-100);
         }
 
-        [data-theme="dark"] .dropdown-item {
-            color: var(--text-color);
+        [data-theme="dark"] .dropdown-menu {
+            background-color: #1e293b;
+            border-color: #475569;
         }
 
-        [data-theme="dark"] .dropdown-item:hover {
-            background-color: var(--gray-100);
+        [data-theme="dark"] .dropdown-item {
+            color: #e2e8f0;
+        }
+
+        [data-theme="dark"] .dropdown-item:hover,
+        [data-theme="dark"] .dropdown-item:focus {
+            background-color: #334155;
+            color: #f1f5f9;
+        }
+
+        [data-theme="dark"] .dropdown-item.active {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        [data-theme="dark"] .dropdown-item-text {
+            color: #e2e8f0;
+        }
+
+        [data-theme="dark"] .dropdown-item-text .fw-semibold,
+        [data-theme="dark"] .dropdown-item-text strong {
+            color: #f1f5f9;
+        }
+
+        [data-theme="dark"] .dropdown-item-text small,
+        [data-theme="dark"] .dropdown-item-text .text-muted {
+            color: #94a3b8 !important;
+        }
+
+        [data-theme="dark"] .dropdown-divider {
+            border-color: #475569;
         }
 
         [data-theme="dark"] .text-muted {
