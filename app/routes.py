@@ -106,13 +106,23 @@ def get_products():
         if not org_id:
             return jsonify([])  # No org = no products
 
-        # Filter products that are assigned to user's organization (via many-to-many)
-        products = Product.query.join(
+        # Get products assigned via many-to-many table
+        products_via_m2m = Product.query.join(
             product_organizations,
             Product.id == product_organizations.c.product_id
         ).filter(
             product_organizations.c.organization_id == org_id
-        ).order_by(Product.vendor, Product.product_name).all()
+        )
+
+        # Also get products with legacy organization_id field
+        products_via_legacy = Product.query.filter(
+            Product.organization_id == org_id
+        )
+
+        # Union both queries and remove duplicates
+        products = products_via_m2m.union(products_via_legacy).order_by(
+            Product.vendor, Product.product_name
+        ).all()
 
     return jsonify([p.to_dict() for p in products])
 
