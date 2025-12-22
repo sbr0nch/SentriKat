@@ -4,12 +4,15 @@ Provides a GUI-based setup process for initial configuration
 """
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
-from app import db
+from app import db, csrf
 from app.models import Organization, User, ServiceCatalog
 from app.cisa_sync import sync_cisa_kev
 import os
 
 setup_bp = Blueprint('setup', __name__)
+
+# Exempt setup routes from CSRF (initial setup before auth is configured)
+csrf.exempt(setup_bp)
 
 def is_setup_complete():
     """Check if initial setup has been completed"""
@@ -73,7 +76,10 @@ def create_initial_organization():
                 existing.smtp_host = data['smtp_host']
                 existing.smtp_port = data.get('smtp_port', 587)
                 existing.smtp_username = data.get('smtp_username')
-                existing.smtp_password = data.get('smtp_password')
+                # Encrypt SMTP password if provided
+                if data.get('smtp_password'):
+                    from app.encryption import encrypt_value
+                    existing.smtp_password = encrypt_value(data['smtp_password'])
                 existing.smtp_from_email = data.get('smtp_from_email')
                 existing.smtp_from_name = data.get('smtp_from_name', 'SentriKat')
                 existing.smtp_use_tls = data.get('smtp_use_tls', True)
@@ -105,7 +111,10 @@ def create_initial_organization():
             org.smtp_host = data['smtp_host']
             org.smtp_port = data.get('smtp_port', 587)
             org.smtp_username = data.get('smtp_username')
-            org.smtp_password = data.get('smtp_password')
+            # Encrypt SMTP password if provided
+            if data.get('smtp_password'):
+                from app.encryption import encrypt_value
+                org.smtp_password = encrypt_value(data['smtp_password'])
             org.smtp_from_email = data.get('smtp_from_email')
             org.smtp_from_name = data.get('smtp_from_name', 'SentriKat')
             org.smtp_use_tls = data.get('smtp_use_tls', True)
@@ -151,6 +160,7 @@ def create_admin_user():
             # Update existing user instead of error
             existing.email = data.get('email', existing.email)
             existing.full_name = data.get('full_name', existing.full_name)
+            existing.role = 'super_admin'
             existing.is_admin = True
             existing.is_active = True
             existing.can_manage_products = True
@@ -175,6 +185,7 @@ def create_admin_user():
             username=data['username'],
             email=data.get('email', f"{data['username']}@localhost"),
             full_name=data.get('full_name', 'System Administrator'),
+            role='super_admin',
             is_admin=True,
             is_active=True,
             auth_type='local',
@@ -193,6 +204,57 @@ def create_admin_user():
             'success': True,
             'user': admin.to_dict()
         }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@setup_bp.route('/api/setup/save-proxy', methods=['POST'])
+def save_proxy_settings():
+    """Save proxy settings to system settings"""
+    try:
+        from app.models import SystemSettings
+        data = request.get_json()
+
+        proxy_server = data.get('proxy_server', '').strip()
+        proxy_port = data.get('proxy_port', '8080')
+        proxy_username = data.get('proxy_username', '').strip()
+        proxy_password = data.get('proxy_password', '')
+
+        if not proxy_server:
+            return jsonify({'error': 'Proxy server is required'}), 400
+
+        # Build proxy URL
+        if proxy_username and proxy_password:
+            proxy_url = f"http://{proxy_username}:{proxy_password}@{proxy_server}:{proxy_port}"
+        else:
+            proxy_url = f"http://{proxy_server}:{proxy_port}"
+
+        # Delete existing proxy settings
+        SystemSettings.query.filter(SystemSettings.key.like('proxy_%')).delete()
+
+        # Save new proxy settings
+        proxy_settings = [
+            SystemSettings(key='proxy_enabled', value='true'),
+            SystemSettings(key='proxy_url', value=proxy_url),
+            SystemSettings(key='proxy_server', value=proxy_server),
+            SystemSettings(key='proxy_port', value=str(proxy_port)),
+        ]
+
+        if proxy_username:
+            proxy_settings.append(SystemSettings(key='proxy_username', value=proxy_username))
+        if proxy_password:
+            proxy_settings.append(SystemSettings(key='proxy_password', value=proxy_password))
+
+        for setting in proxy_settings:
+            db.session.add(setting)
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Proxy settings saved'
+        })
 
     except Exception as e:
         db.session.rollback()

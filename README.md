@@ -1,322 +1,205 @@
-# SentriKat - Vulnerability Management Platform
+<p align="center">
+  <img src="docs/images/logo.png" alt="SentriKat Logo" width="200"/>
+</p>
 
-SentriKat is an internal vulnerability management system that automatically downloads and filters the CISA Known Exploited Vulnerabilities (KEV) catalog to show only vulnerabilities affecting your organization's software and services.
+<h1 align="center">SentriKat</h1>
+
+<p align="center">
+  <strong>Enterprise Vulnerability Management Platform</strong>
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#documentation">Documentation</a> •
+  <a href="#support">Support</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/python-3.11+-green.svg" alt="Python"/>
+  <img src="https://img.shields.io/badge/license-Commercial-red.svg" alt="License"/>
+</p>
+
+---
+
+## Overview
+
+**SentriKat** is an enterprise-grade vulnerability management platform that automatically tracks and filters the CISA Known Exploited Vulnerabilities (KEV) catalog against your organization's software inventory. It provides real-time alerting, multi-tenant support, and comprehensive reporting capabilities.
+
+### Why SentriKat?
+
+- **Automated Threat Intelligence**: Automatically syncs with CISA KEV feed daily
+- **Smart Matching**: Intelligent CVE-to-product matching with custom keywords
+- **Multi-Tenant**: Separate organizations with their own products, users, and settings
+- **Enterprise Authentication**: LDAP/Active Directory integration
+- **Secure by Design**: Encrypted credentials, rate limiting, CSRF protection
+- **Actionable Alerts**: Email notifications for critical vulnerabilities
+
+---
 
 ## Features
 
-- **Automated CISA KEV Sync**: Daily automatic download of the official CISA KEV JSON feed
-- **Product Inventory Management**: Web-based admin interface to manage your software inventory
-- **Intelligent Filtering**: Automatically matches CVEs to your products by vendor, product name, and custom keywords
-- **Interactive Dashboard**: View filtered vulnerabilities with detailed information
-- **Acknowledgement System**: Track which vulnerabilities have been reviewed
-- **Ransomware Indicators**: Highlight vulnerabilities used in ransomware campaigns
-- **REST API**: Programmatic access to all data
-- **Search & Filter**: Find specific vulnerabilities quickly
-- **Sync History**: Track sync operations and status
+### Core Functionality
+- **CISA KEV Integration** - Automatic daily sync of Known Exploited Vulnerabilities
+- **Product Inventory** - Manage software/service inventory per organization
+- **Intelligent Matching** - CVE matching by vendor, product, version, and keywords
+- **Dashboard** - Interactive vulnerability overview with statistics
+- **Acknowledgement Workflow** - Track reviewed vulnerabilities
 
-## Architecture
+### Enterprise Features
+- **Multi-Tenancy** - Multiple organizations with isolated data
+- **Role-Based Access Control** - Super Admin, Org Admin, Manager, User roles
+- **LDAP/AD Authentication** - Integrate with corporate directories
+- **Email Alerts** - Configurable notifications for new vulnerabilities
+- **PDF Reports** - Generate vulnerability reports
+- **Audit Logging** - Track all user actions
 
-- **Backend**: Python 3.11 + Flask
-- **Database**: SQLite (upgradeable to PostgreSQL)
-- **Frontend**: Bootstrap 5 + JavaScript
-- **Scheduler**: APScheduler for daily automated syncs
-- **Deployment**: Docker + docker-compose
+### Security
+- **Encrypted Credentials** - LDAP and SMTP passwords encrypted at rest
+- **Rate Limiting** - Protection against brute force attacks
+- **CSRF Protection** - Cross-site request forgery prevention
+- **Secure Sessions** - HttpOnly, SameSite cookies
+- **Security Headers** - HSTS, CSP in production
+
+---
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Option 1: Docker (Recommended)
 
-1. Clone the repository:
 ```bash
-git clone <repository-url>
+# Clone repository
+git clone https://github.com/your-org/SentriKat.git
 cd SentriKat
-```
 
-2. Create environment configuration:
-```bash
+# Create environment file
 cp .env.example .env
-# Edit .env and set your SECRET_KEY
-```
 
-3. Start the application:
-```bash
+# Generate required keys
+python3 -c "import secrets; print(f'SECRET_KEY={secrets.token_hex(32)}')" >> .env
+python3 -c "from cryptography.fernet import Fernet; print(f'ENCRYPTION_KEY={Fernet.generate_key().decode()}')" >> .env
+
+# Start with Docker
 docker-compose up -d
+
+# Access at http://localhost:5000
 ```
 
-4. Access the application:
-- Open http://localhost:5000 in your browser
-- Go to Admin panel to add your products
-- Click "Sync Now" to download CISA KEV data
+### Option 2: Manual Installation
 
-### Manual Installation
-
-1. Install Python 3.11+ and create virtual environment:
 ```bash
+# Install Python 3.11+
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+source venv/bin/activate
 
-2. Install dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-3. Configure environment:
-```bash
+# Configure environment
 cp .env.example .env
-# Edit .env and set your SECRET_KEY
-```
+# Edit .env with your settings
 
-4. Run the application:
-```bash
+# Run application
 python run.py
 ```
 
-5. Access at http://localhost:5000
+**First-time Setup**: Visit http://localhost:5000 and complete the setup wizard.
 
-## Usage Guide
+---
 
-### Adding Products
+## Documentation
 
-1. Navigate to **Admin** panel
-2. Click **Add Product**
-3. Fill in product details:
-   - **Vendor**: Manufacturer name (e.g., Microsoft, Cisco, Apache)
-   - **Product Name**: Software name (e.g., Windows Server, IOS, Tomcat)
-   - **Version**: Optional version number
-   - **Keywords**: Comma-separated additional search terms
-   - **Description**: Internal notes
-   - **Active**: Enable/disable tracking
+| Document | Description |
+|----------|-------------|
+| [Installation Guide](docs/INSTALLATION.md) | Complete installation instructions (Linux, Docker, Windows) |
+| [Configuration Guide](docs/CONFIGURATION.md) | Environment variables, GUI settings, encryption keys |
+| [User Guide](docs/USER_GUIDE.md) | End-user documentation for daily operations |
+| [Admin Guide](docs/ADMIN_GUIDE.md) | Technical administration and troubleshooting |
 
-Example products:
-- Vendor: "Microsoft", Product: "Exchange Server", Keywords: "Exchange"
-- Vendor: "Cisco", Product: "IOS", Keywords: "Catalyst, Switch"
-- Vendor: "Apache", Product: "Tomcat", Keywords: "Java"
+---
 
-### Viewing Vulnerabilities
+## Architecture
 
-1. Go to **Dashboard**
-2. View statistics at the top:
-   - Total vulnerabilities in CISA KEV
-   - Matches for your products
-   - Unacknowledged items
-   - Products being tracked
-
-3. Use filters to narrow results:
-   - CVE ID search
-   - Vendor filter
-   - Ransomware only
-   - Unacknowledged only
-
-4. Review vulnerability details:
-   - CVE ID and name
-   - Affected vendor/product
-   - Description and required action
-   - Due date
-   - Match reason
-
-5. Acknowledge vulnerabilities after review
-
-### Syncing Data
-
-**Automatic Sync**: Runs daily at 2:00 AM (configurable in .env)
-
-**Manual Sync**:
-- Click **Sync Now** button in navigation bar
-- Triggers immediate download and processing
-- Updates all matches automatically
-
-## API Documentation
-
-### Products
-
-- `GET /api/products` - List all products
-- `POST /api/products` - Create product
-- `GET /api/products/{id}` - Get product details
-- `PUT /api/products/{id}` - Update product
-- `DELETE /api/products/{id}` - Delete product
-
-### Vulnerabilities
-
-- `GET /api/vulnerabilities` - List vulnerabilities with filters
-  - Query params: `product_id`, `cve_id`, `vendor`, `product`, `ransomware_only`, `acknowledged`
-- `GET /api/vulnerabilities/stats` - Get statistics
-
-### Matches
-
-- `POST /api/matches/{id}/acknowledge` - Acknowledge match
-- `POST /api/matches/{id}/unacknowledge` - Unacknowledge match
-
-### Sync
-
-- `POST /api/sync` - Trigger manual sync
-- `GET /api/sync/status` - Get last sync status
-- `GET /api/sync/history` - Get sync history
-
-## Configuration
-
-Edit `.env` file or set environment variables:
-
-```bash
-# Security
-SECRET_KEY=your-random-secret-key
-
-# Database
-DATABASE_URL=sqlite:///sentrikat.db
-
-# CISA KEV Feed
-CISA_KEV_URL=https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
-
-# Sync Schedule (24-hour format)
-SYNC_HOUR=2
-SYNC_MINUTE=0
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        SentriKat                            │
+├─────────────────────────────────────────────────────────────┤
+│  Frontend: Bootstrap 5 + JavaScript                         │
+├─────────────────────────────────────────────────────────────┤
+│  Backend: Python 3.11 + Flask                               │
+│  ├── Authentication (Local + LDAP)                          │
+│  ├── REST API                                               │
+│  ├── Background Scheduler (APScheduler)                     │
+│  └── Email Service                                          │
+├─────────────────────────────────────────────────────────────┤
+│  Database: SQLite / PostgreSQL                              │
+├─────────────────────────────────────────────────────────────┤
+│  External: CISA KEV Feed, LDAP Server, SMTP Server          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Deployment
+---
 
-### Production Deployment with Docker
+## Requirements
 
-1. Set strong SECRET_KEY in .env:
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
-```
+- **Python**: 3.11 or higher
+- **Database**: SQLite (included) or PostgreSQL
+- **Memory**: 512MB minimum, 1GB recommended
+- **Disk**: 100MB for application, additional for database
 
-2. Update docker-compose.yml for your environment:
-```yaml
-ports:
-  - "80:5000"  # Or use reverse proxy
-volumes:
-  - /path/to/persistent/data:/app/data
-```
+### Optional
+- LDAP/Active Directory server for enterprise authentication
+- SMTP server for email notifications
+- Reverse proxy (Nginx/Apache) for production
 
-3. Deploy:
-```bash
-docker-compose up -d
-```
+---
 
-### Using Reverse Proxy (Nginx)
+## Environment Variables
 
-```nginx
-server {
-    listen 80;
-    server_name vulnerabilities.yourcompany.internal;
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SECRET_KEY` | Yes (production) | Flask session signing key |
+| `ENCRYPTION_KEY` | Yes (production) | Fernet key for credential encryption |
+| `DATABASE_URL` | No | Database connection string |
+| `FLASK_ENV` | No | `production` or `development` |
 
-    location / {
-        proxy_pass http://localhost:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+See [Configuration Guide](docs/CONFIGURATION.md) for complete reference.
 
-### PostgreSQL Database
-
-For production, consider PostgreSQL:
-
-```bash
-# Update .env
-DATABASE_URL=postgresql://user:password@localhost/sentrikat
-
-# Install PostgreSQL adapter
-pip install psycopg2-binary
-```
-
-## Matching Algorithm
-
-SentriKat matches vulnerabilities to products using:
-
-1. **Vendor Matching**: CVE vendor contains your product vendor
-2. **Product Matching**: CVE product contains your product name
-3. **Keyword Matching**: Keywords appear in CVE vendor or product
-4. **Cross Matching**: Vendor in product field or vice versa
-
-Matching is case-insensitive and uses substring matching for flexibility.
-
-## Troubleshooting
-
-### Sync Fails
-
-- Check internet connectivity
-- Verify CISA KEV URL is accessible
-- Check logs: `docker-compose logs -f sentrikat`
-
-### No Matches Found
-
-- Verify products are marked as "Active"
-- Check vendor/product names match CVE format
-- Add keywords for better matching
-- Manually trigger sync after adding products
-
-### Database Locked
-
-- SQLite may lock under high concurrency
-- Consider upgrading to PostgreSQL for production
-
-## Maintenance
-
-### Backup Database
-
-```bash
-# Docker
-docker-compose exec sentrikat cp /app/data/sentrikat.db /app/data/sentrikat_backup.db
-
-# Manual
-cp sentrikat.db sentrikat_backup.db
-```
-
-### View Logs
-
-```bash
-# Docker
-docker-compose logs -f
-
-# Manual
-# Logs printed to stdout
-```
-
-### Update Application
-
-```bash
-git pull
-docker-compose down
-docker-compose build
-docker-compose up -d
-```
-
-## Security Considerations
-
-- Run behind firewall (internal use only)
-- Set strong SECRET_KEY
-- Regular database backups
-- Keep dependencies updated
-- Use HTTPS with reverse proxy
-- Implement authentication if needed
-
-## Future Enhancements
-
-Potential features to add:
-
-- Email notifications for new high-priority CVEs
-- Integration with NVD for additional CVE data
-- Asset management integration
-- Multi-user authentication and roles
-- Custom severity scoring
-- Export reports (PDF, CSV, Excel)
-- Slack/Teams notifications
-- Jira integration for ticket creation
-- Historical trending and analytics
-- Bulk product import
-
-## License
-
-Internal use only - customize as needed for your organization.
+---
 
 ## Support
 
-For issues or questions, contact your internal security team.
+### Bug Reports & Feature Requests
+
+- **Website**: *Coming Soon*
+- **GitHub Issues**: Report bugs and request features
+
+### Commercial Support
+
+For enterprise support, custom development, or licensing inquiries:
+
+- **Website**: *Coming Soon*
+- **Email**: *Contact for details*
+
+---
+
+## License
+
+SentriKat is a **commercial product**. See [LICENSE.md](LICENSE.md) for terms.
+
+**Special License**: Free for use by Zertificon Solutions GmbH.
+
+---
 
 ## Credits
 
-Vulnerability data provided by CISA: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+- **Vulnerability Data**: [CISA Known Exploited Vulnerabilities Catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+- **Framework**: Flask, SQLAlchemy, Bootstrap
+- **Icons**: Bootstrap Icons
+
+---
+
+<p align="center">
+  <sub>Built with security in mind</sub>
+</p>

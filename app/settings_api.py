@@ -4,36 +4,71 @@ Handles LDAP, SMTP, Sync, and General system settings
 """
 
 from flask import Blueprint, request, jsonify, session
-from app import db
+from app import db, csrf
 from app.models import SystemSettings, User, Vulnerability, SyncLog
 from app.auth import admin_required
+from app.encryption import encrypt_value, decrypt_value
 import json
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/api/settings')
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(settings_bp)
 
 # ============================================================================
 # Helper Functions
 # ============================================================================
 
 def get_setting(key, default=None):
-    """Get a setting value from database"""
+    """
+    Get a setting value from database.
+    Automatically decrypts values marked as encrypted.
+    """
     setting = SystemSettings.query.filter_by(key=key).first()
-    return setting.value if setting else default
+    if not setting:
+        return default
+
+    # Decrypt if the setting is marked as encrypted
+    if setting.is_encrypted and setting.value:
+        try:
+            return decrypt_value(setting.value)
+        except Exception as e:
+            logger.error(f"Failed to decrypt setting '{key}': {type(e).__name__}")
+            # Return the raw value - might be legacy plaintext
+            return setting.value
+
+    return setting.value
 
 def set_setting(key, value, category, description=None, is_encrypted=False):
-    """Set a setting value in database"""
+    """
+    Set a setting value in database.
+    Encrypts the value if is_encrypted=True.
+    """
     user_id = session.get('user_id')
+
+    # Encrypt the value if required
+    stored_value = value
+    if is_encrypted and value:
+        try:
+            stored_value = encrypt_value(value)
+        except Exception as e:
+            logger.error(f"Failed to encrypt setting '{key}': {type(e).__name__}")
+            raise
 
     setting = SystemSettings.query.filter_by(key=key).first()
     if setting:
-        setting.value = value
+        setting.value = stored_value
+        setting.is_encrypted = is_encrypted
         setting.updated_by = user_id
         setting.updated_at = datetime.utcnow()
     else:
         setting = SystemSettings(
             key=key,
-            value=value,
+            value=stored_value,
             category=category,
             description=description,
             is_encrypted=is_encrypted,
@@ -149,7 +184,8 @@ def get_smtp_settings():
         'smtp_username': get_setting('smtp_username', ''),
         'smtp_from_email': get_setting('smtp_from_email', ''),
         'smtp_from_name': get_setting('smtp_from_name', 'SentriKat Alerts'),
-        'smtp_use_tls': get_setting('smtp_use_tls', 'true') == 'true'
+        'smtp_use_tls': get_setting('smtp_use_tls', 'false') == 'true',
+        'smtp_use_ssl': get_setting('smtp_use_ssl', 'false') == 'true'
     }
     return jsonify(settings)
 
@@ -171,6 +207,7 @@ def save_smtp_settings():
         set_setting('smtp_from_email', data.get('smtp_from_email', ''), 'smtp', 'From email address')
         set_setting('smtp_from_name', data.get('smtp_from_name', 'SentriKat Alerts'), 'smtp', 'From name')
         set_setting('smtp_use_tls', 'true' if data.get('smtp_use_tls') else 'false', 'smtp', 'Use TLS/STARTTLS')
+        set_setting('smtp_use_ssl', 'true' if data.get('smtp_use_ssl') else 'false', 'smtp', 'Use SSL/TLS')
 
         return jsonify({'success': True, 'message': 'SMTP settings saved successfully'})
     except Exception as e:
@@ -202,7 +239,8 @@ def test_smtp_connection():
             'password': get_setting('smtp_password'),
             'from_email': get_setting('smtp_from_email'),
             'from_name': get_setting('smtp_from_name', 'SentriKat Alerts'),
-            'use_tls': get_setting('smtp_use_tls', 'true') == 'true'
+            'use_tls': get_setting('smtp_use_tls', 'false') == 'true',
+            'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true'
         }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
@@ -226,6 +264,7 @@ def test_smtp_connection():
             <li><strong>Server:</strong> {smtp_config['host']}:{smtp_config['port']}</li>
             <li><strong>From:</strong> {smtp_config['from_email']}</li>
             <li><strong>TLS Enabled:</strong> {'Yes' if smtp_config['use_tls'] else 'No'}</li>
+            <li><strong>SSL Enabled:</strong> {'Yes' if smtp_config['use_ssl'] else 'No'}</li>
             <li><strong>Test Recipient:</strong> {test_recipient}</li>
         </ul>
     </div>
@@ -242,12 +281,13 @@ def test_smtp_connection():
         """
         msg.attach(MIMEText(body, 'html'))
 
-        # Send email
-        if smtp_config['use_tls']:
-            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
-            server.starttls()
-        else:
+        # Send email - check SSL first, then plain SMTP with optional TLS
+        if smtp_config['use_ssl']:
             server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'])
+        else:
+            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
+            if smtp_config['use_tls']:
+                server.starttls()
 
         if smtp_config['username'] and smtp_config['password']:
             server.login(smtp_config['username'], smtp_config['password'])

@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Check if Bootstrap is loaded
     if (typeof bootstrap === 'undefined') {
         console.error('Bootstrap is not loaded! Modals will not work.');
-        alert('Error: Bootstrap JavaScript library is not loaded. Please refresh the page.');
+        showToast('Error: Bootstrap JavaScript library is not loaded. Please refresh the page.', 'danger');
         return;
     }
 
@@ -47,6 +47,14 @@ document.addEventListener('DOMContentLoaded', function() {
             console.warn('settings-tab element not found');
         }
 
+        // LDAP Users tab handler - auto-load users when tab is shown
+        const ldapUsersTab = document.getElementById('ldap-users-tab');
+        if (ldapUsersTab) {
+            ldapUsersTab.addEventListener('shown.bs.tab', function() {
+                loadLDAPUsersDefault();
+            });
+        }
+
         // LDAP Groups tab handler
         const ldapGroupsTab = document.getElementById('ldap-groups-tab');
         if (ldapGroupsTab) {
@@ -70,13 +78,6 @@ document.addEventListener('DOMContentLoaded', function() {
             syncDashboardTab.addEventListener('shown.bs.pill', function() {
                 loadSyncStats();
                 loadSyncHistory();
-            });
-        }
-
-        const auditLogTab = document.getElementById('audit-log-tab');
-        if (auditLogTab) {
-            auditLogTab.addEventListener('shown.bs.pill', function() {
-                loadAuditLogs();
             });
         }
 
@@ -118,24 +119,24 @@ async function loadUsers() {
             `;
         } else {
             tbody.innerHTML = users.map(user => {
-                // Role badge based on new role system
+                // Role badge - professional style
                 const roleMap = {
-                    'super_admin': { badge: 'bg-danger', icon: 'star-fill', text: 'Super Admin' },
-                    'org_admin': { badge: 'bg-warning', icon: 'shield-check', text: 'Org Admin' },
-                    'manager': { badge: 'bg-info', icon: 'gear', text: 'Manager' },
-                    'user': { badge: 'bg-secondary', icon: 'person', text: 'User' }
+                    'super_admin': { badge: 'badge-role-super', text: 'Super Admin' },
+                    'org_admin': { badge: 'badge-role-admin', text: 'Org Admin' },
+                    'manager': { badge: 'badge-role-manager', text: 'Manager' },
+                    'user': { badge: 'badge-role-user', text: 'User' }
                 };
 
                 const role = roleMap[user.role] || roleMap['user'];
-                const roleBadge = `<span class="badge ${role.badge}"><i class="bi bi-${role.icon}"></i> ${role.text}</span>`;
+                const roleBadge = `<span class="badge ${role.badge}">${role.text}</span>`;
 
                 const statusBadge = user.is_active
-                    ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
-                    : '<span class="badge bg-secondary"><i class="bi bi-pause-circle"></i> Inactive</span>';
+                    ? '<span class="badge badge-status-active">Active</span>'
+                    : '<span class="badge badge-status-inactive">Inactive</span>';
 
                 const authBadge = user.auth_type === 'ldap'
-                    ? '<span class="badge bg-primary"><i class="bi bi-diagram-3"></i> LDAP</span>'
-                    : '<span class="badge bg-secondary"><i class="bi bi-key"></i> Local</span>';
+                    ? '<span class="badge badge-auth-ldap">LDAP</span>'
+                    : '<span class="badge badge-auth-local">Local</span>';
 
                 // Find organization display name from organizations array
                 let orgDisplay = '<span class="text-muted">-</span>';
@@ -160,12 +161,17 @@ async function loadUsers() {
                         <td>${roleBadge}</td>
                         <td>${statusBadge}</td>
                         <td>
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" onclick="editUser(${user.id})" title="Edit">
+                            <div class="d-flex gap-1">
+                                <button class="btn-action btn-action-edit" onclick="editUser(${user.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-outline-danger" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="Delete">
-                                    <i class="bi bi-trash"></i>
+                                <button class="btn-action ${user.is_active ? 'btn-action-block' : 'btn-action-success'}"
+                                        onclick="toggleUserActive(${user.id}, '${escapeHtml(user.username)}', ${user.is_active})"
+                                        title="${user.is_active ? 'Block' : 'Unblock'}">
+                                    <i class="bi bi-${user.is_active ? 'slash-circle' : 'check-circle'}"></i>
+                                </button>
+                                <button class="btn-action btn-action-delete" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="Delete">
+                                    <i class="bi bi-trash3"></i>
                                 </button>
                             </div>
                         </td>
@@ -200,6 +206,13 @@ function showCreateUserModal() {
         document.getElementById('userRole').value = 'user';
         document.getElementById('canManageProducts').checked = true;
 
+        // Hide org memberships section (only shown when editing)
+        document.getElementById('orgMembershipsSection').style.display = 'none';
+
+        // Show primary org field (for new users)
+        document.getElementById('primaryOrgField').style.display = 'block';
+        document.getElementById('organization').required = true;
+
         toggleAuthFields();
         updateRoleDescription();
 
@@ -214,7 +227,7 @@ function showCreateUserModal() {
         modal.show();
     } catch (error) {
         console.error('Error in showCreateUserModal:', error);
-        alert('Error opening user modal: ' + error.message);
+        showToast('Error opening user modal: ' + error.message, 'danger');
     }
 }
 
@@ -258,9 +271,191 @@ async function editUser(userId) {
         document.getElementById('password').required = false;
         document.getElementById('passwordConfirm').required = false;
 
+        // Hide primary org field (managed via memberships when editing)
+        document.getElementById('primaryOrgField').style.display = 'none';
+        document.getElementById('organization').required = false;
+
+        // Show organization memberships section and load memberships
+        document.getElementById('orgMembershipsSection').style.display = 'block';
+        loadUserOrgMemberships(userId);
+
         new bootstrap.Modal(document.getElementById('userModal')).show();
     } catch (error) {
         showToast(`Error loading user: ${error.message}`, 'danger');
+    }
+}
+
+// =============================================================================
+// Organization Memberships Functions
+// =============================================================================
+
+async function loadUserOrgMemberships(userId) {
+    const tbody = document.getElementById('orgMembershipsTable');
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Loading...</td></tr>';
+
+    try {
+        const response = await fetch(`/api/users/${userId}/organizations`);
+        if (!response.ok) throw new Error('Failed to load memberships');
+
+        const memberships = await response.json();
+
+        if (memberships.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No organization memberships</td></tr>';
+            return;
+        }
+
+        const roleLabels = {
+            'super_admin': '<span class="badge badge-role-super">Super Admin</span>',
+            'org_admin': '<span class="badge badge-role-admin">Org Admin</span>',
+            'manager': '<span class="badge badge-role-manager">Manager</span>',
+            'user': '<span class="badge badge-role-user">User</span>'
+        };
+
+        tbody.innerHTML = memberships.map(m => `
+            <tr>
+                <td>
+                    <i class="bi bi-building me-1"></i>
+                    <strong>${escapeHtml(m.organization_name)}</strong>
+                </td>
+                <td>
+                    ${roleLabels[m.role] || m.role}
+                    <select class="form-select form-select-sm d-inline-block ms-2" style="width: auto;"
+                            onchange="updateOrgMembershipRole(${userId}, ${m.organization_id}, this.value, ${m.is_primary})">
+                        <option value="user" ${m.role === 'user' ? 'selected' : ''}>User</option>
+                        <option value="manager" ${m.role === 'manager' ? 'selected' : ''}>Manager</option>
+                        <option value="org_admin" ${m.role === 'org_admin' ? 'selected' : ''}>Org Admin</option>
+                    </select>
+                </td>
+                <td>
+                    ${m.is_primary ?
+                        '<span class="badge bg-primary"><i class="bi bi-star-fill me-1"></i>Primary</span>' :
+                        '<span class="badge bg-secondary">Additional</span>'}
+                </td>
+                <td>
+                    ${!m.is_primary ? `
+                        <button class="btn btn-sm btn-outline-danger" onclick="removeOrgMembership(${userId}, ${m.organization_id}, '${escapeHtml(m.organization_name)}')" title="Remove from organization">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    ` : '<span class="text-muted small">Cannot remove primary</span>'}
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">Error: ${error.message}</td></tr>`;
+    }
+}
+
+async function showAddOrgMembershipModal() {
+    if (!currentUserId) {
+        showToast('Please save the user first before adding organization memberships', 'warning');
+        return;
+    }
+
+    document.getElementById('addOrgMembershipUserId').value = currentUserId;
+
+    // Load available organizations
+    try {
+        const response = await fetch('/api/organizations');
+        const orgs = await response.json();
+
+        // Get current memberships to exclude
+        const membershipsResponse = await fetch(`/api/users/${currentUserId}/organizations`);
+        const memberships = await membershipsResponse.json();
+        const memberOrgIds = new Set(memberships.map(m => m.organization_id));
+
+        const select = document.getElementById('addOrgMembershipOrg');
+        select.innerHTML = '<option value="">Select organization...</option>';
+
+        orgs.filter(org => !memberOrgIds.has(org.id)).forEach(org => {
+            select.innerHTML += `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`;
+        });
+
+        if (select.options.length <= 1) {
+            select.innerHTML = '<option value="">No available organizations</option>';
+        }
+
+        new bootstrap.Modal(document.getElementById('addOrgMembershipModal')).show();
+    } catch (error) {
+        showToast('Error loading organizations: ' + error.message, 'danger');
+    }
+}
+
+async function addOrgMembership() {
+    const userId = document.getElementById('addOrgMembershipUserId').value;
+    const orgId = document.getElementById('addOrgMembershipOrg').value;
+    const role = document.getElementById('addOrgMembershipRole').value;
+
+    if (!orgId) {
+        showToast('Please select an organization', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/organizations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organization_id: parseInt(orgId), role: role })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showToast(result.message || 'Organization added successfully', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('addOrgMembershipModal')).hide();
+            loadUserOrgMemberships(userId);
+        } else {
+            showToast(result.error || 'Failed to add organization', 'danger');
+        }
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function updateOrgMembershipRole(userId, orgId, newRole, isPrimary) {
+    try {
+        const response = await fetch(`/api/users/${userId}/organizations/${orgId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: newRole })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showToast(result.message || 'Role updated successfully', 'success');
+            // If this is the primary org, also update the role dropdown in the main form
+            if (isPrimary) {
+                document.getElementById('userRole').value = newRole;
+            }
+            loadUserOrgMemberships(userId);
+        } else {
+            showToast(result.error || 'Failed to update role', 'danger');
+            loadUserOrgMemberships(userId); // Reload to revert the select
+        }
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+        loadUserOrgMemberships(userId);
+    }
+}
+
+async function removeOrgMembership(userId, orgId, orgName) {
+    if (!confirm(`Remove user from "${orgName}"?`)) return;
+
+    try {
+        const response = await fetch(`/api/users/${userId}/organizations/${orgId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showToast(result.message || 'Removed from organization', 'success');
+            loadUserOrgMemberships(userId);
+        } else {
+            showToast(result.error || 'Failed to remove from organization', 'danger');
+        }
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
     }
 }
 
@@ -364,7 +559,17 @@ async function saveUser() {
 }
 
 async function deleteUser(userId, username) {
-    if (!confirm(`Are you sure you want to delete user "${username}"?\n\nThis action cannot be undone.`)) {
+    const confirmed = await showConfirm(
+        `<strong>⚠️ PERMANENT DELETION</strong><br><br>` +
+        `Are you sure you want to permanently delete user "<strong>${username}</strong>"?<br><br>` +
+        `<span class="text-danger">This will remove the user from the database entirely and cannot be undone.</span><br><br>` +
+        `<small class="text-muted">Tip: Use the block button (🚫) to temporarily disable a user without deleting them.</small>`,
+        'Permanently Delete User',
+        'Delete Permanently',
+        'btn-danger'
+    );
+
+    if (!confirmed) {
         return;
     }
 
@@ -373,15 +578,52 @@ async function deleteUser(userId, username) {
             method: 'DELETE'
         });
 
+        const result = await response.json();
+
         if (response.ok) {
-            showToast('✓ User deleted successfully', 'success');
+            showToast(result.message || '✓ User permanently deleted', 'success');
+            loadUsers();
+        } else {
+            showToast(`Error: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error deleting user: ${error.message}`, 'danger');
+    }
+}
+
+async function toggleUserActive(userId, username, isCurrentlyActive) {
+    const action = isCurrentlyActive ? 'block' : 'unblock';
+    const actionVerb = isCurrentlyActive ? 'blocked' : 'unblocked';
+
+    const confirmed = await showConfirm(
+        `Are you sure you want to ${action} user "<strong>${username}</strong>"?<br><br>` +
+        (isCurrentlyActive
+            ? 'The user will not be able to log in until unblocked.'
+            : 'The user will be able to log in again.'),
+        `${action.charAt(0).toUpperCase() + action.slice(1)} User`,
+        action.charAt(0).toUpperCase() + action.slice(1),
+        isCurrentlyActive ? 'btn-warning' : 'btn-success'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/toggle-active`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast(`✓ User ${username} has been ${actionVerb}`, 'success');
             loadUsers();
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
         }
     } catch (error) {
-        showToast(`Error deleting user: ${error.message}`, 'danger');
+        showToast(`Error toggling user status: ${error.message}`, 'danger');
     }
 }
 
@@ -415,28 +657,28 @@ async function loadOrganizations() {
         } else {
             tbody.innerHTML = organizations.map(org => {
                 const smtpBadge = org.smtp_host
-                    ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Yes</span>'
-                    : '<span class="badge bg-secondary">No</span>';
+                    ? '<span class="badge badge-status-active">Configured</span>'
+                    : '<span class="badge badge-status-inactive">Not Set</span>';
 
                 const statusBadge = org.active
-                    ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
-                    : '<span class="badge bg-secondary"><i class="bi bi-pause-circle"></i> Inactive</span>';
+                    ? '<span class="badge badge-status-active">Active</span>'
+                    : '<span class="badge badge-status-inactive">Inactive</span>';
 
                 return `
                     <tr>
                         <td class="fw-semibold">${escapeHtml(org.name)}</td>
                         <td>${escapeHtml(org.display_name)}</td>
-                        <td><span class="badge bg-info">${org.user_count || 0}</span></td>
+                        <td><span class="badge badge-role-manager">${org.user_count || 0}</span></td>
                         <td>${smtpBadge}</td>
                         <td>${statusBadge}</td>
                         <td>
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" onclick="editOrganization(${org.id})" title="Edit">
+                            <div class="d-flex gap-1">
+                                <button class="btn-action btn-action-edit" onclick="editOrganization(${org.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
                                 ${org.name !== 'default' ? `
-                                <button class="btn btn-outline-danger" onclick="deleteOrganization(${org.id}, '${escapeHtml(org.display_name)}')" title="Delete">
-                                    <i class="bi bi-trash"></i>
+                                <button class="btn-action btn-action-delete" onclick="deleteOrganization(${org.id}, '${escapeHtml(org.display_name)}')" title="Delete">
+                                    <i class="bi bi-trash3"></i>
                                 </button>
                                 ` : ''}
                             </div>
@@ -477,6 +719,13 @@ function showCreateOrgModal() {
         currentOrgId = null;
         document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-building me-2"></i>Create Organization';
         document.getElementById('orgForm').reset();
+
+        // Make sure orgName is enabled and editable for new organizations
+        const orgNameField = document.getElementById('orgName');
+        orgNameField.disabled = false;
+        orgNameField.readOnly = false;
+        orgNameField.value = '';
+
         document.getElementById('orgActive').checked = true;
         document.getElementById('alertCritical').checked = true;
         document.getElementById('alertNewCVE').checked = true;
@@ -495,7 +744,7 @@ function showCreateOrgModal() {
         modal.show();
     } catch (error) {
         console.error('Error in showCreateOrgModal:', error);
-        alert('Error opening organization modal: ' + error.message);
+        showToast('Error opening organization modal: ' + error.message, 'danger');
     }
 }
 
@@ -526,7 +775,9 @@ async function editOrganization(orgId) {
         document.getElementById('smtpHost').value = org.smtp_host || '';
         document.getElementById('smtpPort').value = org.smtp_port || 587;
         document.getElementById('smtpUsername').value = org.smtp_username || '';
-        document.getElementById('smtpPassword').value = org.smtp_password || '';
+        // Don't pre-fill masked password - leave blank so user can enter new one if needed
+        document.getElementById('smtpPassword').value = '';
+        document.getElementById('smtpPassword').placeholder = org.smtp_password ? '(password saved - leave blank to keep)' : 'Password';
         document.getElementById('smtpFromEmail').value = org.smtp_from_email || '';
         document.getElementById('smtpFromName').value = org.smtp_from_name || 'SentriKat Alerts';
         document.getElementById('smtpUseTls').checked = org.smtp_use_tls !== false;
@@ -639,7 +890,14 @@ async function testSMTP() {
 }
 
 async function deleteOrganization(orgId, displayName) {
-    if (!confirm(`Are you sure you want to delete organization "${displayName}"?\n\nThis will also delete all users and products associated with this organization.\n\nThis action cannot be undone.`)) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to delete organization "<strong>${displayName}</strong>"?<br><br>This will also delete all users and products associated with this organization.<br><br>This action cannot be undone.`,
+        'Delete Organization',
+        'Delete',
+        'btn-danger'
+    );
+
+    if (!confirmed) {
         return;
     }
 
@@ -967,6 +1225,83 @@ async function loadSyncStatus() {
     }
 }
 
+// Manual Critical CVE Alert Trigger
+async function triggerCriticalCVEAlerts() {
+    const confirmed = await showConfirm(
+        'This will send email alerts for all unacknowledged critical and high priority CVEs to all configured organizations.\n\nAre you sure you want to proceed?',
+        'Send Critical CVE Alerts',
+        'Send Alerts',
+        'btn-danger'
+    );
+
+    if (!confirmed) return;
+
+    showLoading();
+
+    try {
+        const response = await fetch('/api/alerts/trigger-critical', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        hideLoading();
+
+        if (result.status === 'success') {
+            const summary = result.summary;
+            let html = `
+                <div class="mb-2">
+                    <strong>Summary:</strong><br>
+                    Organizations processed: ${summary.total_orgs}<br>
+                    Emails sent: <span class="text-success">${summary.emails_sent}</span><br>
+                    Skipped: <span class="text-muted">${summary.skipped}</span><br>
+                    Errors: <span class="text-danger">${summary.errors}</span>
+                </div>
+                <hr>
+                <strong>Details by Organization:</strong>
+                <ul class="mb-0 mt-2">
+            `;
+
+            for (const detail of result.details) {
+                let statusIcon = '';
+                let statusClass = '';
+
+                if (detail.status === 'success') {
+                    statusIcon = '<i class="bi bi-check-circle text-success"></i>';
+                    statusClass = 'text-success';
+                } else if (detail.status === 'skipped') {
+                    statusIcon = '<i class="bi bi-dash-circle text-muted"></i>';
+                    statusClass = 'text-muted';
+                } else {
+                    statusIcon = '<i class="bi bi-x-circle text-danger"></i>';
+                    statusClass = 'text-danger';
+                }
+
+                html += `<li class="${statusClass}">${statusIcon} <strong>${detail.organization}</strong>: `;
+                if (detail.status === 'success') {
+                    html += `Sent ${detail.matches_count} CVEs to ${detail.sent_to} recipients`;
+                } else {
+                    html += detail.reason || detail.status;
+                }
+                html += '</li>';
+            }
+
+            html += '</ul>';
+
+            document.getElementById('alertResultsContent').innerHTML = html;
+            document.getElementById('alertResultsContainer').style.display = 'block';
+
+            showToast(`Critical CVE alerts processed: ${summary.emails_sent} emails sent`, 'success');
+        } else {
+            showToast(`Error: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        hideLoading();
+        showToast(`Error triggering alerts: ${error.message}`, 'danger');
+    }
+}
+
 // General Settings
 async function saveGeneralSettings() {
     const settings = {
@@ -992,6 +1327,138 @@ async function saveGeneralSettings() {
         }
     } catch (error) {
         showToast(`Error saving general settings: ${error.message}`, 'danger');
+    }
+}
+
+// ============================================================================
+// Audit Logs
+// ============================================================================
+
+async function loadAuditLogs() {
+    const tbody = document.getElementById('auditLogsTable');
+    const statsDiv = document.getElementById('auditLogsStats');
+    const countSpan = document.getElementById('auditLogsCount');
+
+    // Show loading
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="6" class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="text-muted mt-2">Loading audit logs...</p>
+            </td>
+        </tr>
+    `;
+
+    // Get filter values
+    const action = document.getElementById('auditActionFilter')?.value || '';
+    const resource = document.getElementById('auditResourceFilter')?.value || '';
+    const limit = document.getElementById('auditLimitFilter')?.value || '100';
+
+    // Build query string
+    const params = new URLSearchParams();
+    if (action) params.append('action', action);
+    if (resource) params.append('resource', resource);
+    params.append('limit', limit);
+
+    try {
+        const response = await fetch(`/api/audit-logs?${params.toString()}`);
+
+        if (!response.ok) {
+            if (response.status === 403) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center py-5">
+                            <i class="bi bi-shield-lock text-warning" style="font-size: 3rem;"></i>
+                            <h5 class="mt-3 text-muted">Access Denied</h5>
+                            <p class="text-muted">Only super administrators can view audit logs.</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.logs || data.logs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-5">
+                        <i class="bi bi-journal-text text-muted" style="font-size: 3rem;"></i>
+                        <h5 class="mt-3 text-muted">No audit logs found</h5>
+                        <p class="text-muted">Audit events will appear here as actions are performed.</p>
+                    </td>
+                </tr>
+            `;
+            statsDiv.style.display = 'none';
+            return;
+        }
+
+        // Render audit logs
+        tbody.innerHTML = data.logs.map(log => {
+            // Format timestamp
+            const timestamp = log.timestamp
+                ? new Date(log.timestamp).toLocaleString()
+                : '-';
+
+            // Action badge color
+            const actionColors = {
+                'CREATE': 'bg-success',
+                'UPDATE': 'bg-primary',
+                'DELETE': 'bg-danger',
+                'INVITE': 'bg-info',
+                'BLOCK': 'bg-warning',
+                'UNBLOCK': 'bg-success',
+                'LOGIN': 'bg-secondary',
+                'SYNC': 'bg-info'
+            };
+            const actionBadge = `<span class="badge ${actionColors[log.action] || 'bg-secondary'}">${escapeHtml(log.action || '-')}</span>`;
+
+            // Format resource
+            const resource = log.resource || '-';
+
+            // Format details
+            let details = log.message || '';
+            if (log.old_value || log.new_value) {
+                if (log.old_value && log.new_value) {
+                    details += ` (${JSON.stringify(log.old_value)} → ${JSON.stringify(log.new_value)})`;
+                } else if (log.new_value) {
+                    details += ` (${JSON.stringify(log.new_value)})`;
+                }
+            }
+            // Truncate long details
+            if (details.length > 100) {
+                details = details.substring(0, 100) + '...';
+            }
+
+            return `
+                <tr>
+                    <td><small>${timestamp}</small></td>
+                    <td>${actionBadge}</td>
+                    <td><code>${escapeHtml(resource)}</code></td>
+                    <td>${log.user_id || '-'}</td>
+                    <td><small>${escapeHtml(details)}</small></td>
+                    <td><small class="text-muted">${escapeHtml(log.ip_address || '-')}</small></td>
+                </tr>
+            `;
+        }).join('');
+
+        // Update stats
+        countSpan.textContent = data.logs.length;
+        statsDiv.style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading audit logs:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-5">
+                    <i class="bi bi-exclamation-triangle text-danger" style="font-size: 3rem;"></i>
+                    <h5 class="mt-3 text-muted">Error loading audit logs</h5>
+                    <p class="text-muted">${escapeHtml(error.message)}</p>
+                </td>
+            </tr>
+        `;
     }
 }
 
@@ -1059,26 +1526,183 @@ async function loadAllSettings() {
 // LDAP User Management
 // ============================================================================
 
+/**
+ * Load LDAP users by default when tab is shown (uses wildcard search)
+ */
+async function loadLDAPUsersDefault() {
+    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    const statsDiv = document.getElementById('ldapSearchStats');
+    const searchInput = document.getElementById('ldapUserSearchQuery');
+
+    // Set default search to wildcard if empty
+    if (searchInput && !searchInput.value.trim()) {
+        searchInput.value = '*';
+    }
+
+    // Show loading
+    if (resultsDiv) {
+        resultsDiv.innerHTML = `
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="text-muted mt-2">Loading LDAP users...</p>
+            </div>
+        `;
+    }
+    if (statsDiv) {
+        statsDiv.style.display = 'none';
+    }
+
+    try {
+        const response = await fetch('/api/ldap/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: '*', max_results: 1000 })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to load users');
+        }
+
+        const results = await response.json();
+        ldapSearchCache.results = results.users;
+        ldapSearchCache.query = '*';
+        ldapSearchCache.currentPage = 1;
+
+        // Display first page of results
+        displayLDAPUserResults(1);
+
+    } catch (error) {
+        console.error('Error loading LDAP users:', error);
+        if (resultsDiv) {
+            resultsDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>Could not load LDAP users:</strong> ${escapeHtml(error.message)}
+                    <hr>
+                    <small>Make sure LDAP is configured in Settings. Use the search box above to find specific users.</small>
+                </div>
+            `;
+        }
+    }
+}
+
+/**
+ * Display paginated LDAP user results from cache
+ */
+function displayLDAPUserResults(page = 1) {
+    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    const statsDiv = document.getElementById('ldapSearchStats');
+    const pageSize = parseInt(document.getElementById('ldapSearchPageSize')?.value) || 25;
+
+    const allResults = ldapSearchCache.results || [];
+    ldapSearchCache.currentPage = page;
+    ldapSearchCache.pageSize = pageSize;
+
+    if (allResults.length === 0) {
+        resultsDiv.innerHTML = `
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                <p class="mt-3">No LDAP users found</p>
+                <p class="text-muted">Check your LDAP configuration in Settings</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Calculate pagination
+    const totalPages = Math.ceil(allResults.length / pageSize);
+    const startIdx = (page - 1) * pageSize;
+    const endIdx = Math.min(startIdx + pageSize, allResults.length);
+    const pageResults = allResults.slice(startIdx, endIdx);
+
+    // Update stats
+    if (document.getElementById('ldapResultCount')) {
+        document.getElementById('ldapResultCount').textContent =
+            `${startIdx + 1}-${endIdx} of ${allResults.length}`;
+    }
+    if (statsDiv) {
+        statsDiv.style.display = 'block';
+    }
+
+    // Build pagination controls
+    const paginationHtml = buildLdapPagination(page, totalPages);
+    if (document.getElementById('ldapPagination')) {
+        document.getElementById('ldapPagination').innerHTML = paginationHtml;
+    }
+
+    // Display results in table
+    resultsDiv.innerHTML = `
+        <div class="table-responsive">
+            <table class="table table-hover table-sm">
+                <thead class="table-light">
+                    <tr>
+                        <th>Username</th>
+                        <th>Full Name</th>
+                        <th>Email</th>
+                        <th>DN</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pageResults.map(user => {
+                        // Determine status badge based on exists_in_db and is_active
+                        let statusBadge, actionButton;
+                        if (user.exists_in_db && user.is_active) {
+                            statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Active</span>';
+                            actionButton = '<button class="btn btn-sm btn-outline-secondary" disabled title="User is already active in SentriKat"><i class="bi bi-check2-circle me-1"></i>Active</button>';
+                        } else if (user.exists_in_db && !user.is_active) {
+                            statusBadge = '<span class="badge bg-warning text-dark"><i class="bi bi-person-dash-fill me-1"></i>Blocked</span>';
+                            actionButton = `<button class="btn btn-sm btn-success" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})' title="Reactivate this user">
+                                   <i class="bi bi-person-check me-1"></i>Reactivate
+                               </button>`;
+                        } else {
+                            statusBadge = '<span class="badge bg-secondary"><i class="bi bi-person-x me-1"></i>Not Invited</span>';
+                            actionButton = `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})' title="Invite this user to SentriKat">
+                                   <i class="bi bi-person-plus-fill me-1"></i>Invite
+                               </button>`;
+                        }
+
+                        return `
+                            <tr>
+                                <td class="fw-semibold">${escapeHtml(user.username)}</td>
+                                <td>${user.full_name ? escapeHtml(user.full_name) : '<span class="text-muted">-</span>'}</td>
+                                <td>${escapeHtml(user.email)}</td>
+                                <td><small class="text-muted">${escapeHtml(user.dn).substring(0, 60)}${user.dn.length > 60 ? '...' : ''}</small></td>
+                                <td>${statusBadge}</td>
+                                <td>${actionButton}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
 async function checkLdapPermissions() {
     try {
         const response = await fetch('/api/current-user');
         if (response.ok) {
             const user = await response.json();
-            // Show LDAP tabs for org_admin, super_admin, or legacy is_admin users
-            const canAccessLdap = user.role === 'org_admin' ||
-                                  user.role === 'super_admin' ||
-                                  user.is_admin === true;
 
-            if (canAccessLdap) {
-                const ldapUsersTab = document.getElementById('ldap-users-tab-item');
-                const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+            // LDAP Users tab: visible to org_admin, super_admin, or legacy is_admin
+            const canAccessLdapUsers = user.role === 'org_admin' ||
+                                       user.role === 'super_admin' ||
+                                       user.is_admin === true;
 
-                if (ldapUsersTab) {
-                    ldapUsersTab.style.display = 'block';
-                }
-                if (ldapGroupsTab) {
-                    ldapGroupsTab.style.display = 'block';
-                }
+            // LDAP Groups tab: only visible to super_admin (system-level config)
+            const canAccessLdapGroups = user.role === 'super_admin' || user.is_admin === true;
+
+            const ldapUsersTab = document.getElementById('ldap-users-tab-item');
+            const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+
+            if (ldapUsersTab && canAccessLdapUsers) {
+                ldapUsersTab.style.display = 'block';
+            }
+            if (ldapGroupsTab && canAccessLdapGroups) {
+                ldapGroupsTab.style.display = 'block';
             }
         }
     } catch (error) {
@@ -1086,23 +1710,292 @@ async function checkLdapPermissions() {
     }
 }
 
-function showLdapSearchModal() {
+// Store LDAP search results for pagination
+let ldapSearchCache = {
+    results: [],
+    currentPage: 1,
+    pageSize: 25,
+    query: ''
+};
+
+/**
+ * Inline LDAP user search with pagination
+ */
+async function searchLdapUsersInline(page = 1) {
+    const query = document.getElementById('ldapUserSearchQuery').value.trim();
+    const pageSize = parseInt(document.getElementById('ldapSearchPageSize').value) || 25;
+
+    if (!query) {
+        showToast('Please enter a search query', 'warning');
+        return;
+    }
+
+    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    const statsDiv = document.getElementById('ldapSearchStats');
+
+    // Show loading
+    resultsDiv.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-2">Searching LDAP directory for "${escapeHtml(query)}"...</p>
+        </div>
+    `;
+    statsDiv.style.display = 'none';
+
     try {
-        document.getElementById('ldapSearchQuery').value = '';
-        document.getElementById('ldapSearchResultsTable').innerHTML = `
-            <div class="text-center text-muted py-4">
-                <i class="bi bi-search" style="font-size: 2rem;"></i>
-                <p class="mt-2">Enter a search query and click Search</p>
+        // Only fetch if query changed or cache is empty
+        if (query !== ldapSearchCache.query || ldapSearchCache.results.length === 0) {
+            const response = await fetch('/api/ldap/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: query, max_results: 1000 })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Search failed');
+            }
+
+            const results = await response.json();
+            ldapSearchCache.results = results.users;
+            ldapSearchCache.query = query;
+        }
+
+        ldapSearchCache.pageSize = pageSize;
+        ldapSearchCache.currentPage = page;
+
+        const allResults = ldapSearchCache.results;
+
+        if (allResults.length === 0) {
+            resultsDiv.innerHTML = `
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                    <p class="mt-3">No users found matching "${escapeHtml(query)}"</p>
+                    <p class="text-muted">Try a different search term or wildcard pattern (e.g., "*${escapeHtml(query)}*")</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Calculate pagination
+        const totalPages = Math.ceil(allResults.length / pageSize);
+        const startIdx = (page - 1) * pageSize;
+        const endIdx = Math.min(startIdx + pageSize, allResults.length);
+        const pageResults = allResults.slice(startIdx, endIdx);
+
+        // Update stats
+        document.getElementById('ldapResultCount').textContent =
+            `${startIdx + 1}-${endIdx} of ${allResults.length}`;
+        statsDiv.style.display = 'block';
+
+        // Build pagination controls
+        const paginationHtml = buildLdapPagination(page, totalPages);
+        document.getElementById('ldapPagination').innerHTML = paginationHtml;
+
+        // Display results in table
+        const tableHtml = `
+            <div class="table-responsive">
+                <table class="table table-hover table-sm">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Username</th>
+                            <th>Full Name</th>
+                            <th>Email</th>
+                            <th>DN</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${pageResults.map(user => {
+                            // Determine status badge based on exists_in_db and is_active
+                            let statusBadge, actionButton;
+                            if (user.exists_in_db && user.is_active) {
+                                statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>';
+                                actionButton = '<button class="btn btn-sm btn-outline-secondary" disabled>Already Active</button>';
+                            } else if (user.exists_in_db && !user.is_active) {
+                                statusBadge = '<span class="badge bg-warning"><i class="bi bi-pause-circle"></i> Blocked</span>';
+                                actionButton = `<button class="btn btn-sm btn-success" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
+                                       <i class="bi bi-arrow-clockwise me-1"></i>Reactivate
+                                   </button>`;
+                            } else {
+                                statusBadge = '<span class="badge bg-secondary">Not Invited</span>';
+                                actionButton = `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModalInline(${JSON.stringify(user).replace(/'/g, "&#39;")})'>
+                                       <i class="bi bi-person-plus me-1"></i>Invite
+                                   </button>`;
+                            }
+
+                            return `
+                                <tr>
+                                    <td class="fw-semibold">${escapeHtml(user.username)}</td>
+                                    <td>${user.full_name ? escapeHtml(user.full_name) : '<span class="text-muted">-</span>'}</td>
+                                    <td>${escapeHtml(user.email)}</td>
+                                    <td><small class="text-muted">${escapeHtml(user.dn).substring(0, 60)}${user.dn.length > 60 ? '...' : ''}</small></td>
+                                    <td>${statusBadge}</td>
+                                    <td>${actionButton}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
             </div>
         `;
 
-        const modalElement = document.getElementById('ldapSearchModal');
-        const modal = new bootstrap.Modal(modalElement);
-        modal.show();
+        resultsDiv.innerHTML = tableHtml;
+
     } catch (error) {
-        console.error('Error showing LDAP search modal:', error);
-        showToast('Error opening search modal: ' + error.message, 'danger');
+        console.error('LDAP search error:', error);
+        resultsDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Search Error:</strong> ${escapeHtml(error.message)}
+            </div>
+        `;
     }
+}
+
+/**
+ * Build pagination controls for LDAP search
+ */
+function buildLdapPagination(currentPage, totalPages) {
+    if (totalPages <= 1) return '';
+
+    let html = '';
+
+    // Previous button
+    html += `
+        <button class="btn btn-outline-secondary ${currentPage === 1 ? 'disabled' : ''}"
+                onclick="searchLdapUsersInline(${currentPage - 1})"
+                ${currentPage === 1 ? 'disabled' : ''}>
+            <i class="bi bi-chevron-left"></i>
+        </button>
+    `;
+
+    // Page numbers (show max 5 pages)
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+
+    if (startPage > 1) {
+        html += `<button class="btn btn-outline-secondary" onclick="searchLdapUsersInline(1)">1</button>`;
+        if (startPage > 2) {
+            html += `<button class="btn btn-outline-secondary" disabled>...</button>`;
+        }
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        html += `
+            <button class="btn ${i === currentPage ? 'btn-primary' : 'btn-outline-secondary'}"
+                    onclick="searchLdapUsersInline(${i})">
+                ${i}
+            </button>
+        `;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            html += `<button class="btn btn-outline-secondary" disabled>...</button>`;
+        }
+        html += `<button class="btn btn-outline-secondary" onclick="searchLdapUsersInline(${totalPages})">${totalPages}</button>`;
+    }
+
+    // Next button
+    html += `
+        <button class="btn btn-outline-secondary ${currentPage === totalPages ? 'disabled' : ''}"
+                onclick="searchLdapUsersInline(${currentPage + 1})"
+                ${currentPage === totalPages ? 'disabled' : ''}>
+            <i class="bi bi-chevron-right"></i>
+        </button>
+    `;
+
+    return html;
+}
+
+/**
+ * Show invite modal for inline search
+ */
+async function showInviteLdapUserModalInline(user) {
+    // Use correct field IDs matching the modal
+    document.getElementById('ldapInviteUsername').value = user.username;
+    document.getElementById('ldapInviteEmail').value = user.email;
+    document.getElementById('ldapInviteFullName').value = user.full_name || '';
+    document.getElementById('ldapUserDN').value = user.dn;
+
+    // Set groups loading state
+    const groupsSpan = document.getElementById('ldapGroupsList');
+    if (groupsSpan) {
+        groupsSpan.textContent = 'Loading...';
+    }
+
+    // Load organizations dropdown
+    try {
+        const response = await fetch('/api/organizations');
+        if (response.ok) {
+            const orgs = await response.json();
+            const select = document.getElementById('ldapInviteOrganization');
+            if (select) {
+                select.innerHTML = '<option value="">Select organization...</option>' +
+                    orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading organizations:', error);
+    }
+
+    // Load LDAP groups for this user
+    try {
+        // First check if user object has groups from search
+        if (user.groups && user.groups.length > 0) {
+            // Extract CN from DN format (e.g., "cn=GroupName,ou=Groups,..." -> "GroupName")
+            const groupNames = user.groups.map(g => {
+                const match = g.match(/^cn=([^,]+)/i);
+                return match ? match[1] : g;
+            });
+            if (groupsSpan) {
+                groupsSpan.textContent = groupNames.join(', ');
+            }
+        } else {
+            // Fetch groups from API
+            const groupsResponse = await fetch('/api/ldap/user-groups', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user.username })
+            });
+
+            if (groupsResponse.ok) {
+                const groupsData = await groupsResponse.json();
+                if (groupsSpan) {
+                    if (groupsData.groups && groupsData.groups.length > 0) {
+                        // Extract CN from DN format
+                        const groupNames = groupsData.groups.map(g => {
+                            const match = g.match(/^cn=([^,]+)/i);
+                            return match ? match[1] : g;
+                        });
+                        groupsSpan.textContent = groupNames.join(', ');
+                    } else {
+                        groupsSpan.textContent = 'No groups found';
+                    }
+                }
+            } else {
+                if (groupsSpan) {
+                    groupsSpan.textContent = 'Could not load groups';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading LDAP groups:', error);
+        if (groupsSpan) {
+            groupsSpan.textContent = 'Error loading groups';
+        }
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('ldapInviteModal'));
+    modal.show();
+}
+
+// Keep old function for backward compatibility
+function showLdapSearchModal() {
+    // Deprecated - now using inline search
+    showToast('Please use the search box above', 'info');
 }
 
 async function searchLdapUsers() {
@@ -1124,7 +2017,7 @@ async function searchLdapUsers() {
         const response = await fetch('/api/ldap/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ search_query: query })
+            body: JSON.stringify({ query: query, max_results: 1000 })
         });
 
         if (!response.ok) {
@@ -1159,15 +2052,22 @@ async function searchLdapUsers() {
                     </thead>
                     <tbody>
                         ${results.users.map(user => {
-                            const statusBadge = user.exists_in_db
-                                ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Already Invited</span>'
-                                : '<span class="badge bg-secondary">Not Invited</span>';
-
-                            const actionButton = user.exists_in_db
-                                ? '<button class="btn btn-sm btn-secondary" disabled>Already Exists</button>'
-                                : `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
+                            // Determine status badge based on exists_in_db and is_active
+                            let statusBadge, actionButton;
+                            if (user.exists_in_db && user.is_active) {
+                                statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>';
+                                actionButton = '<button class="btn btn-sm btn-secondary" disabled>Already Active</button>';
+                            } else if (user.exists_in_db && !user.is_active) {
+                                statusBadge = '<span class="badge bg-warning"><i class="bi bi-pause-circle"></i> Blocked</span>';
+                                actionButton = `<button class="btn btn-sm btn-success" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
+                                       <i class="bi bi-arrow-clockwise me-1"></i>Reactivate
+                                   </button>`;
+                            } else {
+                                statusBadge = '<span class="badge bg-secondary">Not Invited</span>';
+                                actionButton = `<button class="btn btn-sm btn-primary" onclick='showInviteLdapUserModal(${JSON.stringify(user)})'>
                                        <i class="bi bi-person-plus me-1"></i>Invite
                                    </button>`;
+                            }
 
                             return `
                                 <tr>
@@ -1257,6 +2157,19 @@ async function inviteLdapUser() {
         return;
     }
 
+    if (!username || !email) {
+        showToast('Username and email are required', 'warning');
+        return;
+    }
+
+    // Get the invite button using querySelector (more reliable than event.target)
+    const inviteBtn = document.querySelector('#ldapInviteModal .btn-primary');
+    const originalHtml = inviteBtn ? inviteBtn.innerHTML : '';
+    if (inviteBtn) {
+        inviteBtn.disabled = true;
+        inviteBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Inviting...';
+    }
+
     try {
         const response = await fetch('/api/ldap/invite', {
             method: 'POST',
@@ -1273,27 +2186,59 @@ async function inviteLdapUser() {
 
         if (response.ok) {
             const result = await response.json();
-            showToast('✓ LDAP user invited successfully', 'success');
 
-            // Close the invite modal
-            const inviteModal = bootstrap.Modal.getInstance(document.getElementById('ldapInviteModal'));
-            inviteModal.hide();
+            // Show success state
+            if (inviteBtn) {
+                inviteBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Invited!';
+                inviteBtn.classList.remove('btn-primary');
+                inviteBtn.classList.add('btn-success');
+            }
+
+            showToast(`✓ User "${username}" invited successfully!`, 'success');
+
+            // Close the invite modal after a brief delay
+            setTimeout(() => {
+                const inviteModal = bootstrap.Modal.getInstance(document.getElementById('ldapInviteModal'));
+                if (inviteModal) inviteModal.hide();
+
+                // Reset button state
+                if (inviteBtn) {
+                    inviteBtn.disabled = false;
+                    inviteBtn.innerHTML = originalHtml;
+                    inviteBtn.classList.remove('btn-success');
+                    inviteBtn.classList.add('btn-primary');
+                }
+            }, 1500);
 
             // Refresh user list
             loadUsers();
 
-            // Refresh search results if search modal is still open
-            const searchQuery = document.getElementById('ldapSearchQuery').value;
+            // Refresh search results if search is active
+            const searchQuery = document.getElementById('ldapUserSearchQuery')?.value;
             if (searchQuery) {
-                searchLdapUsers();
+                // Clear cache to force refresh and show updated status
+                ldapSearchCache.query = '';
+                searchLdapUsersInline();
             }
         } else {
             const error = await response.json();
-            showToast(`Error: ${error.error}`, 'danger');
+            showToast(`Error: ${error.error || 'Failed to invite user'}`, 'danger');
+
+            // Reset button state on error
+            if (inviteBtn) {
+                inviteBtn.disabled = false;
+                inviteBtn.innerHTML = originalHtml;
+            }
         }
     } catch (error) {
         console.error('Error inviting LDAP user:', error);
         showToast(`Error inviting user: ${error.message}`, 'danger');
+
+        // Reset button state on error
+        if (inviteBtn) {
+            inviteBtn.disabled = false;
+            inviteBtn.innerHTML = originalHtml;
+        }
     }
 }
 
@@ -1337,19 +2282,19 @@ async function loadGroupMappings() {
 
             tableBody.innerHTML = mappings.map(mapping => {
                 const statusBadge = mapping.is_active ?
-                    '<span class="badge bg-success">Active</span>' :
-                    '<span class="badge bg-secondary">Inactive</span>';
+                    '<span class="badge badge-status-active">Active</span>' :
+                    '<span class="badge badge-status-inactive">Inactive</span>';
 
                 const roleBadge = {
-                    'super_admin': '<span class="badge bg-danger">Super Admin</span>',
-                    'org_admin': '<span class="badge bg-warning">Org Admin</span>',
-                    'manager': '<span class="badge bg-info">Manager</span>',
-                    'user': '<span class="badge bg-secondary">User</span>'
+                    'super_admin': '<span class="badge badge-role-super">Super Admin</span>',
+                    'org_admin': '<span class="badge badge-role-admin">Org Admin</span>',
+                    'manager': '<span class="badge badge-role-manager">Manager</span>',
+                    'user': '<span class="badge badge-role-user">User</span>'
                 }[mapping.role] || mapping.role;
 
                 const autoProvisionIcon = mapping.auto_provision ?
-                    '<i class="bi bi-check-circle-fill text-success" title="Auto-provision enabled"></i>' :
-                    '<i class="bi bi-x-circle-fill text-muted" title="Auto-provision disabled"></i>';
+                    '<span class="badge badge-status-active">Yes</span>' :
+                    '<span class="badge badge-status-inactive">No</span>';
 
                 const lastSync = mapping.last_sync ?
                     new Date(mapping.last_sync).toLocaleString() :
@@ -1371,12 +2316,14 @@ async function loadGroupMappings() {
                         <td><small>${lastSync}</small></td>
                         <td>${statusBadge}</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editGroupMapping(${mapping.id})" title="Edit">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteGroupMapping(${mapping.id})" title="Delete">
-                                <i class="bi bi-trash"></i>
-                            </button>
+                            <div class="d-flex gap-1">
+                                <button class="btn-action btn-action-edit" onclick="editGroupMapping(${mapping.id})" title="Edit">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn-action btn-action-delete" onclick="deleteGroupMapping(${mapping.id})" title="Delete">
+                                    <i class="bi bi-trash3"></i>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -1518,7 +2465,14 @@ async function saveGroupMapping() {
  * Delete a group mapping
  */
 async function deleteGroupMapping(mappingId) {
-    if (!confirm('Are you sure you want to delete this group mapping? This action cannot be undone.')) {
+    const confirmed = await showConfirm(
+        'Are you sure you want to delete this group mapping?<br><br>This action cannot be undone.',
+        'Delete Group Mapping',
+        'Delete',
+        'btn-danger'
+    );
+
+    if (!confirmed) {
         return;
     }
 
@@ -1562,9 +2516,146 @@ async function loadOrganizationsForMapping() {
 /**
  * Discover LDAP groups
  */
+/**
+ * Toggle group discovery panel visibility
+ */
+function toggleGroupDiscovery() {
+    const panel = document.getElementById('groupDiscoveryPanel');
+    const icon = document.getElementById('discoveryToggleIcon');
+
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        icon.className = 'bi bi-chevron-up';
+    } else {
+        panel.style.display = 'none';
+        icon.className = 'bi bi-chevron-down';
+    }
+}
+
+/**
+ * Inline LDAP group discovery (replaces modal)
+ */
+async function performGroupDiscoveryInline() {
+    const searchBase = document.getElementById('groupSearchBaseInline').value.trim();
+    const container = document.getElementById('discoveredGroupsContainerInline');
+
+    if (!searchBase) {
+        showToast('Please enter a search base DN', 'warning');
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-3">Discovering LDAP groups in ${escapeHtml(searchBase)}...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('/api/ldap/groups/discover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ search_base: searchBase })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            const groups = result.groups || [];
+
+            if (groups.length === 0) {
+                container.innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>No groups found</strong> in the specified search base DN.
+                        <hr>
+                        <small>Try a different search base or verify your LDAP configuration.</small>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="alert alert-success mb-3">
+                    <i class="bi bi-check-circle me-2"></i>
+                    <strong>Found ${groups.length} LDAP group(s)</strong> - Click "Create Mapping" to configure role assignments
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Group Name</th>
+                                <th>Distinguished Name</th>
+                                <th>Members</th>
+                                <th>Description</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${groups.map(group => `
+                                <tr>
+                                    <td class="fw-semibold">${escapeHtml(group.cn)}</td>
+                                    <td><small class="text-muted">${escapeHtml(group.dn)}</small></td>
+                                    <td>
+                                        <span class="badge bg-info">${group.member_count || 0} members</span>
+                                    </td>
+                                    <td><small>${escapeHtml(group.description || '-')}</small></td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="createMappingFromDiscoveryInline('${escapeHtml(group.dn)}', '${escapeHtml(group.cn)}', '${escapeHtml(group.description || '')}')">
+                                            <i class="bi bi-plus-circle me-1"></i>Create Mapping
+                                        </button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        } else {
+            const error = await response.json();
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <strong>Discovery Error:</strong> ${escapeHtml(error.error)}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error discovering groups:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Error:</strong> Failed to discover groups. Please check your LDAP configuration.
+            </div>
+        `;
+    }
+}
+
+/**
+ * Create mapping from inline discovery results
+ */
+function createMappingFromDiscoveryInline(dn, cn, description) {
+    // Pre-fill the create mapping modal with discovered group info
+    document.getElementById('groupDN').value = dn;
+    document.getElementById('groupName').value = cn;
+    if (description) {
+        document.getElementById('mappingDescription').value = description;
+    }
+
+    // Show the create mapping modal
+    showCreateMappingModal();
+
+    // Optionally collapse the discovery panel
+    const panel = document.getElementById('groupDiscoveryPanel');
+    const icon = document.getElementById('discoveryToggleIcon');
+    panel.style.display = 'none';
+    icon.className = 'bi bi-chevron-down';
+}
+
+// Keep old function for backward compatibility
 function discoverLdapGroups() {
-    const modal = new bootstrap.Modal(document.getElementById('ldapDiscoveryModal'));
-    modal.show();
+    // Deprecated - now using inline discovery
+    toggleGroupDiscovery();
 }
 
 /**
@@ -1737,7 +2828,7 @@ async function triggerManualSync() {
                             <small>Org Changes</small>
                         </div>
                         <div class="col-md-3">
-                            <h4 class="text-danger">${stats.errors || 0}</h4>
+                            <h4 class="text-danger">${typeof stats.errors === 'number' ? stats.errors : (Array.isArray(stats.errors) ? stats.errors.length : 0)}</h4>
                             <small>Errors</small>
                         </div>
                     </div>

@@ -6,38 +6,60 @@
     <title>SentriKat - First Time Setup</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="icon" type="image/x-icon" href="/static/images/favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png">
     <style>
+        :root {
+            --primary-color: #1e40af;
+            --primary-dark: #1e3a8a;
+            --primary-light: #3b82f6;
+            --success-color: #10b981;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-700: #374151;
+            --gray-900: #111827;
+        }
+
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: var(--gray-100);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         .setup-container {
             background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border-radius: 16px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
             padding: 0;
             max-width: 800px;
             width: 90%;
             overflow: hidden;
         }
         .setup-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            color: #111827;
+            padding: 40px 30px;
             text-align: center;
+            border-bottom: 1px solid var(--gray-200);
         }
         .setup-header h1 {
             margin: 0;
-            font-size: 2.5rem;
-            font-weight: 700;
+            font-size: 2.25rem;
+            font-weight: 800;
+            color: #111827;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
         }
         .setup-header p {
-            margin: 10px 0 0 0;
-            opacity: 0.9;
+            margin: 12px 0 0 0;
+            color: var(--gray-700);
+            font-size: 1.1rem;
         }
         .setup-body {
             padding: 40px;
@@ -47,109 +69,165 @@
         }
         .step.active {
             display: block;
-            animation: fadeIn 0.5s;
+            animation: fadeIn 0.3s;
         }
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
         .progress-bar-custom {
             height: 8px;
-            background: #e0e0e0;
+            background: var(--gray-200);
             border-radius: 10px;
             margin-bottom: 30px;
             overflow: hidden;
         }
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(90deg, var(--primary-color) 0%, var(--primary-light) 100%);
             border-radius: 10px;
-            transition: width 0.4s ease;
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .step-indicator {
             display: flex;
             justify-content: space-between;
             margin-bottom: 30px;
+            position: relative;
+        }
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--gray-200);
+            transform: translateY(-50%);
+            z-index: 0;
         }
         .step-dot {
-            width: 40px;
-            height: 40px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
-            background: #e0e0e0;
+            background: white;
+            border: 3px solid var(--gray-200);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: bold;
-            color: #999;
-            transition: all 0.3s;
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--gray-700);
+            transition: all 0.3s ease;
+            z-index: 1;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
         .step-dot.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--primary-color);
+            border-color: var(--primary-color);
             color: white;
-            transform: scale(1.2);
+            transform: scale(1.15);
+            box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
         }
         .step-dot.completed {
-            background: #28a745;
+            background: var(--success-color);
+            border-color: var(--success-color);
             color: white;
         }
         .btn-setup {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
             border: none;
             color: white;
-            padding: 12px 30px;
+            padding: 14px 36px;
             font-weight: 600;
+            font-size: 1rem;
             border-radius: 8px;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(30, 64, 175, 0.25);
         }
         .btn-setup:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+            background: linear-gradient(135deg, var(--primary-dark) 0%, #172554 100%);
             color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(30, 64, 175, 0.35);
+        }
+        .btn-setup:active {
+            transform: translateY(0);
         }
         .btn-setup:disabled {
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
+            box-shadow: none;
         }
         .form-control:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(30, 64, 175, 0.25);
         }
         .alert {
-            border-radius: 8px;
+            border-radius: 6px;
         }
         .spinner-container {
             text-align: center;
             padding: 40px;
         }
         .success-icon {
-            font-size: 80px;
-            color: #28a745;
-            animation: scaleIn 0.5s;
+            font-size: 100px;
+            color: var(--success-color);
+            animation: scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            filter: drop-shadow(0 8px 16px rgba(16, 185, 129, 0.3));
         }
         @keyframes scaleIn {
-            from { transform: scale(0); }
-            to { transform: scale(1); }
+            from { transform: scale(0) rotate(-20deg); opacity: 0; }
+            to { transform: scale(1) rotate(0deg); opacity: 1; }
         }
         .feature-card {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 15px;
-            border-left: 4px solid #667eea;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-bottom: 16px;
+            border: 1px solid var(--gray-200);
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            transition: all 0.2s ease;
         }
-        .feature-card i {
-            font-size: 24px;
-            color: #667eea;
-            margin-right: 15px;
+        .feature-card:hover {
+            transform: translateX(4px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .feature-card .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .feature-card .feature-icon i {
+            font-size: 22px;
+            color: white;
+        }
+        .feature-card .feature-content {
+            flex: 1;
+        }
+        .feature-card .feature-content strong {
+            font-size: 1rem;
+            color: var(--gray-900);
+        }
+        .feature-card .feature-content p {
+            margin: 4px 0 0 0;
+            font-size: 0.9rem;
+            color: var(--gray-700);
         }
         .optional-badge {
-            background: #ffc107;
-            color: #000;
+            background: var(--gray-200);
+            color: var(--gray-700);
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 11px;
-            font-weight: bold;
+            font-weight: 600;
             margin-left: 8px;
         }
     </style>
@@ -157,8 +235,11 @@
 <body>
     <div class="setup-container">
         <div class="setup-header">
-            <h1><i class="bi bi-shield-lock"></i> SentriKat</h1>
-            <p>Vulnerability Management System - First Time Setup</p>
+            <h1>
+                <img src="/static/images/favicon-128x128.png" alt="SentriKat" style="width: 128px; height: 128px;">
+                <span>SentriKat</span>
+            </h1>
+            <p>Enterprise Vulnerability Management - First Time Setup</p>
         </div>
 
         <div class="setup-body">
@@ -192,27 +273,43 @@
                 <p class="lead">Let's get your vulnerability management system up and running.</p>
 
                 <div class="feature-card">
-                    <i class="bi bi-lightning-charge-fill float-start"></i>
-                    <strong>Automated CVE Tracking</strong>
-                    <p class="mb-0 mt-2">Automatically sync with CISA's Known Exploited Vulnerabilities catalog</p>
+                    <div class="feature-icon">
+                        <i class="bi bi-lightning-charge-fill"></i>
+                    </div>
+                    <div class="feature-content">
+                        <strong>Automated CVE Tracking</strong>
+                        <p>Automatically sync with CISA's Known Exploited Vulnerabilities catalog</p>
+                    </div>
                 </div>
 
                 <div class="feature-card">
-                    <i class="bi bi-bell-fill float-start"></i>
-                    <strong>Email Alerts</strong>
-                    <p class="mb-0 mt-2">Get notified when new critical vulnerabilities affect your products</p>
+                    <div class="feature-icon">
+                        <i class="bi bi-bell-fill"></i>
+                    </div>
+                    <div class="feature-content">
+                        <strong>Email Alerts</strong>
+                        <p>Get notified when new critical vulnerabilities affect your products</p>
+                    </div>
                 </div>
 
                 <div class="feature-card">
-                    <i class="bi bi-graph-up-arrow float-start"></i>
-                    <strong>Priority System</strong>
-                    <p class="mb-0 mt-2">CVSS-based prioritization with CISA urgency consideration</p>
+                    <div class="feature-icon">
+                        <i class="bi bi-graph-up-arrow"></i>
+                    </div>
+                    <div class="feature-content">
+                        <strong>Priority System</strong>
+                        <p>CVSS-based prioritization with CISA urgency consideration</p>
+                    </div>
                 </div>
 
                 <div class="feature-card">
-                    <i class="bi bi-building float-start"></i>
-                    <strong>Multi-Tenancy</strong>
-                    <p class="mb-0 mt-2">Manage multiple organizations with separate product catalogs</p>
+                    <div class="feature-icon">
+                        <i class="bi bi-building"></i>
+                    </div>
+                    <div class="feature-content">
+                        <strong>Multi-Tenancy</strong>
+                        <p>Manage multiple organizations with separate product catalogs</p>
+                    </div>
                 </div>
 
                 <div class="mt-4">
@@ -262,7 +359,7 @@
 
                     <div class="alert alert-info">
                         <i class="bi bi-info-circle"></i>
-                        <strong>Note:</strong> You can configure SMTP settings later in the organization settings.
+                        <strong>Note:</strong> You can configure SMTP settings and proxy later in the system settings.
                     </div>
 
                     <div class="text-center mt-4">
@@ -390,9 +487,47 @@
                     </ul>
                 </div>
 
-                <div class="alert alert-warning">
-                    <i class="bi bi-exclamation-triangle"></i>
-                    Make sure you have internet access and your proxy is configured (if needed).
+                <!-- Proxy Configuration -->
+                <hr class="my-4">
+                <h5><i class="bi bi-globe"></i> Proxy Configuration <span class="optional-badge">OPTIONAL</span></h5>
+                <p class="text-muted small">Configure if your network requires a proxy for internet access</p>
+
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="proxy_enabled">
+                        <label class="form-check-label" for="proxy_enabled">
+                            <strong>Use HTTP/HTTPS Proxy</strong>
+                        </label>
+                    </div>
+                    <small class="form-text text-muted">Enable this if your corporate network requires a proxy</small>
+                </div>
+
+                <div id="proxyFields" style="display: none;">
+                    <div class="row">
+                        <div class="col-md-8 mb-3">
+                            <label for="proxy_server" class="form-label">Proxy Server *</label>
+                            <input type="text" class="form-control" id="proxy_server"
+                                   placeholder="proxy.company.com or 192.168.1.10">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="proxy_port" class="form-label">Port *</label>
+                            <input type="number" class="form-control" id="proxy_port"
+                                   placeholder="8080" value="8080">
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="proxy_username" class="form-label">Username <span class="optional-badge">OPTIONAL</span></label>
+                            <input type="text" class="form-control" id="proxy_username"
+                                   placeholder="Leave blank if not required">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="proxy_password" class="form-label">Password <span class="optional-badge">OPTIONAL</span></label>
+                            <input type="password" class="form-control" id="proxy_password"
+                                   placeholder="Leave blank if not required">
+                        </div>
+                    </div>
                 </div>
 
                 <div class="text-center mt-4">
@@ -435,8 +570,8 @@
                     </div>
 
                     <div class="mt-4">
-                        <a href="/" class="btn btn-setup btn-lg">
-                            Go to Dashboard <i class="bi bi-arrow-right"></i>
+                        <a href="/login" class="btn btn-setup btn-lg">
+                            Go to Login <i class="bi bi-box-arrow-in-right"></i>
                         </a>
                     </div>
                 </div>
@@ -635,12 +770,59 @@
             }
         }
 
+        // Proxy toggle (for sync step)
+        document.getElementById('proxy_enabled').addEventListener('change', function() {
+            const proxyFields = document.getElementById('proxyFields');
+            proxyFields.style.display = this.checked ? 'block' : 'none';
+        });
+
         // Initial Sync
         async function runInitialSync() {
             clearAlert();
 
             const btn = document.getElementById('syncBtn');
             btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Configuring...';
+
+            // First, save proxy settings if enabled
+            const proxyEnabled = document.getElementById('proxy_enabled').checked;
+            if (proxyEnabled) {
+                const proxyServer = document.getElementById('proxy_server').value.trim();
+                if (!proxyServer) {
+                    showAlert('Please enter a proxy server address');
+                    btn.disabled = false;
+                    btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
+                    return;
+                }
+
+                try {
+                    const proxyResponse = await fetch('/api/setup/save-proxy', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            proxy_server: proxyServer,
+                            proxy_port: document.getElementById('proxy_port').value,
+                            proxy_username: document.getElementById('proxy_username').value.trim(),
+                            proxy_password: document.getElementById('proxy_password').value
+                        })
+                    });
+
+                    if (!proxyResponse.ok) {
+                        const error = await proxyResponse.json();
+                        showAlert('Failed to save proxy settings: ' + (error.error || 'Unknown error'));
+                        btn.disabled = false;
+                        btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
+                        return;
+                    }
+                } catch (error) {
+                    showAlert('Error saving proxy settings: ' + error.message);
+                    btn.disabled = false;
+                    btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
+                    return;
+                }
+            }
+
+            // Now start the sync
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Syncing...';
             document.getElementById('syncProgress').style.display = 'block';
 

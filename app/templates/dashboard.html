@@ -3,6 +3,140 @@
 {% block title %}Dashboard - SentriKat{% endblock %}
 
 {% block content %}
+<style>
+    /* Priority Alert Cards - Compact */
+    .alert-card {
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        transition: all 0.2s ease;
+        border: 1px solid transparent;
+        background: linear-gradient(135deg, var(--card-bg-start) 0%, var(--card-bg-end) 100%);
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        height: 100%;
+    }
+
+    .alert-card:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .alert-card-critical {
+        --card-bg-start: #fef2f2;
+        --card-bg-end: #fee2e2;
+        border-left: 3px solid #dc2626;
+    }
+
+    .alert-card-high {
+        --card-bg-start: #fef3c7;
+        --card-bg-end: #fde68a;
+        border-left: 3px solid #f59e0b;
+    }
+
+    .alert-card-medium {
+        --card-bg-start: #dbeafe;
+        --card-bg-end: #bfdbfe;
+        border-left: 3px solid #3b82f6;
+    }
+
+    .alert-card-low {
+        --card-bg-start: #f0fdf4;
+        --card-bg-end: #dcfce7;
+        border-left: 3px solid #10b981;
+    }
+
+    .alert-card-label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        margin-bottom: 0.25rem;
+        color: #374151;
+    }
+
+    .alert-card-value {
+        font-size: 2.25rem;
+        font-weight: 700;
+        line-height: 1;
+        margin-bottom: 0.15rem;
+    }
+
+    .alert-card-critical .alert-card-value { color: #dc2626; }
+    .alert-card-high .alert-card-value { color: #f59e0b; }
+    .alert-card-medium .alert-card-value { color: #3b82f6; }
+    .alert-card-low .alert-card-value { color: #10b981; }
+
+    .alert-card i.alert-icon {
+        font-size: 1.5rem;
+        opacity: 0.4;
+    }
+
+    .alert-card small {
+        font-size: 0.75rem;
+    }
+
+    /* Compact Stat Cards */
+    .stat-card-compact {
+        border-radius: 8px;
+    }
+
+    .stat-label-sm {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #6b7280;
+        letter-spacing: 0.02em;
+        margin-bottom: 0.15rem;
+    }
+
+    .stat-value-sm {
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1.1;
+        margin-bottom: 0.1rem;
+    }
+
+    /* Compact Filters */
+    .filters-compact .form-label {
+        font-size: 0.8rem;
+        margin-bottom: 0.25rem;
+    }
+    .filters-compact .form-select,
+    .filters-compact .form-control {
+        font-size: 0.875rem;
+        padding: 0.35rem 0.5rem;
+    }
+    .filters-compact .form-check-label {
+        font-size: 0.875rem;
+    }
+
+    .stat-icon-sm {
+        position: absolute;
+        right: 0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 1.25rem;
+        opacity: 0.15;
+    }
+
+    /* CVE Card Scroll Performance Optimizations */
+    #vulnerabilitiesContainer {
+        contain: layout style;
+    }
+
+    .vuln-card {
+        content-visibility: auto;
+        contain-intrinsic-size: 0 350px;
+        contain: layout style paint;
+    }
+
+    .vuln-card .card-body {
+        will-change: auto;
+    }
+
+    /* Reduce paint complexity */
+    .vuln-card .badge {
+        will-change: auto;
+    }
+</style>
 <div class="fade-in">
     <!-- Page Header -->
     <div class="row mb-4">
@@ -15,226 +149,177 @@
     </div>
 
     <!-- Priority Alert Cards -->
-    <div class="row g-3 mb-4" id="priorityAlerts">
+    <div class="row g-2 mb-3" id="priorityAlerts">
         <div class="col-xl-3 col-md-6">
             <div class="alert-card alert-card-critical">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <div class="alert-card-label">Critical Priority</div>
-                        <div class="alert-card-value" id="criticalCount">
-                            <div class="spinner-border spinner-border-sm" role="status"></div>
-                        </div>
-                        <small class="text-muted">Immediate action required</small>
+                        <div class="alert-card-label">Critical</div>
+                        <div class="alert-card-value" id="criticalCount">-</div>
+                        <small class="text-muted">Immediate action</small>
                     </div>
-                    <i class="bi bi-exclamation-octagon-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                    <i class="bi bi-exclamation-octagon-fill alert-icon"></i>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="alert-card alert-card-high">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <div class="alert-card-label">High Priority</div>
-                        <div class="alert-card-value" id="highCount">
-                            <div class="spinner-border spinner-border-sm" role="status"></div>
-                        </div>
-                        <small class="text-muted">Urgent attention needed</small>
+                        <div class="alert-card-label">High</div>
+                        <div class="alert-card-value" id="highCount">-</div>
+                        <small class="text-muted">Urgent attention</small>
                     </div>
-                    <i class="bi bi-exclamation-triangle-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                    <i class="bi bi-exclamation-triangle-fill alert-icon"></i>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="alert-card alert-card-medium">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <div class="alert-card-label">Medium Priority</div>
-                        <div class="alert-card-value" id="mediumCount">
-                            <div class="spinner-border spinner-border-sm" role="status"></div>
-                        </div>
+                        <div class="alert-card-label">Medium</div>
+                        <div class="alert-card-value" id="mediumCount">-</div>
                         <small class="text-muted">Plan remediation</small>
                     </div>
-                    <i class="bi bi-info-circle-fill" style="font-size: 2rem; opacity: 0.3;"></i>
+                    <i class="bi bi-info-circle-fill alert-icon"></i>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="alert-card alert-card-low">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <div class="alert-card-label">Low Priority</div>
-                        <div class="alert-card-value" id="lowCount">
-                            <div class="spinner-border spinner-border-sm" role="status"></div>
-                        </div>
-                        <small class="text-muted">Monitor and review</small>
+                        <div class="alert-card-label">Low</div>
+                        <div class="alert-card-value" id="lowCount">-</div>
+                        <small class="text-muted">Monitor</small>
                     </div>
-                    <i class="bi bi-shield-check" style="font-size: 2rem; opacity: 0.3;"></i>
+                    <i class="bi bi-shield-check alert-icon"></i>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Statistics Cards -->
-    <div class="row g-4 mb-4" id="statsContainer">
+    <div class="row g-2 mb-3" id="statsContainer">
         <div class="col-xl-3 col-md-6">
-            <div class="card stat-card" style="border-left-color: #3b82f6;">
-                <div class="card-body position-relative">
-                    <i class="bi bi-database stat-icon"></i>
-                    <div class="stat-label">Total Vulnerabilities</div>
-                    <div class="stat-value text-primary" id="totalVulns">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                    </div>
-                    <small class="text-muted">In CISA KEV Catalog</small>
+            <div class="card stat-card stat-card-compact" style="border-left-color: #3b82f6;">
+                <div class="card-body py-2 px-3 position-relative">
+                    <i class="bi bi-database stat-icon-sm"></i>
+                    <div class="stat-label-sm text-uppercase">Total Vulnerabilities</div>
+                    <div class="stat-value-sm text-primary" id="totalVulns">-</div>
+                    <small class="text-muted" style="font-size: 0.75rem;">In CISA KEV Catalog</small>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card stat-card" style="border-left-color: #ef4444;">
-                <div class="card-body position-relative">
-                    <i class="bi bi-exclamation-triangle stat-icon"></i>
-                    <div class="stat-label">Affecting Your Products</div>
-                    <div class="stat-value text-danger" id="totalMatches">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                    </div>
-                    <small class="text-muted">Direct matches found</small>
+            <div class="card stat-card stat-card-compact" style="border-left-color: #ef4444;">
+                <div class="card-body py-2 px-3 position-relative">
+                    <i class="bi bi-exclamation-triangle stat-icon-sm"></i>
+                    <div class="stat-label-sm text-uppercase">Affecting Products</div>
+                    <div class="stat-value-sm text-danger" id="totalMatches">-</div>
+                    <small class="text-muted" style="font-size: 0.75rem;">Direct matches found</small>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card stat-card" style="border-left-color: #f59e0b;">
-                <div class="card-body position-relative">
-                    <i class="bi bi-clock-history stat-icon"></i>
-                    <div class="stat-label">Needs Review</div>
-                    <div class="stat-value text-warning" id="unacknowledged">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                    </div>
-                    <small class="text-muted">Unacknowledged items</small>
+            <div class="card stat-card stat-card-compact" style="border-left-color: #f59e0b;">
+                <div class="card-body py-2 px-3 position-relative">
+                    <i class="bi bi-clock-history stat-icon-sm"></i>
+                    <div class="stat-label-sm text-uppercase">Needs Review</div>
+                    <div class="stat-value-sm text-warning" id="unacknowledged">-</div>
+                    <small class="text-muted" style="font-size: 0.75rem;">Unacknowledged items</small>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card stat-card" style="border-left-color: #10b981;">
-                <div class="card-body position-relative">
-                    <i class="bi bi-gear-fill stat-icon"></i>
-                    <div class="stat-label">Products Tracked</div>
-                    <div class="stat-value text-success" id="productsTracked">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                    </div>
-                    <small class="text-muted">Active inventory items</small>
+            <div class="card stat-card stat-card-compact" style="border-left-color: #10b981;">
+                <div class="card-body py-2 px-3 position-relative">
+                    <i class="bi bi-gear-fill stat-icon-sm"></i>
+                    <div class="stat-label-sm text-uppercase">Products Tracked</div>
+                    <div class="stat-value-sm text-success" id="productsTracked">-</div>
+                    <small class="text-muted" style="font-size: 0.75rem;">Active inventory</small>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Advanced Filters Panel -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-funnel me-2"></i>Advanced Filters</span>
-            <button class="btn btn-sm btn-outline-secondary" onclick="resetFilters()">
+    <div class="card mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-funnel me-2"></i>Filters</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="resetFilters()">
                 <i class="bi bi-arrow-counterclockwise"></i> Reset
             </button>
         </div>
-        <div class="card-body">
-            <div class="row g-3">
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Priority Level</label>
+        <div class="card-body py-2 filters-compact">
+            <div class="row g-2">
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Priority</label>
                     <select class="form-select" id="filterPriority">
-                        <option value="">All Priorities</option>
-                        <option value="critical">Critical Only</option>
-                        <option value="high">High & Above</option>
-                        <option value="medium">Medium & Above</option>
-                        <option value="low">Low & Above</option>
+                        <option value="">All</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High+</option>
+                        <option value="medium">Medium+</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">CVE Severity (CVSS)</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Severity</label>
                     <select class="form-select" id="filterSeverity">
-                        <option value="">All Severities</option>
-                        <option value="CRITICAL">Critical (CVSS 9.0-10.0)</option>
-                        <option value="HIGH">High (CVSS 7.0-8.9)</option>
-                        <option value="MEDIUM">Medium (CVSS 4.0-6.9)</option>
-                        <option value="LOW">Low (CVSS 0.1-3.9)</option>
+                        <option value="">All</option>
+                        <option value="CRITICAL">Critical</option>
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">CISA Urgency</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Urgency</label>
                     <select class="form-select" id="filterUrgency">
-                        <option value="">All Urgency Levels</option>
-                        <option value="critical">Critical - Due ≤7 Days</option>
-                        <option value="high">High - Due ≤30 Days</option>
-                        <option value="has_due_date">Has Due Date</option>
+                        <option value="">All</option>
+                        <option value="critical">≤7 Days</option>
+                        <option value="high">≤30 Days</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">CVE Age</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Age</label>
                     <select class="form-select" id="filterAge">
-                        <option value="">All Ages</option>
-                        <option value="30">Last 30 Days</option>
-                        <option value="90">Last 90 Days</option>
-                        <option value="180">Last 6 Months</option>
+                        <option value="">All</option>
+                        <option value="30">30 Days</option>
+                        <option value="90">90 Days</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">CVE ID</label>
-                    <input type="text" class="form-control" id="filterCVE" placeholder="e.g., CVE-2024-1234">
+                <div class="col-6 col-md-2">
+                    <label class="form-label">CVE ID</label>
+                    <input type="text" class="form-control" id="filterCVE" placeholder="CVE-...">
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Vendor</label>
-                    <input type="text" class="form-control" id="filterVendor" placeholder="e.g., Microsoft">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Product</label>
-                    <input type="text" class="form-control" id="filterProduct" placeholder="e.g., Windows">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Sort By</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Sort</label>
                     <select class="form-select" id="sortBy">
-                        <option value="priority">Priority (Highest First)</option>
-                        <option value="date_desc">Date Added (Newest)</option>
-                        <option value="date_asc">Date Added (Oldest)</option>
-                        <option value="cve_desc">CVE ID (Desc)</option>
-                        <option value="cve_asc">CVE ID (Asc)</option>
+                        <option value="priority">Priority</option>
+                        <option value="date_desc">Newest</option>
+                        <option value="date_asc">Oldest</option>
                     </select>
                 </div>
-                <div class="col-md-12">
-                    <div class="d-flex gap-3 flex-wrap">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="filterRansomware">
-                            <label class="form-check-label fw-semibold" for="filterRansomware">
-                                <i class="bi bi-shield-exclamation text-danger"></i> Ransomware Only
-                            </label>
-                        </div>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="filterUnack">
-                            <label class="form-check-label fw-semibold" for="filterUnack">
-                                <i class="bi bi-circle text-warning"></i> Unacknowledged Only
-                            </label>
-                        </div>
-                    </div>
+                <div class="col-md-3">
+                    <label class="form-label">Vendor</label>
+                    <input type="text" class="form-control" id="filterVendor" placeholder="Microsoft">
                 </div>
-                <div class="col-md-12">
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-primary" onclick="loadVulnerabilities()">
-                            <i class="bi bi-search"></i> Apply Filters
-                        </button>
-                        <button class="btn btn-info" onclick="shareFilteredView()">
-                            <i class="bi bi-share"></i> Share Filtered View
-                        </button>
-                        <div class="dropdown export-dropdown">
-                            <button class="btn btn-success dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                                <i class="bi bi-download"></i> Export
-                            </button>
-                            <ul class="dropdown-menu">
-                                <li><a class="dropdown-item" href="#" onclick="exportData('csv')">
-                                    <i class="bi bi-filetype-csv"></i> Export as CSV
-                                </a></li>
-                                <li><a class="dropdown-item" href="#" onclick="exportData('json')">
-                                    <i class="bi bi-filetype-json"></i> Export as JSON
-                                </a></li>
-                            </ul>
+                <div class="col-md-3">
+                    <label class="form-label">Product</label>
+                    <input type="text" class="form-control" id="filterProduct" placeholder="Windows">
+                </div>
+                <div class="col-md-6">
+                    <div class="d-flex gap-3 align-items-center h-100">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="filterRansomware">
+                            <label class="form-check-label" for="filterRansomware">Ransomware</label>
                         </div>
-                        <button class="btn btn-outline-secondary" onclick="bulkAcknowledge()" id="bulkAckBtn" disabled>
-                            <i class="bi bi-check-all"></i> Bulk Acknowledge (<span id="selectedCount">0</span>)
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="filterUnack">
+                            <label class="form-check-label" for="filterUnack">Unacknowledged</label>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary" onclick="loadVulnerabilities()">
+                            <i class="bi bi-search"></i> Apply
                         </button>
                     </div>
                 </div>
@@ -244,15 +329,78 @@
 
     <!-- Vulnerabilities List -->
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <span><i class="bi bi-shield-exclamation me-2"></i>Matched Vulnerabilities (<span id="vulnCount">0</span>)</span>
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
-                <label class="form-check-label" for="selectAll">Select All</label>
+            <div class="d-flex align-items-center gap-3">
+                <!-- Export Report Dropdown -->
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Export Report">
+                        <i class="bi bi-file-earmark-pdf me-1"></i>Export
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end p-3" style="min-width: 280px;">
+                        <h6 class="dropdown-header px-0">Export PDF Report</h6>
+                        <div class="mb-2">
+                            <select class="form-select form-select-sm" id="reportType" onchange="toggleReportDateFields()">
+                                <option value="monthly">Monthly Report</option>
+                                <option value="custom">Custom Date Range</option>
+                            </select>
+                        </div>
+                        <div class="row g-2 mb-2" id="monthlyFields">
+                            <div class="col-6">
+                                <select class="form-select form-select-sm" id="reportMonth">
+                                    <option value="1">Jan</option>
+                                    <option value="2">Feb</option>
+                                    <option value="3">Mar</option>
+                                    <option value="4">Apr</option>
+                                    <option value="5">May</option>
+                                    <option value="6">Jun</option>
+                                    <option value="7">Jul</option>
+                                    <option value="8">Aug</option>
+                                    <option value="9">Sep</option>
+                                    <option value="10">Oct</option>
+                                    <option value="11">Nov</option>
+                                    <option value="12">Dec</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <select class="form-select form-select-sm" id="reportYear"></select>
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2" id="customFields" style="display: none;">
+                            <div class="col-6">
+                                <input type="date" class="form-control form-control-sm" id="reportStartDate" placeholder="Start">
+                            </div>
+                            <div class="col-6">
+                                <input type="date" class="form-control form-control-sm" id="reportEndDate" placeholder="End">
+                            </div>
+                        </div>
+                        <button class="btn btn-primary btn-sm w-100" onclick="exportReport()">
+                            <i class="bi bi-download me-1"></i>Download PDF
+                        </button>
+                    </div>
+                </div>
+                <!-- Page Size -->
+                <select class="form-select form-select-sm" id="pageSize" style="width: 75px;" onchange="changePageSize()" title="Items per page">
+                    <option value="15" selected>15</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="all">All</option>
+                </select>
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+                    <label class="form-check-label" for="selectAll">Select All</label>
+                </div>
             </div>
         </div>
         <div class="card-body p-0">
             <div id="vulnerabilitiesContainer" class="p-3"></div>
+            <!-- Pagination Controls -->
+            <div id="paginationControls" class="d-flex justify-content-between align-items-center p-3 border-top" style="display: none !important;">
+                <div class="text-muted small" id="paginationInfo">Showing 1-50 of 0</div>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0" id="paginationNav"></ul>
+                </nav>
+            </div>
         </div>
     </div>
 
@@ -361,8 +509,256 @@
 
 {% block extra_js %}
 <script>
+    // Helper functions for priority styling
+    function getPriorityBadgeClass(priority) {
+        const classes = {
+            'critical': 'bg-danger',
+            'high': 'bg-warning text-dark',
+            'medium': 'bg-info text-dark',
+            'low': 'bg-secondary'
+        };
+        return classes[priority?.toLowerCase()] || 'bg-secondary';
+    }
+
+    function getPriorityIcon(priority) {
+        const icons = {
+            'critical': 'bi-exclamation-triangle-fill',
+            'high': 'bi-exclamation-circle-fill',
+            'medium': 'bi-info-circle-fill',
+            'low': 'bi-dash-circle'
+        };
+        return icons[priority?.toLowerCase()] || 'bi-circle';
+    }
+
+    function getPriorityColor(priority) {
+        const colors = {
+            'critical': '#dc2626',
+            'high': '#f59e0b',
+            'medium': '#3b82f6',
+            'low': '#6b7280'
+        };
+        return colors[priority?.toLowerCase()] || '#6b7280';
+    }
+
+    // Report Export Functions
+    function initReportFields() {
+        // Populate year dropdown
+        const yearSelect = document.getElementById('reportYear');
+        const currentYear = new Date().getFullYear();
+        for (let year = currentYear; year >= currentYear - 5; year--) {
+            const option = document.createElement('option');
+            option.value = year;
+            option.textContent = year;
+            yearSelect.appendChild(option);
+        }
+
+        // Set current month and year
+        const currentMonth = new Date().getMonth() + 1;
+        document.getElementById('reportMonth').value = currentMonth;
+
+        // Set default date range for custom reports (last 30 days)
+        const today = new Date();
+        const thirtyDaysAgo = new Date(today);
+        thirtyDaysAgo.setDate(today.getDate() - 30);
+
+        document.getElementById('reportEndDate').value = today.toISOString().split('T')[0];
+        document.getElementById('reportStartDate').value = thirtyDaysAgo.toISOString().split('T')[0];
+    }
+
+    function toggleReportDateFields() {
+        const reportType = document.getElementById('reportType').value;
+        const monthlyFields = document.getElementById('monthlyFields');
+        const customFields = document.getElementById('customFields');
+
+        if (reportType === 'monthly') {
+            monthlyFields.style.display = 'flex';
+            customFields.style.display = 'none';
+        } else {
+            monthlyFields.style.display = 'none';
+            customFields.style.display = 'flex';
+        }
+    }
+
+    async function exportReport() {
+        const reportType = document.getElementById('reportType').value;
+        let url;
+
+        if (reportType === 'monthly') {
+            const month = document.getElementById('reportMonth').value;
+            const year = document.getElementById('reportYear').value;
+            url = `/api/reports/monthly?month=${month}&year=${year}`;
+        } else {
+            const startDate = document.getElementById('reportStartDate').value;
+            const endDate = document.getElementById('reportEndDate').value;
+
+            if (!startDate || !endDate) {
+                showToast('Please select both start and end dates', 'warning');
+                return;
+            }
+
+            url = `/api/reports/custom?start_date=${startDate}&end_date=${endDate}`;
+        }
+
+        try {
+            showLoading();
+            showToast('Generating report...', 'info');
+
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                // Try to parse error as JSON, fallback to status text
+                let errorMessage = 'Failed to generate report';
+                try {
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const error = await response.json();
+                        errorMessage = error.error || errorMessage;
+                    } else {
+                        errorMessage = `Server error: ${response.status} ${response.statusText}`;
+                    }
+                } catch (e) {
+                    errorMessage = `Server error: ${response.status}`;
+                }
+                throw new Error(errorMessage);
+            }
+
+            // Download the PDF
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+
+            // Get filename from Content-Disposition header or generate one
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = 'SentriKat_Report.pdf';
+            if (contentDisposition) {
+                const match = contentDisposition.match(/filename="(.+)"/);
+                if (match) filename = match[1];
+            }
+
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(downloadUrl);
+
+            showToast('Report downloaded successfully!', 'success');
+        } catch (error) {
+            console.error('Error generating report:', error);
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Initialize report fields on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        initReportFields();
+    });
+
     let currentVulnerabilities = [];
     let selectedVulns = new Set();
+    let currentPage = 1;
+    let pageSize = 15;
+
+    function changePageSize() {
+        const select = document.getElementById('pageSize');
+        pageSize = select.value === 'all' ? Infinity : parseInt(select.value);
+        currentPage = 1;
+        renderCurrentPage();
+    }
+
+    function goToPage(page) {
+        currentPage = page;
+        renderCurrentPage();
+        // Scroll to top of vulnerabilities container
+        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function renderCurrentPage() {
+        const container = document.getElementById('vulnerabilitiesContainer');
+        const total = currentVulnerabilities.length;
+
+        if (total === 0) {
+            container.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-shield-check text-success" style="font-size: 4rem;"></i>
+                    <h4 class="mt-3">No vulnerabilities found</h4>
+                    <p class="text-muted">No matches found with the current filter criteria.</p>
+                </div>
+            `;
+            document.getElementById('paginationControls').style.display = 'none';
+            return;
+        }
+
+        const effectivePageSize = pageSize === Infinity ? total : pageSize;
+        const totalPages = Math.ceil(total / effectivePageSize);
+        const startIdx = (currentPage - 1) * effectivePageSize;
+        const endIdx = Math.min(startIdx + effectivePageSize, total);
+        const pageItems = currentVulnerabilities.slice(startIdx, endIdx);
+
+        // Use requestAnimationFrame for smoother rendering
+        requestAnimationFrame(() => {
+            // Build HTML in chunks to prevent blocking
+            const fragment = document.createDocumentFragment();
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = pageItems.map(match => createVulnCard(match)).join('');
+
+            while (tempDiv.firstChild) {
+                fragment.appendChild(tempDiv.firstChild);
+            }
+
+            container.innerHTML = '';
+            container.appendChild(fragment);
+        });
+
+        // Update pagination info and controls
+        const paginationControls = document.getElementById('paginationControls');
+        const paginationInfo = document.getElementById('paginationInfo');
+        const paginationNav = document.getElementById('paginationNav');
+
+        if (totalPages > 1) {
+            paginationControls.style.display = 'flex';
+            paginationInfo.textContent = `Showing ${startIdx + 1}-${endIdx} of ${total}`;
+
+            // Build pagination nav
+            let navHtml = '';
+
+            // Previous button
+            navHtml += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="goToPage(${currentPage - 1}); return false;">&laquo;</a>
+            </li>`;
+
+            // Page numbers (show max 5 pages around current)
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, currentPage + 2);
+
+            if (startPage > 1) {
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(1); return false;">1</a></li>`;
+                if (startPage > 2) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                navHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="goToPage(${i}); return false;">${i}</a>
+                </li>`;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(${totalPages}); return false;">${totalPages}</a></li>`;
+            }
+
+            // Next button
+            navHtml += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="goToPage(${currentPage + 1}); return false;">&raquo;</a>
+            </li>`;
+
+            paginationNav.innerHTML = navHtml;
+        } else {
+            paginationControls.style.display = 'none';
+        }
+    }
 
     async function loadStats() {
         try {
@@ -416,17 +812,9 @@
 
             document.getElementById('vulnCount').textContent = currentVulnerabilities.length;
 
-            if (currentVulnerabilities.length === 0) {
-                container.innerHTML = `
-                    <div class="text-center py-5">
-                        <i class="bi bi-shield-check text-success" style="font-size: 4rem;"></i>
-                        <h4 class="mt-3">No vulnerabilities found</h4>
-                        <p class="text-muted">No matches found with the current filter criteria.</p>
-                    </div>
-                `;
-            } else {
-                container.innerHTML = currentVulnerabilities.map(match => createVulnCard(match)).join('');
-            }
+            // Reset to page 1 and render
+            currentPage = 1;
+            renderCurrentPage();
         } catch (error) {
             container.innerHTML = `
                 <div class="alert alert-danger">
@@ -626,6 +1014,9 @@
                                    class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-box-arrow-up-right"></i> View in NVD
                                 </a>
+                                <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
+                                    <i class="bi bi-share"></i> Share
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -660,14 +1051,23 @@
 
     function updateBulkActions() {
         const count = selectedVulns.size;
-        document.getElementById('selectedCount').textContent = count;
-        document.getElementById('bulkAckBtn').disabled = count === 0;
+        const selectedCountEl = document.getElementById('selectedCount');
+        const bulkAckBtnEl = document.getElementById('bulkAckBtn');
+        if (selectedCountEl) selectedCountEl.textContent = count;
+        if (bulkAckBtnEl) bulkAckBtnEl.disabled = count === 0;
     }
 
     async function bulkAcknowledge() {
         if (selectedVulns.size === 0) return;
 
-        if (!confirm(`Acknowledge ${selectedVulns.size} vulnerabilities?`)) return;
+        const confirmed = await showConfirm(
+            `Acknowledge ${selectedVulns.size} vulnerabilities?`,
+            'Bulk Acknowledge',
+            'Acknowledge',
+            'btn-primary'
+        );
+
+        if (!confirmed) return;
 
         showLoading();
         let success = 0;
@@ -828,8 +1228,19 @@
 
     // Load data on page load
     document.addEventListener('DOMContentLoaded', function() {
+        // Check for shared CVE in URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const sharedCVE = urlParams.get('cve');
+
+        if (sharedCVE) {
+            // Auto-fill CVE filter and apply
+            document.getElementById('filterCVE').value = sharedCVE;
+            loadVulnerabilities();
+        } else {
+            loadVulnerabilities();
+        }
+
         loadStats();
-        loadVulnerabilities();
         loadLastSync();
 
         // Auto-refresh stats every 5 minutes
@@ -855,8 +1266,7 @@
     document.getElementById('sortBy').addEventListener('change', function() {
         if (currentVulnerabilities.length > 0) {
             sortVulnerabilities();
-            document.getElementById('vulnerabilitiesContainer').innerHTML =
-                currentVulnerabilities.map(match => createVulnCard(match)).join('');
+            renderCurrentPage();
         }
     });
 
@@ -951,13 +1361,13 @@
                 btn.style.display = 'none';
             } else {
                 const error = await response.json();
-                alert(`Error creating share link: ${error.error}`);
+                showToast(`Error creating share link: ${error.error}`, 'danger');
                 btn.disabled = false;
                 btn.innerHTML = originalHtml;
             }
         } catch (error) {
             console.error('Error creating share link:', error);
-            alert('Error creating share link. Please try again.');
+            showToast('Error creating share link. Please try again.', 'danger');
             btn.disabled = false;
             btn.innerHTML = originalHtml;
         }
@@ -978,6 +1388,34 @@
         setTimeout(() => {
             btn.innerHTML = originalHtml;
         }, 2000);
+    }
+
+    /**
+     * Share a single CVE with NVD link - copies to clipboard automatically
+     */
+    async function shareSingleCVE(cveId, vulnName) {
+        const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}`;
+
+        try {
+            // Try modern clipboard API first
+            await navigator.clipboard.writeText(nvdUrl);
+            showToast(`NVD link copied to clipboard`, 'success');
+        } catch (error) {
+            // Fallback for older browsers or non-HTTPS
+            const textArea = document.createElement('textarea');
+            textArea.value = nvdUrl;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showToast(`NVD link copied to clipboard`, 'success');
+            } catch (e) {
+                showToast(`Could not copy. URL: ${nvdUrl}`, 'warning');
+            }
+            document.body.removeChild(textArea);
+        }
     }
 
     /**
@@ -1018,10 +1456,10 @@
                 // Load vulnerabilities with these filters
                 loadVulnerabilities();
             } else if (response.status === 410) {
-                alert('This shared link has expired.');
+                showToast('This shared link has expired.', 'warning');
             } else {
                 const error = await response.json();
-                alert(`Error loading shared view: ${error.error}`);
+                showToast(`Error loading shared view: ${error.error}`, 'danger');
             }
         } catch (error) {
             console.error('Error loading shared view:', error);

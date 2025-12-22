@@ -1,13 +1,54 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
-from app import db
+from app import db, csrf
 from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
-from app.auth import admin_required, login_required
+from app.auth import admin_required, login_required, org_admin_required, manager_required
 import json
+import re
 
 bp = Blueprint('main', __name__)
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(bp)
+
+
+def validate_email(email):
+    """Validate email format"""
+    if not email:
+        return False
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+
+def validate_username(username):
+    """Validate username format - alphanumeric, underscore, dash, 3-50 chars"""
+    if not username:
+        return False
+    pattern = r'^[a-zA-Z0-9_-]{3,50}$'
+    return re.match(pattern, username) is not None
+
+
+def validate_password_strength(password):
+    """
+    Validate password meets security requirements:
+    - At least 12 characters
+    - Contains uppercase and lowercase
+    - Contains digit
+    - Contains special character
+    """
+    if not password or len(password) < 12:
+        return False, "Password must be at least 12 characters"
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    if not re.search(r'[0-9]', password):
+        return False, "Password must contain at least one digit"
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        return False, "Password must contain at least one special character"
+    return True, None
 
 @bp.route('/')
 @login_required
@@ -28,9 +69,14 @@ def admin():
     return render_template('admin.html')
 
 @bp.route('/admin-panel')
-@admin_required
+@org_admin_required
 def admin_panel():
-    """Full administration panel for users, organizations, and settings"""
+    """Full administration panel for users, organizations, and settings.
+
+    Access:
+    - super_admin: Full access to all tabs
+    - org_admin: Limited access (users in their org, LDAP, SMTP/Sync settings only)
+    """
     return render_template('admin_panel.html')
 
 # API Endpoints
@@ -38,25 +84,72 @@ def admin_panel():
 @bp.route('/api/products', methods=['GET'])
 @login_required
 def get_products():
-    """Get all products for current organization"""
-    # Get current organization
-    org_id = session.get('organization_id')
-    if not org_id:
-        default_org = Organization.query.filter_by(name='default').first()
-        org_id = default_org.id if default_org else None
+    """Get products based on user permissions.
 
-    # Filter by organization
-    query = Product.query
-    if org_id:
-        query = query.filter_by(organization_id=org_id)
+    - Super Admin: See all products
+    - Others: Only see products assigned to their organization
+    """
+    from app.models import product_organizations
+    import logging
+    logger = logging.getLogger(__name__)
 
-    products = query.order_by(Product.vendor, Product.product_name).all()
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({'error': 'User not found'}), 401
+
+    logger.info(f"get_products: user={current_user.username}, role={current_user.role}, is_super_admin={current_user.is_super_admin()}")
+
+    # Super admins see all products
+    if current_user.is_super_admin():
+        products = Product.query.order_by(Product.vendor, Product.product_name).all()
+        logger.info(f"get_products: super_admin sees all {len(products)} products")
+    else:
+        # Get user's current organization from session
+        org_id = session.get('organization_id') or current_user.organization_id
+        logger.info(f"get_products: org_id from session={session.get('organization_id')}, from user={current_user.organization_id}, using={org_id}")
+
+        if not org_id:
+            logger.info("get_products: no org_id, returning empty list")
+            return jsonify([])  # No org = no products
+
+        # Get products assigned via many-to-many table
+        products_via_m2m = Product.query.join(
+            product_organizations,
+            Product.id == product_organizations.c.product_id
+        ).filter(
+            product_organizations.c.organization_id == org_id
+        )
+
+        # Also get products with legacy organization_id field
+        products_via_legacy = Product.query.filter(
+            Product.organization_id == org_id
+        )
+
+        # Union both queries and remove duplicates
+        products = products_via_m2m.union(products_via_legacy).order_by(
+            Product.vendor, Product.product_name
+        ).all()
+
+        logger.info(f"get_products: org {org_id} has {len(products)} products")
+
     return jsonify([p.to_dict() for p in products])
 
 @bp.route('/api/products', methods=['POST'])
-@login_required
+@manager_required
 def create_product():
-    """Create a new product"""
+    """
+    Create a new product
+
+    Permissions:
+    - Super Admin: Can create products for any org
+    - Org Admin: Can create products for their org only
+    - Manager: Can create products for their org only
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
     data = request.get_json()
 
     if not data.get('vendor') or not data.get('product_name'):
@@ -69,12 +162,41 @@ def create_product():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
+    # Check for duplicate product (case-insensitive)
+    # For multi-org support, check if product exists globally (regardless of org)
+    # since products can now be assigned to multiple organizations
+    version = data.get('version', '').strip() or None  # Treat empty string as None
+    vendor_lower = data['vendor'].lower().strip()
+    product_name_lower = data['product_name'].lower().strip()
+
+    duplicate_query = Product.query.filter(
+        db.func.lower(Product.vendor) == vendor_lower,
+        db.func.lower(Product.product_name) == product_name_lower
+    )
+
+    # Check version - treat empty string and None as equivalent
+    if version:
+        duplicate_query = duplicate_query.filter(
+            db.func.lower(Product.version) == version.lower()
+        )
+    else:
+        duplicate_query = duplicate_query.filter(
+            db.or_(Product.version.is_(None), Product.version == '')
+        )
+
+    existing_product = duplicate_query.first()
+
+    if existing_product:
+        return jsonify({
+            'error': 'A product with the same vendor, name, and version already exists. You can assign it to additional organizations from the product list.'
+        }), 409
+
     product = Product(
         organization_id=data.get('organization_id', org_id),
         service_catalog_id=data.get('service_catalog_id'),
-        vendor=data['vendor'],
-        product_name=data['product_name'],
-        version=data.get('version'),
+        vendor=data['vendor'].strip(),
+        product_name=data['product_name'].strip(),
+        version=version,  # Already normalized above (empty string -> None)
         keywords=data.get('keywords'),
         description=data.get('description'),
         active=data.get('active', True),
@@ -88,6 +210,15 @@ def create_product():
             catalog_entry.usage_frequency += 1
 
     db.session.add(product)
+    db.session.flush()  # Get the product ID
+
+    # Also add to product_organizations many-to-many table
+    org_to_assign = data.get('organization_id', org_id)
+    if org_to_assign:
+        org = Organization.query.get(org_to_assign)
+        if org and org not in product.organizations.all():
+            product.organizations.append(org)
+
     db.session.commit()
 
     # Re-run matching for new product
@@ -103,11 +234,57 @@ def get_product(product_id):
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['PUT'])
-@login_required
+@manager_required
 def update_product(product_id):
-    """Update a product"""
+    """
+    Update a product
+
+    Permissions:
+    - Super Admin: Can update any product
+    - Org Admin: Can update products in their organization
+    - Manager: Can update products in their organization
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     product = Product.query.get_or_404(product_id)
+
+    # Permission check: org admins can only edit products in their org
+    if not current_user.is_super_admin():
+        # Check if product belongs to user's org (via primary or multi-org assignment)
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if current_user.organization_id not in product_org_ids:
+            return jsonify({'error': 'You can only edit products in your organization'}), 403
+
     data = request.get_json()
+
+    # Check for duplicate product if vendor, product_name, or version is being updated
+    # For multi-org support, check globally (not just within one org)
+    if 'vendor' in data or 'product_name' in data or 'version' in data:
+        new_vendor = data.get('vendor', product.vendor)
+        new_product_name = data.get('product_name', product.product_name)
+        new_version = data.get('version', product.version)
+
+        # Query for existing products with same details (excluding current product)
+        duplicate_query = Product.query.filter(
+            Product.id != product_id,
+            Product.vendor == new_vendor,
+            Product.product_name == new_product_name
+        )
+
+        # Check version match
+        if new_version:
+            duplicate_query = duplicate_query.filter_by(version=new_version)
+        else:
+            duplicate_query = duplicate_query.filter(Product.version.is_(None))
+
+        existing_product = duplicate_query.first()
+
+        if existing_product:
+            return jsonify({
+                'error': 'A product with the same vendor, name, and version already exists. Products are unique globally.'
+            }), 409
 
     if 'vendor' in data:
         product.vendor = data['vendor']
@@ -123,6 +300,13 @@ def update_product(product_id):
         product.active = data['active']
     if 'criticality' in data:
         product.criticality = data['criticality']
+    if 'organization_id' in data:
+        # Allow setting to None or a valid organization ID
+        org_id = data['organization_id']
+        if org_id == '' or org_id is None:
+            product.organization_id = None
+        else:
+            product.organization_id = int(org_id)
 
     db.session.commit()
 
@@ -132,13 +316,225 @@ def update_product(product_id):
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['DELETE'])
-@login_required
+@manager_required
 def delete_product(product_id):
-    """Delete a product"""
+    """
+    Delete a product or remove it from current organization.
+
+    Permissions:
+    - Super Admin: Deletes product globally from all organizations
+    - Org Admin/Manager: Removes product from their org only.
+      If product is in multiple orgs, it stays in others.
+      If product is only in their org, it gets deleted globally.
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     product = Product.query.get_or_404(product_id)
-    db.session.delete(product)
-    db.session.commit()
-    return jsonify({'success': True})
+
+    # Get user's current organization
+    user_org_id = session.get('organization_id') or current_user.organization_id
+
+    # Get all organizations this product is assigned to
+    product_org_ids = [org.id for org in product.organizations.all()]
+
+    # Permission check: non-super-admins can only manage products in their org
+    if not current_user.is_super_admin():
+        if user_org_id not in product_org_ids:
+            return jsonify({'error': 'You can only delete products in your organization'}), 403
+
+    # Store product info for audit log
+    product_info = {
+        'name': product.product_name,
+        'vendor': product.vendor,
+        'version': product.version,
+        'organizations': product_org_ids,
+        'action_by': current_user.username
+    }
+
+    try:
+        if current_user.is_super_admin():
+            # Super admin: delete product globally
+            VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+            db.session.delete(product)
+            db.session.commit()
+
+            log_audit_event(
+                'DELETE',
+                'products',
+                product_id,
+                old_value=product_info,
+                details=f"Super admin deleted product {product.vendor} {product.product_name} globally"
+            )
+            return jsonify({'success': True, 'message': 'Product deleted globally'})
+
+        else:
+            # Org admin/manager: remove from their org only
+            user_org = Organization.query.get(user_org_id)
+
+            if len(product_org_ids) > 1:
+                # Product is in multiple orgs - just remove from this org
+                if user_org in product.organizations:
+                    product.organizations.remove(user_org)
+                    db.session.commit()
+
+                    log_audit_event(
+                        'REMOVE_ORG',
+                        'products',
+                        product_id,
+                        old_value={'organization_id': user_org_id},
+                        details=f"Removed product {product.vendor} {product.product_name} from {user_org.display_name}"
+                    )
+                    return jsonify({
+                        'success': True,
+                        'message': f'Product removed from {user_org.display_name} (still exists in other organizations)'
+                    })
+            else:
+                # Product only in this org - delete it globally
+                VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+                db.session.delete(product)
+                db.session.commit()
+
+                log_audit_event(
+                    'DELETE',
+                    'products',
+                    product_id,
+                    old_value=product_info,
+                    details=f"Deleted product {product.vendor} {product.product_name}"
+                )
+                return jsonify({'success': True, 'message': 'Product deleted'})
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
+@login_required
+def get_product_organizations(product_id):
+    """Get organizations assigned to a product"""
+    product = Product.query.get_or_404(product_id)
+
+    # Get assigned organizations from many-to-many relationship
+    assigned_orgs = [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
+                     for org in product.organizations.all()]
+
+    # Include legacy organization_id for backwards compatibility
+    if product.organization_id and not assigned_orgs:
+        if product.organization:
+            assigned_orgs = [{'id': product.organization.id, 'name': product.organization.name,
+                             'display_name': product.organization.display_name}]
+
+    return jsonify({'organizations': assigned_orgs})
+
+@bp.route('/api/products/<int:product_id>/organizations', methods=['POST'])
+@org_admin_required
+def assign_product_organizations(product_id):
+    """Assign product to multiple organizations"""
+    from app.email_service import send_product_assignment_notification
+
+    product = Product.query.get_or_404(product_id)
+    data = request.get_json()
+    org_ids = data.get('organization_ids', [])
+
+    if not org_ids:
+        return jsonify({'error': 'No organizations specified'}), 400
+
+    try:
+        added_orgs = []
+        for org_id in org_ids:
+            org = Organization.query.get(org_id)
+            if not org:
+                continue
+
+            # Check if already assigned
+            if org not in product.organizations.all():
+                product.organizations.append(org)
+                added_orgs.append(org)
+
+        db.session.commit()
+
+        # Send email notifications to org admins
+        for org in added_orgs:
+            try:
+                send_product_assignment_notification(product, org, 'assigned')
+            except Exception as e:
+                # Log but don't fail the request
+                print(f"Failed to send notification to {org.name}: {str(e)}")
+
+        return jsonify({
+            'success': True,
+            'message': f'Product assigned to {len(added_orgs)} organization(s)',
+            'organizations': [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
+                             for org in product.organizations.all()]
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/products/<int:product_id>/organizations/<int:org_id>', methods=['DELETE'])
+@org_admin_required
+def remove_product_organization(product_id, org_id):
+    """Remove an organization from a product"""
+    from app.email_service import send_product_assignment_notification
+
+    product = Product.query.get_or_404(product_id)
+    org = Organization.query.get_or_404(org_id)
+
+    try:
+        removed = False
+
+        # Check many-to-many relationship
+        if org in product.organizations.all():
+            product.organizations.remove(org)
+            removed = True
+
+        # Also check legacy organization_id
+        if product.organization_id == org_id:
+            product.organization_id = None
+            removed = True
+
+        if not removed:
+            return jsonify({'error': 'Organization not assigned to this product'}), 404
+
+        db.session.commit()
+
+        # Send email notification
+        try:
+            send_product_assignment_notification(product, org, 'removed')
+        except Exception as e:
+            print(f"Failed to send notification to {org.name}: {str(e)}")
+
+        # Check if product has any organizations left
+        remaining_orgs = product.organizations.count()
+        has_legacy_org = product.organization_id is not None
+
+        # If no organizations left, delete the product entirely
+        if remaining_orgs == 0 and not has_legacy_org:
+            # Delete associated vulnerability matches first
+            VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+
+            db.session.delete(product)
+            db.session.commit()
+
+            return jsonify({
+                'success': True,
+                'message': f'Organization removed. Product deleted (no organizations remaining).',
+                'product_deleted': True
+            })
+
+        return jsonify({
+            'success': True,
+            'message': f'Organization {org.display_name} removed from product',
+            'product_deleted': False
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/vulnerabilities', methods=['GET'])
 @login_required
@@ -239,9 +635,14 @@ def unacknowledge_match(match_id):
     return jsonify(match.to_dict())
 
 @bp.route('/api/sync', methods=['POST'])
-@login_required
+@admin_required
 def trigger_sync():
-    """Manually trigger CISA KEV sync"""
+    """
+    Manually trigger CISA KEV sync
+
+    Permissions:
+    - Super Admin only: Can trigger manual sync of CISA KEV data
+    """
     result = sync_cisa_kev()
     return jsonify(result)
 
@@ -261,6 +662,79 @@ def sync_history():
     limit = request.args.get('limit', 10, type=int)
     syncs = SyncLog.query.order_by(SyncLog.sync_date.desc()).limit(limit).all()
     return jsonify([s.to_dict() for s in syncs])
+
+@bp.route('/api/alerts/trigger-critical', methods=['POST'])
+@admin_required
+def trigger_critical_cve_alerts():
+    """
+    Manually trigger critical CVE email alerts for all organizations
+
+    Permissions:
+    - Super Admin only: Can manually trigger critical CVE alert emails
+    """
+    from app.email_alerts import EmailAlertManager
+
+    try:
+        results = []
+        organizations = Organization.query.filter_by(active=True).all()
+
+        for org in organizations:
+            # Get unacknowledged critical/high priority vulnerabilities
+            unack_matches = (
+                VulnerabilityMatch.query
+                .join(Product)
+                .filter(
+                    Product.organization_id == org.id,
+                    VulnerabilityMatch.acknowledged == False
+                )
+                .all()
+            )
+
+            # Filter for critical/high priority only
+            critical_matches = [
+                m for m in unack_matches
+                if m.calculate_effective_priority() in ['critical', 'high']
+            ]
+
+            if not critical_matches:
+                results.append({
+                    'organization': org.name,
+                    'status': 'skipped',
+                    'reason': 'No unacknowledged critical CVEs'
+                })
+                continue
+
+            # Send alert
+            result = EmailAlertManager.send_critical_cve_alert(org, critical_matches)
+            results.append({
+                'organization': org.name,
+                'status': result.get('status'),
+                'matches_count': result.get('matches_count', 0),
+                'sent_to': result.get('sent_to', 0),
+                'reason': result.get('reason', '')
+            })
+
+        # Count successes
+        sent_count = sum(1 for r in results if r['status'] == 'success')
+        skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+        error_count = sum(1 for r in results if r['status'] == 'error')
+
+        return jsonify({
+            'status': 'success',
+            'summary': {
+                'total_orgs': len(organizations),
+                'emails_sent': sent_count,
+                'skipped': skipped_count,
+                'errors': error_count
+            },
+            'details': results
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
 
 # ============================================================================
 # SERVICE CATALOG API ENDPOINTS
@@ -371,8 +845,23 @@ def increment_catalog_usage(catalog_id):
 @bp.route('/api/organizations', methods=['GET'])
 @login_required
 def get_organizations():
-    """Get all organizations"""
-    orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
+    """Get organizations based on user permissions"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({'error': 'User not found'}), 404
+
+    # Super admins and users with can_view_all_orgs see all organizations
+    if current_user.is_super_admin() or current_user.can_view_all_orgs:
+        orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
+    else:
+        # Regular users only see their own organization
+        if current_user.organization_id:
+            orgs = Organization.query.filter_by(id=current_user.organization_id, active=True).all()
+        else:
+            orgs = []
+
     return jsonify([o.to_dict() for o in orgs])
 
 @bp.route('/api/organizations', methods=['POST'])
@@ -412,15 +901,43 @@ def create_organization():
 @bp.route('/api/organizations/<int:org_id>', methods=['GET'])
 @login_required
 def get_organization(org_id):
-    """Get a specific organization"""
+    """
+    Get a specific organization
+
+    Permissions:
+    - Super Admin: Can view any organization
+    - Org Admin/Manager/User: Can only view organizations they belong to
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Permission check: non-super admins can only view their own orgs
+    if not current_user.is_super_admin():
+        if not current_user.has_access_to_org(org_id):
+            return jsonify({'error': 'You do not have access to this organization'}), 403
+
     org = Organization.query.get_or_404(org_id)
     return jsonify(org.to_dict())
 
 @bp.route('/api/organizations/<int:org_id>', methods=['PUT'])
-@admin_required
+@org_admin_required
 def update_organization(org_id):
-    """Update an organization"""
+    """
+    Update an organization
+
+    Permissions:
+    - Super Admin: Can update any organization
+    - Org Admin: Can update their own organization only
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     org = Organization.query.get_or_404(org_id)
+
+    # Permission check: org admins can only edit their own org
+    if not current_user.is_super_admin():
+        if not current_user.is_org_admin_for(org_id):
+            return jsonify({'error': 'You can only edit your own organization'}), 403
+
     data = request.get_json()
 
     if 'display_name' in data:
@@ -453,9 +970,10 @@ def update_organization(org_id):
         org.smtp_port = data['smtp_port']
     if 'smtp_username' in data:
         org.smtp_username = data['smtp_username']
-    # Only update password if provided (not null/empty)
+    # Only update password if provided (not null/empty) - encrypt it
     if 'smtp_password' in data and data['smtp_password']:
-        org.smtp_password = data['smtp_password']
+        from app.encryption import encrypt_value
+        org.smtp_password = encrypt_value(data['smtp_password'])
     if 'smtp_use_tls' in data:
         org.smtp_use_tls = data['smtp_use_tls']
     if 'smtp_use_ssl' in data:
@@ -625,7 +1143,7 @@ def fix_admin_role():
     })
 
 @bp.route('/api/users', methods=['GET'])
-@admin_required
+@org_admin_required
 def get_users():
     """
     Get users based on permissions
@@ -642,12 +1160,11 @@ def get_users():
 
     # Super admins see all users
     if current_user.is_super_admin():
-        users = User.query.filter_by(is_active=True).order_by(User.username).all()
+        users = User.query.order_by(User.username).all()
     # Org admins see only their organization's users
     elif current_user.is_org_admin():
         users = User.query.filter_by(
-            organization_id=current_user.organization_id,
-            is_active=True
+            organization_id=current_user.organization_id
         ).order_by(User.username).all()
     else:
         return jsonify({'error': 'Insufficient permissions'}), 403
@@ -655,18 +1172,27 @@ def get_users():
     return jsonify([u.to_dict() for u in users])
 
 @bp.route('/api/users', methods=['POST'])
-@admin_required
+@org_admin_required
 def create_user():
     """Create a new user (local auth only - LDAP users must be discovered/invited)"""
     data = request.get_json()
 
+    # Validate required fields
     if not data.get('username') or not data.get('email'):
         return jsonify({'error': 'Username and email are required'}), 400
+
+    # Validate username format
+    if not validate_username(data['username']):
+        return jsonify({'error': 'Invalid username format. Use 3-50 alphanumeric characters, underscores, or dashes'}), 400
+
+    # Validate email format
+    if not validate_email(data['email']):
+        return jsonify({'error': 'Invalid email format'}), 400
 
     # Prevent direct LDAP user creation - LDAP users should be discovered/invited
     auth_type = data.get('auth_type', 'local')
     if auth_type == 'ldap':
-        return jsonify({'error': 'Cannot create LDAP users directly. LDAP users must be discovered and invited through LDAP authentication.'}), 400
+        return jsonify({'error': 'Cannot create LDAP users directly. Use LDAP discovery instead.'}), 400
 
     # Check if username or email already exists
     existing = User.query.filter(
@@ -679,13 +1205,24 @@ def create_user():
     if not data.get('password'):
         return jsonify({'error': 'Password is required for local users'}), 400
 
+    # Validate password strength
+    is_valid, error_msg = validate_password_strength(data['password'])
+    if not is_valid:
+        return jsonify({'error': error_msg}), 400
+
+    # Validate role
+    valid_roles = ['user', 'manager', 'org_admin', 'super_admin']
+    role = data.get('role', 'user')
+    if role not in valid_roles:
+        return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
+
     user = User(
         username=data['username'],
         email=data['email'],
-        full_name=data.get('full_name'),
+        full_name=data.get('full_name', '')[:100],  # Limit length
         organization_id=data.get('organization_id'),
         auth_type='local',  # Force local auth for created users
-        role=data.get('role', 'user'),
+        role=role,
         is_admin=data.get('is_admin', False),
         is_active=data.get('is_active', True),
         can_manage_products=data.get('can_manage_products', True),
@@ -701,14 +1238,14 @@ def create_user():
     return jsonify(user.to_dict()), 201
 
 @bp.route('/api/users/<int:user_id>', methods=['GET'])
-@admin_required
+@org_admin_required
 def get_user(user_id):
     """Get a specific user"""
     user = User.query.get_or_404(user_id)
     return jsonify(user.to_dict())
 
 @bp.route('/api/users/<int:user_id>', methods=['PUT'])
-@admin_required
+@org_admin_required
 def update_user(user_id):
     """
     Update a user
@@ -717,15 +1254,31 @@ def update_user(user_id):
     - Super Admin: Can update any user
     - Org Admin: Can only update users in their organization (except super admins)
     """
+    from app.logging_config import log_audit_event
+
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
 
-    # Check permissions
-    if not current_user.can_manage_user(user):
+    # Check permissions (self-modification is always allowed for admins)
+    is_self_edit = user_id == current_user_id
+    if not is_self_edit and not current_user.can_manage_user(user):
         return jsonify({'error': 'Insufficient permissions to manage this user'}), 403
 
     data = request.get_json()
+    old_role = user.role
+    old_org_id = user.organization_id
+    warnings = []
+
+    # Username update (only for super admins and must be unique)
+    if 'username' in data and data['username'] != user.username:
+        if not current_user.is_super_admin():
+            return jsonify({'error': 'Only super admins can change usernames'}), 403
+        # Check if new username is already taken
+        existing = User.query.filter_by(username=data['username']).first()
+        if existing and existing.id != user_id:
+            return jsonify({'error': 'Username already exists'}), 400
+        user.username = data['username']
 
     if 'email' in data:
         user.email = data['email']
@@ -742,12 +1295,26 @@ def update_user(user_id):
     # Role changes
     if 'role' in data:
         new_role = data['role']
+
+        # Prevent demoting the last super_admin
+        if old_role == 'super_admin' and new_role != 'super_admin':
+            super_admin_count = User.query.filter_by(role='super_admin', is_active=True).count()
+            if super_admin_count <= 1 and user.role == 'super_admin':
+                return jsonify({'error': 'Cannot demote the last super admin. Create another super admin first.'}), 400
+
         # Only super admins can create/modify super_admins
         if new_role == 'super_admin' and not current_user.is_super_admin():
             return jsonify({'error': 'Only super admins can create super admin users'}), 403
-        # Org admins cannot set org_admin or super_admin roles
-        if current_user.role == 'org_admin' and new_role in ['super_admin', 'org_admin']:
-            return jsonify({'error': 'Org admins cannot create admin users'}), 403
+
+        # Non-super-admins cannot set org_admin or super_admin roles (except for themselves - they can demote)
+        if not current_user.is_super_admin() and new_role in ['super_admin', 'org_admin']:
+            if not is_self_edit:  # Org admins can demote themselves but not promote others
+                return jsonify({'error': 'Org admins cannot create admin users'}), 403
+
+        # Self-demotion warning
+        if is_self_edit and old_role == 'super_admin' and new_role != 'super_admin':
+            warnings.append(f'You have demoted yourself from super_admin to {new_role}. You may lose access to some admin features.')
+
         user.role = new_role
 
     if 'is_admin' in data:
@@ -767,18 +1334,46 @@ def update_user(user_id):
 
     db.session.commit()
 
-    return jsonify(user.to_dict())
+    # Log audit event if role changed
+    if old_role != user.role:
+        log_audit_event(
+            'ROLE_CHANGE',
+            'users',
+            user.id,
+            old_value={'role': old_role},
+            new_value={'role': user.role},
+            details=f"Role changed from {old_role} to {user.role} by {current_user.username}"
+        )
+
+        # Send email notification for role change
+        try:
+            from app.email_alerts import send_role_change_email
+            send_role_change_email(user, old_role, user.role, current_user.username)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to send role change email: {e}")
+
+    result = user.to_dict()
+    if warnings:
+        result['warnings'] = warnings
+
+    return jsonify(result)
 
 @bp.route('/api/users/<int:user_id>', methods=['DELETE'])
-@admin_required
+@org_admin_required
 def delete_user(user_id):
     """
-    Delete a user (soft delete - deactivate)
+    Permanently delete a user from the system.
 
     Permissions:
     - Super Admin: Can delete any user
     - Org Admin: Can only delete users in their organization (except super admins)
+
+    Note: This is a PERMANENT deletion. Use toggle-active endpoint for blocking/unblocking.
     """
+    from app.models import UserOrganization
+    from app.logging_config import log_audit_event
+
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
@@ -787,13 +1382,337 @@ def delete_user(user_id):
     if user_id == current_user_id:
         return jsonify({'error': 'Cannot delete your own account'}), 400
 
+    # Cannot delete super admins (only other super admins can, with confirmation)
+    if user.is_super_admin() and not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can delete other super admins'}), 403
+
     # Check permissions
     if not current_user.can_manage_user(user):
         return jsonify({'error': 'Insufficient permissions to delete this user'}), 403
 
-    user.is_active = False
+    # Store user info for audit log before deletion
+    deleted_username = user.username
+    deleted_email = user.email
+    deleted_role = user.role
+
+    try:
+        # Delete organization memberships first
+        UserOrganization.query.filter_by(user_id=user_id).delete()
+
+        # Delete the user
+        db.session.delete(user)
+        db.session.commit()
+
+        # Log audit event
+        log_audit_event(
+            'USER_DELETE',
+            'users',
+            user_id,
+            old_value={'username': deleted_username, 'email': deleted_email, 'role': deleted_role},
+            details=f"Permanently deleted user {deleted_username}"
+        )
+
+        return jsonify({'success': True, 'message': f'User {deleted_username} permanently deleted'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to delete user: {str(e)}'}), 500
+
+@bp.route('/api/users/<int:user_id>/toggle-active', methods=['POST'])
+@org_admin_required
+def toggle_user_active(user_id):
+    """
+    Toggle user active status (block/unblock)
+
+    Permissions:
+    - Super Admin: Can toggle any user
+    - Org Admin: Can only toggle users in their organization (except super admins)
+    """
+    from app.logging_config import log_audit_event
+    from app.email_alerts import send_user_status_email
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Cannot toggle yourself
+    if user_id == current_user_id:
+        return jsonify({'error': 'Cannot block/unblock your own account'}), 400
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions to modify this user'}), 403
+
+    old_status = user.is_active
+    user.is_active = not user.is_active
+    is_blocked = not user.is_active
+    action = 'unblocked' if user.is_active else 'blocked'
+
+    # Log the action
+    log_audit_event(
+        'BLOCK' if is_blocked else 'UNBLOCK',
+        'users',
+        user.id,
+        old_value={'is_active': old_status},
+        new_value={'is_active': user.is_active},
+        details=f"User {user.username} {action} by {current_user.username}"
+    )
+
     db.session.commit()
-    return jsonify({'success': True})
+
+    # Send email notification to the user
+    email_sent = False
+    email_details = None
+    try:
+        email_sent, email_details = send_user_status_email(user, is_blocked, current_user.username)
+    except Exception as e:
+        email_details = str(e)
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to send status email: {e}")
+
+    message = f'User {user.username} has been {action}'
+    if email_sent:
+        message += f' ({email_details})'
+    elif email_details:
+        message += f' (email failed: {email_details})'
+
+    return jsonify({
+        'success': True,
+        'is_active': user.is_active,
+        'message': message,
+        'email_sent': email_sent
+    })
+
+# ============================================================================
+# USER ORGANIZATION ASSIGNMENTS (Multi-Org Support)
+# ============================================================================
+
+@bp.route('/api/users/<int:user_id>/organizations', methods=['GET'])
+@login_required
+def get_user_organizations(user_id):
+    """Get all organization assignments for a user"""
+    from app.models import UserOrganization
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get_or_404(user_id)
+
+    # Permission check: super admin or org admin for one of the user's orgs
+    if not current_user.is_super_admin():
+        # Org admins can view users in their org
+        if not current_user.can_manage_user(target_user):
+            return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Get all org memberships
+    memberships = target_user.org_memberships.all()
+
+    # Include primary org if not in memberships
+    result = []
+    primary_org_id = target_user.organization_id
+
+    if primary_org_id and target_user.organization:
+        result.append({
+            'id': None,  # No membership ID for legacy org
+            'organization_id': primary_org_id,
+            'organization_name': target_user.organization.display_name,
+            'role': target_user.role,
+            'is_primary': True,
+            'assigned_at': target_user.created_at.isoformat() if target_user.created_at else None
+        })
+
+    for m in memberships:
+        if m.organization_id != primary_org_id:
+            result.append({
+                'id': m.id,
+                'organization_id': m.organization_id,
+                'organization_name': m.organization.display_name if m.organization else None,
+                'role': m.role,
+                'is_primary': False,
+                'assigned_at': m.assigned_at.isoformat() if m.assigned_at else None,
+                'assigned_by': m.assigner.username if m.assigner else None
+            })
+
+    return jsonify(result)
+
+
+@bp.route('/api/users/<int:user_id>/organizations', methods=['POST'])
+@login_required
+def add_user_organization(user_id):
+    """Add a user to an organization with a specific role"""
+    from app.models import UserOrganization
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get_or_404(user_id)
+
+    data = request.get_json()
+    org_id = data.get('organization_id')
+    role = data.get('role', 'user')
+
+    if not org_id:
+        return jsonify({'error': 'organization_id is required'}), 400
+
+    # Validate role
+    valid_roles = ['user', 'manager', 'org_admin']
+    if current_user.is_super_admin():
+        valid_roles.append('super_admin')
+
+    if role not in valid_roles:
+        return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
+
+    # Permission checks
+    if current_user.is_super_admin():
+        # Super admins can assign anyone to any org
+        pass
+    elif current_user.is_org_admin_for(org_id):
+        # Org admins can only assign to their own org
+        if role in ['super_admin']:
+            return jsonify({'error': 'Only super admins can assign super_admin role'}), 403
+    else:
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Check if org exists
+    org = Organization.query.get(org_id)
+    if not org:
+        return jsonify({'error': 'Organization not found'}), 404
+
+    # Add user to organization
+    target_user.add_to_organization(org_id, role, current_user_id)
+    db.session.commit()
+
+    # Log audit event
+    log_audit_event(
+        'ADD_ORG_MEMBERSHIP',
+        'users',
+        user_id,
+        new_value={'organization_id': org_id, 'role': role},
+        details=f"Added {target_user.username} to {org.display_name} as {role}"
+    )
+
+    return jsonify({
+        'success': True,
+        'message': f'User {target_user.username} added to {org.display_name} as {role}'
+    })
+
+
+@bp.route('/api/users/<int:user_id>/organizations/<int:org_id>', methods=['PUT'])
+@login_required
+def update_user_organization_role(user_id, org_id):
+    """Update a user's role in an organization"""
+    from app.models import UserOrganization
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get_or_404(user_id)
+
+    data = request.get_json()
+    new_role = data.get('role')
+
+    if not new_role:
+        return jsonify({'error': 'role is required'}), 400
+
+    # Validate role
+    valid_roles = ['user', 'manager', 'org_admin']
+    if current_user.is_super_admin():
+        valid_roles.append('super_admin')
+
+    if new_role not in valid_roles:
+        return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
+
+    # Permission checks
+    if not current_user.is_super_admin() and not current_user.is_org_admin_for(org_id):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    if new_role == 'super_admin' and not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can assign super_admin role'}), 403
+
+    # Check if this is the primary org
+    if target_user.organization_id == org_id:
+        # Update the user's main role
+        old_role = target_user.role
+        target_user.role = new_role
+        db.session.commit()
+
+        log_audit_event(
+            'UPDATE_ROLE',
+            'users',
+            user_id,
+            old_value={'role': old_role},
+            new_value={'role': new_role},
+            details=f"Updated {target_user.username}'s role to {new_role} in primary org"
+        )
+    else:
+        # Update membership role
+        membership = target_user.org_memberships.filter_by(organization_id=org_id).first()
+        if not membership:
+            return jsonify({'error': 'User is not a member of this organization'}), 404
+
+        old_role = membership.role
+        membership.role = new_role
+        membership.assigned_by = current_user_id
+        db.session.commit()
+
+        log_audit_event(
+            'UPDATE_ORG_ROLE',
+            'users',
+            user_id,
+            old_value={'organization_id': org_id, 'role': old_role},
+            new_value={'organization_id': org_id, 'role': new_role},
+            details=f"Updated {target_user.username}'s role to {new_role}"
+        )
+
+    org = Organization.query.get(org_id)
+    return jsonify({
+        'success': True,
+        'message': f'Role updated to {new_role} for {org.display_name if org else "organization"}'
+    })
+
+
+@bp.route('/api/users/<int:user_id>/organizations/<int:org_id>', methods=['DELETE'])
+@login_required
+def remove_user_organization(user_id, org_id):
+    """Remove a user from an organization"""
+    from app.models import UserOrganization
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get_or_404(user_id)
+
+    # Permission checks
+    if not current_user.is_super_admin() and not current_user.is_org_admin_for(org_id):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Cannot remove from primary org this way
+    if target_user.organization_id == org_id:
+        return jsonify({'error': 'Cannot remove user from their primary organization. Change primary org first or delete user.'}), 400
+
+    # Remove membership
+    membership = target_user.org_memberships.filter_by(organization_id=org_id).first()
+    if not membership:
+        return jsonify({'error': 'User is not a member of this organization'}), 404
+
+    org = Organization.query.get(org_id)
+    old_role = membership.role
+
+    db.session.delete(membership)
+    db.session.commit()
+
+    log_audit_event(
+        'REMOVE_ORG_MEMBERSHIP',
+        'users',
+        user_id,
+        old_value={'organization_id': org_id, 'role': old_role},
+        details=f"Removed {target_user.username} from {org.display_name if org else 'organization'}"
+    )
+
+    return jsonify({
+        'success': True,
+        'message': f'User removed from {org.display_name if org else "organization"}'
+    })
+
 
 # ============================================================================
 # DEBUG & DIAGNOSTICS
@@ -827,6 +1746,265 @@ def debug_auth_status():
     })
 
 # ============================================================================
+# AUDIT LOGS API
+# ============================================================================
+
+@bp.route('/api/audit-logs', methods=['GET'])
+@admin_required
+def get_audit_logs():
+    """
+    Get audit logs from the audit.log file
+    Only accessible by super admins
+    """
+    import os
+    import json
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Only super admins can view audit logs
+    if not current_user or not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can view audit logs'}), 403
+
+    # Get query parameters
+    limit = request.args.get('limit', 100, type=int)
+    action_filter = request.args.get('action')
+    resource_filter = request.args.get('resource')
+    user_filter = request.args.get('user_id')
+
+    # Find the audit log file
+    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    if not os.path.exists(log_dir):
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+
+    audit_log_path = os.path.join(log_dir, 'audit.log')
+
+    if not os.path.exists(audit_log_path):
+        return jsonify({'logs': [], 'total': 0, 'message': 'No audit logs found'})
+
+    logs = []
+    try:
+        # Read the file in reverse to get most recent first
+        with open(audit_log_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Parse JSON lines (most recent first)
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            try:
+                log_entry = json.loads(line.strip())
+
+                # Apply filters
+                if action_filter and log_entry.get('action') != action_filter:
+                    continue
+                if resource_filter and not log_entry.get('resource', '').startswith(resource_filter):
+                    continue
+                if user_filter and str(log_entry.get('user_id')) != str(user_filter):
+                    continue
+
+                logs.append(log_entry)
+
+                if len(logs) >= limit:
+                    break
+
+            except json.JSONDecodeError:
+                continue
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
+
+    return jsonify({
+        'logs': logs,
+        'total': len(logs),
+        'limit': limit
+    })
+
+# ============================================================================
+# CVE SERVICE STATUS CHECK
+# ============================================================================
+
+@bp.route('/api/cve-service/status', methods=['GET'])
+@login_required
+def check_cve_service_status():
+    """
+    Check if the CVE/NVD service is accessible
+    Returns status of connection to NIST NVD API
+    """
+    import requests
+    from config import Config
+    import urllib3
+
+    try:
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        # Try to reach the NVD API
+        response = requests.get(
+            'https://services.nvd.nist.gov/rest/json/cves/2.0',
+            params={'resultsPerPage': 1},
+            timeout=10,
+            proxies=proxies,
+            verify=verify_ssl
+        )
+
+        if response.status_code == 200:
+            return jsonify({
+                'status': 'online',
+                'message': 'NVD service is accessible',
+                'response_code': response.status_code
+            })
+        elif response.status_code == 403:
+            return jsonify({
+                'status': 'rate_limited',
+                'message': 'NVD API rate limited',
+                'response_code': response.status_code
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'NVD returned status {response.status_code}',
+                'response_code': response.status_code
+            })
+
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'timeout',
+            'message': 'Connection to NVD timed out'
+        })
+    except requests.exceptions.ConnectionError as e:
+        return jsonify({
+            'status': 'offline',
+            'message': 'Cannot connect to NVD service'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+
+# ============================================================================
+# REPORTS API
+# ============================================================================
+
+@bp.route('/api/reports/monthly', methods=['GET'])
+@login_required
+def generate_monthly_report():
+    """
+    Generate a monthly vulnerability report PDF
+
+    Query parameters:
+        year: Report year (default: current year)
+        month: Report month (default: current month)
+    """
+    from flask import make_response
+    from app.reports import VulnerabilityReportGenerator
+    from datetime import datetime
+
+    try:
+        year = request.args.get('year', type=int, default=datetime.now().year)
+        month = request.args.get('month', type=int, default=datetime.now().month)
+
+        # Validate month
+        if month < 1 or month > 12:
+            return jsonify({'error': 'Invalid month'}), 400
+
+        # Get organization from session
+        org_id = session.get('organization_id')
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
+
+        # Non-super admins can only see their organization
+        if current_user and not current_user.is_super_admin() and not current_user.can_view_all_orgs:
+            org_id = current_user.organization_id
+
+        # Generate report
+        generator = VulnerabilityReportGenerator(organization_id=org_id)
+        pdf_buffer = generator.generate_monthly_report(year=year, month=month)
+
+        # Create response
+        month_name = datetime(year, month, 1).strftime('%B_%Y')
+        filename = f"SentriKat_Vulnerability_Report_{month_name}.pdf"
+
+        response = make_response(pdf_buffer.getvalue())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/reports/custom', methods=['GET'])
+@login_required
+def generate_custom_report():
+    """
+    Generate a custom date range vulnerability report PDF
+
+    Query parameters:
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+        include_acknowledged: Include acknowledged vulnerabilities (default: true)
+        include_pending: Include pending vulnerabilities (default: true)
+    """
+    from flask import make_response
+    from app.reports import VulnerabilityReportGenerator
+    from datetime import datetime
+
+    try:
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+
+        if not start_date_str or not end_date_str:
+            return jsonify({'error': 'start_date and end_date are required'}), 400
+
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+
+        include_acknowledged = request.args.get('include_acknowledged', 'true').lower() == 'true'
+        include_pending = request.args.get('include_pending', 'true').lower() == 'true'
+
+        # Get organization from session
+        org_id = session.get('organization_id')
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
+
+        # Non-super admins can only see their organization
+        if current_user and not current_user.is_super_admin() and not current_user.can_view_all_orgs:
+            org_id = current_user.organization_id
+
+        # Generate report
+        generator = VulnerabilityReportGenerator(organization_id=org_id)
+        pdf_buffer = generator.generate_custom_report(
+            start_date=start_date,
+            end_date=end_date,
+            include_acknowledged=include_acknowledged,
+            include_pending=include_pending
+        )
+
+        # Create response
+        filename = f"SentriKat_Report_{start_date_str}_to_{end_date_str}.pdf"
+
+        response = make_response(pdf_buffer.getvalue())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
+    except ValueError as e:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# ============================================================================
 # SESSION MANAGEMENT (Organization Switching)
 # ============================================================================
 
@@ -850,26 +2028,20 @@ def get_current_organization():
 @bp.route('/api/session/organization/<int:org_id>', methods=['POST'])
 @login_required
 def switch_organization(org_id):
-    """Switch to a different organization"""
+    """Switch to a different organization (with permission check)"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({'error': 'User not found'}), 404
+
     org = Organization.query.get_or_404(org_id)
+
+    # Check if user has permission to switch to this organization
+    if not current_user.is_super_admin() and not current_user.can_view_all_orgs:
+        # Regular users can only access their own organization
+        if current_user.organization_id != org_id:
+            return jsonify({'error': 'You do not have permission to access this organization'}), 403
+
     session['organization_id'] = org_id
     return jsonify({'success': True, 'organization': org.to_dict()})
-
-
-# TEMPORARY: Direct login bypass for testing
-@bp.route('/debug-login-admin')
-def debug_login_admin():
-    """TEMPORARY endpoint to bypass login issues - REMOVE IN PRODUCTION"""
-    import os
-    if os.environ.get('DISABLE_DEBUG_LOGIN', 'false').lower() == 'true':
-        return jsonify({'error': 'Debug login is disabled'}), 403
-    
-    admin = User.query.filter_by(username='admin').first()
-    if admin:
-        session.clear()
-        session['user_id'] = admin.id
-        session['username'] = admin.username
-        session['organization_id'] = admin.organization_id
-        session.permanent = True
-        return redirect(url_for('main.index'))
-    return jsonify({'error': 'Admin user not found'}), 404

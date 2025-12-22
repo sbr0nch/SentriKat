@@ -17,7 +17,7 @@ def fetch_cvss_data(cve_id):
         params = {'cveId': cve_id}
 
         proxies = Config.get_proxies()
-        verify_ssl = Config.VERIFY_SSL
+        verify_ssl = Config.get_verify_ssl()  # GUI settings > .env settings
 
         # Suppress SSL warnings if verification is disabled
         if not verify_ssl:

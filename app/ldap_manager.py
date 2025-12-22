@@ -15,10 +15,9 @@ class LDAPManager:
 
     @staticmethod
     def get_ldap_config():
-        """Get LDAP configuration from system settings"""
-        def get_setting(key, default=None):
-            setting = SystemSettings.query.filter_by(key=key).first()
-            return setting.value if setting else default
+        """Get LDAP configuration from system settings with automatic decryption"""
+        # Use centralized get_setting that handles decryption
+        from app.settings_api import get_setting
 
         return {
             'enabled': get_setting('ldap_enabled', 'false') == 'true',
@@ -66,23 +65,47 @@ class LDAPManager:
 
             # Build search filter
             if search_query and search_query != '*':
-                # Search for users matching the query
-                search_filter = f"(&(objectClass=person)(|(cn=*{search_query}*)(mail=*{search_query}*)(sAMAccountName=*{search_query}*)))"
+                # Search for users matching the query - use configured username attribute
+                username_attr = config['username_attr']
+                search_filter = f"(&(objectClass=person)(|(cn=*{search_query}*)(mail=*{search_query}*)({username_attr}=*{search_query}*)))"
             else:
                 # Get all users
                 search_filter = "(objectClass=person)"
 
-            # Search LDAP
+            # Search LDAP with paged search to handle large directories
+            # Active Directory often limits results - use paged search to bypass
             conn.search(
                 search_base=config['base_dn'],
                 search_filter=search_filter,
                 search_scope=ldap3.SUBTREE,
                 attributes=[config['username_attr'], config['email_attr'], 'cn', 'displayName', 'memberOf'],
-                size_limit=max_results
+                paged_size=500,  # Fetch 500 at a time
+                size_limit=0  # 0 = no limit, let server decide
             )
 
             users = []
-            for entry in conn.entries:
+            # Collect all results from paged search
+            all_entries = list(conn.entries)
+
+            # Handle paged results - continue fetching if there are more pages
+            cookie = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {}).get('value', {}).get('cookie')
+            while cookie:
+                conn.search(
+                    search_base=config['base_dn'],
+                    search_filter=search_filter,
+                    search_scope=ldap3.SUBTREE,
+                    attributes=[config['username_attr'], config['email_attr'], 'cn', 'displayName', 'memberOf'],
+                    paged_size=500,
+                    paged_cookie=cookie
+                )
+                all_entries.extend(conn.entries)
+                cookie = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {}).get('value', {}).get('cookie')
+                # Stop if we've reached max_results
+                if max_results > 0 and len(all_entries) >= max_results:
+                    all_entries = all_entries[:max_results]
+                    break
+
+            for entry in all_entries:
                 try:
                     username = str(entry[config['username_attr']].value) if entry[config['username_attr']] else None
                     email = str(entry[config['email_attr']].value) if entry[config['email_attr']] else None
@@ -205,19 +228,145 @@ class LDAPManager:
         Returns:
             dict with 'success' and either 'user' or 'error'
         """
+        from app.logging_config import log_audit_event, log_ldap_operation
+        from app.email_alerts import send_user_invite_email
+
         try:
-            # Check if user already exists
+            # Check if user already exists by username
             existing_user = User.query.filter_by(username=username).first()
+
+            # Also check by email (different username but same email)
+            if not existing_user:
+                existing_user = User.query.filter_by(email=email).first()
+                if existing_user:
+                    # User exists with different username but same email
+                    if not existing_user.is_active:
+                        # Reactivate and update username
+                        old_state = {
+                            'is_active': False,
+                            'username': existing_user.username,
+                            'organization_id': existing_user.organization_id,
+                            'role': existing_user.role
+                        }
+
+                        existing_user.username = username
+                        existing_user.is_active = True
+                        existing_user.organization_id = organization_id
+                        existing_user.role = role
+                        existing_user.ldap_dn = dn
+                        existing_user.full_name = full_name
+                        db.session.commit()
+
+                        log_audit_event(
+                            'REACTIVATE',
+                            'users',
+                            existing_user.id,
+                            old_value=old_state,
+                            new_value={
+                                'is_active': True,
+                                'username': username,
+                                'organization_id': organization_id,
+                                'role': role
+                            },
+                            details=f"Reactivated LDAP user {username} (email: {email})"
+                        )
+
+                        log_ldap_operation('USER_REACTIVATE', f"{username} reactivated (email match)", True)
+
+                        # Send welcome email
+                        email_sent = False
+                        email_details = None
+                        try:
+                            email_sent, email_details = send_user_invite_email(existing_user)
+                        except Exception as email_error:
+                            email_details = str(email_error)
+                            logger.warning(f"Failed to send invite email to {email}: {email_error}")
+
+                        result_message = f'User {username} reactivated (matched by email)'
+                        if email_sent:
+                            result_message += f' ({email_details})'
+                        elif email_details:
+                            result_message += f' (email failed: {email_details})'
+
+                        return {'success': True, 'message': result_message, 'user': existing_user.to_dict(), 'email_sent': email_sent}
+                    else:
+                        return {'success': False, 'error': f'Email {email} is already used by another active user ({existing_user.username})'}
+
             if existing_user:
                 # Reactivate if inactive
                 if not existing_user.is_active:
+                    old_state = {
+                        'is_active': False,
+                        'organization_id': existing_user.organization_id,
+                        'role': existing_user.role
+                    }
+
                     existing_user.is_active = True
                     existing_user.organization_id = organization_id
                     existing_user.role = role
                     db.session.commit()
-                    return {'success': True, 'message': f'User {username} reactivated', 'user': existing_user.to_dict()}
+
+                    # Log audit event
+                    log_audit_event(
+                        'REACTIVATE',
+                        'users',
+                        existing_user.id,
+                        old_value=old_state,
+                        new_value={
+                            'is_active': True,
+                            'organization_id': organization_id,
+                            'role': role
+                        },
+                        details=f"Reactivated LDAP user {username}"
+                    )
+
+                    log_ldap_operation('USER_REACTIVATE', f"{username} reactivated and invited", True)
+
+                    # Send welcome email
+                    email_sent = False
+                    email_details = None
+                    try:
+                        email_sent, email_details = send_user_invite_email(existing_user)
+                    except Exception as email_error:
+                        email_details = str(email_error)
+                        logger.warning(f"Failed to send invite email to {email}: {email_error}")
+
+                    result_message = f'User {username} reactivated'
+                    if email_sent:
+                        result_message += f' ({email_details})'
+                    elif email_details:
+                        result_message += f' (email failed: {email_details})'
+                    else:
+                        result_message += ' (no email sent - SMTP not configured)'
+
+                    return {'success': True, 'message': result_message, 'user': existing_user.to_dict(), 'email_sent': email_sent}
                 else:
-                    return {'success': False, 'error': f'User {username} already exists and is active'}
+                    # User is active - check if they're already in the target organization
+                    if existing_user.organization_id == organization_id:
+                        return {'success': False, 'error': f'User {username} already exists in this organization'}
+                    elif existing_user.has_access_to_org(organization_id):
+                        return {'success': False, 'error': f'User {username} already has access to this organization'}
+                    else:
+                        # Add user to the new organization as secondary membership
+                        from flask import session
+                        current_user_id = session.get('user_id')
+                        existing_user.add_to_organization(organization_id, role, current_user_id)
+                        db.session.commit()
+
+                        log_audit_event(
+                            'ADD_ORG_MEMBERSHIP',
+                            'users',
+                            existing_user.id,
+                            new_value={'organization_id': organization_id, 'role': role},
+                            details=f"Added {username} to organization via LDAP invite"
+                        )
+
+                        return {
+                            'success': True,
+                            'message': f'User {username} already exists. Added to organization with role: {role}',
+                            'user': existing_user.to_dict(),
+                            'added_to_org': True
+                        }
 
             # Create new LDAP user
             user = User(
@@ -235,11 +384,46 @@ class LDAPManager:
             db.session.add(user)
             db.session.commit()
 
-            return {'success': True, 'message': f'User {username} invited successfully', 'user': user.to_dict()}
+            # Log audit event
+            log_audit_event(
+                'INVITE',
+                'users',
+                user.id,
+                new_value={
+                    'username': username,
+                    'email': email,
+                    'role': role,
+                    'organization_id': organization_id,
+                    'auth_type': 'ldap'
+                },
+                details=f"Invited LDAP user {username}"
+            )
+
+            log_ldap_operation('USER_INVITE', f"{username} invited to organization {organization_id}", True)
+
+            # Send welcome email
+            email_sent = False
+            email_details = None
+            try:
+                email_sent, email_details = send_user_invite_email(user)
+            except Exception as email_error:
+                email_details = str(email_error)
+                logger.warning(f"Failed to send invite email to {email}: {email_error}")
+
+            result_message = f'User {username} invited successfully'
+            if email_sent:
+                result_message += f' ({email_details})'
+            elif email_details:
+                result_message += f' (email failed: {email_details})'
+            else:
+                result_message += ' (no email sent - SMTP not configured)'
+
+            return {'success': True, 'message': result_message, 'user': user.to_dict(), 'email_sent': email_sent}
 
         except Exception as e:
             db.session.rollback()
             logger.error(f"Error inviting LDAP user: {e}")
+            log_ldap_operation('USER_INVITE', f"Failed to invite {username}: {str(e)}", False)
             return {'success': False, 'error': str(e)}
 
     @staticmethod

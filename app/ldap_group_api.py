@@ -4,7 +4,7 @@ REST endpoints for managing LDAP group mappings and synchronization
 """
 
 from flask import Blueprint, request, jsonify, session
-from app import db
+from app import db, csrf
 from app.models import User, Organization
 from app.ldap_models import LDAPGroupMapping, LDAPSyncLog, LDAPAuditLog
 from app.ldap_manager import LDAPManager
@@ -14,6 +14,9 @@ from datetime import datetime
 import json
 
 ldap_group_bp = Blueprint('ldap_groups', __name__, url_prefix='/api/ldap/groups')
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(ldap_group_bp)
 
 
 # ============================================================================
@@ -354,11 +357,11 @@ def sync_single_user(user_id):
 @ldap_group_bp.route('/audit', methods=['GET'])
 @org_admin_required
 def get_audit_logs():
-    """Get LDAP audit logs"""
+    """Get LDAP audit logs with pagination"""
     current_user = User.query.get(session.get('user_id'))
-    limit = request.args.get('limit', 100, type=int)
-    offset = request.args.get('offset', 0, type=int)
-    event_type = request.args.get('event_type')
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 50, type=int)
+    search = request.args.get('search', '')
 
     query = LDAPAuditLog.query.order_by(LDAPAuditLog.timestamp.desc())
 
@@ -366,16 +369,28 @@ def get_audit_logs():
     if current_user.role == 'org_admin':
         query = query.filter_by(organization_id=current_user.organization_id)
 
-    # Filter by event type if specified
-    if event_type:
-        query = query.filter_by(event_type=event_type)
+    # Filter by search term if provided
+    if search:
+        search_filter = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                LDAPAuditLog.user_username.ilike(search_filter),
+                LDAPAuditLog.target_user_username.ilike(search_filter),
+                LDAPAuditLog.event_type.ilike(search_filter)
+            )
+        )
+
+    # Calculate pagination
+    total = query.count()
+    total_pages = (total + limit - 1) // limit  # Ceiling division
+    offset = (page - 1) * limit
 
     logs = query.limit(limit).offset(offset).all()
-    total = query.count()
 
     return jsonify({
         'logs': [log.to_dict() for log in logs],
         'total': total,
-        'limit': limit,
-        'offset': offset
+        'page': page,
+        'total_pages': total_pages,
+        'limit': limit
     })

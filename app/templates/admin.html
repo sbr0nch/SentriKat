@@ -11,13 +11,16 @@
             </h1>
             <p class="text-muted">Manage your software inventory for vulnerability tracking</p>
         </div>
+        {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
         <div class="col-auto">
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#productModal" onclick="showAddProduct()">
                 <i class="bi bi-plus-circle me-2"></i>Add Product
             </button>
         </div>
+        {% endif %}
     </div>
 
+    {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
     <!-- Bulk Actions Toolbar (hidden by default) -->
     <div class="alert alert-info mb-3" id="bulkActionsToolbar" style="display: none;">
         <div class="d-flex justify-content-between align-items-center">
@@ -26,9 +29,11 @@
                 <strong><span id="selectedCount">0</span> product(s) selected</strong>
             </span>
             <div class="btn-group btn-group-sm">
+                {% if current_user.role in ['org_admin', 'super_admin'] or current_user.is_admin %}
                 <button class="btn btn-outline-primary" onclick="bulkAssignOrganization()">
                     <i class="bi bi-building me-1"></i>Assign to Organization
                 </button>
+                {% endif %}
                 <button class="btn btn-outline-success" onclick="bulkActivate()">
                     <i class="bi bi-check-circle me-1"></i>Activate
                 </button>
@@ -44,28 +49,62 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-list-ul me-2"></i>Product Inventory</span>
-            <button class="btn btn-sm btn-outline-secondary" onclick="toggleSelectAll()">
-                <i class="bi bi-check-square me-1"></i>Select All
-            </button>
+            <div class="dropdown">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                    <i class="bi bi-layout-three-columns me-1"></i>Columns
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-2" style="min-width: 180px;">
+                    <div class="dropdown-header small text-muted px-2 pb-2">Show/Hide Columns</div>
+                    <div class="form-check px-3 py-1">
+                        <input class="form-check-input" type="checkbox" id="col-vendor" checked onchange="toggleColumn('vendor', this.checked)">
+                        <label class="form-check-label" for="col-vendor">Vendor</label>
+                    </div>
+                    <div class="form-check px-3 py-1">
+                        <input class="form-check-input" type="checkbox" id="col-product" checked onchange="toggleColumn('product', this.checked)">
+                        <label class="form-check-label" for="col-product">Product</label>
+                    </div>
+                    <div class="form-check px-3 py-1">
+                        <input class="form-check-input" type="checkbox" id="col-version" checked onchange="toggleColumn('version', this.checked)">
+                        <label class="form-check-label" for="col-version">Version</label>
+                    </div>
+                    <div class="form-check px-3 py-1">
+                        <input class="form-check-input" type="checkbox" id="col-organization" checked onchange="toggleColumn('organization', this.checked)">
+                        <label class="form-check-label" for="col-organization">Organization</label>
+                    </div>
+                    <div class="form-check px-3 py-1">
+                        <input class="form-check-input" type="checkbox" id="col-criticality" checked onchange="toggleColumn('criticality', this.checked)">
+                        <label class="form-check-label" for="col-criticality">Criticality</label>
+                    </div>
+                    <div class="form-check px-3 py-1">
+                        <input class="form-check-input" type="checkbox" id="col-status" checked onchange="toggleColumn('status', this.checked)">
+                        <label class="form-check-label" for="col-status">Status</label>
+                    </div>
+                    <div class="dropdown-divider"></div>
+                    <button class="btn btn-sm btn-link w-100 text-start px-3" onclick="resetColumns()">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Reset All
+                    </button>
+                </div>
+            </div>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover table-compact mb-0" id="productsTableContainer">
                     <thead>
                         <tr>
                             <th style="width: 40px;">
                                 <input type="checkbox" class="form-check-input" id="selectAllCheckbox" onchange="toggleSelectAll()">
                             </th>
-                            <th>Vendor</th>
-                            <th>Product</th>
-                            <th>Version</th>
-                            <th>Organization</th>
-                            <th>Criticality</th>
-                            <th>Status</th>
+                            <th data-column="vendor">Vendor</th>
+                            <th data-column="product">Product</th>
+                            <th data-column="version">Version</th>
+                            <th data-column="organization">Organization</th>
+                            <th data-column="criticality">Criticality</th>
+                            <th data-column="status">Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -214,9 +253,11 @@
                                oninput="filterCatalog(this.value)">
                     </div>
                     <div class="col-md-4">
-                        <select class="form-select" id="catalogOrgSelect">
-                            <option value="">Assign to Organization (optional)</option>
+                        <label class="form-label small mb-1">Assign to Organizations (optional)</label>
+                        <select class="form-select" id="catalogOrgSelect" multiple size="3">
+                            <option value="" disabled>Loading organizations...</option>
                         </select>
+                        <small class="text-muted">Hold Ctrl/Cmd to select multiple</small>
                     </div>
                 </div>
                 <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
@@ -228,12 +269,13 @@
                                 </th>
                                 <th>Vendor</th>
                                 <th>Product</th>
-                                <th>Keywords</th>
+                                <th>Version</th>
+                                <th>Category</th>
                             </tr>
                         </thead>
                         <tbody id="catalogTable">
                             <tr>
-                                <td colspan="4" class="text-center py-4">
+                                <td colspan="5" class="text-center py-4">
                                     <div class="spinner-border text-primary" role="status">
                                         <span class="visually-hidden">Loading...</span>
                                     </div>
@@ -253,13 +295,88 @@
         </div>
     </div>
 </div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirmationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Confirm Action
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmationMessage" class="mb-0"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmActionBtn">
+                    <i class="bi bi-check-circle me-1"></i>Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Organization Management Modal -->
+<div class="modal fade" id="orgManagementModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-building me-2"></i>Manage Organizations
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <p class="text-muted">Product: <strong id="orgModalProductName"></strong></p>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Assigned Organizations</label>
+                    <div id="assignedOrgsList" class="border rounded p-2" style="min-height: 100px; max-height: 200px; overflow-y: auto;">
+                        <div class="text-center text-muted py-3">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Add Organizations</label>
+                    <select class="form-select" id="addOrgSelect" multiple size="5">
+                        <option value="">Loading...</option>
+                    </select>
+                    <small class="text-muted">Hold Ctrl/Cmd to select multiple organizations</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" onclick="assignOrganizations()">
+                    <i class="bi bi-check-circle me-1"></i>Assign Selected
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+    // User permission flags for UI visibility
+    const userPermissions = {
+        canManageProducts: {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}true{% else %}false{% endif %},
+        canAssignOrgs: {% if current_user and (current_user.role in ['org_admin', 'super_admin'] or current_user.is_admin) %}true{% else %}false{% endif %},
+        isSuperAdmin: {% if current_user and current_user.is_super_admin() %}true{% else %}false{% endif %}
+    };
+
     let currentProductId = null;
     let serviceCatalog = [];
     let selectedCatalogItems = new Set();
+    let selectedVersions = {};  // Store selected versions by catalog ID
 
     async function loadProducts() {
         showLoading();
@@ -283,34 +400,49 @@
                 tbody.innerHTML = products.map(product => {
                     const criticalityBadge = `<span class="badge ${getPriorityBadgeClass(product.criticality || 'medium')}">${(product.criticality || 'medium').toUpperCase()}</span>`;
                     const statusBadge = product.active
-                        ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Active</span>'
-                        : '<span class="badge bg-secondary"><i class="bi bi-pause-circle"></i> Inactive</span>';
+                        ? '<span class="badge badge-status-active">Active</span>'
+                        : '<span class="badge badge-status-inactive">Inactive</span>';
 
-                    const orgDisplay = product.organization_name
-                        ? `<span class="badge bg-primary">${escapeHtml(product.organization_name)}</span>`
-                        : '<span class="text-muted">-</span>';
+                    // Display multiple organizations
+                    let orgDisplay;
+                    if (product.organizations && product.organizations.length > 0) {
+                        orgDisplay = product.organizations.map(org =>
+                            `<span class="badge bg-primary me-1">${escapeHtml(org.display_name)}</span>`
+                        ).join('');
+                    } else if (product.organization_name) {
+                        // Legacy single org support
+                        orgDisplay = `<span class="badge bg-primary">${escapeHtml(product.organization_name)}</span>`;
+                    } else {
+                        orgDisplay = '<span class="text-muted">-</span>';
+                    }
 
                     return `
-                        <tr>
-                            <td>
+                        <tr onclick="toggleProductRow(${product.id}, event)" style="cursor: pointer;">
+                            <td onclick="event.stopPropagation();">
                                 <input type="checkbox" class="form-check-input product-checkbox"
                                        data-product-id="${product.id}"
                                        onchange="toggleProductSelect(${product.id}, this)">
                             </td>
-                            <td class="fw-semibold">${escapeHtml(product.vendor)}</td>
-                            <td>${escapeHtml(product.product_name)}</td>
-                            <td>${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
-                            <td>${orgDisplay}</td>
-                            <td>${criticalityBadge}</td>
-                            <td>${statusBadge}</td>
-                            <td>
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <button class="btn btn-outline-primary" onclick="editProduct(${product.id})" title="Edit">
+                            <td data-column="vendor" class="fw-semibold">${escapeHtml(product.vendor)}</td>
+                            <td data-column="product">${escapeHtml(product.product_name)}</td>
+                            <td data-column="version">${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
+                            <td data-column="organization">${orgDisplay}</td>
+                            <td data-column="criticality">${criticalityBadge}</td>
+                            <td data-column="status">${statusBadge}</td>
+                            <td onclick="event.stopPropagation();">
+                                <div class="d-flex gap-1">
+                                    ${userPermissions.canManageProducts ? `
+                                    <button class="btn-action btn-action-edit" onclick="editProduct(${product.id})" title="Edit">
                                         <i class="bi bi-pencil"></i>
-                                    </button>
-                                    <button class="btn btn-outline-danger" onclick="deleteProduct(${product.id}, '${escapeHtml(product.vendor)} ${escapeHtml(product.product_name)}')" title="Delete">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
+                                    </button>` : ''}
+                                    ${userPermissions.canAssignOrgs ? `
+                                    <button class="btn-action btn-action-edit" onclick="manageOrganizations(${product.id})" title="Organizations">
+                                        <i class="bi bi-building"></i>
+                                    </button>` : ''}
+                                    ${userPermissions.canManageProducts ? `
+                                    <button class="btn-action btn-action-delete" onclick="deleteProduct(${product.id}, '${escapeHtml(product.vendor)} ${escapeHtml(product.product_name)}')" title="Delete">
+                                        <i class="bi bi-trash3"></i>
+                                    </button>` : ''}
                                 </div>
                             </td>
                         </tr>
@@ -327,6 +459,8 @@
             `;
         } finally {
             hideLoading();
+            // Restore column visibility after loading
+            restoreColumnPrefs();
         }
     }
 
@@ -419,7 +553,9 @@
                 loadProducts();
             } else {
                 const error = await response.json();
-                showToast(`Error: ${error.error}`, 'danger');
+                // Show warning for duplicates, danger for other errors
+                const toastType = response.status === 409 ? 'warning' : 'danger';
+                showToast(`⚠ ${error.error}`, toastType);
             }
         } catch (error) {
             showToast(`Error saving product: ${error.message}`, 'danger');
@@ -429,7 +565,14 @@
     }
 
     async function deleteProduct(productId, productName) {
-        if (!confirm(`Are you sure you want to delete "${productName}"?\n\nThis will remove the product and all its vulnerability matches.`)) {
+        const confirmed = await showConfirm(
+            `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove the product and all its vulnerability matches.`,
+            'Delete Product',
+            'Delete',
+            'btn-danger'
+        );
+
+        if (!confirmed) {
             return;
         }
 
@@ -474,9 +617,16 @@
 
     // Service Catalog Functions
     async function showServiceCatalog() {
+        // Clear previous selection state
+        selectedCatalogItems.clear();
+        updateCatalogSelectionUI();
+
         // Load catalog if not already loaded
         if (serviceCatalog.length === 0) {
             await loadServiceCatalog();
+        } else {
+            // Re-render to clear visual checkboxes
+            renderCatalog(serviceCatalog);
         }
 
         // Load organizations into dropdown
@@ -485,15 +635,21 @@
             if (response.ok) {
                 const orgs = await response.json();
                 const select = document.getElementById('catalogOrgSelect');
-                select.innerHTML = '<option value="">Assign to Organization (optional)</option>' +
-                    orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+                select.innerHTML = orgs.map(org =>
+                    `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`
+                ).join('');
             }
         } catch (error) {
             console.error('Error loading organizations:', error);
         }
 
-        // Show modal
-        new bootstrap.Modal(document.getElementById('serviceCatalogModal')).show();
+        // Show modal - reuse existing instance or create new one
+        const modalElement = document.getElementById('serviceCatalogModal');
+        let modal = bootstrap.Modal.getInstance(modalElement);
+        if (!modal) {
+            modal = new bootstrap.Modal(modalElement);
+        }
+        modal.show();
     }
 
     async function loadServiceCatalog() {
@@ -521,7 +677,7 @@
         if (catalog.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="4" class="text-center py-4 text-muted">
+                    <td colspan="5" class="text-center py-4 text-muted">
                         No services found matching your search
                     </td>
                 </tr>
@@ -531,8 +687,21 @@
 
         tbody.innerHTML = catalog.map(service => {
             const isChecked = selectedCatalogItems.has(service.id);
+            let versions = [];
+            try {
+                versions = service.typical_versions ? JSON.parse(service.typical_versions) : [];
+            } catch (e) {
+                versions = [];
+            }
+
+            // Build version dropdown options
+            const selectedVersion = selectedVersions[service.id] || (versions.length > 0 ? versions[0] : '');
+            const versionOptions = versions.length > 0
+                ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === selectedVersion ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
+                : '<option value="">N/A</option>';
+
             return `
-                <tr onclick="toggleCatalogSelection(${service.id}, event)" style="cursor: pointer;">
+                <tr onclick="toggleCatalogRow(${service.id}, event)" style="cursor: pointer;">
                     <td onclick="event.stopPropagation();">
                         <input type="checkbox"
                                class="form-check-input catalog-item-checkbox"
@@ -542,10 +711,22 @@
                     </td>
                     <td class="fw-semibold">${escapeHtml(service.vendor)}</td>
                     <td>${escapeHtml(service.product_name)}</td>
-                    <td><small class="text-muted">${escapeHtml(service.keywords || '')}</small></td>
+                    <td onclick="event.stopPropagation();">
+                        <select class="form-select form-select-sm version-select"
+                                data-catalog-id="${service.id}"
+                                onchange="updateSelectedVersion(${service.id}, this.value)"
+                                style="min-width: 100px;">
+                            ${versionOptions}
+                        </select>
+                    </td>
+                    <td><small class="text-muted">${escapeHtml(service.category || '')}</small></td>
                 </tr>
             `;
         }).join('');
+    }
+
+    function updateSelectedVersion(catalogId, version) {
+        selectedVersions[catalogId] = version;
     }
 
     function filterCatalog(query) {
@@ -561,17 +742,24 @@
     }
 
     function toggleCatalogSelection(catalogId, event) {
-        if (event) {
-            event.stopPropagation();
-        }
-
+        // Toggle selection state
         if (selectedCatalogItems.has(catalogId)) {
             selectedCatalogItems.delete(catalogId);
         } else {
             selectedCatalogItems.add(catalogId);
         }
 
+        // Update UI
         updateCatalogSelectionUI();
+    }
+
+    function toggleCatalogRow(catalogId, event) {
+        if (event) event.stopPropagation();
+        const checkbox = document.querySelector(`.catalog-item-checkbox[data-catalog-id="${catalogId}"]`);
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            toggleCatalogSelection(catalogId, event);
+        }
     }
 
     function toggleCatalogSelectAll() {
@@ -613,7 +801,9 @@
             return;
         }
 
-        const orgId = document.getElementById('catalogOrgSelect').value;
+        const orgSelect = document.getElementById('catalogOrgSelect');
+        const selectedOrgIds = Array.from(orgSelect.selectedOptions).map(opt => parseInt(opt.value)).filter(id => !isNaN(id));
+
         const addBtn = document.getElementById('addSelectedBtn');
         const originalText = addBtn.innerHTML;
 
@@ -622,27 +812,35 @@
 
         try {
             let successCount = 0;
+            let duplicateCount = 0;
             let failCount = 0;
 
-            // Create products for all selected services
-            for (const catalogId of selectedCatalogItems) {
+            // Create products for all selected services in parallel for better performance
+            const requests = Array.from(selectedCatalogItems).map(async catalogId => {
                 const service = serviceCatalog.find(s => s.id === catalogId);
-                if (!service) continue;
+                if (!service) return { status: 'failed' };
 
                 try {
+                    // Get selected version for this catalog item
+                    let versions = [];
+                    try {
+                        versions = service.typical_versions ? JSON.parse(service.typical_versions) : [];
+                    } catch (e) {
+                        versions = [];
+                    }
+                    const version = selectedVersions[catalogId] || (versions.length > 0 ? versions[0] : '');
+
                     const productData = {
                         vendor: service.vendor,
                         product_name: service.product_name,
+                        version: version,
                         keywords: service.keywords || '',
                         service_catalog_id: catalogId,
                         active: true,
                         criticality: 'medium'
                     };
 
-                    if (orgId) {
-                        productData.organization_id = parseInt(orgId);
-                    }
-
+                    // Don't set organization_id when creating - we'll use multi-org assignment
                     const response = await fetch('/api/products', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -650,24 +848,58 @@
                     });
 
                     if (response.ok) {
-                        successCount++;
+                        const product = await response.json();
+
+                        // If organizations were selected, assign the product to them
+                        if (selectedOrgIds.length > 0) {
+                            await fetch(`/api/products/${product.id}/organizations`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ organization_ids: selectedOrgIds })
+                            });
+                        }
+
+                        return { status: 'success' };
+                    } else if (response.status === 409) {
+                        return { status: 'duplicate' };
                     } else {
-                        failCount++;
+                        return { status: 'failed' };
                     }
                 } catch (error) {
-                    failCount++;
+                    return { status: 'failed' };
                 }
-            }
+            });
 
-            // Clear selection and close modal
+            // Wait for all requests to complete
+            const results = await Promise.all(requests);
+
+            results.forEach(result => {
+                if (result.status === 'success') successCount++;
+                else if (result.status === 'duplicate') duplicateCount++;
+                else if (result.status === 'failed') failCount++;
+            });
+
+            // Clear selection and close modals
             selectedCatalogItems.clear();
             updateCatalogSelectionUI();
             bootstrap.Modal.getInstance(document.getElementById('serviceCatalogModal')).hide();
 
-            // Show results
+            // Also close the product modal if it's open
+            const productModal = bootstrap.Modal.getInstance(document.getElementById('productModal'));
+            if (productModal) {
+                productModal.hide();
+            }
+
+            // Show results with detailed message
+            let message = '';
             if (successCount > 0) {
-                showToast(`✓ Successfully added ${successCount} product(s)${failCount > 0 ? ` (${failCount} failed)` : ''}`, 'success');
+                message = `✓ Successfully added ${successCount} product(s)`;
+                if (duplicateCount > 0) message += `, ${duplicateCount} already existed`;
+                if (failCount > 0) message += `, ${failCount} failed`;
+                showToast(message, 'success');
                 loadProducts();
+            } else if (duplicateCount > 0) {
+                showToast(`⚠ ${duplicateCount} product(s) already existed`, 'warning');
             } else {
                 showToast('Failed to add products', 'danger');
             }
@@ -693,8 +925,10 @@
             // Close catalog modal
             bootstrap.Modal.getInstance(document.getElementById('serviceCatalogModal')).hide();
 
-            // Show success toast
-            showToast('✓ Service selected from catalog', 'success');
+            // Automatically save the product and close the form modal
+            setTimeout(async () => {
+                await saveProduct();
+            }, 300);
         } catch (error) {
             showToast(`Error loading service: ${error.message}`, 'danger');
         }
@@ -765,17 +999,41 @@
         updateBulkToolbar();
     }
 
+    function toggleProductRow(productId, event) {
+        if (event) event.stopPropagation();
+        const checkbox = document.querySelector(`.product-checkbox[data-product-id="${productId}"]`);
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            toggleProductSelect(productId, checkbox);
+        }
+    }
+
     function toggleSelectAll() {
         const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        if (!selectAllCheckbox) {
+            console.error('Select all checkbox not found');
+            return;
+        }
+
         const checkboxes = document.querySelectorAll('.product-checkbox');
 
+        if (checkboxes.length === 0) {
+            console.warn('No product checkboxes found');
+            return;
+        }
+
+        const isChecked = selectAllCheckbox.checked;
+
         checkboxes.forEach(checkbox => {
-            checkbox.checked = selectAllCheckbox.checked;
+            checkbox.checked = isChecked;
             const productId = parseInt(checkbox.dataset.productId);
-            if (selectAllCheckbox.checked) {
-                selectedProducts.add(productId);
-            } else {
-                selectedProducts.delete(productId);
+
+            if (!isNaN(productId)) {
+                if (isChecked) {
+                    selectedProducts.add(productId);
+                } else {
+                    selectedProducts.delete(productId);
+                }
             }
         });
 
@@ -796,13 +1054,13 @@
         const response = await fetch('/api/organizations');
         const orgs = await response.json();
 
-        const orgOptions = orgs.map(org =>
-            `<option value="${org.id}">${org.display_name}</option>`
-        ).join('');
+        const orgList = orgs.map((o, i) => `${i + 1}. ${escapeHtml(o.display_name)} (ID: ${o.id})`).join('<br>');
 
-        const orgId = prompt(`Assign ${selectedProducts.size} product(s) to organization:\n\n` +
-            orgs.map((o, i) => `${i + 1}. ${o.display_name} (ID: ${o.id})`).join('\n') +
-            `\n\nEnter Organization ID:`);
+        const orgId = await showPrompt(
+            `Assign ${selectedProducts.size} product(s) to organization:<br><br>${orgList}<br><br>Enter Organization ID:`,
+            '',
+            'Assign to Organization'
+        );
 
         if (!orgId) return;
 
@@ -829,7 +1087,15 @@
 
     async function bulkActivate() {
         if (selectedProducts.size === 0) return;
-        if (!confirm(`Activate ${selectedProducts.size} product(s)?`)) return;
+
+        const confirmed = await showConfirm(
+            `Activate ${selectedProducts.size} product(s)?`,
+            'Activate Products',
+            'Activate',
+            'btn-success'
+        );
+
+        if (!confirmed) return;
 
         showLoading();
         try {
@@ -854,7 +1120,15 @@
 
     async function bulkDeactivate() {
         if (selectedProducts.size === 0) return;
-        if (!confirm(`Deactivate ${selectedProducts.size} product(s)?`)) return;
+
+        const confirmed = await showConfirm(
+            `Deactivate ${selectedProducts.size} product(s)?`,
+            'Deactivate Products',
+            'Deactivate',
+            'btn-warning'
+        );
+
+        if (!confirmed) return;
 
         showLoading();
         try {
@@ -879,7 +1153,15 @@
 
     async function bulkDelete() {
         if (selectedProducts.size === 0) return;
-        if (!confirm(`⚠️ DELETE ${selectedProducts.size} product(s)?\n\nThis action cannot be undone.`)) return;
+
+        const confirmed = await showConfirm(
+            `<strong>⚠️ DELETE ${selectedProducts.size} product(s)?</strong><br><br>This action cannot be undone.`,
+            'Delete Products',
+            'Delete All',
+            'btn-danger'
+        );
+
+        if (!confirmed) return;
 
         showLoading();
         try {
@@ -898,8 +1180,245 @@
         }
     }
 
+    // Organization management functions
+    let currentOrgProductId = null;
+    let currentOrgProductName = '';
+    let allOrganizations = [];
+
+    async function manageOrganizations(productId) {
+        currentOrgProductId = productId;
+
+        // Clean up any existing backdrops first
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('padding-right');
+
+        // Get product details
+        try {
+            const productResponse = await fetch(`/api/products/${productId}`);
+            const product = await productResponse.json();
+            currentOrgProductName = `${product.vendor} ${product.product_name}`;
+            document.getElementById('orgModalProductName').textContent = currentOrgProductName;
+
+            // Load assigned organizations
+            await loadAssignedOrganizations(productId);
+
+            // Load all organizations
+            await loadAllOrganizations();
+
+            // Dispose of any existing modal instance and create fresh
+            const modalElement = document.getElementById('orgManagementModal');
+            const existingModal = bootstrap.Modal.getInstance(modalElement);
+            if (existingModal) {
+                existingModal.dispose();
+            }
+
+            // Create and show new modal
+            const modal = new bootstrap.Modal(modalElement, {
+                backdrop: true,
+                keyboard: true
+            });
+            modal.show();
+        } catch (error) {
+            showToast(`Error loading organizations: ${error.message}`, 'danger');
+        }
+    }
+
+    async function loadAssignedOrganizations(productId) {
+        const container = document.getElementById('assignedOrgsList');
+        container.innerHTML = '<div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+
+        try {
+            const response = await fetch(`/api/products/${productId}/organizations`);
+            const data = await response.json();
+            const assignedOrgs = data.organizations || [];
+
+            if (assignedOrgs.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted py-3">No organizations assigned</div>';
+            } else {
+                container.innerHTML = assignedOrgs.map(org => `
+                    <div class="d-flex justify-content-between align-items-center p-2 border-bottom" id="org-item-${org.id}">
+                        <span><i class="bi bi-building text-primary me-2"></i>${escapeHtml(org.display_name)}</span>
+                        <div class="btn-group btn-group-sm" id="org-actions-${org.id}">
+                            <button class="btn btn-sm btn-outline-danger" onclick="showRemoveConfirm(${org.id}, '${escapeHtml(org.display_name)}')">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            container.innerHTML = '<div class="text-center text-danger py-3">Error loading assigned organizations</div>';
+        }
+    }
+
+    async function loadAllOrganizations() {
+        try {
+            const response = await fetch('/api/organizations');
+            allOrganizations = await response.json();
+
+            const select = document.getElementById('addOrgSelect');
+            select.innerHTML = allOrganizations.map(org =>
+                `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`
+            ).join('');
+        } catch (error) {
+            showToast(`Error loading organizations: ${error.message}`, 'danger');
+        }
+    }
+
+    async function assignOrganizations() {
+        const select = document.getElementById('addOrgSelect');
+        const selectedOptions = Array.from(select.selectedOptions);
+        const orgIds = selectedOptions.map(opt => parseInt(opt.value));
+
+        if (orgIds.length === 0) {
+            showToast('Please select at least one organization', 'warning');
+            return;
+        }
+
+        try {
+            showLoading();
+            const response = await fetch(`/api/products/${currentOrgProductId}/organizations`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ organization_ids: orgIds })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showToast(data.message || 'Organizations assigned successfully', 'success');
+                await loadAssignedOrganizations(currentOrgProductId);
+                loadProducts(); // Refresh product list
+            } else {
+                showToast(data.error || 'Failed to assign organizations', 'danger');
+            }
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function showConfirmation(message, onConfirm) {
+        document.getElementById('confirmationMessage').textContent = message;
+
+        // Reuse existing modal instance or create new one
+        const modalElement = document.getElementById('confirmationModal');
+        let modal = bootstrap.Modal.getInstance(modalElement);
+        if (!modal) {
+            modal = new bootstrap.Modal(modalElement);
+        }
+
+        const confirmBtn = document.getElementById('confirmActionBtn');
+
+        // Remove any existing event listeners by cloning the button
+        const newConfirmBtn = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+        // Add new event listener
+        newConfirmBtn.addEventListener('click', () => {
+            modal.hide();
+            onConfirm();
+        });
+
+        modal.show();
+    }
+
+    function showRemoveConfirm(orgId, orgName) {
+        // Show inline confirmation buttons
+        const actionsDiv = document.getElementById(`org-actions-${orgId}`);
+        actionsDiv.innerHTML = `
+            <div class="alert alert-danger p-2 mb-0 d-flex align-items-center" style="font-size: 0.875rem;">
+                <span class="me-2">Remove? Org admins will be notified.</span>
+                <button class="btn btn-danger btn-sm me-1" onclick="confirmRemoveOrganization(${orgId})">
+                    <i class="bi bi-check2"></i> Yes
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="loadAssignedOrganizations(${currentOrgProductId})">
+                    <i class="bi bi-x"></i> Cancel
+                </button>
+            </div>
+        `;
+    }
+
+    async function confirmRemoveOrganization(orgId) {
+        try {
+            showLoading();
+            const response = await fetch(`/api/products/${currentOrgProductId}/organizations/${orgId}`, {
+                method: 'DELETE'
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showToast(data.message || 'Organization removed successfully', 'success');
+
+                // If product was deleted (no orgs left), close the modal
+                if (data.product_deleted) {
+                    const modalElement = document.getElementById('orgManagementModal');
+                    const modal = bootstrap.Modal.getInstance(modalElement);
+                    if (modal) {
+                        modal.hide();
+                    }
+                } else {
+                    // Just reload the org list
+                    await loadAssignedOrganizations(currentOrgProductId);
+                }
+
+                loadProducts(); // Refresh product list
+            } else {
+                showToast(data.error || 'Failed to remove organization', 'danger');
+            }
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Column visibility toggle
+    function toggleColumn(columnName, visible) {
+        const cells = document.querySelectorAll(`[data-column="${columnName}"]`);
+        cells.forEach(cell => {
+            cell.style.display = visible ? '' : 'none';
+        });
+
+        // Save preference to localStorage
+        const prefs = JSON.parse(localStorage.getItem('productColumnPrefs') || '{}');
+        prefs[columnName] = visible;
+        localStorage.setItem('productColumnPrefs', JSON.stringify(prefs));
+    }
+
+    // Restore column preferences from localStorage
+    function restoreColumnPrefs() {
+        const prefs = JSON.parse(localStorage.getItem('productColumnPrefs') || '{}');
+        Object.keys(prefs).forEach(columnName => {
+            const visible = prefs[columnName];
+            const checkbox = document.getElementById(`col-${columnName}`);
+            if (checkbox) {
+                checkbox.checked = visible;
+                toggleColumn(columnName, visible);
+            }
+        });
+    }
+
+    // Reset all columns to visible
+    function resetColumns() {
+        const columns = ['vendor', 'product', 'version', 'organization', 'criticality', 'status'];
+        columns.forEach(col => {
+            const checkbox = document.getElementById(`col-${col}`);
+            if (checkbox) {
+                checkbox.checked = true;
+            }
+            toggleColumn(col, true);
+        });
+        localStorage.removeItem('productColumnPrefs');
+        showToast('Columns reset to default', 'info');
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         loadProducts();
+        restoreColumnPrefs();
     });
 </script>
 {% endblock %}

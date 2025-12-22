@@ -7,6 +7,11 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="/static/images/favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="/static/images/logo-192.png">
+    <link rel="manifest" href="/static/manifest.json">
     <style>
         /* Professional Corporate Color Scheme */
         :root {
@@ -45,6 +50,368 @@
             --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
             --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+            /* Background and surface colors for theming */
+            --bg-color: var(--gray-50);
+            --surface-color: white;
+            --text-color: var(--gray-900);
+            --text-muted: var(--gray-600);
+            --border-color: var(--gray-200);
+        }
+
+        /* Dark Mode Theme - Softer dark for better readability */
+        [data-theme="dark"] {
+            --primary-color: #60a5fa;
+            --primary-dark: #3b82f6;
+            --primary-light: #93c5fd;
+
+            --gray-50: #1e293b;
+            --gray-100: #334155;
+            --gray-200: #475569;
+            --gray-300: #64748b;
+            --gray-400: #94a3b8;
+            --gray-500: #cbd5e1;
+            --gray-600: #e2e8f0;
+            --gray-700: #f1f5f9;
+            --gray-800: #f8fafc;
+            --gray-900: #ffffff;
+
+            --bg-color: #1e293b;
+            --surface-color: #334155;
+            --text-color: #f1f5f9;
+            --text-muted: #cbd5e1;
+            --border-color: #475569;
+
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        [data-theme="dark"] body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .top-navbar,
+        [data-theme="dark"] .card,
+        [data-theme="dark"] .modal-content,
+        [data-theme="dark"] .dropdown-menu,
+        [data-theme="dark"] .app-footer {
+            background-color: var(--surface-color);
+            border-color: var(--border-color);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .card-header {
+            background-color: var(--gray-100);
+            border-color: var(--border-color);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .card-header span {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .table {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .table > :not(caption) > * > * {
+            background-color: var(--surface-color);
+            border-color: var(--border-color);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .table-hover > tbody > tr:hover > * {
+            background-color: var(--gray-100);
+        }
+
+        [data-theme="dark"] .form-control,
+        [data-theme="dark"] .form-select {
+            background-color: var(--gray-100);
+            border-color: var(--border-color);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .form-control::placeholder {
+            color: var(--gray-400);
+        }
+
+        [data-theme="dark"] .form-control:focus,
+        [data-theme="dark"] .form-select:focus {
+            background-color: var(--gray-100);
+            border-color: var(--primary-color);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .form-control:disabled,
+        [data-theme="dark"] .form-control[readonly],
+        [data-theme="dark"] .form-select:disabled {
+            background-color: #1e293b;
+            border-color: #334155;
+            color: #94a3b8;
+            opacity: 1;
+        }
+
+        [data-theme="dark"] .form-label,
+        [data-theme="dark"] label {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .form-text {
+            color: var(--text-muted) !important;
+        }
+
+        [data-theme="dark"] .nav-link {
+            color: var(--text-muted);
+        }
+
+        [data-theme="dark"] .nav-link:hover,
+        [data-theme="dark"] .nav-link.active {
+            color: var(--primary-light);
+            background-color: var(--gray-100);
+        }
+
+        [data-theme="dark"] .dropdown-menu {
+            background-color: #1e293b;
+            border-color: #475569;
+        }
+
+        [data-theme="dark"] .dropdown-item {
+            color: #e2e8f0;
+        }
+
+        [data-theme="dark"] .dropdown-item:hover,
+        [data-theme="dark"] .dropdown-item:focus {
+            background-color: #334155;
+            color: #f1f5f9;
+        }
+
+        [data-theme="dark"] .dropdown-item.active {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        [data-theme="dark"] .dropdown-item-text {
+            color: #e2e8f0;
+        }
+
+        [data-theme="dark"] .dropdown-item-text .fw-semibold,
+        [data-theme="dark"] .dropdown-item-text strong {
+            color: #f1f5f9;
+        }
+
+        [data-theme="dark"] .dropdown-item-text small,
+        [data-theme="dark"] .dropdown-item-text .text-muted {
+            color: #94a3b8 !important;
+        }
+
+        [data-theme="dark"] .dropdown-divider {
+            border-color: #475569;
+        }
+
+        [data-theme="dark"] .text-muted {
+            color: var(--text-muted) !important;
+        }
+
+        [data-theme="dark"] .text-dark,
+        [data-theme="dark"] .fw-semibold,
+        [data-theme="dark"] .fw-bold {
+            color: var(--text-color) !important;
+        }
+
+        [data-theme="dark"] h1, [data-theme="dark"] h2, [data-theme="dark"] h3,
+        [data-theme="dark"] h4, [data-theme="dark"] h5, [data-theme="dark"] h6,
+        [data-theme="dark"] .display-6 {
+            color: var(--text-color) !important;
+        }
+
+        [data-theme="dark"] p {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .btn-outline-secondary {
+            color: var(--text-muted);
+            border-color: var(--border-color);
+        }
+
+        [data-theme="dark"] .btn-outline-secondary:hover {
+            background-color: var(--gray-100);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .alert-info {
+            background-color: rgba(59, 130, 246, 0.2);
+            border-color: rgba(59, 130, 246, 0.4);
+            color: #bfdbfe;
+        }
+
+        [data-theme="dark"] .vuln-card {
+            background-color: var(--surface-color);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .modal-title {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .modal-body {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .badge {
+            color: inherit;
+        }
+
+        [data-theme="dark"] .page-title,
+        [data-theme="dark"] .page-subtitle {
+            color: var(--text-color) !important;
+        }
+
+        [data-theme="dark"] a {
+            color: var(--primary-light);
+        }
+
+        [data-theme="dark"] a:hover {
+            color: var(--primary-color);
+        }
+
+        [data-theme="dark"] .copyright-notice {
+            color: var(--text-muted);
+        }
+
+        [data-theme="dark"] .copyright-notice a {
+            color: var(--primary-light);
+        }
+
+        /* Dark mode alert cards */
+        [data-theme="dark"] .alert-card {
+            background: var(--surface-color) !important;
+        }
+
+        [data-theme="dark"] .alert-card-critical {
+            background: linear-gradient(135deg, rgba(220, 38, 38, 0.15) 0%, rgba(220, 38, 38, 0.25) 100%) !important;
+            border-color: rgba(220, 38, 38, 0.4);
+        }
+
+        [data-theme="dark"] .alert-card-high {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.25) 100%) !important;
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        [data-theme="dark"] .alert-card-medium {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.25) 100%) !important;
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+
+        [data-theme="dark"] .alert-card-low {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.25) 100%) !important;
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+
+        [data-theme="dark"] .alert-card-label,
+        [data-theme="dark"] .alert-card small {
+            color: var(--text-muted) !important;
+        }
+
+        /* Dark mode sync results */
+        [data-theme="dark"] .alert-success {
+            background-color: rgba(16, 185, 129, 0.15) !important;
+            border-color: rgba(16, 185, 129, 0.4) !important;
+            color: #6ee7b7 !important;
+        }
+
+        [data-theme="dark"] .alert-success .alert-heading,
+        [data-theme="dark"] .alert-success h4,
+        [data-theme="dark"] .alert-success h5 {
+            color: #6ee7b7 !important;
+        }
+
+        [data-theme="dark"] .alert-success small {
+            color: #a7f3d0 !important;
+        }
+
+        [data-theme="dark"] .alert-danger {
+            background-color: rgba(220, 38, 38, 0.15) !important;
+            border-color: rgba(220, 38, 38, 0.4) !important;
+            color: #fca5a5 !important;
+        }
+
+        [data-theme="dark"] .alert-warning {
+            background-color: rgba(245, 158, 11, 0.15) !important;
+            border-color: rgba(245, 158, 11, 0.4) !important;
+            color: #fcd34d !important;
+        }
+
+        [data-theme="dark"] .alert hr {
+            border-color: var(--border-color);
+        }
+
+        /* Dark mode table text */
+        [data-theme="dark"] td,
+        [data-theme="dark"] th {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .text-success {
+            color: #6ee7b7 !important;
+        }
+
+        [data-theme="dark"] .text-danger {
+            color: #fca5a5 !important;
+        }
+
+        [data-theme="dark"] .text-warning {
+            color: #fcd34d !important;
+        }
+
+        [data-theme="dark"] .text-primary {
+            color: var(--primary-light) !important;
+        }
+
+        /* Dark mode pagination */
+        [data-theme="dark"] .pagination .page-link {
+            background-color: #334155;
+            border-color: #475569;
+            color: #e2e8f0;
+        }
+
+        [data-theme="dark"] .pagination .page-link:hover {
+            background-color: #475569;
+            border-color: #64748b;
+            color: #f1f5f9;
+        }
+
+        [data-theme="dark"] .pagination .page-item.active .page-link {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+        }
+
+        [data-theme="dark"] .pagination .page-item.disabled .page-link {
+            background-color: #1e293b;
+            border-color: #334155;
+            color: #64748b;
+        }
+
+        /* Dark mode column toggles */
+        [data-theme="dark"] .column-toggle {
+            background: #334155;
+            color: #cbd5e1;
+            border-color: #475569;
+        }
+
+        [data-theme="dark"] .column-toggle:hover {
+            background: #475569;
+            color: #f1f5f9;
+        }
+
+        [data-theme="dark"] .column-toggle.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
         }
 
         * {
@@ -62,25 +429,38 @@
 
         /* Navigation Bar - Clean and Professional */
         .top-navbar {
-            background: white;
+            background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
             border-bottom: 1px solid var(--gray-200);
-            box-shadow: var(--shadow-sm);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
             position: sticky;
             top: 0;
             z-index: 1000;
         }
 
+        [data-theme="dark"] .top-navbar {
+            background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+            border-bottom-color: var(--border-color);
+        }
+
+        [data-theme="dark"] .navbar-brand {
+            color: #f1f5f9;
+        }
+
+        [data-theme="dark"] .navbar-brand img {
+            filter: brightness(0) invert(1);
+        }
+
         .navbar-brand {
             font-weight: 700;
-            font-size: 1.5rem;
-            color: var(--primary-color);
+            font-size: 1.75rem;
+            color: #111827;
             display: flex;
             align-items: center;
             gap: 0.75rem;
         }
 
         .navbar-brand i {
-            font-size: 1.75rem;
+            font-size: 2.25rem;
         }
 
         .nav-link {
@@ -285,14 +665,145 @@
             background: var(--gray-50);
         }
 
-        /* Badges */
+        /* Badges - Clean Professional Style */
         .badge {
-            padding: 0.375rem 0.75rem;
-            border-radius: 0.375rem;
-            font-weight: 600;
-            font-size: 0.75rem;
+            padding: 0.35rem 0.65rem;
+            border-radius: 4px;
+            font-weight: 500;
+            font-size: 0.7rem;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
         }
 
+        .badge i {
+            font-size: 0.65rem;
+        }
+
+        /* Role Badges - Subtle, Professional */
+        .badge-role-super {
+            background: #fef2f2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .badge-role-admin {
+            background: #fffbeb;
+            color: #92400e;
+            border: 1px solid #fde68a;
+        }
+
+        .badge-role-manager {
+            background: #eff6ff;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
+        }
+
+        .badge-role-user {
+            background: #f3f4f6;
+            color: #4b5563;
+            border: 1px solid #d1d5db;
+        }
+
+        /* Auth Type Badges */
+        .badge-auth-ldap {
+            background: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .badge-auth-local {
+            background: #f8fafc;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+        }
+
+        /* Status Badges */
+        .badge-status-active {
+            background: #ecfdf5;
+            color: #047857;
+            border: 1px solid #a7f3d0;
+        }
+
+        .badge-status-inactive {
+            background: #f9fafb;
+            color: #6b7280;
+            border: 1px solid #e5e7eb;
+        }
+
+        /* Dark mode badge overrides - high contrast versions */
+        [data-theme="dark"] .badge-role-super {
+            background: rgba(220, 38, 38, 0.2);
+            color: #fca5a5;
+            border-color: rgba(220, 38, 38, 0.4);
+        }
+
+        [data-theme="dark"] .badge-role-admin {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fcd34d;
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        [data-theme="dark"] .badge-role-manager {
+            background: rgba(59, 130, 246, 0.2);
+            color: #93c5fd;
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+
+        [data-theme="dark"] .badge-role-user {
+            background: rgba(107, 114, 128, 0.2);
+            color: #d1d5db;
+            border-color: rgba(107, 114, 128, 0.4);
+        }
+
+        [data-theme="dark"] .badge-auth-ldap {
+            background: rgba(16, 185, 129, 0.2);
+            color: #6ee7b7;
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+
+        [data-theme="dark"] .badge-auth-local {
+            background: rgba(100, 116, 139, 0.2);
+            color: #cbd5e1;
+            border-color: rgba(100, 116, 139, 0.4);
+        }
+
+        [data-theme="dark"] .badge-status-active {
+            background: rgba(16, 185, 129, 0.2);
+            color: #6ee7b7;
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+
+        [data-theme="dark"] .badge-status-inactive {
+            background: rgba(107, 114, 128, 0.2);
+            color: #9ca3af;
+            border-color: rgba(107, 114, 128, 0.4);
+        }
+
+        /* Status LED indicator */
+        .status-led {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-led-green {
+            background: #10b981;
+            box-shadow: 0 0 6px #10b981;
+        }
+        .status-led-red {
+            background: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+        }
+        .status-led-yellow {
+            background: #f59e0b;
+            box-shadow: 0 0 6px #f59e0b;
+        }
+
+        /* Priority Badges */
         .badge-critical {
             background: var(--critical-color);
             color: white;
@@ -311,6 +822,121 @@
         .badge-low {
             background: var(--low-color);
             color: white;
+        }
+
+        /* Action Buttons - Clean Icon Style */
+        .btn-action {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            background: transparent;
+            transition: all 0.15s ease;
+        }
+
+        .btn-action i {
+            font-size: 0.875rem;
+        }
+
+        .btn-action-edit {
+            color: var(--primary-color);
+        }
+
+        .btn-action-edit:hover {
+            background: #eff6ff;
+            border-color: #bfdbfe;
+            color: var(--primary-dark);
+        }
+
+        .btn-action-block {
+            color: #d97706;
+        }
+
+        .btn-action-block:hover {
+            background: #fffbeb;
+            border-color: #fde68a;
+            color: #b45309;
+        }
+
+        .btn-action-delete {
+            color: #dc2626;
+        }
+
+        .btn-action-delete:hover {
+            background: #fef2f2;
+            border-color: #fecaca;
+            color: #b91c1c;
+        }
+
+        .btn-action-success {
+            color: #059669;
+        }
+
+        .btn-action-success:hover {
+            background: #ecfdf5;
+            border-color: #a7f3d0;
+            color: #047857;
+        }
+
+        /* Table Column Controls */
+        .table-controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .column-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            background: var(--gray-100);
+            color: var(--gray-600);
+            border: 1px solid var(--gray-200);
+            transition: all 0.15s;
+        }
+
+        .column-toggle:hover {
+            background: var(--gray-200);
+        }
+
+        .column-toggle.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .column-toggle input {
+            display: none;
+        }
+
+        /* Resizable table columns */
+        .table-resizable th {
+            position: relative;
+            min-width: 80px;
+        }
+
+        .table-resizable th .resize-handle {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 5px;
+            cursor: col-resize;
+            background: transparent;
+        }
+
+        .table-resizable th .resize-handle:hover {
+            background: var(--primary-color);
         }
 
         /* Vulnerability Cards */
@@ -381,25 +1007,92 @@
             font-size: 0.875rem;
         }
 
-        /* Modal Improvements */
+        /* Modal Improvements - Compact Styling */
         .modal-content {
             border: none;
             border-radius: 0.75rem;
             box-shadow: var(--shadow-xl);
+            font-size: 0.875rem;
         }
 
         .modal-header {
             border-bottom: 1px solid var(--gray-200);
-            padding: 1.5rem;
+            padding: 1rem 1.25rem;
+        }
+
+        .modal-header .modal-title {
+            font-size: 1rem;
+            font-weight: 600;
         }
 
         .modal-body {
-            padding: 1.5rem;
+            padding: 1rem 1.25rem;
+        }
+
+        .modal-body .form-label {
+            font-size: 0.8125rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .modal-body .form-control,
+        .modal-body .form-select {
+            font-size: 0.8125rem;
+            padding: 0.375rem 0.625rem;
+        }
+
+        .modal-body .form-text {
+            font-size: 0.75rem;
+        }
+
+        .modal-body .row.g-3 {
+            --bs-gutter-y: 0.75rem;
         }
 
         .modal-footer {
             border-top: 1px solid var(--gray-200);
-            padding: 1.5rem;
+            padding: 0.75rem 1.25rem;
+        }
+
+        .modal-footer .btn {
+            font-size: 0.8125rem;
+            padding: 0.375rem 0.75rem;
+        }
+
+        /* Compact table styling */
+        .table-compact td,
+        .table-compact th {
+            font-size: 0.8125rem;
+            padding: 0.5rem 0.75rem;
+        }
+
+        /* Dark mode toggle button */
+        .theme-toggle {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid var(--gray-200);
+            background: transparent;
+            color: var(--gray-600);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .theme-toggle:hover {
+            background: var(--gray-100);
+            color: var(--gray-800);
+        }
+
+        [data-theme="dark"] .theme-toggle {
+            border-color: var(--border-color);
+            color: var(--text-muted);
+        }
+
+        [data-theme="dark"] .theme-toggle:hover {
+            background: var(--gray-100);
+            color: var(--text-color);
         }
 
         /* Page Header */
@@ -445,7 +1138,7 @@
         <div class="container-fluid px-4">
             <div class="d-flex justify-content-between align-items-center">
                 <a class="navbar-brand" href="/">
-                    <i class="bi bi-shield-lock-fill"></i>
+                    <img src="/static/images/favicon-128x128.png" alt="SentriKat" style="width: 96px; height: 96px;">
                     <span>SentriKat</span>
                 </a>
                 <div class="d-flex align-items-center gap-3">
@@ -456,8 +1149,8 @@
                         <i class="bi bi-server"></i> Products
                     </a>
 
-                    <!-- Admin Menu Dropdown (visible if no auth OR user is admin) -->
-                    {% if not auth_enabled or (current_user and current_user.is_admin) %}
+                    <!-- Admin Menu Dropdown (visible for super_admin, org_admin, or legacy is_admin) -->
+                    {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                     <div class="dropdown">
                         <button class="nav-link {{ 'active' if request.endpoint == 'main.admin_panel' else '' }}"
                                 type="button"
@@ -476,20 +1169,22 @@
                             </li>
                             <li><hr class="dropdown-divider"></li>
                             <li>
-                                <a class="dropdown-item" href="/admin-panel#users">
+                                <a class="dropdown-item" href="#" onclick="switchToAdminTab('users'); return false;">
                                     <i class="bi bi-people me-2"></i>User Management
                                 </a>
                             </li>
                             <li>
-                                <a class="dropdown-item" href="/admin-panel#organizations">
+                                <a class="dropdown-item" href="#" onclick="switchToAdminTab('organizations'); return false;">
                                     <i class="bi bi-building me-2"></i>Organizations
                                 </a>
                             </li>
+                            {% if current_user and current_user.is_super_admin() %}
                             <li>
-                                <a class="dropdown-item" href="/admin-panel#settings">
+                                <a class="dropdown-item" href="#" onclick="switchToAdminTab('settings'); return false;">
                                     <i class="bi bi-sliders me-2"></i>Settings
                                 </a>
                             </li>
+                            {% endif %}
                         </ul>
                     </div>
 
@@ -499,7 +1194,7 @@
                     <!-- Organization Switcher -->
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="orgDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-building"></i> <span id="currentOrgName">Loading...</span>
+                            <i class="bi bi-building"></i> <span id="currentOrgName">{% if current_user and current_user.organization %}{{ current_user.organization.display_name }}{% else %}Organization{% endif %}</span>
                         </button>
                         <ul class="dropdown-menu" id="orgList">
                             <li><span class="dropdown-item-text text-muted small">Loading organizations...</span></li>
@@ -511,6 +1206,11 @@
                         <i class="bi bi-arrow-clockwise"></i> Sync Now
                     </button>
 
+                    <!-- Dark Mode Toggle -->
+                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" id="themeToggle">
+                        <i class="bi bi-moon-fill" id="themeIcon"></i>
+                    </button>
+
                     <!-- User Menu (when auth is enabled) -->
                     {% if auth_enabled and current_user %}
                     <div class="vr"></div>
@@ -520,7 +1220,7 @@
                                 id="userDropdown"
                                 data-bs-toggle="dropdown"
                                 aria-expanded="false">
-                            <i class="bi bi-person-circle"></i> {{ current_user.full_name or current_user.username }}
+                            <i class="bi bi-person-circle" style="font-size: 1.2rem;"></i> {{ current_user.username }}
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
                             <li>
@@ -534,7 +1234,10 @@
                                 <span class="dropdown-item-text">
                                     <small>
                                         <i class="bi bi-shield-check me-1"></i>
-                                        {% if current_user.is_admin %}Administrator{% else %}User{% endif %}
+                                        {% if current_user.role == 'super_admin' %}Super Admin
+                                        {% elif current_user.role == 'org_admin' %}Org Admin
+                                        {% elif current_user.role == 'manager' %}Manager
+                                        {% else %}User{% endif %}
                                     </small>
                                 </span>
                             </li>
@@ -562,18 +1265,75 @@
     <!-- Footer -->
     <footer class="app-footer">
         <div class="container-fluid px-4">
-            <p class="mb-1">
-                <strong>SentriKat</strong> - Enterprise Vulnerability Management Platform
-            </p>
-            <p class="copyright-notice mb-0">
-                Copyright © 2025 <strong>Denis Sota</strong>. All Rights Reserved. Licensed to Zertificon Solutions GmbH. |
-                Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
-            </p>
+            <div class="text-center">
+                <p class="mb-1">
+                    <strong>SentriKat</strong> - Enterprise Vulnerability Management Platform
+                </p>
+                <p class="copyright-notice mb-1">
+                    Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
+                </p>
+                <!-- CVE Service Status Indicator -->
+                <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
+                    <span class="status-led status-led-yellow" id="cveStatusLed"></span>
+                    <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
+                </div>
+            </div>
         </div>
     </footer>
 
     <!-- Toast Container -->
     <div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
+
+    <!-- Confirmation Modal -->
+    <div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmModalLabel">
+                        <i class="bi bi-question-circle me-2"></i>Confirm Action
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="confirmModalBody">
+                    Are you sure you want to proceed?
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle me-1"></i>Cancel
+                    </button>
+                    <button type="button" class="btn btn-primary" id="confirmModalButton">
+                        <i class="bi bi-check-circle me-1"></i>Confirm
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prompt Modal -->
+    <div class="modal fade" id="promptModal" tabindex="-1" aria-labelledby="promptModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="promptModalLabel">
+                        <i class="bi bi-pencil-square me-2"></i>Input Required
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="promptModalBody">Please enter a value:</p>
+                    <input type="text" class="form-control" id="promptModalInput" placeholder="Enter value">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle me-1"></i>Cancel
+                    </button>
+                    <button type="button" class="btn btn-primary" id="promptModalButton">
+                        <i class="bi bi-check-circle me-1"></i>Submit
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -583,6 +1343,56 @@
 
         function hideLoading() {
             document.getElementById('loadingOverlay').classList.remove('show');
+            // Clean up any lingering modal backdrops
+            cleanupModalBackdrops();
+        }
+
+        /**
+         * Remove any lingering modal backdrops from the DOM
+         * This fixes the issue where grey backdrop layers remain after bulk operations
+         */
+        function cleanupModalBackdrops() {
+            // Remove all modal backdrops
+            document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+                backdrop.remove();
+            });
+            // Remove modal-open class from body to restore scrolling
+            document.body.classList.remove('modal-open');
+            // Reset body padding that Bootstrap adds
+            document.body.style.removeProperty('padding-right');
+        }
+
+        /**
+         * Switch to a specific admin panel tab
+         * Used by the admin dropdown menu
+         */
+        function switchToAdminTab(tabId) {
+            console.log('switchToAdminTab called with:', tabId);
+            console.log('Current pathname:', window.location.pathname);
+
+            // Check if we're on the admin panel page
+            if (window.location.pathname !== '/admin-panel') {
+                console.log('Not on admin panel, navigating to:', '/admin-panel#' + tabId);
+                // Navigate to admin panel with hash
+                window.location.href = '/admin-panel#' + tabId;
+                return;
+            }
+
+            // We're already on the page, just switch the tab
+            console.log('On admin panel, switching tab...');
+            const tabButtonId = tabId + '-tab';
+            console.log('Looking for tab button:', tabButtonId);
+            const tabButton = document.getElementById(tabButtonId);
+            console.log('Tab button found:', !!tabButton);
+
+            if (tabButton) {
+                console.log('Activating tab...');
+                const tab = new bootstrap.Tab(tabButton);
+                tab.show();
+                console.log('Tab shown');
+            } else {
+                console.error('Tab button not found:', tabButtonId);
+            }
         }
 
         function showToast(message, type = 'success') {
@@ -611,8 +1421,166 @@
             toast.addEventListener('hidden.bs.toast', () => toast.remove());
         }
 
+        /**
+         * Check CVE service status and update the status indicator
+         */
+        async function checkCVEServiceStatus() {
+            const led = document.getElementById('cveStatusLed');
+            const text = document.getElementById('cveStatusText');
+
+            if (!led || !text) return;
+
+            try {
+                const response = await fetch('/api/cve-service/status');
+                const data = await response.json();
+
+                // Remove all status classes
+                led.classList.remove('status-led-green', 'status-led-red', 'status-led-yellow');
+
+                if (data.status === 'online') {
+                    led.classList.add('status-led-green');
+                    text.textContent = 'NVD Online';
+                    text.title = 'CVE service is accessible';
+                } else if (data.status === 'rate_limited') {
+                    led.classList.add('status-led-yellow');
+                    text.textContent = 'Rate Limited';
+                    text.title = 'NVD API is rate limited - try again later';
+                } else {
+                    led.classList.add('status-led-red');
+                    text.textContent = 'NVD Offline';
+                    text.title = data.message || 'Cannot connect to CVE service';
+                }
+            } catch (error) {
+                led.classList.remove('status-led-green', 'status-led-red', 'status-led-yellow');
+                led.classList.add('status-led-red');
+                text.textContent = 'Error';
+                text.title = 'Failed to check CVE service status';
+            }
+        }
+
+        // Check CVE status on page load and every 5 minutes
+        document.addEventListener('DOMContentLoaded', function() {
+            checkCVEServiceStatus();
+            setInterval(checkCVEServiceStatus, 300000); // 5 minutes
+        });
+
+        /**
+         * Shows a confirmation modal dialog (replacement for confirm())
+         * @param {string} message - The confirmation message
+         * @param {string} title - Optional title (default: "Confirm Action")
+         * @param {string} confirmText - Optional confirm button text (default: "Confirm")
+         * @param {string} confirmClass - Optional button class (default: "btn-primary", use "btn-danger" for destructive actions)
+         * @returns {Promise<boolean>} - Resolves to true if confirmed, false if cancelled
+         */
+        function showConfirm(message, title = 'Confirm Action', confirmText = 'Confirm', confirmClass = 'btn-primary') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirmModal');
+                const modalTitle = document.getElementById('confirmModalLabel');
+                const modalBody = document.getElementById('confirmModalBody');
+                const confirmBtn = document.getElementById('confirmModalButton');
+
+                // Set content
+                modalTitle.innerHTML = `<i class="bi bi-question-circle me-2"></i>${title}`;
+                modalBody.innerHTML = message.replace(/\n/g, '<br>');
+                confirmBtn.textContent = confirmText;
+                confirmBtn.className = `btn ${confirmClass}`;
+
+                const bsModal = new bootstrap.Modal(modal);
+
+                // Handle confirm
+                const handleConfirm = () => {
+                    cleanup();
+                    resolve(true);
+                };
+
+                // Handle cancel/close
+                const handleCancel = () => {
+                    cleanup();
+                    resolve(false);
+                };
+
+                const cleanup = () => {
+                    confirmBtn.removeEventListener('click', handleConfirm);
+                    modal.removeEventListener('hidden.bs.modal', handleCancel);
+                    bsModal.hide();
+                };
+
+                confirmBtn.addEventListener('click', handleConfirm);
+                modal.addEventListener('hidden.bs.modal', handleCancel, { once: true });
+
+                bsModal.show();
+            });
+        }
+
+        /**
+         * Shows a prompt modal dialog (replacement for prompt())
+         * @param {string} message - The prompt message
+         * @param {string} defaultValue - Optional default value
+         * @param {string} title - Optional title (default: "Input Required")
+         * @returns {Promise<string|null>} - Resolves to the input value if submitted, null if cancelled
+         */
+        function showPrompt(message, defaultValue = '', title = 'Input Required') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('promptModal');
+                const modalTitle = document.getElementById('promptModalLabel');
+                const modalBody = document.getElementById('promptModalBody');
+                const input = document.getElementById('promptModalInput');
+                const submitBtn = document.getElementById('promptModalButton');
+
+                // Set content
+                modalTitle.innerHTML = `<i class="bi bi-pencil-square me-2"></i>${title}`;
+                modalBody.innerHTML = message.replace(/\n/g, '<br>');
+                input.value = defaultValue;
+
+                const bsModal = new bootstrap.Modal(modal);
+
+                // Handle submit
+                const handleSubmit = () => {
+                    const value = input.value.trim();
+                    cleanup();
+                    resolve(value || null);
+                };
+
+                // Handle cancel/close
+                const handleCancel = () => {
+                    cleanup();
+                    resolve(null);
+                };
+
+                // Handle Enter key
+                const handleEnter = (e) => {
+                    if (e.key === 'Enter') {
+                        handleSubmit();
+                    }
+                };
+
+                const cleanup = () => {
+                    submitBtn.removeEventListener('click', handleSubmit);
+                    input.removeEventListener('keypress', handleEnter);
+                    modal.removeEventListener('hidden.bs.modal', handleCancel);
+                    bsModal.hide();
+                };
+
+                submitBtn.addEventListener('click', handleSubmit);
+                input.addEventListener('keypress', handleEnter);
+                modal.addEventListener('hidden.bs.modal', handleCancel, { once: true });
+
+                bsModal.show();
+
+                // Focus input after modal is shown
+                setTimeout(() => input.focus(), 300);
+            });
+        }
+
         async function triggerSync() {
-            if (!confirm('Download the latest CISA KEV data and update all matches?\n\nThis may take a minute.')) {
+            const confirmed = await showConfirm(
+                'Download the latest CISA KEV data and update all matches?<br><br>This may take a minute.',
+                'Sync Vulnerability Data',
+                'Start Sync',
+                'btn-primary'
+            );
+
+            if (!confirmed) {
                 return;
             }
 
@@ -648,6 +1616,13 @@
             });
         }
 
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function getPriorityBadgeClass(priority) {
             const badges = {
                 'critical': 'badge-critical',
@@ -681,6 +1656,12 @@
         // Organization Switcher Functions
         async function loadOrganizations() {
             try {
+                // Show cached organization name immediately to avoid "Loading..." flash
+                const cachedOrgName = localStorage.getItem('currentOrgName');
+                if (cachedOrgName) {
+                    document.getElementById('currentOrgName').textContent = cachedOrgName;
+                }
+
                 // Get current organization
                 const currentResponse = await fetch('/api/session/organization');
                 if (!currentResponse.ok) {
@@ -690,6 +1671,8 @@
 
                 if (currentOrg && currentOrg.display_name) {
                     document.getElementById('currentOrgName').textContent = currentOrg.display_name;
+                    // Cache for next page load
+                    localStorage.setItem('currentOrgName', currentOrg.display_name);
                 }
 
                 // Get all organizations
@@ -715,7 +1698,11 @@
                 }
             } catch (error) {
                 console.error('Error loading organizations:', error);
-                document.getElementById('currentOrgName').textContent = 'Error';
+                // Update both the button and the dropdown list on error
+                const orgList = document.getElementById('orgList');
+                if (orgList) {
+                    orgList.innerHTML = `<li><span class="dropdown-item-text text-danger small">Error: ${error.message}</span></li>`;
+                }
             }
         }
 
@@ -727,6 +1714,8 @@
 
                 if (response.ok) {
                     document.getElementById('currentOrgName').textContent = orgName;
+                    // Cache the new organization name
+                    localStorage.setItem('currentOrgName', orgName);
                     showToast(`Switched to ${orgName}`, 'success');
 
                     // Reload page to refresh data
@@ -738,6 +1727,40 @@
                 showToast(`Error: ${error.message}`, 'danger');
             }
         }
+
+        // Theme Toggle Functions
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeIcon(newTheme);
+        }
+
+        function updateThemeIcon(theme) {
+            const icon = document.getElementById('themeIcon');
+            if (icon) {
+                if (theme === 'dark') {
+                    icon.className = 'bi bi-sun-fill';
+                } else {
+                    icon.className = 'bi bi-moon-fill';
+                }
+            }
+        }
+
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+
+            document.documentElement.setAttribute('data-theme', theme);
+            updateThemeIcon(theme);
+        }
+
+        // Initialize theme immediately to prevent flash
+        initTheme();
 
         // Load organizations on page load
         document.addEventListener('DOMContentLoaded', function() {

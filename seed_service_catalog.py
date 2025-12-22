@@ -489,6 +489,797 @@ SERVICE_CATALOG = [
      'common_names': json.dumps(['varnish', 'varnish-cache']), 'cpe_vendor': 'varnish-cache', 'cpe_product': 'varnish_cache',
      'description': 'Web application accelerator', 'website_url': 'https://varnish-cache.org',
      'typical_versions': json.dumps(['6.x', '7.x']), 'is_popular': True},
+
+    # ==================== NETWORK EQUIPMENT ====================
+    {'vendor': 'Cisco', 'product_name': 'IOS', 'category': 'Network', 'subcategory': 'Router/Switch OS',
+     'common_names': json.dumps(['cisco-ios', 'ios']), 'cpe_vendor': 'cisco', 'cpe_product': 'ios',
+     'description': 'Cisco Internetwork Operating System', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['15.x', '17.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'IOS XE', 'category': 'Network', 'subcategory': 'Router/Switch OS',
+     'common_names': json.dumps(['ios-xe', 'cisco-ios-xe']), 'cpe_vendor': 'cisco', 'cpe_product': 'ios_xe',
+     'description': 'Cisco IOS XE Software', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['16.x', '17.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'NX-OS', 'category': 'Network', 'subcategory': 'Data Center Switch OS',
+     'common_names': json.dumps(['nx-os', 'nxos']), 'cpe_vendor': 'cisco', 'cpe_product': 'nx-os',
+     'description': 'Cisco Nexus Operating System', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['9.x', '10.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'ASA', 'category': 'Firewall', 'subcategory': 'Enterprise Firewall',
+     'common_names': json.dumps(['asa', 'cisco-asa']), 'cpe_vendor': 'cisco', 'cpe_product': 'adaptive_security_appliance_software',
+     'description': 'Cisco Adaptive Security Appliance', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['9.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'Firepower', 'category': 'Firewall', 'subcategory': 'NGFW',
+     'common_names': json.dumps(['firepower', 'fmc', 'ftd']), 'cpe_vendor': 'cisco', 'cpe_product': 'firepower_threat_defense',
+     'description': 'Cisco Firepower Threat Defense', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['6.x', '7.x']), 'is_popular': True},
+
+    {'vendor': 'Palo Alto Networks', 'product_name': 'PAN-OS', 'category': 'Firewall', 'subcategory': 'NGFW',
+     'common_names': json.dumps(['pan-os', 'panos', 'paloalto']), 'cpe_vendor': 'paloaltonetworks', 'cpe_product': 'pan-os',
+     'description': 'Palo Alto Networks Operating System', 'website_url': 'https://www.paloaltonetworks.com',
+     'typical_versions': json.dumps(['10.x', '11.x']), 'is_popular': True},
+
+    {'vendor': 'Fortinet', 'product_name': 'FortiOS', 'category': 'Firewall', 'subcategory': 'NGFW',
+     'common_names': json.dumps(['fortios', 'fortigate']), 'cpe_vendor': 'fortinet', 'cpe_product': 'fortios',
+     'description': 'Fortinet FortiGate Operating System', 'website_url': 'https://www.fortinet.com',
+     'typical_versions': json.dumps(['6.x', '7.x']), 'is_popular': True},
+
+    {'vendor': 'Juniper', 'product_name': 'Junos OS', 'category': 'Network', 'subcategory': 'Router/Switch OS',
+     'common_names': json.dumps(['junos', 'juniper']), 'cpe_vendor': 'juniper', 'cpe_product': 'junos',
+     'description': 'Juniper Networks Operating System', 'website_url': 'https://www.juniper.net',
+     'typical_versions': json.dumps(['21.x', '22.x', '23.x']), 'is_popular': True},
+
+    {'vendor': 'Arista', 'product_name': 'EOS', 'category': 'Network', 'subcategory': 'Data Center Switch OS',
+     'common_names': json.dumps(['arista-eos', 'eos']), 'cpe_vendor': 'arista', 'cpe_product': 'eos',
+     'description': 'Arista Extensible Operating System', 'website_url': 'https://www.arista.com',
+     'typical_versions': json.dumps(['4.x']), 'is_popular': True},
+
+    {'vendor': 'F5', 'product_name': 'BIG-IP', 'category': 'Load Balancing', 'subcategory': 'ADC',
+     'common_names': json.dumps(['big-ip', 'f5', 'bigip']), 'cpe_vendor': 'f5', 'cpe_product': 'big-ip_access_policy_manager',
+     'description': 'F5 BIG-IP Application Delivery Controller', 'website_url': 'https://www.f5.com',
+     'typical_versions': json.dumps(['15.x', '16.x', '17.x']), 'is_popular': True},
+
+    {'vendor': 'Ubiquiti', 'product_name': 'UniFi', 'category': 'Network', 'subcategory': 'Wireless Network',
+     'common_names': json.dumps(['unifi', 'ubiquiti']), 'cpe_vendor': 'ui', 'cpe_product': 'unifi_network_application',
+     'description': 'Ubiquiti UniFi Network Management', 'website_url': 'https://ui.com',
+     'typical_versions': json.dumps(['7.x', '8.x']), 'is_popular': True},
+
+    # ==================== SECURITY PRODUCTS ====================
+    {'vendor': 'CrowdStrike', 'product_name': 'Falcon', 'category': 'Security', 'subcategory': 'EDR',
+     'common_names': json.dumps(['crowdstrike', 'falcon']), 'cpe_vendor': 'crowdstrike', 'cpe_product': 'falcon',
+     'description': 'Endpoint Detection and Response', 'website_url': 'https://www.crowdstrike.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Carbon Black', 'product_name': 'Carbon Black', 'category': 'Security', 'subcategory': 'EDR',
+     'common_names': json.dumps(['carbon-black', 'cb']), 'cpe_vendor': 'vmware', 'cpe_product': 'carbon_black_cloud',
+     'description': 'Endpoint Security Platform', 'website_url': 'https://www.carbonblack.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'SentinelOne', 'product_name': 'Singularity', 'category': 'Security', 'subcategory': 'EDR',
+     'common_names': json.dumps(['sentinelone', 's1']), 'cpe_vendor': 'sentinelone', 'cpe_product': 'singularity',
+     'description': 'AI-powered Endpoint Protection', 'website_url': 'https://www.sentinelone.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Symantec', 'product_name': 'Endpoint Protection', 'category': 'Security', 'subcategory': 'Antivirus',
+     'common_names': json.dumps(['symantec', 'sep']), 'cpe_vendor': 'broadcom', 'cpe_product': 'symantec_endpoint_protection',
+     'description': 'Enterprise Endpoint Protection', 'website_url': 'https://www.broadcom.com',
+     'typical_versions': json.dumps(['14.x']), 'is_popular': True},
+
+    {'vendor': 'McAfee', 'product_name': 'Endpoint Security', 'category': 'Security', 'subcategory': 'Antivirus',
+     'common_names': json.dumps(['mcafee', 'ens']), 'cpe_vendor': 'mcafee', 'cpe_product': 'endpoint_security',
+     'description': 'McAfee Endpoint Security', 'website_url': 'https://www.mcafee.com',
+     'typical_versions': json.dumps(['10.x']), 'is_popular': True},
+
+    {'vendor': 'Trend Micro', 'product_name': 'Apex One', 'category': 'Security', 'subcategory': 'Antivirus',
+     'common_names': json.dumps(['trend-micro', 'apex-one']), 'cpe_vendor': 'trendmicro', 'cpe_product': 'apex_one',
+     'description': 'Endpoint Security Solution', 'website_url': 'https://www.trendmicro.com',
+     'typical_versions': json.dumps(['2019', 'SaaS']), 'is_popular': True},
+
+    {'vendor': 'Splunk', 'product_name': 'Splunk Enterprise', 'category': 'SIEM', 'subcategory': 'Log Management',
+     'common_names': json.dumps(['splunk']), 'cpe_vendor': 'splunk', 'cpe_product': 'splunk',
+     'description': 'Data Platform for Security and Observability', 'website_url': 'https://www.splunk.com',
+     'typical_versions': json.dumps(['8.x', '9.x']), 'is_popular': True},
+
+    {'vendor': 'Elastic', 'product_name': 'Elastic Security', 'category': 'SIEM', 'subcategory': 'Security Analytics',
+     'common_names': json.dumps(['elastic-security', 'elastic-siem']), 'cpe_vendor': 'elastic', 'cpe_product': 'elastic_security',
+     'description': 'SIEM and Endpoint Security', 'website_url': 'https://www.elastic.co',
+     'typical_versions': json.dumps(['7.x', '8.x']), 'is_popular': True},
+
+    {'vendor': 'IBM', 'product_name': 'QRadar', 'category': 'SIEM', 'subcategory': 'Security Intelligence',
+     'common_names': json.dumps(['qradar']), 'cpe_vendor': 'ibm', 'cpe_product': 'qradar_security_information_and_event_manager',
+     'description': 'Security Information and Event Management', 'website_url': 'https://www.ibm.com/qradar',
+     'typical_versions': json.dumps(['7.x']), 'is_popular': True},
+
+    {'vendor': 'Tenable', 'product_name': 'Nessus', 'category': 'Security', 'subcategory': 'Vulnerability Scanner',
+     'common_names': json.dumps(['nessus', 'tenable']), 'cpe_vendor': 'tenable', 'cpe_product': 'nessus',
+     'description': 'Vulnerability Assessment Scanner', 'website_url': 'https://www.tenable.com',
+     'typical_versions': json.dumps(['10.x']), 'is_popular': True},
+
+    {'vendor': 'Qualys', 'product_name': 'Qualys VMDR', 'category': 'Security', 'subcategory': 'Vulnerability Management',
+     'common_names': json.dumps(['qualys']), 'cpe_vendor': 'qualys', 'cpe_product': 'qualys_cloud_platform',
+     'description': 'Vulnerability Management Detection Response', 'website_url': 'https://www.qualys.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Rapid7', 'product_name': 'InsightVM', 'category': 'Security', 'subcategory': 'Vulnerability Management',
+     'common_names': json.dumps(['rapid7', 'insightvm', 'nexpose']), 'cpe_vendor': 'rapid7', 'cpe_product': 'insightvm',
+     'description': 'Vulnerability Risk Management', 'website_url': 'https://www.rapid7.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    # ==================== IDENTITY & ACCESS MANAGEMENT ====================
+    {'vendor': 'Okta', 'product_name': 'Okta', 'category': 'IAM', 'subcategory': 'Identity Provider',
+     'common_names': json.dumps(['okta']), 'cpe_vendor': 'okta', 'cpe_product': 'okta',
+     'description': 'Identity and Access Management', 'website_url': 'https://www.okta.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Microsoft', 'product_name': 'Azure AD', 'category': 'IAM', 'subcategory': 'Identity Provider',
+     'common_names': json.dumps(['azure-ad', 'aad', 'entra-id']), 'cpe_vendor': 'microsoft', 'cpe_product': 'azure_active_directory',
+     'description': 'Cloud Identity Service', 'website_url': 'https://azure.microsoft.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Ping Identity', 'product_name': 'PingFederate', 'category': 'IAM', 'subcategory': 'Federation Server',
+     'common_names': json.dumps(['pingfederate', 'ping']), 'cpe_vendor': 'pingidentity', 'cpe_product': 'pingfederate',
+     'description': 'Enterprise Federation Server', 'website_url': 'https://www.pingidentity.com',
+     'typical_versions': json.dumps(['11.x', '12.x']), 'is_popular': True},
+
+    {'vendor': 'CyberArk', 'product_name': 'Privileged Access Manager', 'category': 'IAM', 'subcategory': 'PAM',
+     'common_names': json.dumps(['cyberark', 'pam']), 'cpe_vendor': 'cyberark', 'cpe_product': 'privileged_access_manager',
+     'description': 'Privileged Access Security', 'website_url': 'https://www.cyberark.com',
+     'typical_versions': json.dumps(['12.x', '13.x']), 'is_popular': True},
+
+    {'vendor': 'BeyondTrust', 'product_name': 'Password Safe', 'category': 'IAM', 'subcategory': 'PAM',
+     'common_names': json.dumps(['beyondtrust', 'password-safe']), 'cpe_vendor': 'beyondtrust', 'cpe_product': 'password_safe',
+     'description': 'Enterprise Password Management', 'website_url': 'https://www.beyondtrust.com',
+     'typical_versions': json.dumps(['22.x', '23.x']), 'is_popular': True},
+
+    {'vendor': 'Keycloak', 'product_name': 'Keycloak', 'category': 'IAM', 'subcategory': 'Identity Provider',
+     'common_names': json.dumps(['keycloak']), 'cpe_vendor': 'redhat', 'cpe_product': 'keycloak',
+     'description': 'Open Source Identity Management', 'website_url': 'https://www.keycloak.org',
+     'typical_versions': json.dumps(['21.x', '22.x', '23.x']), 'is_popular': True},
+
+    # ==================== COLLABORATION ====================
+    {'vendor': 'Slack', 'product_name': 'Slack', 'category': 'Collaboration', 'subcategory': 'Team Messaging',
+     'common_names': json.dumps(['slack']), 'cpe_vendor': 'slack', 'cpe_product': 'slack',
+     'description': 'Team Communication Platform', 'website_url': 'https://slack.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Microsoft', 'product_name': 'Teams', 'category': 'Collaboration', 'subcategory': 'Team Messaging',
+     'common_names': json.dumps(['teams', 'ms-teams']), 'cpe_vendor': 'microsoft', 'cpe_product': 'teams',
+     'description': 'Team Collaboration Hub', 'website_url': 'https://www.microsoft.com/teams',
+     'typical_versions': json.dumps(['Cloud', 'Desktop']), 'is_popular': True},
+
+    {'vendor': 'Zoom', 'product_name': 'Zoom', 'category': 'Collaboration', 'subcategory': 'Video Conferencing',
+     'common_names': json.dumps(['zoom']), 'cpe_vendor': 'zoom', 'cpe_product': 'zoom',
+     'description': 'Video Communications Platform', 'website_url': 'https://zoom.us',
+     'typical_versions': json.dumps(['5.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'Webex', 'category': 'Collaboration', 'subcategory': 'Video Conferencing',
+     'common_names': json.dumps(['webex']), 'cpe_vendor': 'cisco', 'cpe_product': 'webex_meetings',
+     'description': 'Video Conferencing and Collaboration', 'website_url': 'https://www.webex.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Mattermost', 'product_name': 'Mattermost', 'category': 'Collaboration', 'subcategory': 'Team Messaging',
+     'common_names': json.dumps(['mattermost']), 'cpe_vendor': 'mattermost', 'cpe_product': 'mattermost',
+     'description': 'Open Source Team Messaging', 'website_url': 'https://mattermost.com',
+     'typical_versions': json.dumps(['7.x', '8.x', '9.x']), 'is_popular': True},
+
+    # ==================== ERP & BUSINESS ====================
+    {'vendor': 'SAP', 'product_name': 'SAP S/4HANA', 'category': 'ERP', 'subcategory': 'Enterprise Resource Planning',
+     'common_names': json.dumps(['sap', 's4hana']), 'cpe_vendor': 'sap', 'cpe_product': 's4hana',
+     'description': 'Intelligent ERP System', 'website_url': 'https://www.sap.com',
+     'typical_versions': json.dumps(['2020', '2021', '2022', '2023']), 'is_popular': True},
+
+    {'vendor': 'SAP', 'product_name': 'SAP NetWeaver', 'category': 'ERP', 'subcategory': 'Application Platform',
+     'common_names': json.dumps(['netweaver']), 'cpe_vendor': 'sap', 'cpe_product': 'netweaver',
+     'description': 'SAP Technology Platform', 'website_url': 'https://www.sap.com',
+     'typical_versions': json.dumps(['7.x']), 'is_popular': True},
+
+    {'vendor': 'Oracle', 'product_name': 'Oracle E-Business Suite', 'category': 'ERP', 'subcategory': 'Enterprise Applications',
+     'common_names': json.dumps(['ebs', 'e-business-suite']), 'cpe_vendor': 'oracle', 'cpe_product': 'e-business_suite',
+     'description': 'Enterprise Resource Planning Suite', 'website_url': 'https://www.oracle.com',
+     'typical_versions': json.dumps(['12.x']), 'is_popular': True},
+
+    {'vendor': 'Oracle', 'product_name': 'PeopleSoft', 'category': 'ERP', 'subcategory': 'HCM/Finance',
+     'common_names': json.dumps(['peoplesoft']), 'cpe_vendor': 'oracle', 'cpe_product': 'peoplesoft',
+     'description': 'Human Capital and Financial Management', 'website_url': 'https://www.oracle.com',
+     'typical_versions': json.dumps(['9.x']), 'is_popular': True},
+
+    {'vendor': 'ServiceNow', 'product_name': 'ServiceNow', 'category': 'ITSM', 'subcategory': 'IT Service Management',
+     'common_names': json.dumps(['servicenow', 'snow']), 'cpe_vendor': 'servicenow', 'cpe_product': 'servicenow',
+     'description': 'Digital Workflow Platform', 'website_url': 'https://www.servicenow.com',
+     'typical_versions': json.dumps(['Tokyo', 'Utah', 'Vancouver']), 'is_popular': True},
+
+    # ==================== API & INTEGRATION ====================
+    {'vendor': 'Kong', 'product_name': 'Kong Gateway', 'category': 'API Gateway', 'subcategory': 'API Management',
+     'common_names': json.dumps(['kong']), 'cpe_vendor': 'konghq', 'cpe_product': 'kong',
+     'description': 'Cloud-Native API Gateway', 'website_url': 'https://konghq.com',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
+
+    {'vendor': 'MuleSoft', 'product_name': 'Anypoint Platform', 'category': 'Integration', 'subcategory': 'iPaaS',
+     'common_names': json.dumps(['mulesoft', 'anypoint']), 'cpe_vendor': 'mulesoft', 'cpe_product': 'anypoint_platform',
+     'description': 'Integration Platform as a Service', 'website_url': 'https://www.mulesoft.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Apache', 'product_name': 'APISIX', 'category': 'API Gateway', 'subcategory': 'API Management',
+     'common_names': json.dumps(['apisix']), 'cpe_vendor': 'apache', 'cpe_product': 'apisix',
+     'description': 'Dynamic API Gateway', 'website_url': 'https://apisix.apache.org',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': False},
+
+    # ==================== MORE DATABASES ====================
+    {'vendor': 'Oracle', 'product_name': 'Oracle Database', 'category': 'Database', 'subcategory': 'Enterprise RDBMS',
+     'common_names': json.dumps(['oracle', 'oracle-db']), 'cpe_vendor': 'oracle', 'cpe_product': 'database_server',
+     'description': 'Enterprise Relational Database', 'website_url': 'https://www.oracle.com/database',
+     'typical_versions': json.dumps(['19c', '21c', '23c']), 'is_popular': True},
+
+    {'vendor': 'IBM', 'product_name': 'Db2', 'category': 'Database', 'subcategory': 'Enterprise RDBMS',
+     'common_names': json.dumps(['db2', 'ibm-db2']), 'cpe_vendor': 'ibm', 'cpe_product': 'db2',
+     'description': 'Enterprise Database Server', 'website_url': 'https://www.ibm.com/db2',
+     'typical_versions': json.dumps(['11.x']), 'is_popular': True},
+
+    {'vendor': 'Apache', 'product_name': 'Cassandra', 'category': 'Database', 'subcategory': 'NoSQL Database',
+     'common_names': json.dumps(['cassandra']), 'cpe_vendor': 'apache', 'cpe_product': 'cassandra',
+     'description': 'Distributed NoSQL Database', 'website_url': 'https://cassandra.apache.org',
+     'typical_versions': json.dumps(['4.x']), 'is_popular': True},
+
+    {'vendor': 'CouchDB', 'product_name': 'CouchDB', 'category': 'Database', 'subcategory': 'NoSQL Database',
+     'common_names': json.dumps(['couchdb']), 'cpe_vendor': 'apache', 'cpe_product': 'couchdb',
+     'description': 'Document-Oriented NoSQL Database', 'website_url': 'https://couchdb.apache.org',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': False},
+
+    {'vendor': 'InfluxData', 'product_name': 'InfluxDB', 'category': 'Database', 'subcategory': 'Time Series',
+     'common_names': json.dumps(['influxdb']), 'cpe_vendor': 'influxdata', 'cpe_product': 'influxdb',
+     'description': 'Time Series Database', 'website_url': 'https://www.influxdata.com',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'TimescaleDB', 'product_name': 'TimescaleDB', 'category': 'Database', 'subcategory': 'Time Series',
+     'common_names': json.dumps(['timescaledb']), 'cpe_vendor': 'timescale', 'cpe_product': 'timescaledb',
+     'description': 'Time Series Database on PostgreSQL', 'website_url': 'https://www.timescale.com',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': False},
+
+    # ==================== APPLICATION FRAMEWORKS ====================
+    {'vendor': 'Spring', 'product_name': 'Spring Framework', 'category': 'Framework', 'subcategory': 'Java Framework',
+     'common_names': json.dumps(['spring', 'spring-framework']), 'cpe_vendor': 'vmware', 'cpe_product': 'spring_framework',
+     'description': 'Java Application Framework', 'website_url': 'https://spring.io',
+     'typical_versions': json.dumps(['5.x', '6.x']), 'is_popular': True},
+
+    {'vendor': 'Spring', 'product_name': 'Spring Boot', 'category': 'Framework', 'subcategory': 'Java Framework',
+     'common_names': json.dumps(['spring-boot']), 'cpe_vendor': 'vmware', 'cpe_product': 'spring_boot',
+     'description': 'Java Application Framework', 'website_url': 'https://spring.io/projects/spring-boot',
+     'typical_versions': json.dumps(['2.x', '3.x']), 'is_popular': True},
+
+    {'vendor': 'Django', 'product_name': 'Django', 'category': 'Framework', 'subcategory': 'Python Framework',
+     'common_names': json.dumps(['django']), 'cpe_vendor': 'djangoproject', 'cpe_product': 'django',
+     'description': 'Python Web Framework', 'website_url': 'https://www.djangoproject.com',
+     'typical_versions': json.dumps(['4.x', '5.x']), 'is_popular': True},
+
+    {'vendor': 'Ruby on Rails', 'product_name': 'Rails', 'category': 'Framework', 'subcategory': 'Ruby Framework',
+     'common_names': json.dumps(['rails', 'ruby-on-rails']), 'cpe_vendor': 'rubyonrails', 'cpe_product': 'rails',
+     'description': 'Ruby Web Application Framework', 'website_url': 'https://rubyonrails.org',
+     'typical_versions': json.dumps(['6.x', '7.x']), 'is_popular': True},
+
+    {'vendor': 'Laravel', 'product_name': 'Laravel', 'category': 'Framework', 'subcategory': 'PHP Framework',
+     'common_names': json.dumps(['laravel']), 'cpe_vendor': 'laravel', 'cpe_product': 'laravel',
+     'description': 'PHP Web Framework', 'website_url': 'https://laravel.com',
+     'typical_versions': json.dumps(['9.x', '10.x', '11.x']), 'is_popular': True},
+
+    {'vendor': 'Express', 'product_name': 'Express.js', 'category': 'Framework', 'subcategory': 'Node.js Framework',
+     'common_names': json.dumps(['express', 'expressjs']), 'cpe_vendor': 'expressjs', 'cpe_product': 'express',
+     'description': 'Node.js Web Framework', 'website_url': 'https://expressjs.com',
+     'typical_versions': json.dumps(['4.x']), 'is_popular': True},
+
+    {'vendor': 'React', 'product_name': 'React', 'category': 'Framework', 'subcategory': 'JavaScript Library',
+     'common_names': json.dumps(['react', 'reactjs']), 'cpe_vendor': 'facebook', 'cpe_product': 'react',
+     'description': 'JavaScript Library for UI', 'website_url': 'https://react.dev',
+     'typical_versions': json.dumps(['17.x', '18.x']), 'is_popular': True},
+
+    {'vendor': 'Vue.js', 'product_name': 'Vue.js', 'category': 'Framework', 'subcategory': 'JavaScript Framework',
+     'common_names': json.dumps(['vue', 'vuejs']), 'cpe_vendor': 'vuejs', 'cpe_product': 'vue.js',
+     'description': 'Progressive JavaScript Framework', 'website_url': 'https://vuejs.org',
+     'typical_versions': json.dumps(['2.x', '3.x']), 'is_popular': True},
+
+    {'vendor': 'Angular', 'product_name': 'Angular', 'category': 'Framework', 'subcategory': 'JavaScript Framework',
+     'common_names': json.dumps(['angular']), 'cpe_vendor': 'google', 'cpe_product': 'angular',
+     'description': 'Web Application Framework', 'website_url': 'https://angular.io',
+     'typical_versions': json.dumps(['15.x', '16.x', '17.x']), 'is_popular': True},
+
+    # ==================== REMOTE ACCESS & VDI ====================
+    {'vendor': 'Citrix', 'product_name': 'Citrix ADC', 'category': 'Load Balancing', 'subcategory': 'ADC',
+     'common_names': json.dumps(['citrix-adc', 'netscaler']), 'cpe_vendor': 'citrix', 'cpe_product': 'application_delivery_controller_firmware',
+     'description': 'Application Delivery Controller', 'website_url': 'https://www.citrix.com',
+     'typical_versions': json.dumps(['13.x']), 'is_popular': True},
+
+    {'vendor': 'Citrix', 'product_name': 'Citrix Virtual Apps', 'category': 'VDI', 'subcategory': 'Application Virtualization',
+     'common_names': json.dumps(['citrix-virtual-apps', 'xenapp']), 'cpe_vendor': 'citrix', 'cpe_product': 'virtual_apps',
+     'description': 'Application Virtualization', 'website_url': 'https://www.citrix.com',
+     'typical_versions': json.dumps(['7.x']), 'is_popular': True},
+
+    {'vendor': 'VMware', 'product_name': 'Horizon', 'category': 'VDI', 'subcategory': 'Virtual Desktop',
+     'common_names': json.dumps(['horizon', 'vmware-horizon']), 'cpe_vendor': 'vmware', 'cpe_product': 'horizon',
+     'description': 'Virtual Desktop Infrastructure', 'website_url': 'https://www.vmware.com/products/horizon.html',
+     'typical_versions': json.dumps(['7.x', '8.x']), 'is_popular': True},
+
+    # ==================== STORAGE ====================
+    {'vendor': 'NetApp', 'product_name': 'ONTAP', 'category': 'Storage', 'subcategory': 'Enterprise Storage',
+     'common_names': json.dumps(['ontap', 'netapp']), 'cpe_vendor': 'netapp', 'cpe_product': 'ontap',
+     'description': 'Enterprise Data Management', 'website_url': 'https://www.netapp.com',
+     'typical_versions': json.dumps(['9.x']), 'is_popular': True},
+
+    {'vendor': 'Dell EMC', 'product_name': 'PowerStore', 'category': 'Storage', 'subcategory': 'Enterprise Storage',
+     'common_names': json.dumps(['powerstore', 'dell-emc']), 'cpe_vendor': 'dell', 'cpe_product': 'powerstore',
+     'description': 'Enterprise Storage Array', 'website_url': 'https://www.dell.com',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
+
+    {'vendor': 'TrueNAS', 'product_name': 'TrueNAS', 'category': 'Storage', 'subcategory': 'NAS',
+     'common_names': json.dumps(['truenas', 'freenas']), 'cpe_vendor': 'ixsystems', 'cpe_product': 'truenas',
+     'description': 'Open Source Storage Operating System', 'website_url': 'https://www.truenas.com',
+     'typical_versions': json.dumps(['CORE', 'SCALE']), 'is_popular': True},
+
+    {'vendor': 'MinIO', 'product_name': 'MinIO', 'category': 'Storage', 'subcategory': 'Object Storage',
+     'common_names': json.dumps(['minio']), 'cpe_vendor': 'minio', 'cpe_product': 'minio',
+     'description': 'S3 Compatible Object Storage', 'website_url': 'https://min.io',
+     'typical_versions': json.dumps(['RELEASE']), 'is_popular': True},
+
+    {'vendor': 'Ceph', 'product_name': 'Ceph', 'category': 'Storage', 'subcategory': 'Distributed Storage',
+     'common_names': json.dumps(['ceph']), 'cpe_vendor': 'redhat', 'cpe_product': 'ceph_storage',
+     'description': 'Distributed Storage System', 'website_url': 'https://ceph.io',
+     'typical_versions': json.dumps(['17.x', '18.x']), 'is_popular': True},
+
+    # ==================== CLOUD PLATFORMS ====================
+    {'vendor': 'HashiCorp', 'product_name': 'Terraform', 'category': 'Infrastructure', 'subcategory': 'IaC',
+     'common_names': json.dumps(['terraform']), 'cpe_vendor': 'hashicorp', 'cpe_product': 'terraform',
+     'description': 'Infrastructure as Code', 'website_url': 'https://www.terraform.io',
+     'typical_versions': json.dumps(['1.x']), 'is_popular': True},
+
+    {'vendor': 'HashiCorp', 'product_name': 'Vault', 'category': 'Security', 'subcategory': 'Secrets Management',
+     'common_names': json.dumps(['vault', 'hashicorp-vault']), 'cpe_vendor': 'hashicorp', 'cpe_product': 'vault',
+     'description': 'Secrets and Encryption Management', 'website_url': 'https://www.vaultproject.io',
+     'typical_versions': json.dumps(['1.x']), 'is_popular': True},
+
+    {'vendor': 'HashiCorp', 'product_name': 'Consul', 'category': 'Infrastructure', 'subcategory': 'Service Discovery',
+     'common_names': json.dumps(['consul']), 'cpe_vendor': 'hashicorp', 'cpe_product': 'consul',
+     'description': 'Service Networking Platform', 'website_url': 'https://www.consul.io',
+     'typical_versions': json.dumps(['1.x']), 'is_popular': True},
+
+    # ==================== MORE WEB SERVERS ====================
+    {'vendor': 'Caddy', 'product_name': 'Caddy', 'category': 'Web Server', 'subcategory': 'HTTP Server',
+     'common_names': json.dumps(['caddy', 'caddyserver']), 'cpe_vendor': 'caddyserver', 'cpe_product': 'caddy',
+     'description': 'Modern Web Server with Automatic HTTPS', 'website_url': 'https://caddyserver.com',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'Traefik', 'product_name': 'Traefik', 'category': 'Load Balancing', 'subcategory': 'Cloud Native Proxy',
+     'common_names': json.dumps(['traefik']), 'cpe_vendor': 'traefik', 'cpe_product': 'traefik',
+     'description': 'Cloud Native Edge Router', 'website_url': 'https://traefik.io',
+     'typical_versions': json.dumps(['2.x', '3.x']), 'is_popular': True},
+
+    {'vendor': 'Envoy', 'product_name': 'Envoy', 'category': 'Load Balancing', 'subcategory': 'Service Proxy',
+     'common_names': json.dumps(['envoy', 'envoy-proxy']), 'cpe_vendor': 'envoyproxy', 'cpe_product': 'envoy',
+     'description': 'Cloud Native High Performance Proxy', 'website_url': 'https://www.envoyproxy.io',
+     'typical_versions': json.dumps(['1.x']), 'is_popular': True},
+
+    # ==================== LOGGING ====================
+    {'vendor': 'Graylog', 'product_name': 'Graylog', 'category': 'Logging', 'subcategory': 'Log Management',
+     'common_names': json.dumps(['graylog']), 'cpe_vendor': 'graylog', 'cpe_product': 'graylog',
+     'description': 'Log Management Platform', 'website_url': 'https://www.graylog.org',
+     'typical_versions': json.dumps(['5.x']), 'is_popular': True},
+
+    {'vendor': 'Fluentd', 'product_name': 'Fluentd', 'category': 'Logging', 'subcategory': 'Data Collector',
+     'common_names': json.dumps(['fluentd', 'td-agent']), 'cpe_vendor': 'fluentd', 'cpe_product': 'fluentd',
+     'description': 'Open Source Data Collector', 'website_url': 'https://www.fluentd.org',
+     'typical_versions': json.dumps(['1.x']), 'is_popular': True},
+
+    {'vendor': 'Elastic', 'product_name': 'Logstash', 'category': 'Logging', 'subcategory': 'Data Pipeline',
+     'common_names': json.dumps(['logstash']), 'cpe_vendor': 'elastic', 'cpe_product': 'logstash',
+     'description': 'Server-Side Data Processing Pipeline', 'website_url': 'https://www.elastic.co/logstash',
+     'typical_versions': json.dumps(['7.x', '8.x']), 'is_popular': True},
+
+    # ==================== ADDITIONAL POPULAR SOFTWARE ====================
+    {'vendor': 'Apache', 'product_name': 'Struts', 'category': 'Framework', 'subcategory': 'Java Framework',
+     'common_names': json.dumps(['struts', 'apache-struts']), 'cpe_vendor': 'apache', 'cpe_product': 'struts',
+     'description': 'Java Web Application Framework', 'website_url': 'https://struts.apache.org',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'Apache', 'product_name': 'Log4j', 'category': 'Library', 'subcategory': 'Logging',
+     'common_names': json.dumps(['log4j', 'log4j2']), 'cpe_vendor': 'apache', 'cpe_product': 'log4j',
+     'description': 'Java Logging Library', 'website_url': 'https://logging.apache.org/log4j',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'Apache', 'product_name': 'ActiveMQ', 'category': 'Message Queue', 'subcategory': 'Message Broker',
+     'common_names': json.dumps(['activemq']), 'cpe_vendor': 'apache', 'cpe_product': 'activemq',
+     'description': 'Open Source Message Broker', 'website_url': 'https://activemq.apache.org',
+     'typical_versions': json.dumps(['5.x']), 'is_popular': True},
+
+    {'vendor': 'SonarSource', 'product_name': 'SonarQube', 'category': 'DevOps', 'subcategory': 'Code Quality',
+     'common_names': json.dumps(['sonarqube', 'sonar']), 'cpe_vendor': 'sonarsource', 'cpe_product': 'sonarqube',
+     'description': 'Code Quality Platform', 'website_url': 'https://www.sonarqube.org',
+     'typical_versions': json.dumps(['9.x', '10.x']), 'is_popular': True},
+
+    {'vendor': 'Artifactory', 'product_name': 'JFrog Artifactory', 'category': 'DevOps', 'subcategory': 'Artifact Repository',
+     'common_names': json.dumps(['artifactory', 'jfrog']), 'cpe_vendor': 'jfrog', 'cpe_product': 'artifactory',
+     'description': 'Universal Artifact Repository', 'website_url': 'https://jfrog.com/artifactory',
+     'typical_versions': json.dumps(['7.x']), 'is_popular': True},
+
+    {'vendor': 'Nexus', 'product_name': 'Nexus Repository', 'category': 'DevOps', 'subcategory': 'Artifact Repository',
+     'common_names': json.dumps(['nexus', 'nexus-repository']), 'cpe_vendor': 'sonatype', 'cpe_product': 'nexus_repository_manager',
+     'description': 'Repository Manager', 'website_url': 'https://www.sonatype.com/nexus',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
+
+    {'vendor': 'Portainer', 'product_name': 'Portainer', 'category': 'Containerization', 'subcategory': 'Container Management',
+     'common_names': json.dumps(['portainer']), 'cpe_vendor': 'portainer', 'cpe_product': 'portainer',
+     'description': 'Container Management UI', 'website_url': 'https://www.portainer.io',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'Argo', 'product_name': 'ArgoCD', 'category': 'CI/CD', 'subcategory': 'GitOps',
+     'common_names': json.dumps(['argocd', 'argo-cd']), 'cpe_vendor': 'argoproj', 'cpe_product': 'argo-cd',
+     'description': 'GitOps Continuous Delivery', 'website_url': 'https://argoproj.github.io/cd',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'Harbor', 'product_name': 'Harbor', 'category': 'Containerization', 'subcategory': 'Container Registry',
+     'common_names': json.dumps(['harbor']), 'cpe_vendor': 'goharbor', 'cpe_product': 'harbor',
+     'description': 'Container Image Registry', 'website_url': 'https://goharbor.io',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'AWX', 'product_name': 'AWX', 'category': 'Configuration Management', 'subcategory': 'Automation',
+     'common_names': json.dumps(['awx', 'ansible-tower']), 'cpe_vendor': 'redhat', 'cpe_product': 'ansible_tower',
+     'description': 'Ansible Tower Open Source', 'website_url': 'https://github.com/ansible/awx',
+     'typical_versions': json.dumps(['21.x', '22.x', '23.x']), 'is_popular': True},
+
+    {'vendor': 'Istio', 'product_name': 'Istio', 'category': 'Orchestration', 'subcategory': 'Service Mesh',
+     'common_names': json.dumps(['istio']), 'cpe_vendor': 'istio', 'cpe_product': 'istio',
+     'description': 'Service Mesh Platform', 'website_url': 'https://istio.io',
+     'typical_versions': json.dumps(['1.x']), 'is_popular': True},
+
+    {'vendor': 'Linkerd', 'product_name': 'Linkerd', 'category': 'Orchestration', 'subcategory': 'Service Mesh',
+     'common_names': json.dumps(['linkerd']), 'cpe_vendor': 'linkerd', 'cpe_product': 'linkerd',
+     'description': 'Ultralight Service Mesh', 'website_url': 'https://linkerd.io',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': False},
+
+    # ==================== MORE CISCO PRODUCTS ====================
+    {'vendor': 'Cisco', 'product_name': 'Unified Communications Manager', 'category': 'Communications', 'subcategory': 'VoIP',
+     'common_names': json.dumps(['cucm', 'callmanager']), 'cpe_vendor': 'cisco', 'cpe_product': 'unified_communications_manager',
+     'description': 'IP Telephony Call Processing', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['12.x', '14.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'DNA Center', 'category': 'Network Management', 'subcategory': 'SDN Controller',
+     'common_names': json.dumps(['dnac', 'dna-center']), 'cpe_vendor': 'cisco', 'cpe_product': 'dna_center',
+     'description': 'Network Management and Automation', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'Prime Infrastructure', 'category': 'Network Management', 'subcategory': 'NMS',
+     'common_names': json.dumps(['prime', 'cisco-prime']), 'cpe_vendor': 'cisco', 'cpe_product': 'prime_infrastructure',
+     'description': 'Network Management System', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'ISE', 'category': 'Security', 'subcategory': 'NAC',
+     'common_names': json.dumps(['ise', 'identity-services-engine']), 'cpe_vendor': 'cisco', 'cpe_product': 'identity_services_engine',
+     'description': 'Network Access Control', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'AnyConnect', 'category': 'VPN', 'subcategory': 'VPN Client',
+     'common_names': json.dumps(['anyconnect']), 'cpe_vendor': 'cisco', 'cpe_product': 'anyconnect_secure_mobility_client',
+     'description': 'Secure VPN Client', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['4.x', '5.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'Meraki', 'category': 'Network', 'subcategory': 'Cloud Managed',
+     'common_names': json.dumps(['meraki']), 'cpe_vendor': 'cisco', 'cpe_product': 'meraki',
+     'description': 'Cloud-Managed Networking', 'website_url': 'https://meraki.cisco.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    # ==================== MORE NETWORK VENDORS ====================
+    {'vendor': 'Aruba', 'product_name': 'ArubaOS', 'category': 'Network', 'subcategory': 'Wireless',
+     'common_names': json.dumps(['aruba', 'arubaos']), 'cpe_vendor': 'arubanetworks', 'cpe_product': 'arubaos',
+     'description': 'Wireless Network Operating System', 'website_url': 'https://www.arubanetworks.com',
+     'typical_versions': json.dumps(['8.x', '10.x']), 'is_popular': True},
+
+    {'vendor': 'Aruba', 'product_name': 'ClearPass', 'category': 'Security', 'subcategory': 'NAC',
+     'common_names': json.dumps(['clearpass']), 'cpe_vendor': 'arubanetworks', 'cpe_product': 'clearpass_policy_manager',
+     'description': 'Network Access Control', 'website_url': 'https://www.arubanetworks.com',
+     'typical_versions': json.dumps(['6.x']), 'is_popular': True},
+
+    {'vendor': 'SonicWall', 'product_name': 'SonicOS', 'category': 'Firewall', 'subcategory': 'UTM',
+     'common_names': json.dumps(['sonicwall', 'sonicos']), 'cpe_vendor': 'sonicwall', 'cpe_product': 'sonicos',
+     'description': 'Firewall Operating System', 'website_url': 'https://www.sonicwall.com',
+     'typical_versions': json.dumps(['6.x', '7.x']), 'is_popular': True},
+
+    {'vendor': 'WatchGuard', 'product_name': 'Fireware', 'category': 'Firewall', 'subcategory': 'UTM',
+     'common_names': json.dumps(['watchguard', 'fireware']), 'cpe_vendor': 'watchguard', 'cpe_product': 'fireware',
+     'description': 'Firewall Operating System', 'website_url': 'https://www.watchguard.com',
+     'typical_versions': json.dumps(['12.x']), 'is_popular': True},
+
+    {'vendor': 'Sophos', 'product_name': 'XG Firewall', 'category': 'Firewall', 'subcategory': 'NGFW',
+     'common_names': json.dumps(['sophos-xg', 'sfos']), 'cpe_vendor': 'sophos', 'cpe_product': 'xg_firewall',
+     'description': 'Next-Generation Firewall', 'website_url': 'https://www.sophos.com',
+     'typical_versions': json.dumps(['18.x', '19.x', '20.x']), 'is_popular': True},
+
+    {'vendor': 'Check Point', 'product_name': 'Gaia', 'category': 'Firewall', 'subcategory': 'NGFW',
+     'common_names': json.dumps(['checkpoint', 'gaia']), 'cpe_vendor': 'checkpoint', 'cpe_product': 'gaia_os',
+     'description': 'Security Gateway Operating System', 'website_url': 'https://www.checkpoint.com',
+     'typical_versions': json.dumps(['R80.x', 'R81.x']), 'is_popular': True},
+
+    {'vendor': 'MikroTik', 'product_name': 'RouterOS', 'category': 'Network', 'subcategory': 'Router OS',
+     'common_names': json.dumps(['mikrotik', 'routeros']), 'cpe_vendor': 'mikrotik', 'cpe_product': 'routeros',
+     'description': 'Router Operating System', 'website_url': 'https://mikrotik.com',
+     'typical_versions': json.dumps(['6.x', '7.x']), 'is_popular': True},
+
+    # ==================== MORE SECURITY TOOLS ====================
+    {'vendor': 'Suricata', 'product_name': 'Suricata', 'category': 'Security', 'subcategory': 'IDS/IPS',
+     'common_names': json.dumps(['suricata']), 'cpe_vendor': 'oisf', 'cpe_product': 'suricata',
+     'description': 'Network Threat Detection Engine', 'website_url': 'https://suricata.io',
+     'typical_versions': json.dumps(['6.x', '7.x']), 'is_popular': True},
+
+    {'vendor': 'Wazuh', 'product_name': 'Wazuh', 'category': 'Security', 'subcategory': 'SIEM/XDR',
+     'common_names': json.dumps(['wazuh']), 'cpe_vendor': 'wazuh', 'cpe_product': 'wazuh',
+     'description': 'Open Source Security Platform', 'website_url': 'https://wazuh.com',
+     'typical_versions': json.dumps(['4.x']), 'is_popular': True},
+
+    {'vendor': 'OSSEC', 'product_name': 'OSSEC', 'category': 'Security', 'subcategory': 'HIDS',
+     'common_names': json.dumps(['ossec']), 'cpe_vendor': 'ossec', 'cpe_product': 'ossec',
+     'description': 'Host-based Intrusion Detection', 'website_url': 'https://www.ossec.net',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': False},
+
+    {'vendor': 'Zeek', 'product_name': 'Zeek', 'category': 'Security', 'subcategory': 'Network Monitor',
+     'common_names': json.dumps(['zeek', 'bro']), 'cpe_vendor': 'zeek', 'cpe_product': 'zeek',
+     'description': 'Network Analysis Framework', 'website_url': 'https://zeek.org',
+     'typical_versions': json.dumps(['5.x', '6.x']), 'is_popular': True},
+
+    {'vendor': 'Cisco', 'product_name': 'Stealthwatch', 'category': 'Security', 'subcategory': 'Network Analytics',
+     'common_names': json.dumps(['stealthwatch', 'secure-network-analytics']), 'cpe_vendor': 'cisco', 'cpe_product': 'stealthwatch',
+     'description': 'Network Traffic Analysis', 'website_url': 'https://www.cisco.com',
+     'typical_versions': json.dumps(['7.x']), 'is_popular': True},
+
+    {'vendor': 'Darktrace', 'product_name': 'Darktrace', 'category': 'Security', 'subcategory': 'AI Security',
+     'common_names': json.dumps(['darktrace']), 'cpe_vendor': 'darktrace', 'cpe_product': 'darktrace',
+     'description': 'AI Cyber Defense', 'website_url': 'https://www.darktrace.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Palo Alto Networks', 'product_name': 'Cortex XDR', 'category': 'Security', 'subcategory': 'XDR',
+     'common_names': json.dumps(['cortex-xdr']), 'cpe_vendor': 'paloaltonetworks', 'cpe_product': 'cortex_xdr',
+     'description': 'Extended Detection and Response', 'website_url': 'https://www.paloaltonetworks.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Palo Alto Networks', 'product_name': 'Prisma Cloud', 'category': 'Security', 'subcategory': 'CNAPP',
+     'common_names': json.dumps(['prisma-cloud']), 'cpe_vendor': 'paloaltonetworks', 'cpe_product': 'prisma_cloud',
+     'description': 'Cloud Native Security', 'website_url': 'https://www.paloaltonetworks.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    # ==================== DEVELOPMENT & BUILD TOOLS ====================
+    {'vendor': 'Docker', 'product_name': 'Docker Compose', 'category': 'Containerization', 'subcategory': 'Container Orchestration',
+     'common_names': json.dumps(['docker-compose', 'compose']), 'cpe_vendor': 'docker', 'cpe_product': 'docker_compose',
+     'description': 'Multi-Container Applications', 'website_url': 'https://docs.docker.com/compose',
+     'typical_versions': json.dumps(['2.x']), 'is_popular': True},
+
+    {'vendor': 'Helm', 'product_name': 'Helm', 'category': 'Orchestration', 'subcategory': 'Package Manager',
+     'common_names': json.dumps(['helm']), 'cpe_vendor': 'helm', 'cpe_product': 'helm',
+     'description': 'Kubernetes Package Manager', 'website_url': 'https://helm.sh',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
+
+    {'vendor': 'Apache', 'product_name': 'Maven', 'category': 'Build Tools', 'subcategory': 'Java Build',
+     'common_names': json.dumps(['maven', 'mvn']), 'cpe_vendor': 'apache', 'cpe_product': 'maven',
+     'description': 'Java Build Tool', 'website_url': 'https://maven.apache.org',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
+
+    {'vendor': 'Gradle', 'product_name': 'Gradle', 'category': 'Build Tools', 'subcategory': 'Build Automation',
+     'common_names': json.dumps(['gradle']), 'cpe_vendor': 'gradle', 'cpe_product': 'gradle',
+     'description': 'Build Automation Tool', 'website_url': 'https://gradle.org',
+     'typical_versions': json.dumps(['7.x', '8.x']), 'is_popular': True},
+
+    {'vendor': 'npm', 'product_name': 'npm', 'category': 'Package Manager', 'subcategory': 'JavaScript',
+     'common_names': json.dumps(['npm']), 'cpe_vendor': 'npmjs', 'cpe_product': 'npm',
+     'description': 'Node Package Manager', 'website_url': 'https://www.npmjs.com',
+     'typical_versions': json.dumps(['9.x', '10.x']), 'is_popular': True},
+
+    {'vendor': 'pip', 'product_name': 'pip', 'category': 'Package Manager', 'subcategory': 'Python',
+     'common_names': json.dumps(['pip', 'pip3']), 'cpe_vendor': 'pypa', 'cpe_product': 'pip',
+     'description': 'Python Package Installer', 'website_url': 'https://pip.pypa.io',
+     'typical_versions': json.dumps(['23.x', '24.x']), 'is_popular': True},
+
+    # ==================== MORE ENTERPRISE SOFTWARE ====================
+    {'vendor': 'Workday', 'product_name': 'Workday', 'category': 'ERP', 'subcategory': 'HCM',
+     'common_names': json.dumps(['workday']), 'cpe_vendor': 'workday', 'cpe_product': 'workday',
+     'description': 'Enterprise Cloud Applications', 'website_url': 'https://www.workday.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Concur', 'product_name': 'SAP Concur', 'category': 'ERP', 'subcategory': 'Expense Management',
+     'common_names': json.dumps(['concur']), 'cpe_vendor': 'sap', 'cpe_product': 'concur',
+     'description': 'Travel and Expense Management', 'website_url': 'https://www.concur.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Tableau', 'product_name': 'Tableau', 'category': 'Analytics', 'subcategory': 'BI',
+     'common_names': json.dumps(['tableau']), 'cpe_vendor': 'tableau', 'cpe_product': 'tableau_server',
+     'description': 'Business Intelligence Platform', 'website_url': 'https://www.tableau.com',
+     'typical_versions': json.dumps(['2023.x', '2024.x']), 'is_popular': True},
+
+    {'vendor': 'Microsoft', 'product_name': 'Power BI', 'category': 'Analytics', 'subcategory': 'BI',
+     'common_names': json.dumps(['power-bi', 'powerbi']), 'cpe_vendor': 'microsoft', 'cpe_product': 'power_bi',
+     'description': 'Business Analytics Service', 'website_url': 'https://powerbi.microsoft.com',
+     'typical_versions': json.dumps(['Cloud', 'Desktop']), 'is_popular': True},
+
+    {'vendor': 'Snowflake', 'product_name': 'Snowflake', 'category': 'Database', 'subcategory': 'Data Warehouse',
+     'common_names': json.dumps(['snowflake']), 'cpe_vendor': 'snowflake', 'cpe_product': 'snowflake',
+     'description': 'Cloud Data Platform', 'website_url': 'https://www.snowflake.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Databricks', 'product_name': 'Databricks', 'category': 'Analytics', 'subcategory': 'Data Platform',
+     'common_names': json.dumps(['databricks']), 'cpe_vendor': 'databricks', 'cpe_product': 'databricks',
+     'description': 'Unified Analytics Platform', 'website_url': 'https://www.databricks.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    # ==================== ICS/SCADA ====================
+    {'vendor': 'Siemens', 'product_name': 'SIMATIC', 'category': 'ICS', 'subcategory': 'PLC',
+     'common_names': json.dumps(['simatic', 's7']), 'cpe_vendor': 'siemens', 'cpe_product': 'simatic',
+     'description': 'Industrial Automation', 'website_url': 'https://www.siemens.com',
+     'typical_versions': json.dumps(['Various']), 'is_popular': True},
+
+    {'vendor': 'Schneider Electric', 'product_name': 'Modicon', 'category': 'ICS', 'subcategory': 'PLC',
+     'common_names': json.dumps(['modicon']), 'cpe_vendor': 'schneider-electric', 'cpe_product': 'modicon',
+     'description': 'Programmable Logic Controller', 'website_url': 'https://www.se.com',
+     'typical_versions': json.dumps(['Various']), 'is_popular': True},
+
+    {'vendor': 'Rockwell Automation', 'product_name': 'ControlLogix', 'category': 'ICS', 'subcategory': 'PLC',
+     'common_names': json.dumps(['controllogix', 'allen-bradley']), 'cpe_vendor': 'rockwellautomation', 'cpe_product': 'controllogix',
+     'description': 'Programmable Automation Controller', 'website_url': 'https://www.rockwellautomation.com',
+     'typical_versions': json.dumps(['Various']), 'is_popular': True},
+
+    {'vendor': 'Honeywell', 'product_name': 'Experion PKS', 'category': 'ICS', 'subcategory': 'DCS',
+     'common_names': json.dumps(['experion']), 'cpe_vendor': 'honeywell', 'cpe_product': 'experion_pks',
+     'description': 'Distributed Control System', 'website_url': 'https://www.honeywell.com',
+     'typical_versions': json.dumps(['Various']), 'is_popular': True},
+
+    {'vendor': 'GE', 'product_name': 'iFIX', 'category': 'ICS', 'subcategory': 'SCADA/HMI',
+     'common_names': json.dumps(['ifix', 'ge-ifix']), 'cpe_vendor': 'ge', 'cpe_product': 'ifix',
+     'description': 'HMI/SCADA System', 'website_url': 'https://www.ge.com/digital',
+     'typical_versions': json.dumps(['6.x']), 'is_popular': True},
+
+    {'vendor': 'Inductive Automation', 'product_name': 'Ignition', 'category': 'ICS', 'subcategory': 'SCADA',
+     'common_names': json.dumps(['ignition']), 'cpe_vendor': 'inductiveautomation', 'cpe_product': 'ignition',
+     'description': 'Industrial Application Platform', 'website_url': 'https://inductiveautomation.com',
+     'typical_versions': json.dumps(['8.x']), 'is_popular': True},
+
+    # ==================== MORE CLOUD & VIRTUALIZATION ====================
+    {'vendor': 'Nutanix', 'product_name': 'AOS', 'category': 'Virtualization', 'subcategory': 'HCI',
+     'common_names': json.dumps(['nutanix', 'aos']), 'cpe_vendor': 'nutanix', 'cpe_product': 'aos',
+     'description': 'Hyper-Converged Infrastructure', 'website_url': 'https://www.nutanix.com',
+     'typical_versions': json.dumps(['6.x']), 'is_popular': True},
+
+    {'vendor': 'OpenStack', 'product_name': 'OpenStack', 'category': 'Cloud', 'subcategory': 'Private Cloud',
+     'common_names': json.dumps(['openstack']), 'cpe_vendor': 'openstack', 'cpe_product': 'openstack',
+     'description': 'Open Source Cloud Computing', 'website_url': 'https://www.openstack.org',
+     'typical_versions': json.dumps(['Zed', 'Antelope', 'Bobcat']), 'is_popular': True},
+
+    {'vendor': 'CloudFoundry', 'product_name': 'Cloud Foundry', 'category': 'Cloud', 'subcategory': 'PaaS',
+     'common_names': json.dumps(['cloudfoundry', 'cf']), 'cpe_vendor': 'cloudfoundry', 'cpe_product': 'cloud_foundry',
+     'description': 'Cloud Application Platform', 'website_url': 'https://www.cloudfoundry.org',
+     'typical_versions': json.dumps(['Various']), 'is_popular': False},
+
+    # ==================== MORE REMOTE ACCESS ====================
+    {'vendor': 'TeamViewer', 'product_name': 'TeamViewer', 'category': 'Remote Access', 'subcategory': 'Remote Desktop',
+     'common_names': json.dumps(['teamviewer']), 'cpe_vendor': 'teamviewer', 'cpe_product': 'teamviewer',
+     'description': 'Remote Desktop Software', 'website_url': 'https://www.teamviewer.com',
+     'typical_versions': json.dumps(['15.x']), 'is_popular': True},
+
+    {'vendor': 'AnyDesk', 'product_name': 'AnyDesk', 'category': 'Remote Access', 'subcategory': 'Remote Desktop',
+     'common_names': json.dumps(['anydesk']), 'cpe_vendor': 'anydesk', 'cpe_product': 'anydesk',
+     'description': 'Remote Desktop Application', 'website_url': 'https://anydesk.com',
+     'typical_versions': json.dumps(['7.x', '8.x']), 'is_popular': True},
+
+    {'vendor': 'BeyondTrust', 'product_name': 'Remote Support', 'category': 'Remote Access', 'subcategory': 'Enterprise Remote',
+     'common_names': json.dumps(['bomgar']), 'cpe_vendor': 'beyondtrust', 'cpe_product': 'remote_support',
+     'description': 'Enterprise Remote Support', 'website_url': 'https://www.beyondtrust.com',
+     'typical_versions': json.dumps(['23.x', '24.x']), 'is_popular': True},
+
+    {'vendor': 'Apache', 'product_name': 'Guacamole', 'category': 'Remote Access', 'subcategory': 'Remote Gateway',
+     'common_names': json.dumps(['guacamole']), 'cpe_vendor': 'apache', 'cpe_product': 'guacamole',
+     'description': 'Clientless Remote Desktop Gateway', 'website_url': 'https://guacamole.apache.org',
+     'typical_versions': json.dumps(['1.x']), 'is_popular': True},
+
+    # ==================== MORE OFFICE & PRODUCTIVITY ====================
+    {'vendor': 'Microsoft', 'product_name': 'Office 365', 'category': 'Productivity', 'subcategory': 'Office Suite',
+     'common_names': json.dumps(['office365', 'o365', 'microsoft365']), 'cpe_vendor': 'microsoft', 'cpe_product': 'office_365',
+     'description': 'Cloud Productivity Suite', 'website_url': 'https://www.microsoft.com/microsoft-365',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Microsoft', 'product_name': 'SharePoint', 'category': 'Collaboration', 'subcategory': 'Document Management',
+     'common_names': json.dumps(['sharepoint']), 'cpe_vendor': 'microsoft', 'cpe_product': 'sharepoint_server',
+     'description': 'Enterprise Content Management', 'website_url': 'https://www.microsoft.com/sharepoint',
+     'typical_versions': json.dumps(['2016', '2019', 'Online']), 'is_popular': True},
+
+    {'vendor': 'Microsoft', 'product_name': 'OneDrive', 'category': 'File Sharing', 'subcategory': 'Cloud Storage',
+     'common_names': json.dumps(['onedrive']), 'cpe_vendor': 'microsoft', 'cpe_product': 'onedrive',
+     'description': 'Cloud File Storage', 'website_url': 'https://www.microsoft.com/onedrive',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Google', 'product_name': 'Google Workspace', 'category': 'Productivity', 'subcategory': 'Office Suite',
+     'common_names': json.dumps(['gsuite', 'google-workspace']), 'cpe_vendor': 'google', 'cpe_product': 'workspace',
+     'description': 'Cloud Productivity Suite', 'website_url': 'https://workspace.google.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    # ==================== AUTHENTICATION & SSO ====================
+    {'vendor': 'Microsoft', 'product_name': 'ADFS', 'category': 'IAM', 'subcategory': 'Federation',
+     'common_names': json.dumps(['adfs']), 'cpe_vendor': 'microsoft', 'cpe_product': 'active_directory_federation_services',
+     'description': 'Active Directory Federation Services', 'website_url': 'https://docs.microsoft.com/windows-server/identity/ad-fs',
+     'typical_versions': json.dumps(['Server 2016', 'Server 2019', 'Server 2022']), 'is_popular': True},
+
+    {'vendor': 'Duo Security', 'product_name': 'Duo', 'category': 'IAM', 'subcategory': 'MFA',
+     'common_names': json.dumps(['duo']), 'cpe_vendor': 'cisco', 'cpe_product': 'duo',
+     'description': 'Multi-Factor Authentication', 'website_url': 'https://duo.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'RSA', 'product_name': 'SecurID', 'category': 'IAM', 'subcategory': 'MFA',
+     'common_names': json.dumps(['securid', 'rsa']), 'cpe_vendor': 'rsa', 'cpe_product': 'securid',
+     'description': 'Two-Factor Authentication', 'website_url': 'https://www.rsa.com',
+     'typical_versions': json.dumps(['8.x']), 'is_popular': True},
+
+    {'vendor': 'Auth0', 'product_name': 'Auth0', 'category': 'IAM', 'subcategory': 'Identity Platform',
+     'common_names': json.dumps(['auth0']), 'cpe_vendor': 'auth0', 'cpe_product': 'auth0',
+     'description': 'Identity Platform', 'website_url': 'https://auth0.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    # ==================== ADDITIONAL DATABASES ====================
+    {'vendor': 'SAP', 'product_name': 'HANA', 'category': 'Database', 'subcategory': 'In-Memory',
+     'common_names': json.dumps(['hana', 'sap-hana']), 'cpe_vendor': 'sap', 'cpe_product': 'hana',
+     'description': 'In-Memory Database', 'website_url': 'https://www.sap.com/products/hana.html',
+     'typical_versions': json.dumps(['2.0']), 'is_popular': True},
+
+    {'vendor': 'Percona', 'product_name': 'Percona Server', 'category': 'Database', 'subcategory': 'MySQL Fork',
+     'common_names': json.dumps(['percona']), 'cpe_vendor': 'percona', 'cpe_product': 'percona_server',
+     'description': 'Enhanced MySQL Server', 'website_url': 'https://www.percona.com',
+     'typical_versions': json.dumps(['8.x']), 'is_popular': False},
+
+    {'vendor': 'Cockroach Labs', 'product_name': 'CockroachDB', 'category': 'Database', 'subcategory': 'Distributed SQL',
+     'common_names': json.dumps(['cockroachdb']), 'cpe_vendor': 'cockroachlabs', 'cpe_product': 'cockroachdb',
+     'description': 'Distributed SQL Database', 'website_url': 'https://www.cockroachlabs.com',
+     'typical_versions': json.dumps(['23.x', '24.x']), 'is_popular': False},
+
+    {'vendor': 'Neo4j', 'product_name': 'Neo4j', 'category': 'Database', 'subcategory': 'Graph Database',
+     'common_names': json.dumps(['neo4j']), 'cpe_vendor': 'neo4j', 'cpe_product': 'neo4j',
+     'description': 'Graph Database Platform', 'website_url': 'https://neo4j.com',
+     'typical_versions': json.dumps(['4.x', '5.x']), 'is_popular': True},
+
+    {'vendor': 'ClickHouse', 'product_name': 'ClickHouse', 'category': 'Database', 'subcategory': 'OLAP',
+     'common_names': json.dumps(['clickhouse']), 'cpe_vendor': 'clickhouse', 'cpe_product': 'clickhouse',
+     'description': 'Column-Oriented OLAP Database', 'website_url': 'https://clickhouse.com',
+     'typical_versions': json.dumps(['23.x', '24.x']), 'is_popular': True},
+
+    # ==================== ADDITIONAL COMMON SOFTWARE ====================
+    {'vendor': 'Atlassian', 'product_name': 'Bamboo', 'category': 'CI/CD', 'subcategory': 'Build Server',
+     'common_names': json.dumps(['bamboo']), 'cpe_vendor': 'atlassian', 'cpe_product': 'bamboo',
+     'description': 'Continuous Integration Server', 'website_url': 'https://www.atlassian.com/software/bamboo',
+     'typical_versions': json.dumps(['9.x']), 'is_popular': True},
+
+    {'vendor': 'Datadog', 'product_name': 'Datadog', 'category': 'Monitoring', 'subcategory': 'Cloud Monitoring',
+     'common_names': json.dumps(['datadog']), 'cpe_vendor': 'datadog', 'cpe_product': 'datadog',
+     'description': 'Cloud Monitoring Platform', 'website_url': 'https://www.datadoghq.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'New Relic', 'product_name': 'New Relic', 'category': 'Monitoring', 'subcategory': 'APM',
+     'common_names': json.dumps(['newrelic']), 'cpe_vendor': 'newrelic', 'cpe_product': 'new_relic',
+     'description': 'Application Performance Monitoring', 'website_url': 'https://newrelic.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Dynatrace', 'product_name': 'Dynatrace', 'category': 'Monitoring', 'subcategory': 'APM',
+     'common_names': json.dumps(['dynatrace']), 'cpe_vendor': 'dynatrace', 'cpe_product': 'dynatrace',
+     'description': 'Software Intelligence Platform', 'website_url': 'https://www.dynatrace.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'PagerDuty', 'product_name': 'PagerDuty', 'category': 'Operations', 'subcategory': 'Incident Management',
+     'common_names': json.dumps(['pagerduty']), 'cpe_vendor': 'pagerduty', 'cpe_product': 'pagerduty',
+     'description': 'Digital Operations Management', 'website_url': 'https://www.pagerduty.com',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Opsgenie', 'product_name': 'Opsgenie', 'category': 'Operations', 'subcategory': 'Incident Management',
+     'common_names': json.dumps(['opsgenie']), 'cpe_vendor': 'atlassian', 'cpe_product': 'opsgenie',
+     'description': 'Alert and Incident Management', 'website_url': 'https://www.atlassian.com/software/opsgenie',
+     'typical_versions': json.dumps(['Cloud']), 'is_popular': True},
+
+    {'vendor': 'Apache', 'product_name': 'ZooKeeper', 'category': 'Infrastructure', 'subcategory': 'Coordination',
+     'common_names': json.dumps(['zookeeper']), 'cpe_vendor': 'apache', 'cpe_product': 'zookeeper',
+     'description': 'Distributed Coordination Service', 'website_url': 'https://zookeeper.apache.org',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
+
+    {'vendor': 'etcd', 'product_name': 'etcd', 'category': 'Infrastructure', 'subcategory': 'Key-Value Store',
+     'common_names': json.dumps(['etcd']), 'cpe_vendor': 'etcd-io', 'cpe_product': 'etcd',
+     'description': 'Distributed Key-Value Store', 'website_url': 'https://etcd.io',
+     'typical_versions': json.dumps(['3.x']), 'is_popular': True},
 ]
 
 def seed_catalog():

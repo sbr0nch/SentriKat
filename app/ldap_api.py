@@ -4,7 +4,7 @@ Handles LDAP user discovery, invitation, and group management
 """
 
 from flask import Blueprint, request, jsonify, session
-from app import db
+from app import db, csrf
 from app.models import User
 from app.auth import admin_required, org_admin_required
 from app.ldap_manager import LDAPManager
@@ -13,6 +13,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 ldap_bp = Blueprint('ldap', __name__, url_prefix='/api/ldap')
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(ldap_bp)
 
 
 # ============================================================================
@@ -94,6 +97,46 @@ def get_user_ldap_groups(username):
     return jsonify(result)
 
 
+@ldap_bp.route('/user-groups', methods=['POST'])
+@org_admin_required
+def get_user_ldap_groups_post():
+    """
+    Get LDAP groups for a specific user (POST version)
+
+    Body:
+    {
+        "username": "jdoe"
+    }
+
+    Permissions:
+    - Super Admin: Can view any user's groups
+    - Org Admin: Can view users in their organization
+    """
+    current_user = get_current_user()
+    if not can_manage_ldap_users(current_user):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    data = request.get_json()
+    username = data.get('username')
+
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+
+    # Check if user exists and permissions
+    user = User.query.filter_by(username=username).first()
+    if user and current_user.role == 'org_admin':
+        # Org admins can only view users in their organization
+        if user.organization_id != current_user.organization_id:
+            return jsonify({'error': 'Cannot view users from other organizations'}), 403
+
+    result = LDAPManager.get_user_groups(username)
+
+    if not result['success']:
+        return jsonify(result), 400
+
+    return jsonify(result)
+
+
 # ============================================================================
 # LDAP User Invitation
 # ============================================================================
@@ -136,18 +179,14 @@ def invite_ldap_user():
         return jsonify({'error': 'Username, email, and organization_id are required'}), 400
 
     # Permission check for organization assignment
-    if current_user.role == 'org_admin':
-        # Org admins can only invite to their own organization
+    if not current_user.is_super_admin():
+        # Non-super-admins can only invite to their own organization
         if organization_id != current_user.organization_id:
-            return jsonify({'error': 'Org admins can only invite users to their own organization'}), 403
+            return jsonify({'error': 'You can only invite users to your own organization'}), 403
 
-        # Org admins cannot create super_admins
-        if role == 'super_admin':
-            return jsonify({'error': 'Org admins cannot create super admins'}), 403
-
-    # Only super admins can create super_admins and org_admins
-    if role in ['super_admin', 'org_admin'] and current_user.role != 'super_admin':
-        return jsonify({'error': 'Only super admins can create admin users'}), 403
+        # Only super admins can create super_admins and org_admins
+        if role in ['super_admin', 'org_admin']:
+            return jsonify({'error': 'Only super admins can create admin users'}), 403
 
     result = LDAPManager.invite_ldap_user(
         username=username,
@@ -235,8 +274,8 @@ def bulk_invite_ldap_users():
     if not users_data or not organization_id:
         return jsonify({'error': 'Users list and organization_id are required'}), 400
 
-    # Permission check
-    if current_user.role == 'org_admin':
+    # Permission check - non-super-admins have restrictions
+    if not current_user.is_super_admin():
         if organization_id != current_user.organization_id:
             return jsonify({'error': 'Org admins can only invite to their own organization'}), 403
         if role in ['super_admin', 'org_admin']:

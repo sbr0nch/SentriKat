@@ -11,7 +11,7 @@ def download_cisa_kev():
     """Download CISA KEV JSON feed"""
     try:
         proxies = Config.get_proxies()
-        verify_ssl = Config.VERIFY_SSL
+        verify_ssl = Config.get_verify_ssl()  # GUI settings > .env settings
 
         # Suppress SSL warnings if verification is disabled
         if not verify_ssl:

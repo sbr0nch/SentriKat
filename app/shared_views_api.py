@@ -4,14 +4,18 @@ Endpoints for creating and accessing shared filtered views
 """
 
 from flask import Blueprint, request, jsonify, session, redirect, url_for
-from app import db
+from app import db, csrf
 from app.models import User
 from app.shared_views import SharedView
 from app.auth import login_required
+from config import Config
 from datetime import datetime, timedelta
 import json
 
 shared_views_bp = Blueprint('shared_views', __name__, url_prefix='/api/shared')
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(shared_views_bp)
 
 @shared_views_bp.route('/create', methods=['POST'])
 @login_required
@@ -33,6 +37,11 @@ def create_shared_view():
         "expires_days": 30  # Optional, null for no expiration
     }
     """
+    import time
+    from app.logging_config import log_performance, log_audit_event
+
+    start_time = time.time()
+
     try:
         data = request.get_json()
         current_user_id = session.get('user_id')
@@ -43,10 +52,20 @@ def create_shared_view():
 
         filters = data.get('filters', {})
 
-        # Generate unique token
-        token = SharedView.generate_token()
-        while SharedView.query.filter_by(share_token=token).first():
-            token = SharedView.generate_token()
+        # Generate unique token (more efficient with retry limit)
+        max_retries = 10
+        token = None
+        for attempt in range(max_retries):
+            candidate_token = SharedView.generate_token()
+            # Use EXISTS for faster check (doesn't fetch the whole row)
+            if not db.session.query(
+                db.exists().where(SharedView.share_token == candidate_token)
+            ).scalar():
+                token = candidate_token
+                break
+
+        if not token:
+            return jsonify({'error': 'Failed to generate unique token, please try again'}), 500
 
         # Calculate expiration
         expires_at = None
@@ -76,7 +95,27 @@ def create_shared_view():
         db.session.add(shared_view)
         db.session.commit()
 
-        share_url = request.host_url.rstrip('/') + shared_view.get_share_url()
+        # Use configured SENTRIKAT_URL or fall back to request host
+        base_url = Config.SENTRIKAT_URL or request.host_url.rstrip('/')
+        share_url = base_url + shared_view.get_share_url()
+
+        # Log audit event
+        log_audit_event(
+            'CREATE',
+            'shared_views',
+            shared_view.id,
+            new_value={
+                'name': shared_view.name,
+                'filters': filters,
+                'is_public': shared_view.is_public
+            },
+            details=f"Created shared view: {shared_view.name}"
+        )
+
+        # Log performance if slow
+        duration_ms = (time.time() - start_time) * 1000
+        if duration_ms > 1000:
+            log_performance('/api/shared/create', duration_ms)
 
         return jsonify({
             'success': True,
@@ -87,6 +126,8 @@ def create_shared_view():
 
     except Exception as e:
         db.session.rollback()
+        import logging
+        logging.error(f"Error creating shared view: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
