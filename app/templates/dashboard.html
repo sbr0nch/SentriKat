@@ -1051,8 +1051,10 @@
 
     function updateBulkActions() {
         const count = selectedVulns.size;
-        document.getElementById('selectedCount').textContent = count;
-        document.getElementById('bulkAckBtn').disabled = count === 0;
+        const selectedCountEl = document.getElementById('selectedCount');
+        const bulkAckBtnEl = document.getElementById('bulkAckBtn');
+        if (selectedCountEl) selectedCountEl.textContent = count;
+        if (bulkAckBtnEl) bulkAckBtnEl.disabled = count === 0;
     }
 
     async function bulkAcknowledge() {
