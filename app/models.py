@@ -444,12 +444,12 @@ class User(db.Model):
         return check_password_hash(self.password_hash, password)
 
     def is_super_admin(self):
-        """Check if user is a super admin"""
-        return self.role == 'super_admin' or (self.is_admin and self.can_view_all_orgs)
+        """Check if user is a super admin - only role-based, not legacy flags"""
+        return self.role == 'super_admin'
 
     def is_org_admin(self):
         """Check if user is an organization admin"""
-        return self.role in ['super_admin', 'org_admin'] or self.is_admin
+        return self.role in ['super_admin', 'org_admin']
 
     def can_manage_organization(self, org_id):
         """Check if user can manage a specific organization"""
