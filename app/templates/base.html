@@ -1178,11 +1178,13 @@
                                     <i class="bi bi-building me-2"></i>Organizations
                                 </a>
                             </li>
+                            {% if current_user and current_user.is_super_admin() %}
                             <li>
                                 <a class="dropdown-item" href="#" onclick="switchToAdminTab('settings'); return false;">
                                     <i class="bi bi-sliders me-2"></i>Settings
                                 </a>
                             </li>
+                            {% endif %}
                         </ul>
                     </div>
 
