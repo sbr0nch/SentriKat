@@ -377,6 +377,7 @@
         <div class="tab-pane fade" id="settings" role="tabpanel">
             <!-- Settings Sub-Tabs -->
             <ul class="nav nav-pills mb-4" id="settingsTabs" role="tablist">
+                {% if current_user and current_user.is_super_admin() %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="ldap-settings-tab" data-bs-toggle="pill" data-bs-target="#ldapSettings" type="button">
                         <i class="bi bi-diagram-3 me-2"></i>LDAP / Active Directory
@@ -387,20 +388,30 @@
                         <i class="bi bi-envelope me-2"></i>Global SMTP
                     </button>
                 </li>
+                {% else %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="smtp-settings-tab" data-bs-toggle="pill" data-bs-target="#smtpSettings" type="button">
+                        <i class="bi bi-envelope me-2"></i>Global SMTP
+                    </button>
+                </li>
+                {% endif %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="sync-settings-tab" data-bs-toggle="pill" data-bs-target="#syncSettings" type="button">
                         <i class="bi bi-arrow-clockwise me-2"></i>Sync Schedule
                     </button>
                 </li>
+                {% if current_user and current_user.is_super_admin() %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="general-settings-tab" data-bs-toggle="pill" data-bs-target="#generalSettings" type="button">
                         <i class="bi bi-sliders me-2"></i>General
                     </button>
                 </li>
+                {% endif %}
             </ul>
 
             <div class="tab-content" id="settingsTabContent">
-                <!-- LDAP Settings -->
+                {% if current_user and current_user.is_super_admin() %}
+                <!-- LDAP Settings (Super Admin Only) -->
                 <div class="tab-pane fade show active" id="ldapSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
@@ -543,9 +554,10 @@
                         </div>
                     </div>
                 </div>
+                {% endif %}
 
                 <!-- Global SMTP Settings -->
-                <div class="tab-pane fade" id="smtpSettings" role="tabpanel">
+                <div class="tab-pane fade {% if not current_user or not current_user.is_super_admin() %}show active{% endif %}" id="smtpSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
                             <i class="bi bi-envelope me-2"></i>Global SMTP Configuration
@@ -718,7 +730,8 @@
                     </div>
                 </div>
 
-                <!-- General Settings -->
+                {% if current_user and current_user.is_super_admin() %}
+                <!-- General Settings (Super Admin Only) -->
                 <div class="tab-pane fade" id="generalSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
@@ -770,6 +783,7 @@
                         </div>
                     </div>
                 </div>
+                {% endif %}
             </div>
         </div>
     </div>

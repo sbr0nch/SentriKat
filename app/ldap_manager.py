@@ -342,7 +342,32 @@ class LDAPManager:
 
                     return {'success': True, 'message': result_message, 'user': existing_user.to_dict(), 'email_sent': email_sent}
                 else:
-                    return {'success': False, 'error': f'User {username} already exists and is active'}
+                    # User is active - check if they're already in the target organization
+                    if existing_user.organization_id == organization_id:
+                        return {'success': False, 'error': f'User {username} already exists in this organization'}
+                    elif existing_user.has_access_to_org(organization_id):
+                        return {'success': False, 'error': f'User {username} already has access to this organization'}
+                    else:
+                        # Add user to the new organization as secondary membership
+                        from flask import session
+                        current_user_id = session.get('user_id')
+                        existing_user.add_to_organization(organization_id, role, current_user_id)
+                        db.session.commit()
+
+                        log_audit_event(
+                            'ADD_ORG_MEMBERSHIP',
+                            'users',
+                            existing_user.id,
+                            new_value={'organization_id': organization_id, 'role': role},
+                            details=f"Added {username} to organization via LDAP invite"
+                        )
+
+                        return {
+                            'success': True,
+                            'message': f'User {username} already exists. Added to organization with role: {role}',
+                            'user': existing_user.to_dict(),
+                            'added_to_org': True
+                        }
 
             # Create new LDAP user
             user = User(
