@@ -311,7 +311,14 @@ def api_login():
     elif user.auth_type == 'ldap':
         # LDAP authentication
         try:
-            if not authenticate_ldap(user, password):
+            auth_result = authenticate_ldap(user, password)
+            if auth_result is not True:
+                # auth_result contains error details if it's a dict
+                if isinstance(auth_result, dict):
+                    return jsonify({
+                        'error': 'Invalid LDAP credentials',
+                        'detail': auth_result.get('detail', 'Unknown error')
+                    }), 401
                 return jsonify({'error': 'Invalid LDAP credentials'}), 401
         except Exception as e:
             return jsonify({'error': f'LDAP authentication failed: {str(e)}'}), 500
@@ -448,7 +455,10 @@ def authenticate_ldap(user, password):
 
         if not search_conn.entries:
             search_conn.unbind()
-            return False
+            return {
+                'success': False,
+                'detail': f'User "{user.username}" not found in LDAP. Check if username matches AD sAMAccountName.'
+            }
 
         # Get user's DN (works with both AD and OpenLDAP)
         user_entry = search_conn.entries[0]
@@ -465,7 +475,10 @@ def authenticate_ldap(user, password):
         user_conn = Connection(server, user=user_dn, password=password, authentication=SIMPLE)
 
         if not user_conn.bind():
-            return False
+            return {
+                'success': False,
+                'detail': f'Password verification failed for DN: {user_dn}. Check password or AD account status (locked/disabled).'
+            }
 
         user_conn.unbind()
         return True
