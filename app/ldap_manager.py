@@ -73,17 +73,40 @@ class LDAPManager:
                 # Get all users
                 search_filter = "(objectClass=person)"
 
-            # Search LDAP
+            # Search LDAP with paged search to handle large directories
+            # Active Directory often limits results - use paged search to bypass
             conn.search(
                 search_base=config['base_dn'],
                 search_filter=search_filter,
                 search_scope=ldap3.SUBTREE,
                 attributes=[config['username_attr'], config['email_attr'], 'cn', 'displayName', 'memberOf'],
-                size_limit=max_results
+                paged_size=500,  # Fetch 500 at a time
+                size_limit=0  # 0 = no limit, let server decide
             )
 
             users = []
-            for entry in conn.entries:
+            # Collect all results from paged search
+            all_entries = list(conn.entries)
+
+            # Handle paged results - continue fetching if there are more pages
+            cookie = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {}).get('value', {}).get('cookie')
+            while cookie:
+                conn.search(
+                    search_base=config['base_dn'],
+                    search_filter=search_filter,
+                    search_scope=ldap3.SUBTREE,
+                    attributes=[config['username_attr'], config['email_attr'], 'cn', 'displayName', 'memberOf'],
+                    paged_size=500,
+                    paged_cookie=cookie
+                )
+                all_entries.extend(conn.entries)
+                cookie = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {}).get('value', {}).get('cookie')
+                # Stop if we've reached max_results
+                if max_results > 0 and len(all_entries) >= max_results:
+                    all_entries = all_entries[:max_results]
+                    break
+
+            for entry in all_entries:
                 try:
                     username = str(entry[config['username_attr']].value) if entry[config['username_attr']] else None
                     email = str(entry[config['email_attr']].value) if entry[config['email_attr']] else None

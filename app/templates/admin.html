@@ -46,23 +46,44 @@
     </div>
 
     <div class="card">
-        <div class="card-header">
+        <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-list-ul me-2"></i>Product Inventory</span>
+            <div class="column-visibility-controls">
+                <span class="text-muted small me-2">Show columns:</span>
+                <label class="column-toggle active" data-column="vendor">
+                    <input type="checkbox" checked onchange="toggleColumn('vendor', this.checked)"> Vendor
+                </label>
+                <label class="column-toggle active" data-column="product">
+                    <input type="checkbox" checked onchange="toggleColumn('product', this.checked)"> Product
+                </label>
+                <label class="column-toggle active" data-column="version">
+                    <input type="checkbox" checked onchange="toggleColumn('version', this.checked)"> Version
+                </label>
+                <label class="column-toggle active" data-column="organization">
+                    <input type="checkbox" checked onchange="toggleColumn('organization', this.checked)"> Org
+                </label>
+                <label class="column-toggle active" data-column="criticality">
+                    <input type="checkbox" checked onchange="toggleColumn('criticality', this.checked)"> Criticality
+                </label>
+                <label class="column-toggle active" data-column="status">
+                    <input type="checkbox" checked onchange="toggleColumn('status', this.checked)"> Status
+                </label>
+            </div>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover table-compact mb-0" id="productsTableContainer">
                     <thead>
                         <tr>
                             <th style="width: 40px;">
                                 <input type="checkbox" class="form-check-input" id="selectAllCheckbox" onchange="toggleSelectAll()">
                             </th>
-                            <th>Vendor</th>
-                            <th>Product</th>
-                            <th>Version</th>
-                            <th>Organization</th>
-                            <th>Criticality</th>
-                            <th>Status</th>
+                            <th data-column="vendor">Vendor</th>
+                            <th data-column="product">Product</th>
+                            <th data-column="version">Version</th>
+                            <th data-column="organization">Organization</th>
+                            <th data-column="criticality">Criticality</th>
+                            <th data-column="status">Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -372,12 +393,12 @@
                                        data-product-id="${product.id}"
                                        onchange="toggleProductSelect(${product.id}, this)">
                             </td>
-                            <td class="fw-semibold">${escapeHtml(product.vendor)}</td>
-                            <td>${escapeHtml(product.product_name)}</td>
-                            <td>${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
-                            <td>${orgDisplay}</td>
-                            <td>${criticalityBadge}</td>
-                            <td>${statusBadge}</td>
+                            <td data-column="vendor" class="fw-semibold">${escapeHtml(product.vendor)}</td>
+                            <td data-column="product">${escapeHtml(product.product_name)}</td>
+                            <td data-column="version">${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
+                            <td data-column="organization">${orgDisplay}</td>
+                            <td data-column="criticality">${criticalityBadge}</td>
+                            <td data-column="status">${statusBadge}</td>
                             <td onclick="event.stopPropagation();">
                                 <div class="d-flex gap-1">
                                     <button class="btn-action btn-action-edit" onclick="editProduct(${product.id})" title="Edit">
@@ -405,6 +426,8 @@
             `;
         } finally {
             hideLoading();
+            // Restore column visibility after loading
+            restoreColumnPrefs();
         }
     }
 
@@ -1285,8 +1308,41 @@
         }
     }
 
+    // Column visibility toggle
+    function toggleColumn(columnName, visible) {
+        const cells = document.querySelectorAll(`[data-column="${columnName}"]`);
+        cells.forEach(cell => {
+            cell.style.display = visible ? '' : 'none';
+        });
+
+        // Update toggle button state
+        const toggle = document.querySelector(`.column-toggle[data-column="${columnName}"]`);
+        if (toggle) {
+            toggle.classList.toggle('active', visible);
+        }
+
+        // Save preference to localStorage
+        const prefs = JSON.parse(localStorage.getItem('productColumnPrefs') || '{}');
+        prefs[columnName] = visible;
+        localStorage.setItem('productColumnPrefs', JSON.stringify(prefs));
+    }
+
+    // Restore column preferences from localStorage
+    function restoreColumnPrefs() {
+        const prefs = JSON.parse(localStorage.getItem('productColumnPrefs') || '{}');
+        Object.keys(prefs).forEach(columnName => {
+            const visible = prefs[columnName];
+            const checkbox = document.querySelector(`.column-toggle[data-column="${columnName}"] input`);
+            if (checkbox) {
+                checkbox.checked = visible;
+                toggleColumn(columnName, visible);
+            }
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         loadProducts();
+        restoreColumnPrefs();
     });
 </script>
 {% endblock %}

@@ -1657,7 +1657,7 @@ async function searchLdapUsersInline(page = 1) {
             const response = await fetch('/api/ldap/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: query })
+                body: JSON.stringify({ query: query, max_results: 1000 })
             });
 
             if (!response.ok) {
