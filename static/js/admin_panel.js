@@ -83,6 +83,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const auditLogTab = document.getElementById('audit-log-tab');
         if (auditLogTab) {
+            // Try both pill and tab events in case the tab type varies
+            auditLogTab.addEventListener('shown.bs.tab', function() {
+                loadAuditLogs();
+            });
             auditLogTab.addEventListener('shown.bs.pill', function() {
                 loadAuditLogs();
             });
@@ -1467,7 +1471,7 @@ async function loadLDAPUsersDefault() {
         const response = await fetch('/api/ldap/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: '*' })
+            body: JSON.stringify({ query: '*', max_results: 1000 })
         });
 
         if (!response.ok) {
@@ -1926,7 +1930,7 @@ async function searchLdapUsers() {
         const response = await fetch('/api/ldap/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: query })
+            body: JSON.stringify({ query: query, max_results: 1000 })
         });
 
         if (!response.ok) {
@@ -2737,7 +2741,7 @@ async function triggerManualSync() {
                             <small>Org Changes</small>
                         </div>
                         <div class="col-md-3">
-                            <h4 class="text-danger">${stats.errors || 0}</h4>
+                            <h4 class="text-danger">${typeof stats.errors === 'number' ? stats.errors : (Array.isArray(stats.errors) ? stats.errors.length : 0)}</h4>
                             <small>Errors</small>
                         </div>
                     </div>

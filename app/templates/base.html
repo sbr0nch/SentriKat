@@ -7,6 +7,11 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="/static/images/favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="/static/images/logo-192.png">
+    <link rel="manifest" href="/static/manifest.json">
     <style>
         /* Professional Corporate Color Scheme */
         :root {
@@ -240,6 +245,91 @@
 
         [data-theme="dark"] .copyright-notice a {
             color: var(--primary-light);
+        }
+
+        /* Dark mode alert cards */
+        [data-theme="dark"] .alert-card {
+            background: var(--surface-color) !important;
+        }
+
+        [data-theme="dark"] .alert-card-critical {
+            background: linear-gradient(135deg, rgba(220, 38, 38, 0.15) 0%, rgba(220, 38, 38, 0.25) 100%) !important;
+            border-color: rgba(220, 38, 38, 0.4);
+        }
+
+        [data-theme="dark"] .alert-card-high {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.25) 100%) !important;
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        [data-theme="dark"] .alert-card-medium {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.25) 100%) !important;
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+
+        [data-theme="dark"] .alert-card-low {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.25) 100%) !important;
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+
+        [data-theme="dark"] .alert-card-label,
+        [data-theme="dark"] .alert-card small {
+            color: var(--text-muted) !important;
+        }
+
+        /* Dark mode sync results */
+        [data-theme="dark"] .alert-success {
+            background-color: rgba(16, 185, 129, 0.15) !important;
+            border-color: rgba(16, 185, 129, 0.4) !important;
+            color: #6ee7b7 !important;
+        }
+
+        [data-theme="dark"] .alert-success .alert-heading,
+        [data-theme="dark"] .alert-success h4,
+        [data-theme="dark"] .alert-success h5 {
+            color: #6ee7b7 !important;
+        }
+
+        [data-theme="dark"] .alert-success small {
+            color: #a7f3d0 !important;
+        }
+
+        [data-theme="dark"] .alert-danger {
+            background-color: rgba(220, 38, 38, 0.15) !important;
+            border-color: rgba(220, 38, 38, 0.4) !important;
+            color: #fca5a5 !important;
+        }
+
+        [data-theme="dark"] .alert-warning {
+            background-color: rgba(245, 158, 11, 0.15) !important;
+            border-color: rgba(245, 158, 11, 0.4) !important;
+            color: #fcd34d !important;
+        }
+
+        [data-theme="dark"] .alert hr {
+            border-color: var(--border-color);
+        }
+
+        /* Dark mode table text */
+        [data-theme="dark"] td,
+        [data-theme="dark"] th {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .text-success {
+            color: #6ee7b7 !important;
+        }
+
+        [data-theme="dark"] .text-danger {
+            color: #fca5a5 !important;
+        }
+
+        [data-theme="dark"] .text-warning {
+            color: #fcd34d !important;
+        }
+
+        [data-theme="dark"] .text-primary {
+            color: var(--primary-light) !important;
         }
 
         * {
@@ -546,6 +636,76 @@
             background: #f9fafb;
             color: #6b7280;
             border: 1px solid #e5e7eb;
+        }
+
+        /* Dark mode badge overrides - high contrast versions */
+        [data-theme="dark"] .badge-role-super {
+            background: rgba(220, 38, 38, 0.2);
+            color: #fca5a5;
+            border-color: rgba(220, 38, 38, 0.4);
+        }
+
+        [data-theme="dark"] .badge-role-admin {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fcd34d;
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        [data-theme="dark"] .badge-role-manager {
+            background: rgba(59, 130, 246, 0.2);
+            color: #93c5fd;
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+
+        [data-theme="dark"] .badge-role-user {
+            background: rgba(107, 114, 128, 0.2);
+            color: #d1d5db;
+            border-color: rgba(107, 114, 128, 0.4);
+        }
+
+        [data-theme="dark"] .badge-auth-ldap {
+            background: rgba(16, 185, 129, 0.2);
+            color: #6ee7b7;
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+
+        [data-theme="dark"] .badge-auth-local {
+            background: rgba(100, 116, 139, 0.2);
+            color: #cbd5e1;
+            border-color: rgba(100, 116, 139, 0.4);
+        }
+
+        [data-theme="dark"] .badge-status-active {
+            background: rgba(16, 185, 129, 0.2);
+            color: #6ee7b7;
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+
+        [data-theme="dark"] .badge-status-inactive {
+            background: rgba(107, 114, 128, 0.2);
+            color: #9ca3af;
+            border-color: rgba(107, 114, 128, 0.4);
+        }
+
+        /* Status LED indicator */
+        .status-led {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-led-green {
+            background: #10b981;
+            box-shadow: 0 0 6px #10b981;
+        }
+        .status-led-red {
+            background: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+        }
+        .status-led-yellow {
+            background: #f59e0b;
+            box-shadow: 0 0 6px #f59e0b;
         }
 
         /* Priority Badges */
@@ -886,6 +1046,11 @@
                     <i class="bi bi-shield-lock-fill"></i>
                     <span>SentriKat</span>
                 </a>
+                <!-- CVE Service Status Indicator -->
+                <div class="d-flex align-items-center ms-3" id="cveServiceStatus" title="CVE Service Status">
+                    <span class="status-led status-led-yellow" id="cveStatusLed"></span>
+                    <small class="text-muted" id="cveStatusText">Checking...</small>
+                </div>
                 <div class="d-flex align-items-center gap-3">
                     <a class="nav-link {{ 'active' if request.endpoint == 'main.index' else '' }}" href="/">
                         <i class="bi bi-grid-fill"></i> Dashboard
@@ -1153,6 +1318,49 @@
             bsToast.show();
             toast.addEventListener('hidden.bs.toast', () => toast.remove());
         }
+
+        /**
+         * Check CVE service status and update the status indicator
+         */
+        async function checkCVEServiceStatus() {
+            const led = document.getElementById('cveStatusLed');
+            const text = document.getElementById('cveStatusText');
+
+            if (!led || !text) return;
+
+            try {
+                const response = await fetch('/api/cve-service/status');
+                const data = await response.json();
+
+                // Remove all status classes
+                led.classList.remove('status-led-green', 'status-led-red', 'status-led-yellow');
+
+                if (data.status === 'online') {
+                    led.classList.add('status-led-green');
+                    text.textContent = 'NVD Online';
+                    text.title = 'CVE service is accessible';
+                } else if (data.status === 'rate_limited') {
+                    led.classList.add('status-led-yellow');
+                    text.textContent = 'Rate Limited';
+                    text.title = 'NVD API is rate limited - try again later';
+                } else {
+                    led.classList.add('status-led-red');
+                    text.textContent = 'NVD Offline';
+                    text.title = data.message || 'Cannot connect to CVE service';
+                }
+            } catch (error) {
+                led.classList.remove('status-led-green', 'status-led-red', 'status-led-yellow');
+                led.classList.add('status-led-red');
+                text.textContent = 'Error';
+                text.title = 'Failed to check CVE service status';
+            }
+        }
+
+        // Check CVE status on page load and every 5 minutes
+        document.addEventListener('DOMContentLoaded', function() {
+            checkCVEServiceStatus();
+            setInterval(checkCVEServiceStatus, 300000); // 5 minutes
+        });
 
         /**
          * Shows a confirmation modal dialog (replacement for confirm())

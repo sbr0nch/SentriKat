@@ -1561,6 +1561,72 @@ def get_audit_logs():
     })
 
 # ============================================================================
+# CVE SERVICE STATUS CHECK
+# ============================================================================
+
+@bp.route('/api/cve-service/status', methods=['GET'])
+@login_required
+def check_cve_service_status():
+    """
+    Check if the CVE/NVD service is accessible
+    Returns status of connection to NIST NVD API
+    """
+    import requests
+    from config import Config
+    import urllib3
+
+    try:
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        # Try to reach the NVD API
+        response = requests.get(
+            'https://services.nvd.nist.gov/rest/json/cves/2.0',
+            params={'resultsPerPage': 1},
+            timeout=10,
+            proxies=proxies,
+            verify=verify_ssl
+        )
+
+        if response.status_code == 200:
+            return jsonify({
+                'status': 'online',
+                'message': 'NVD service is accessible',
+                'response_code': response.status_code
+            })
+        elif response.status_code == 403:
+            return jsonify({
+                'status': 'rate_limited',
+                'message': 'NVD API rate limited',
+                'response_code': response.status_code
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'NVD returned status {response.status_code}',
+                'response_code': response.status_code
+            })
+
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'timeout',
+            'message': 'Connection to NVD timed out'
+        })
+    except requests.exceptions.ConnectionError as e:
+        return jsonify({
+            'status': 'offline',
+            'message': 'Cannot connect to NVD service'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+
+# ============================================================================
 # SESSION MANAGEMENT (Organization Switching)
 # ============================================================================
 
