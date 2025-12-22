@@ -4,7 +4,7 @@ REST endpoints for managing LDAP group mappings and synchronization
 """
 
 from flask import Blueprint, request, jsonify, session
-from app import db
+from app import db, csrf
 from app.models import User, Organization
 from app.ldap_models import LDAPGroupMapping, LDAPSyncLog, LDAPAuditLog
 from app.ldap_manager import LDAPManager
@@ -14,6 +14,9 @@ from datetime import datetime
 import json
 
 ldap_group_bp = Blueprint('ldap_groups', __name__, url_prefix='/api/ldap/groups')
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(ldap_group_bp)
 
 
 # ============================================================================

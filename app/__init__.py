@@ -1,10 +1,16 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from config import Config
+import os
 
 db = SQLAlchemy()
 migrate = Migrate()
+csrf = CSRFProtect()
+limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
 
 def create_app(config_class=Config):
     app = Flask(__name__,
@@ -14,6 +20,24 @@ def create_app(config_class=Config):
 
     db.init_app(app)
     migrate.init_app(app, db)
+    csrf.init_app(app)
+    limiter.init_app(app)
+
+    # Security headers via Talisman (only in production with HTTPS)
+    if os.environ.get('FLASK_ENV') == 'production':
+        from flask_talisman import Talisman
+        Talisman(app,
+            force_https=True,
+            strict_transport_security=True,
+            strict_transport_security_max_age=31536000,
+            content_security_policy={
+                'default-src': "'self'",
+                'script-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
+                'style-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
+                'img-src': ["'self'", "data:"],
+                'font-src': ["'self'", "cdn.jsdelivr.net"],
+            }
+        )
 
     # Setup comprehensive logging with rotation
     from app.logging_config import setup_logging

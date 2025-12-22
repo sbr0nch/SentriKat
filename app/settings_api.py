@@ -4,13 +4,16 @@ Handles LDAP, SMTP, Sync, and General system settings
 """
 
 from flask import Blueprint, request, jsonify, session
-from app import db
+from app import db, csrf
 from app.models import SystemSettings, User, Vulnerability, SyncLog
 from app.auth import admin_required
 import json
 from datetime import datetime
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/api/settings')
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(settings_bp)
 
 # ============================================================================
 # Helper Functions

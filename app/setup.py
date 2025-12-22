@@ -4,12 +4,15 @@ Provides a GUI-based setup process for initial configuration
 """
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
-from app import db
+from app import db, csrf
 from app.models import Organization, User, ServiceCatalog
 from app.cisa_sync import sync_cisa_kev
 import os
 
 setup_bp = Blueprint('setup', __name__)
+
+# Exempt setup routes from CSRF (initial setup before auth is configured)
+csrf.exempt(setup_bp)
 
 def is_setup_complete():
     """Check if initial setup has been completed"""

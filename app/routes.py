@@ -1,13 +1,54 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
-from app import db
+from app import db, csrf
 from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required, org_admin_required, manager_required
 import json
+import re
 
 bp = Blueprint('main', __name__)
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(bp)
+
+
+def validate_email(email):
+    """Validate email format"""
+    if not email:
+        return False
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+
+def validate_username(username):
+    """Validate username format - alphanumeric, underscore, dash, 3-50 chars"""
+    if not username:
+        return False
+    pattern = r'^[a-zA-Z0-9_-]{3,50}$'
+    return re.match(pattern, username) is not None
+
+
+def validate_password_strength(password):
+    """
+    Validate password meets security requirements:
+    - At least 12 characters
+    - Contains uppercase and lowercase
+    - Contains digit
+    - Contains special character
+    """
+    if not password or len(password) < 12:
+        return False, "Password must be at least 12 characters"
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    if not re.search(r'[0-9]', password):
+        return False, "Password must contain at least one digit"
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        return False, "Password must contain at least one special character"
+    return True, None
 
 @bp.route('/')
 @login_required
@@ -1106,13 +1147,22 @@ def create_user():
     """Create a new user (local auth only - LDAP users must be discovered/invited)"""
     data = request.get_json()
 
+    # Validate required fields
     if not data.get('username') or not data.get('email'):
         return jsonify({'error': 'Username and email are required'}), 400
+
+    # Validate username format
+    if not validate_username(data['username']):
+        return jsonify({'error': 'Invalid username format. Use 3-50 alphanumeric characters, underscores, or dashes'}), 400
+
+    # Validate email format
+    if not validate_email(data['email']):
+        return jsonify({'error': 'Invalid email format'}), 400
 
     # Prevent direct LDAP user creation - LDAP users should be discovered/invited
     auth_type = data.get('auth_type', 'local')
     if auth_type == 'ldap':
-        return jsonify({'error': 'Cannot create LDAP users directly. LDAP users must be discovered and invited through LDAP authentication.'}), 400
+        return jsonify({'error': 'Cannot create LDAP users directly. Use LDAP discovery instead.'}), 400
 
     # Check if username or email already exists
     existing = User.query.filter(
@@ -1125,13 +1175,24 @@ def create_user():
     if not data.get('password'):
         return jsonify({'error': 'Password is required for local users'}), 400
 
+    # Validate password strength
+    is_valid, error_msg = validate_password_strength(data['password'])
+    if not is_valid:
+        return jsonify({'error': error_msg}), 400
+
+    # Validate role
+    valid_roles = ['user', 'manager', 'org_admin', 'super_admin']
+    role = data.get('role', 'user')
+    if role not in valid_roles:
+        return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
+
     user = User(
         username=data['username'],
         email=data['email'],
-        full_name=data.get('full_name'),
+        full_name=data.get('full_name', '')[:100],  # Limit length
         organization_id=data.get('organization_id'),
         auth_type='local',  # Force local auth for created users
-        role=data.get('role', 'user'),
+        role=role,
         is_admin=data.get('is_admin', False),
         is_active=data.get('is_active', True),
         can_manage_products=data.get('can_manage_products', True),
@@ -1954,22 +2015,3 @@ def switch_organization(org_id):
 
     session['organization_id'] = org_id
     return jsonify({'success': True, 'organization': org.to_dict()})
-
-
-# TEMPORARY: Direct login bypass for testing
-@bp.route('/debug-login-admin')
-def debug_login_admin():
-    """TEMPORARY endpoint to bypass login issues - REMOVE IN PRODUCTION"""
-    import os
-    if os.environ.get('DISABLE_DEBUG_LOGIN', 'false').lower() == 'true':
-        return jsonify({'error': 'Debug login is disabled'}), 403
-    
-    admin = User.query.filter_by(username='admin').first()
-    if admin:
-        session.clear()
-        session['user_id'] = admin.id
-        session['username'] = admin.username
-        session['organization_id'] = admin.organization_id
-        session.permanent = True
-        return redirect(url_for('main.index'))
-    return jsonify({'error': 'Admin user not found'}), 404

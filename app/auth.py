@@ -5,12 +5,15 @@ Authentication is ENABLED by default for security
 
 from functools import wraps
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, flash
-from app import db
+from app import db, csrf, limiter
 from app.models import User, Organization
 from datetime import datetime
 import os
 
 auth_bp = Blueprint('auth', __name__)
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(auth_bp)
 
 # Authentication is ALWAYS enabled by default (security requirement)
 # Only disable for testing with DISABLE_AUTH=true (NOT recommended)
@@ -114,16 +117,7 @@ def manager_required(f):
                 f"(role={user.role}, is_admin={user.is_admin}) from {request.remote_addr}"
             )
             if request.is_json or request.path.startswith('/api/'):
-                return jsonify({
-                    'error': 'Manager privileges required',
-                    'debug': {
-                        'user': user.username,
-                        'role': user.role,
-                        'is_admin': user.is_admin,
-                        'can_manage_products': user.can_manage_products,
-                        'required': 'manager, org_admin, or super_admin'
-                    }
-                }), 403
+                return jsonify({'error': 'Insufficient privileges'}), 403
             return redirect(url_for('main.index'))
 
         return f(*args, **kwargs)
@@ -284,6 +278,7 @@ def api_setup():
 
 
 @auth_bp.route('/api/auth/login', methods=['POST'])
+@limiter.limit("5 per minute")  # Prevent brute force attacks
 def api_login():
     """Handle login via API"""
     import logging
@@ -297,12 +292,6 @@ def api_login():
     password = data.get('password')
 
     logger.info(f"Login attempt for username: {username} from {request.remote_addr}")
-
-    # Log password hash for debugging (to verify same password across attempts)
-    if password:
-        import hashlib
-        pwd_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()[:16]
-        logger.info(f"Login: Password hash (first 16 chars): {pwd_hash}, length: {len(password)}")
 
     if not username or not password:
         logger.warning(f"Login failed: missing username or password from {request.remote_addr}")
@@ -339,20 +328,13 @@ def api_login():
             if auth_result is not True:
                 # auth_result contains error details if it's a dict
                 if isinstance(auth_result, dict):
-                    response = {
-                        'error': 'Invalid LDAP credentials',
-                        'detail': auth_result.get('detail', 'Unknown error')
-                    }
-                    # Include LDAP error details for debugging
-                    if 'ldap_error' in auth_result:
-                        response['ldap_error'] = auth_result['ldap_error']
-                    return jsonify(response), 401
-                return jsonify({'error': 'Invalid LDAP credentials'}), 401
+                    return jsonify({
+                        'error': auth_result.get('detail', 'Invalid credentials')
+                    }), 401
+                return jsonify({'error': 'Invalid credentials'}), 401
         except Exception as e:
-            import logging
-            logger = logging.getLogger('security')
-            logger.exception(f"LDAP authentication exception for {username}")
-            return jsonify({'error': f'LDAP authentication failed: {str(e)}'}), 500
+            logger.exception(f"LDAP authentication error for {username}")
+            return jsonify({'error': 'Authentication service unavailable'}), 500
 
     else:
         logger.error(f"Login failed: unknown auth_type '{user.auth_type}' for user {username}")
@@ -430,13 +412,7 @@ def authenticate_ldap(user, password):
     # Refresh user from database to ensure we have current data
     db.session.refresh(user)
 
-    logger.info(f"LDAP: Starting authentication for user {user.username} (id={user.id}, auth_type={user.auth_type})")
-    logger.info(f"LDAP: User active={user.is_active}, organization_id={user.organization_id}")
-    logger.info(f"LDAP: Password length: {len(password) if password else 0}, contains special chars: {any(not c.isalnum() for c in password) if password else False}")
-    # Log password hash for debugging (to verify same password across attempts)
-    import hashlib
-    pwd_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()[:16] if password else 'none'
-    logger.info(f"LDAP: Password hash (first 16 chars): {pwd_hash}")
+    logger.info(f"LDAP: Starting authentication for user {user.username} (id={user.id})")
 
     # LDAP configuration from database (GUI settings)
     from app.models import SystemSettings
@@ -494,10 +470,13 @@ def authenticate_ldap(user, password):
 
         # Step 2: Search for user by username
         import logging
+        from ldap3.utils.conv import escape_filter_chars
         logger = logging.getLogger('security')
 
-        search_filter = search_filter_template.replace('{username}', user.username)
-        logger.info(f"LDAP: Searching for user {user.username} with filter: {search_filter}")
+        # Escape username to prevent LDAP injection attacks
+        safe_username = escape_filter_chars(user.username)
+        search_filter = search_filter_template.replace('{username}', safe_username)
+        logger.info(f"LDAP: Searching for user {user.username}")
 
         search_conn.search(
             search_base=base_dn,
@@ -525,15 +504,10 @@ def authenticate_ldap(user, password):
         user_entry = search_conn.entries[0]
         user_dn = str(user_entry.entry_dn)
 
-        logger.info(f"LDAP: Found user {user.username}, DN: {user_dn}")
-        logger.info(f"LDAP: DN bytes: {user_dn.encode('utf-8')}")
-        logger.info(f"LDAP: Stored DN in database: {user.ldap_dn}")
-        if user.ldap_dn:
-            logger.info(f"LDAP: Stored DN bytes: {user.ldap_dn.encode('utf-8')}")
+        logger.info(f"LDAP: Found user {user.username}")
 
         # Update user's LDAP DN in database if not set or changed
         if user.ldap_dn != user_dn:
-            logger.info(f"LDAP: Updating stored DN from '{user.ldap_dn}' to '{user_dn}'")
             user.ldap_dn = user_dn
             db.session.commit()
 
@@ -547,7 +521,7 @@ def authenticate_ldap(user, password):
         user_conn = Connection(server, user=user_dn, password=password, authentication=SIMPLE)
 
         if not user_conn.bind():
-            # Capture detailed LDAP error information
+            # Log detailed LDAP error information server-side only
             ldap_result = user_conn.result
             result_code = ldap_result.get('result', 'unknown')
             result_desc = ldap_result.get('description', 'unknown')
@@ -555,45 +529,26 @@ def authenticate_ldap(user, password):
 
             logger.error(
                 f"LDAP bind failed for {user.username}: "
-                f"result_code={result_code}, description={result_desc}, message={result_msg}, "
-                f"DN={user_dn}"
+                f"code={result_code}, desc={result_desc}, msg={result_msg}"
             )
 
-            # Build detailed error message based on LDAP error code
-            error_details = f'Password verification failed for DN: {user_dn}.'
-
-            # Common LDAP error codes
+            # Return generic error to client (details are in server logs)
+            # Determine user-friendly message based on error code
             if result_code == 49:
-                # Invalid credentials - check sub-error in message
-                if '52e' in str(result_msg).lower() or 'invalid credentials' in str(result_desc).lower():
-                    error_details += ' Invalid username or password.'
-                elif '530' in str(result_msg):
-                    error_details += ' Account not permitted to logon at this time.'
-                elif '531' in str(result_msg):
-                    error_details += ' Account not permitted to logon at this workstation.'
-                elif '532' in str(result_msg):
-                    error_details += ' Password has expired.'
-                elif '533' in str(result_msg):
-                    error_details += ' Account disabled.'
-                elif '701' in str(result_msg):
-                    error_details += ' Account expired.'
-                elif '773' in str(result_msg):
-                    error_details += ' User must reset password.'
+                if '533' in str(result_msg):
+                    user_message = 'Account is disabled'
                 elif '775' in str(result_msg):
-                    error_details += ' Account locked out.'
+                    user_message = 'Account is locked'
+                elif '532' in str(result_msg) or '773' in str(result_msg):
+                    user_message = 'Password expired or must be changed'
                 else:
-                    error_details += f' LDAP error: {result_desc}. {result_msg}'
+                    user_message = 'Invalid credentials'
             else:
-                error_details += f' LDAP result: {result_code} - {result_desc}. {result_msg}'
+                user_message = 'Authentication failed'
 
             return {
                 'success': False,
-                'detail': error_details,
-                'ldap_error': {
-                    'code': result_code,
-                    'description': result_desc,
-                    'message': result_msg
-                }
+                'detail': user_message
             }
 
         logger.info(f"LDAP: Successful bind for {user.username}")

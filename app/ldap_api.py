@@ -4,7 +4,7 @@ Handles LDAP user discovery, invitation, and group management
 """
 
 from flask import Blueprint, request, jsonify, session
-from app import db
+from app import db, csrf
 from app.models import User
 from app.auth import admin_required, org_admin_required
 from app.ldap_manager import LDAPManager
@@ -13,6 +13,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 ldap_bp = Blueprint('ldap', __name__, url_prefix='/api/ldap')
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(ldap_bp)
 
 
 # ============================================================================

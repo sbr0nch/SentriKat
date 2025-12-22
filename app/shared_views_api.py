@@ -4,7 +4,7 @@ Endpoints for creating and accessing shared filtered views
 """
 
 from flask import Blueprint, request, jsonify, session, redirect, url_for
-from app import db
+from app import db, csrf
 from app.models import User
 from app.shared_views import SharedView
 from app.auth import login_required
@@ -13,6 +13,9 @@ from datetime import datetime, timedelta
 import json
 
 shared_views_bp = Blueprint('shared_views', __name__, url_prefix='/api/shared')
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(shared_views_bp)
 
 @shared_views_bp.route('/create', methods=['POST'])
 @login_required

@@ -3,7 +3,14 @@ from datetime import timedelta
 
 class Config:
     """Application configuration"""
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
+    # Secret key for session signing - MUST be set in production
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    if not SECRET_KEY:
+        import warnings
+        if os.environ.get('FLASK_ENV') == 'production':
+            raise ValueError("SECRET_KEY environment variable must be set in production!")
+        warnings.warn("SECRET_KEY not set - using insecure default for development only")
+        SECRET_KEY = 'dev-secret-key-change-in-production'
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///sentrikat.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
@@ -29,12 +36,12 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file upload
 
     # Security settings
-    # Only use secure cookies if explicitly enabled (for HTTPS deployments)
-    # Set SESSION_COOKIE_SECURE=true in .env when using HTTPS
-    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
+    # Secure cookies - default to true for production security
+    # Set SESSION_COOKIE_SECURE=false only for local HTTP development
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'true').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = 'Lax'
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
+    SESSION_COOKIE_SAMESITE = 'Strict'  # Strict provides better CSRF protection
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=4)  # Reduced from 8 hours for security
 
     # SSL Certificate Verification
     # WARNING: Disabling SSL verification is a security risk!
