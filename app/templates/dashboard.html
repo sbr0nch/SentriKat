@@ -45,7 +45,7 @@
     }
 
     .alert-card-label {
-        font-size: 0.7rem;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.03em;
@@ -54,7 +54,7 @@
     }
 
     .alert-card-value {
-        font-size: 1.75rem;
+        font-size: 2rem;
         font-weight: 700;
         line-height: 1;
         margin-bottom: 0.15rem;
@@ -80,7 +80,7 @@
     }
 
     .stat-label-sm {
-        font-size: 0.65rem;
+        font-size: 0.7rem;
         font-weight: 600;
         color: #6b7280;
         letter-spacing: 0.02em;
@@ -88,10 +88,24 @@
     }
 
     .stat-value-sm {
-        font-size: 1.5rem;
+        font-size: 1.75rem;
         font-weight: 700;
         line-height: 1.1;
         margin-bottom: 0.1rem;
+    }
+
+    /* Compact Filters */
+    .filters-compact .form-label {
+        font-size: 0.7rem;
+        margin-bottom: 0.25rem;
+    }
+    .filters-compact .form-select,
+    .filters-compact .form-control {
+        font-size: 0.8rem;
+        padding: 0.3rem 0.5rem;
+    }
+    .filters-compact .form-check-label {
+        font-size: 0.8rem;
     }
 
     .stat-icon-sm {
@@ -101,6 +115,26 @@
         transform: translateY(-50%);
         font-size: 1.25rem;
         opacity: 0.15;
+    }
+
+    /* CVE Card Scroll Performance Optimizations */
+    #vulnerabilitiesContainer {
+        contain: layout style;
+    }
+
+    .vuln-card {
+        content-visibility: auto;
+        contain-intrinsic-size: 0 350px;
+        contain: layout style paint;
+    }
+
+    .vuln-card .card-body {
+        will-change: auto;
+    }
+
+    /* Reduce paint complexity */
+    .vuln-card .badge {
+        will-change: auto;
     }
 </style>
 <div class="fade-in">
@@ -211,114 +245,81 @@
     </div>
 
     <!-- Advanced Filters Panel -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-funnel me-2"></i>Advanced Filters</span>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetFilters()">
+    <div class="card mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-funnel me-2"></i>Filters</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="resetFilters()">
                 <i class="bi bi-arrow-counterclockwise"></i> Reset
             </button>
         </div>
-        <div class="card-body">
-            <div class="row g-3">
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Priority Level</label>
+        <div class="card-body py-2 filters-compact">
+            <div class="row g-2">
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Priority</label>
                     <select class="form-select" id="filterPriority">
-                        <option value="">All Priorities</option>
-                        <option value="critical">Critical Only</option>
-                        <option value="high">High & Above</option>
-                        <option value="medium">Medium & Above</option>
-                        <option value="low">Low & Above</option>
+                        <option value="">All</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High+</option>
+                        <option value="medium">Medium+</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">CVE Severity (CVSS)</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Severity</label>
                     <select class="form-select" id="filterSeverity">
-                        <option value="">All Severities</option>
-                        <option value="CRITICAL">Critical (CVSS 9.0-10.0)</option>
-                        <option value="HIGH">High (CVSS 7.0-8.9)</option>
-                        <option value="MEDIUM">Medium (CVSS 4.0-6.9)</option>
-                        <option value="LOW">Low (CVSS 0.1-3.9)</option>
+                        <option value="">All</option>
+                        <option value="CRITICAL">Critical</option>
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">CISA Urgency</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Urgency</label>
                     <select class="form-select" id="filterUrgency">
-                        <option value="">All Urgency Levels</option>
-                        <option value="critical">Critical - Due ≤7 Days</option>
-                        <option value="high">High - Due ≤30 Days</option>
-                        <option value="has_due_date">Has Due Date</option>
+                        <option value="">All</option>
+                        <option value="critical">≤7 Days</option>
+                        <option value="high">≤30 Days</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">CVE Age</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Age</label>
                     <select class="form-select" id="filterAge">
-                        <option value="">All Ages</option>
-                        <option value="30">Last 30 Days</option>
-                        <option value="90">Last 90 Days</option>
-                        <option value="180">Last 6 Months</option>
+                        <option value="">All</option>
+                        <option value="30">30 Days</option>
+                        <option value="90">90 Days</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">CVE ID</label>
-                    <input type="text" class="form-control" id="filterCVE" placeholder="e.g., CVE-2024-1234">
+                <div class="col-6 col-md-2">
+                    <label class="form-label">CVE ID</label>
+                    <input type="text" class="form-control" id="filterCVE" placeholder="CVE-...">
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Vendor</label>
-                    <input type="text" class="form-control" id="filterVendor" placeholder="e.g., Microsoft">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Product</label>
-                    <input type="text" class="form-control" id="filterProduct" placeholder="e.g., Windows">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Sort By</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Sort</label>
                     <select class="form-select" id="sortBy">
-                        <option value="priority">Priority (Highest First)</option>
-                        <option value="date_desc">Date Added (Newest)</option>
-                        <option value="date_asc">Date Added (Oldest)</option>
-                        <option value="cve_desc">CVE ID (Desc)</option>
-                        <option value="cve_asc">CVE ID (Asc)</option>
+                        <option value="priority">Priority</option>
+                        <option value="date_desc">Newest</option>
+                        <option value="date_asc">Oldest</option>
                     </select>
                 </div>
-                <div class="col-md-12">
-                    <div class="d-flex gap-3 flex-wrap">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="filterRansomware">
-                            <label class="form-check-label fw-semibold" for="filterRansomware">
-                                <i class="bi bi-shield-exclamation text-danger"></i> Ransomware Only
-                            </label>
-                        </div>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="filterUnack">
-                            <label class="form-check-label fw-semibold" for="filterUnack">
-                                <i class="bi bi-circle text-warning"></i> Unacknowledged Only
-                            </label>
-                        </div>
-                    </div>
+                <div class="col-md-3">
+                    <label class="form-label">Vendor</label>
+                    <input type="text" class="form-control" id="filterVendor" placeholder="Microsoft">
                 </div>
-                <div class="col-md-12">
-                    <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-primary" onclick="loadVulnerabilities()">
-                            <i class="bi bi-search"></i> Apply Filters
-                        </button>
-                        <button type="button" class="btn btn-info" onclick="shareFilteredView()">
-                            <i class="bi bi-share"></i> Share Filtered View
-                        </button>
-                        <div class="dropdown export-dropdown">
-                            <button class="btn btn-success dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                                <i class="bi bi-download"></i> Export
-                            </button>
-                            <ul class="dropdown-menu">
-                                <li><a class="dropdown-item" href="#" onclick="exportData('csv')">
-                                    <i class="bi bi-filetype-csv"></i> Export as CSV
-                                </a></li>
-                                <li><a class="dropdown-item" href="#" onclick="exportData('json')">
-                                    <i class="bi bi-filetype-json"></i> Export as JSON
-                                </a></li>
-                            </ul>
+                <div class="col-md-3">
+                    <label class="form-label">Product</label>
+                    <input type="text" class="form-control" id="filterProduct" placeholder="Windows">
+                </div>
+                <div class="col-md-6">
+                    <div class="d-flex gap-3 align-items-center h-100">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="filterRansomware">
+                            <label class="form-check-label" for="filterRansomware">Ransomware</label>
                         </div>
-                        <button class="btn btn-outline-secondary" onclick="bulkAcknowledge()" id="bulkAckBtn" disabled>
-                            <i class="bi bi-check-all"></i> Bulk Acknowledge (<span id="selectedCount">0</span>)
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="filterUnack">
+                            <label class="form-check-label" for="filterUnack">Unacknowledged</label>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary" onclick="loadVulnerabilities()">
+                            <i class="bi bi-search"></i> Apply
                         </button>
                     </div>
                 </div>
@@ -334,7 +335,7 @@
                 <!-- Export Report Dropdown -->
                 <div class="dropdown">
                     <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Export Report">
-                        <i class="bi bi-file-earmark-pdf"></i>
+                        <i class="bi bi-file-earmark-pdf me-1"></i>Export
                     </button>
                     <div class="dropdown-menu dropdown-menu-end p-3" style="min-width: 280px;">
                         <h6 class="dropdown-header px-0">Export PDF Report</h6>
@@ -696,7 +697,20 @@
         const endIdx = Math.min(startIdx + effectivePageSize, total);
         const pageItems = currentVulnerabilities.slice(startIdx, endIdx);
 
-        container.innerHTML = pageItems.map(match => createVulnCard(match)).join('');
+        // Use requestAnimationFrame for smoother rendering
+        requestAnimationFrame(() => {
+            // Build HTML in chunks to prevent blocking
+            const fragment = document.createDocumentFragment();
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = pageItems.map(match => createVulnCard(match)).join('');
+
+            while (tempDiv.firstChild) {
+                fragment.appendChild(tempDiv.firstChild);
+            }
+
+            container.innerHTML = '';
+            container.appendChild(fragment);
+        });
 
         // Update pagination info and controls
         const paginationControls = document.getElementById('paginationControls');
@@ -1250,8 +1264,7 @@
     document.getElementById('sortBy').addEventListener('change', function() {
         if (currentVulnerabilities.length > 0) {
             sortVulnerabilities();
-            document.getElementById('vulnerabilitiesContainer').innerHTML =
-                currentVulnerabilities.map(match => createVulnCard(match)).join('');
+            renderCurrentPage();
         }
     });
 
