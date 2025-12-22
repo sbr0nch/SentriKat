@@ -944,15 +944,21 @@ def update_user(user_id):
     - Super Admin: Can update any user
     - Org Admin: Can only update users in their organization (except super admins)
     """
+    from app.logging_config import log_audit_event
+
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
 
-    # Check permissions
-    if not current_user.can_manage_user(user):
+    # Check permissions (self-modification is always allowed for admins)
+    is_self_edit = user_id == current_user_id
+    if not is_self_edit and not current_user.can_manage_user(user):
         return jsonify({'error': 'Insufficient permissions to manage this user'}), 403
 
     data = request.get_json()
+    old_role = user.role
+    old_org_id = user.organization_id
+    warnings = []
 
     # Username update (only for super admins and must be unique)
     if 'username' in data and data['username'] != user.username:
@@ -979,12 +985,26 @@ def update_user(user_id):
     # Role changes
     if 'role' in data:
         new_role = data['role']
+
+        # Prevent demoting the last super_admin
+        if old_role == 'super_admin' and new_role != 'super_admin':
+            super_admin_count = User.query.filter_by(role='super_admin', is_active=True).count()
+            if super_admin_count <= 1 and user.role == 'super_admin':
+                return jsonify({'error': 'Cannot demote the last super admin. Create another super admin first.'}), 400
+
         # Only super admins can create/modify super_admins
         if new_role == 'super_admin' and not current_user.is_super_admin():
             return jsonify({'error': 'Only super admins can create super admin users'}), 403
-        # Org admins cannot set org_admin or super_admin roles
+
+        # Org admins cannot set org_admin or super_admin roles (except for themselves - they can demote)
         if current_user.role == 'org_admin' and new_role in ['super_admin', 'org_admin']:
-            return jsonify({'error': 'Org admins cannot create admin users'}), 403
+            if not is_self_edit:  # Org admins can demote themselves but not promote others
+                return jsonify({'error': 'Org admins cannot create admin users'}), 403
+
+        # Self-demotion warning
+        if is_self_edit and old_role == 'super_admin' and new_role != 'super_admin':
+            warnings.append(f'You have demoted yourself from super_admin to {new_role}. You may lose access to some admin features.')
+
         user.role = new_role
 
     if 'is_admin' in data:
@@ -1004,7 +1024,30 @@ def update_user(user_id):
 
     db.session.commit()
 
-    return jsonify(user.to_dict())
+    # Log audit event if role changed
+    if old_role != user.role:
+        log_audit_event(
+            'ROLE_CHANGE',
+            'users',
+            user.id,
+            old_value={'role': old_role},
+            new_value={'role': user.role},
+            details=f"Role changed from {old_role} to {user.role} by {current_user.username}"
+        )
+
+        # Send email notification for role change
+        try:
+            from app.email_alerts import send_role_change_email
+            send_role_change_email(user, old_role, user.role, current_user.username)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to send role change email: {e}")
+
+    result = user.to_dict()
+    if warnings:
+        result['warnings'] = warnings
+
+    return jsonify(result)
 
 @bp.route('/api/users/<int:user_id>', methods=['DELETE'])
 @admin_required

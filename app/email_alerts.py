@@ -922,3 +922,179 @@ def _build_user_status_email_html(user, organization, is_blocked, blocked_by_use
 """
 
     return html
+
+
+# ============================================================================
+# User Role Change Email
+# ============================================================================
+
+def send_role_change_email(user, old_role, new_role, changed_by_username=None):
+    """
+    Send email notification when a user's role changes
+
+    Args:
+        user: User object whose role changed
+        old_role: Previous role
+        new_role: New role
+        changed_by_username: Username of admin who made the change
+
+    Returns:
+        tuple: (success: bool, details: str) - success status and details message
+    """
+    from app.models import Organization, SystemSettings
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get user's organization
+        organization = Organization.query.get(user.organization_id)
+        if not organization:
+            msg = f"No organization found for user {user.username}"
+            logger.warning(msg)
+            return False, msg
+
+        # Try organization SMTP first, then fall back to global SMTP
+        smtp_config = organization.get_smtp_config()
+        smtp_source = "organization"
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            smtp_source = "global"
+            def get_setting(key, default=None):
+                setting = SystemSettings.query.filter_by(key=key).first()
+                return setting.value if setting else default
+
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587') or '587'),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat')
+            }
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            msg = "No SMTP configured (neither org nor global)"
+            logger.warning(f"{msg} - cannot send role change email to {user.email}")
+            return False, msg
+
+        subject = f"SentriKat Role Changed - {organization.display_name}"
+        html_body = _build_role_change_email_html(user, organization, old_role, new_role, changed_by_username)
+
+        logger.info(f"Sending role change email to {user.email} via {smtp_source} SMTP")
+
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=[user.email],
+            subject=subject,
+            html_body=html_body
+        )
+
+        msg = f"Email sent via {smtp_source} SMTP to {user.email}"
+        logger.info(msg)
+        return True, msg
+
+    except Exception as e:
+        import traceback
+        logger = logging.getLogger(__name__)
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"Failed to send role change email to {user.email}: {error_detail}")
+        logger.error(traceback.format_exc())
+        return False, error_detail
+
+
+def _build_role_change_email_html(user, organization, old_role, new_role, changed_by_username=None):
+    """Build HTML email for role change notification"""
+    from datetime import datetime
+
+    role_descriptions = {
+        'super_admin': 'Super Administrator - Full system access across all organizations',
+        'org_admin': 'Organization Administrator - Full access within your organization',
+        'manager': 'Manager - Can manage products and view vulnerabilities',
+        'user': 'User - View-only access to vulnerabilities'
+    }
+
+    is_promotion = _role_level(new_role) > _role_level(old_role)
+    status_color = "#10b981" if is_promotion else "#f59e0b"  # Green for promotion, amber for demotion
+    status_icon = "⬆️" if is_promotion else "⬇️"
+    status_text = "Promoted" if is_promotion else "Changed"
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, {status_color} 0%, {status_color}dd 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">{status_icon} Role {status_text}</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">Your permissions have been updated</p>
+        </div>
+
+        <div style="background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <p style="color: #374151; font-size: 16px; line-height: 1.6;">
+                Hello <strong>{user.full_name or user.username}</strong>,
+            </p>
+
+            <p style="color: #374151; font-size: 16px; line-height: 1.6;">
+                Your role in <strong>{organization.display_name}</strong> has been changed:
+            </p>
+
+            <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <div style="margin-bottom: 15px;">
+                    <div style="display: inline-block; width: 45%;">
+                        <div style="color: #6b7280; font-size: 12px; text-transform: uppercase; margin-bottom: 5px;">Previous Role</div>
+                        <div style="color: #374151; font-size: 16px; font-weight: 600;">{old_role.replace('_', ' ').title()}</div>
+                    </div>
+                    <div style="display: inline-block; width: 8%; text-align: center; color: #9ca3af;">→</div>
+                    <div style="display: inline-block; width: 45%;">
+                        <div style="color: #6b7280; font-size: 12px; text-transform: uppercase; margin-bottom: 5px;">New Role</div>
+                        <div style="color: {status_color}; font-size: 16px; font-weight: 600;">{new_role.replace('_', ' ').title()}</div>
+                    </div>
+                </div>
+
+                <div style="border-top: 1px solid #e5e7eb; padding-top: 15px; margin-top: 15px;">
+                    <div style="color: #6b7280; font-size: 14px;">
+                        <strong>New permissions:</strong> {role_descriptions.get(new_role, new_role)}
+                    </div>
+                </div>
+            </div>
+
+            <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <div style="margin-bottom: 8px;">
+                    <strong>Changed by:</strong> {changed_by_username or 'System'}
+                </div>
+                <div>
+                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </div>
+            </div>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                If you did not expect this change or have questions, please contact your administrator.
+            </p>
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>This is an automated message from SentriKat</p>
+            <p>© {datetime.now().year} {organization.display_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    return html
+
+
+def _role_level(role):
+    """Get numeric level for a role (higher = more permissions)"""
+    levels = {
+        'user': 1,
+        'manager': 2,
+        'org_admin': 3,
+        'super_admin': 4
+    }
+    return levels.get(role, 0)
