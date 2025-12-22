@@ -81,17 +81,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        const auditLogTab = document.getElementById('audit-log-tab');
-        if (auditLogTab) {
-            // Try both pill and tab events in case the tab type varies
-            auditLogTab.addEventListener('shown.bs.tab', function() {
-                loadAuditLogs();
-            });
-            auditLogTab.addEventListener('shown.bs.pill', function() {
-                loadAuditLogs();
-            });
-        }
-
         // Load sync status immediately (doesn't require settings to be configured)
         loadSyncStatus();
 

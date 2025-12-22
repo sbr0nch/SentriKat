@@ -1046,11 +1046,6 @@
                     <i class="bi bi-shield-lock-fill"></i>
                     <span>SentriKat</span>
                 </a>
-                <!-- CVE Service Status Indicator -->
-                <div class="d-flex align-items-center ms-3" id="cveServiceStatus" title="CVE Service Status">
-                    <span class="status-led status-led-yellow" id="cveStatusLed"></span>
-                    <small class="text-muted" id="cveStatusText">Checking...</small>
-                </div>
                 <div class="d-flex align-items-center gap-3">
                     <a class="nav-link {{ 'active' if request.endpoint == 'main.index' else '' }}" href="/">
                         <i class="bi bi-grid-fill"></i> Dashboard
@@ -1170,12 +1165,21 @@
     <!-- Footer -->
     <footer class="app-footer">
         <div class="container-fluid px-4">
-            <p class="mb-1">
-                <strong>SentriKat</strong> - Enterprise Vulnerability Management Platform
-            </p>
-            <p class="copyright-notice mb-0">
-                Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
-            </p>
+            <div class="d-flex justify-content-between align-items-center flex-wrap">
+                <div>
+                    <p class="mb-1">
+                        <strong>SentriKat</strong> - Enterprise Vulnerability Management Platform
+                    </p>
+                    <p class="copyright-notice mb-0">
+                        Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
+                    </p>
+                </div>
+                <!-- CVE Service Status Indicator -->
+                <div class="d-flex align-items-center" id="cveServiceStatus" title="CVE Service Status">
+                    <span class="status-led status-led-yellow" id="cveStatusLed"></span>
+                    <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
+                </div>
+            </div>
         </div>
     </footer>
 
