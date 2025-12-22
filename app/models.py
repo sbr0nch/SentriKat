@@ -122,12 +122,24 @@ class Organization(db.Model):
         }
 
     def get_smtp_config(self):
-        """Return SMTP configuration dictionary"""
+        """Return SMTP configuration dictionary with decrypted password"""
+        password = self.smtp_password
+
+        # Decrypt password if it's encrypted
+        if password:
+            try:
+                from app.encryption import decrypt_value, is_encrypted
+                if is_encrypted(password):
+                    password = decrypt_value(password)
+            except Exception:
+                # If decryption fails, return raw value (might be legacy plaintext)
+                pass
+
         return {
             'host': self.smtp_host,
             'port': self.smtp_port,
             'username': self.smtp_username,
-            'password': self.smtp_password,
+            'password': password,
             'use_tls': self.smtp_use_tls,
             'use_ssl': self.smtp_use_ssl,
             'from_email': self.smtp_from_email,

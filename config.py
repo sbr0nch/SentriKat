@@ -11,6 +11,12 @@ class Config:
             raise ValueError("SECRET_KEY environment variable must be set in production!")
         warnings.warn("SECRET_KEY not set - using insecure default for development only")
         SECRET_KEY = 'dev-secret-key-change-in-production'
+
+    # Encryption key for sensitive data (LDAP password, SMTP password, etc.)
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # MUST be set in production to encrypt/decrypt sensitive settings
+    ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY')
+
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///sentrikat.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 

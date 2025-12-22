@@ -7,8 +7,12 @@ from flask import Blueprint, request, jsonify, session
 from app import db, csrf
 from app.models import SystemSettings, User, Vulnerability, SyncLog
 from app.auth import admin_required
+from app.encryption import encrypt_value, decrypt_value
 import json
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/api/settings')
 
@@ -20,23 +24,51 @@ csrf.exempt(settings_bp)
 # ============================================================================
 
 def get_setting(key, default=None):
-    """Get a setting value from database"""
+    """
+    Get a setting value from database.
+    Automatically decrypts values marked as encrypted.
+    """
     setting = SystemSettings.query.filter_by(key=key).first()
-    return setting.value if setting else default
+    if not setting:
+        return default
+
+    # Decrypt if the setting is marked as encrypted
+    if setting.is_encrypted and setting.value:
+        try:
+            return decrypt_value(setting.value)
+        except Exception as e:
+            logger.error(f"Failed to decrypt setting '{key}': {type(e).__name__}")
+            # Return the raw value - might be legacy plaintext
+            return setting.value
+
+    return setting.value
 
 def set_setting(key, value, category, description=None, is_encrypted=False):
-    """Set a setting value in database"""
+    """
+    Set a setting value in database.
+    Encrypts the value if is_encrypted=True.
+    """
     user_id = session.get('user_id')
+
+    # Encrypt the value if required
+    stored_value = value
+    if is_encrypted and value:
+        try:
+            stored_value = encrypt_value(value)
+        except Exception as e:
+            logger.error(f"Failed to encrypt setting '{key}': {type(e).__name__}")
+            raise
 
     setting = SystemSettings.query.filter_by(key=key).first()
     if setting:
-        setting.value = value
+        setting.value = stored_value
+        setting.is_encrypted = is_encrypted
         setting.updated_by = user_id
         setting.updated_at = datetime.utcnow()
     else:
         setting = SystemSettings(
             key=key,
-            value=value,
+            value=stored_value,
             category=category,
             description=description,
             is_encrypted=is_encrypted,

@@ -15,10 +15,9 @@ class LDAPManager:
 
     @staticmethod
     def get_ldap_config():
-        """Get LDAP configuration from system settings"""
-        def get_setting(key, default=None):
-            setting = SystemSettings.query.filter_by(key=key).first()
-            return setting.value if setting else default
+        """Get LDAP configuration from system settings with automatic decryption"""
+        # Use centralized get_setting that handles decryption
+        from app.settings_api import get_setting
 
         return {
             'enabled': get_setting('ldap_enabled', 'false') == 'true',

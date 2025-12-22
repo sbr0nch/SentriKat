@@ -414,12 +414,8 @@ def authenticate_ldap(user, password):
 
     logger.info(f"LDAP: Starting authentication for user {user.username} (id={user.id})")
 
-    # LDAP configuration from database (GUI settings)
-    from app.models import SystemSettings
-
-    def get_setting(key, default=None):
-        setting = SystemSettings.query.filter_by(key=key).first()
-        return setting.value if setting else default
+    # LDAP configuration from database (GUI settings) - use centralized function with decryption
+    from app.settings_api import get_setting
 
     ldap_enabled = get_setting('ldap_enabled', 'false') == 'true'
     if not ldap_enabled:

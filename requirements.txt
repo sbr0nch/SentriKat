@@ -11,3 +11,4 @@ gunicorn==21.2.0
 ldap3==2.9.1
 reportlab==4.0.7
 email-validator==2.1.0
+cryptography==41.0.7

@@ -970,9 +970,10 @@ def update_organization(org_id):
         org.smtp_port = data['smtp_port']
     if 'smtp_username' in data:
         org.smtp_username = data['smtp_username']
-    # Only update password if provided (not null/empty)
+    # Only update password if provided (not null/empty) - encrypt it
     if 'smtp_password' in data and data['smtp_password']:
-        org.smtp_password = data['smtp_password']
+        from app.encryption import encrypt_value
+        org.smtp_password = encrypt_value(data['smtp_password'])
     if 'smtp_use_tls' in data:
         org.smtp_use_tls = data['smtp_use_tls']
     if 'smtp_use_ssl' in data:

@@ -76,7 +76,10 @@ def create_initial_organization():
                 existing.smtp_host = data['smtp_host']
                 existing.smtp_port = data.get('smtp_port', 587)
                 existing.smtp_username = data.get('smtp_username')
-                existing.smtp_password = data.get('smtp_password')
+                # Encrypt SMTP password if provided
+                if data.get('smtp_password'):
+                    from app.encryption import encrypt_value
+                    existing.smtp_password = encrypt_value(data['smtp_password'])
                 existing.smtp_from_email = data.get('smtp_from_email')
                 existing.smtp_from_name = data.get('smtp_from_name', 'SentriKat')
                 existing.smtp_use_tls = data.get('smtp_use_tls', True)
@@ -108,7 +111,10 @@ def create_initial_organization():
             org.smtp_host = data['smtp_host']
             org.smtp_port = data.get('smtp_port', 587)
             org.smtp_username = data.get('smtp_username')
-            org.smtp_password = data.get('smtp_password')
+            # Encrypt SMTP password if provided
+            if data.get('smtp_password'):
+                from app.encryption import encrypt_value
+                org.smtp_password = encrypt_value(data['smtp_password'])
             org.smtp_from_email = data.get('smtp_from_email')
             org.smtp_from_name = data.get('smtp_from_name', 'SentriKat')
             org.smtp_use_tls = data.get('smtp_use_tls', True)

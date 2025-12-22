@@ -512,10 +512,8 @@ def send_user_invite_email(user):
         if not smtp_config['host'] or not smtp_config['from_email']:
             logger.info(f"Organization SMTP not configured, trying global SMTP")
             smtp_source = "global"
-            # Try global SMTP settings
-            def get_setting(key, default=None):
-                setting = SystemSettings.query.filter_by(key=key).first()
-                return setting.value if setting else default
+            # Try global SMTP settings - use centralized function with decryption
+            from app.settings_api import get_setting
 
             smtp_config = {
                 'host': get_setting('smtp_host'),
@@ -795,10 +793,8 @@ def send_user_status_email(user, is_blocked, blocked_by_username=None):
 
         if not smtp_config['host'] or not smtp_config['from_email']:
             smtp_source = "global"
-            # Try global SMTP settings
-            def get_setting(key, default=None):
-                setting = SystemSettings.query.filter_by(key=key).first()
-                return setting.value if setting else default
+            # Try global SMTP settings - use centralized function with decryption
+            from app.settings_api import get_setting
 
             smtp_config = {
                 'host': get_setting('smtp_host'),
@@ -945,9 +941,8 @@ def send_role_change_email(user, old_role, new_role, changed_by_username=None):
 
         if not smtp_config['host'] or not smtp_config['from_email']:
             smtp_source = "global"
-            def get_setting(key, default=None):
-                setting = SystemSettings.query.filter_by(key=key).first()
-                return setting.value if setting else default
+            # Try global SMTP settings - use centralized function with decryption
+            from app.settings_api import get_setting
 
             smtp_config = {
                 'host': get_setting('smtp_host'),
