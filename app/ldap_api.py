@@ -176,18 +176,14 @@ def invite_ldap_user():
         return jsonify({'error': 'Username, email, and organization_id are required'}), 400
 
     # Permission check for organization assignment
-    if current_user.role == 'org_admin':
-        # Org admins can only invite to their own organization
+    if not current_user.is_super_admin():
+        # Non-super-admins can only invite to their own organization
         if organization_id != current_user.organization_id:
-            return jsonify({'error': 'Org admins can only invite users to their own organization'}), 403
+            return jsonify({'error': 'You can only invite users to your own organization'}), 403
 
-        # Org admins cannot create super_admins
-        if role == 'super_admin':
-            return jsonify({'error': 'Org admins cannot create super admins'}), 403
-
-    # Only super admins can create super_admins and org_admins
-    if role in ['super_admin', 'org_admin'] and current_user.role != 'super_admin':
-        return jsonify({'error': 'Only super admins can create admin users'}), 403
+        # Only super admins can create super_admins and org_admins
+        if role in ['super_admin', 'org_admin']:
+            return jsonify({'error': 'Only super admins can create admin users'}), 403
 
     result = LDAPManager.invite_ldap_user(
         username=username,
