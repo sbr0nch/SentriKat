@@ -4,7 +4,7 @@ from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Orga
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
-from app.auth import admin_required, login_required, org_admin_required
+from app.auth import admin_required, login_required, org_admin_required, manager_required
 import json
 
 bp = Blueprint('main', __name__)
@@ -54,7 +54,7 @@ def get_products():
     return jsonify([p.to_dict() for p in products])
 
 @bp.route('/api/products', methods=['POST'])
-@org_admin_required
+@manager_required
 def create_product():
     """
     Create a new product
@@ -62,6 +62,7 @@ def create_product():
     Permissions:
     - Super Admin: Can create products for any org
     - Org Admin: Can create products for their org only
+    - Manager: Can create products for their org only
     """
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -141,7 +142,7 @@ def get_product(product_id):
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['PUT'])
-@org_admin_required
+@manager_required
 def update_product(product_id):
     """
     Update a product
@@ -149,6 +150,7 @@ def update_product(product_id):
     Permissions:
     - Super Admin: Can update any product
     - Org Admin: Can update products in their organization
+    - Manager: Can update products in their organization
     """
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -222,7 +224,7 @@ def update_product(product_id):
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['DELETE'])
-@org_admin_required
+@manager_required
 def delete_product(product_id):
     """
     Delete a product
@@ -230,6 +232,7 @@ def delete_product(product_id):
     Permissions:
     - Super Admin: Can delete any product
     - Org Admin: Can delete products in their organization
+    - Manager: Can delete products in their organization
     """
     from app.logging_config import log_audit_event
 

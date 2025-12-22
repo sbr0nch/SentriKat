@@ -57,6 +57,65 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def manager_required(f):
+    """Decorator to require manager, org admin, or super admin privileges.
+
+    Allows access for users with:
+    - role: super_admin, org_admin, or manager
+    - is_admin=True (legacy)
+    - can_manage_products=True (explicit permission)
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        import logging
+        logger = logging.getLogger('security')
+
+        # If auth is disabled, allow all requests
+        if not AUTH_ENABLED:
+            return f(*args, **kwargs)
+
+        # Check if user is logged in
+        if 'user_id' not in session:
+            logger.warning(f"Unauthorized access attempt to {request.path} - No session")
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Authentication required'}), 401
+            return redirect(url_for('auth.login', next=request.url))
+
+        user = User.query.get(session['user_id'])
+        if not user:
+            logger.error(f"User {session['user_id']} not found in database")
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'User not found'}), 401
+            return redirect(url_for('auth.login'))
+
+        # Allow manager, org_admin, super_admin roles, is_admin flag, or can_manage_products
+        has_permission = (
+            user.role in ['manager', 'org_admin', 'super_admin'] or
+            user.is_admin == True or
+            user.can_manage_products == True
+        )
+
+        if not has_permission:
+            logger.warning(
+                f"Access denied to {request.path} for user {user.username} "
+                f"(role={user.role}, is_admin={user.is_admin}) from {request.remote_addr}"
+            )
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({
+                    'error': 'Manager privileges required',
+                    'debug': {
+                        'user': user.username,
+                        'role': user.role,
+                        'is_admin': user.is_admin,
+                        'can_manage_products': user.can_manage_products,
+                        'required': 'manager, org_admin, or super_admin'
+                    }
+                }), 403
+            return redirect(url_for('main.index'))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
 def org_admin_required(f):
     """Decorator to require org admin or super admin privileges"""
     @wraps(f)
