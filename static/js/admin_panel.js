@@ -213,6 +213,9 @@ function showCreateUserModal() {
         document.getElementById('userRole').value = 'user';
         document.getElementById('canManageProducts').checked = true;
 
+        // Hide org memberships section (only shown when editing)
+        document.getElementById('orgMembershipsSection').style.display = 'none';
+
         toggleAuthFields();
         updateRoleDescription();
 
@@ -271,9 +274,187 @@ async function editUser(userId) {
         document.getElementById('password').required = false;
         document.getElementById('passwordConfirm').required = false;
 
+        // Show organization memberships section and load memberships
+        document.getElementById('orgMembershipsSection').style.display = 'block';
+        loadUserOrgMemberships(userId);
+
         new bootstrap.Modal(document.getElementById('userModal')).show();
     } catch (error) {
         showToast(`Error loading user: ${error.message}`, 'danger');
+    }
+}
+
+// =============================================================================
+// Organization Memberships Functions
+// =============================================================================
+
+async function loadUserOrgMemberships(userId) {
+    const tbody = document.getElementById('orgMembershipsTable');
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Loading...</td></tr>';
+
+    try {
+        const response = await fetch(`/api/users/${userId}/organizations`);
+        if (!response.ok) throw new Error('Failed to load memberships');
+
+        const memberships = await response.json();
+
+        if (memberships.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No organization memberships</td></tr>';
+            return;
+        }
+
+        const roleLabels = {
+            'super_admin': '<span class="badge bg-danger">Super Admin</span>',
+            'org_admin': '<span class="badge bg-warning text-dark">Org Admin</span>',
+            'manager': '<span class="badge bg-info">Manager</span>',
+            'user': '<span class="badge bg-secondary">User</span>'
+        };
+
+        tbody.innerHTML = memberships.map(m => `
+            <tr>
+                <td>
+                    <i class="bi bi-building me-1"></i>
+                    <strong>${escapeHtml(m.organization_name)}</strong>
+                </td>
+                <td>
+                    ${roleLabels[m.role] || m.role}
+                    <select class="form-select form-select-sm d-inline-block ms-2" style="width: auto;"
+                            onchange="updateOrgMembershipRole(${userId}, ${m.organization_id}, this.value, ${m.is_primary})">
+                        <option value="user" ${m.role === 'user' ? 'selected' : ''}>User</option>
+                        <option value="manager" ${m.role === 'manager' ? 'selected' : ''}>Manager</option>
+                        <option value="org_admin" ${m.role === 'org_admin' ? 'selected' : ''}>Org Admin</option>
+                    </select>
+                </td>
+                <td>
+                    ${m.is_primary ?
+                        '<span class="badge bg-primary"><i class="bi bi-star-fill me-1"></i>Primary</span>' :
+                        '<span class="badge bg-secondary">Additional</span>'}
+                </td>
+                <td>
+                    ${!m.is_primary ? `
+                        <button class="btn btn-sm btn-outline-danger" onclick="removeOrgMembership(${userId}, ${m.organization_id}, '${escapeHtml(m.organization_name)}')" title="Remove from organization">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    ` : '<span class="text-muted small">Cannot remove primary</span>'}
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">Error: ${error.message}</td></tr>`;
+    }
+}
+
+async function showAddOrgMembershipModal() {
+    if (!currentUserId) {
+        showToast('Please save the user first before adding organization memberships', 'warning');
+        return;
+    }
+
+    document.getElementById('addOrgMembershipUserId').value = currentUserId;
+
+    // Load available organizations
+    try {
+        const response = await fetch('/api/organizations');
+        const orgs = await response.json();
+
+        // Get current memberships to exclude
+        const membershipsResponse = await fetch(`/api/users/${currentUserId}/organizations`);
+        const memberships = await membershipsResponse.json();
+        const memberOrgIds = new Set(memberships.map(m => m.organization_id));
+
+        const select = document.getElementById('addOrgMembershipOrg');
+        select.innerHTML = '<option value="">Select organization...</option>';
+
+        orgs.filter(org => !memberOrgIds.has(org.id)).forEach(org => {
+            select.innerHTML += `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`;
+        });
+
+        if (select.options.length <= 1) {
+            select.innerHTML = '<option value="">No available organizations</option>';
+        }
+
+        new bootstrap.Modal(document.getElementById('addOrgMembershipModal')).show();
+    } catch (error) {
+        showToast('Error loading organizations: ' + error.message, 'danger');
+    }
+}
+
+async function addOrgMembership() {
+    const userId = document.getElementById('addOrgMembershipUserId').value;
+    const orgId = document.getElementById('addOrgMembershipOrg').value;
+    const role = document.getElementById('addOrgMembershipRole').value;
+
+    if (!orgId) {
+        showToast('Please select an organization', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/organizations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organization_id: parseInt(orgId), role: role })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showToast(result.message || 'Organization added successfully', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('addOrgMembershipModal')).hide();
+            loadUserOrgMemberships(userId);
+        } else {
+            showToast(result.error || 'Failed to add organization', 'danger');
+        }
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function updateOrgMembershipRole(userId, orgId, newRole, isPrimary) {
+    try {
+        const response = await fetch(`/api/users/${userId}/organizations/${orgId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: newRole })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showToast(result.message || 'Role updated successfully', 'success');
+            // If this is the primary org, also update the role dropdown in the main form
+            if (isPrimary) {
+                document.getElementById('userRole').value = newRole;
+            }
+            loadUserOrgMemberships(userId);
+        } else {
+            showToast(result.error || 'Failed to update role', 'danger');
+            loadUserOrgMemberships(userId); // Reload to revert the select
+        }
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+        loadUserOrgMemberships(userId);
+    }
+}
+
+async function removeOrgMembership(userId, orgId, orgName) {
+    if (!confirm(`Remove user from "${orgName}"?`)) return;
+
+    try {
+        const response = await fetch(`/api/users/${userId}/organizations/${orgId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showToast(result.message || 'Removed from organization', 'success');
+            loadUserOrgMemberships(userId);
+        } else {
+            showToast(result.error || 'Failed to remove from organization', 'danger');
+        }
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
     }
 }
 

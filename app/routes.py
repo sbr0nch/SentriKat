@@ -1098,6 +1098,237 @@ def toggle_user_active(user_id):
     })
 
 # ============================================================================
+# USER ORGANIZATION ASSIGNMENTS (Multi-Org Support)
+# ============================================================================
+
+@bp.route('/api/users/<int:user_id>/organizations', methods=['GET'])
+@login_required
+def get_user_organizations(user_id):
+    """Get all organization assignments for a user"""
+    from app.models import UserOrganization
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get_or_404(user_id)
+
+    # Permission check: super admin or org admin for one of the user's orgs
+    if not current_user.is_super_admin():
+        # Org admins can view users in their org
+        if not current_user.can_manage_user(target_user):
+            return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Get all org memberships
+    memberships = target_user.org_memberships.all()
+
+    # Include primary org if not in memberships
+    result = []
+    primary_org_id = target_user.organization_id
+
+    if primary_org_id and target_user.organization:
+        result.append({
+            'id': None,  # No membership ID for legacy org
+            'organization_id': primary_org_id,
+            'organization_name': target_user.organization.display_name,
+            'role': target_user.role,
+            'is_primary': True,
+            'assigned_at': target_user.created_at.isoformat() if target_user.created_at else None
+        })
+
+    for m in memberships:
+        if m.organization_id != primary_org_id:
+            result.append({
+                'id': m.id,
+                'organization_id': m.organization_id,
+                'organization_name': m.organization.display_name if m.organization else None,
+                'role': m.role,
+                'is_primary': False,
+                'assigned_at': m.assigned_at.isoformat() if m.assigned_at else None,
+                'assigned_by': m.assigner.username if m.assigner else None
+            })
+
+    return jsonify(result)
+
+
+@bp.route('/api/users/<int:user_id>/organizations', methods=['POST'])
+@login_required
+def add_user_organization(user_id):
+    """Add a user to an organization with a specific role"""
+    from app.models import UserOrganization
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get_or_404(user_id)
+
+    data = request.get_json()
+    org_id = data.get('organization_id')
+    role = data.get('role', 'user')
+
+    if not org_id:
+        return jsonify({'error': 'organization_id is required'}), 400
+
+    # Validate role
+    valid_roles = ['user', 'manager', 'org_admin']
+    if current_user.is_super_admin():
+        valid_roles.append('super_admin')
+
+    if role not in valid_roles:
+        return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
+
+    # Permission checks
+    if current_user.is_super_admin():
+        # Super admins can assign anyone to any org
+        pass
+    elif current_user.is_org_admin_for(org_id):
+        # Org admins can only assign to their own org
+        if role in ['super_admin']:
+            return jsonify({'error': 'Only super admins can assign super_admin role'}), 403
+    else:
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Check if org exists
+    org = Organization.query.get(org_id)
+    if not org:
+        return jsonify({'error': 'Organization not found'}), 404
+
+    # Add user to organization
+    target_user.add_to_organization(org_id, role, current_user_id)
+    db.session.commit()
+
+    # Log audit event
+    log_audit_event(
+        'ADD_ORG_MEMBERSHIP',
+        'users',
+        user_id,
+        new_value={'organization_id': org_id, 'role': role},
+        details=f"Added {target_user.username} to {org.display_name} as {role}"
+    )
+
+    return jsonify({
+        'success': True,
+        'message': f'User {target_user.username} added to {org.display_name} as {role}'
+    })
+
+
+@bp.route('/api/users/<int:user_id>/organizations/<int:org_id>', methods=['PUT'])
+@login_required
+def update_user_organization_role(user_id, org_id):
+    """Update a user's role in an organization"""
+    from app.models import UserOrganization
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get_or_404(user_id)
+
+    data = request.get_json()
+    new_role = data.get('role')
+
+    if not new_role:
+        return jsonify({'error': 'role is required'}), 400
+
+    # Validate role
+    valid_roles = ['user', 'manager', 'org_admin']
+    if current_user.is_super_admin():
+        valid_roles.append('super_admin')
+
+    if new_role not in valid_roles:
+        return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
+
+    # Permission checks
+    if not current_user.is_super_admin() and not current_user.is_org_admin_for(org_id):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    if new_role == 'super_admin' and not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can assign super_admin role'}), 403
+
+    # Check if this is the primary org
+    if target_user.organization_id == org_id:
+        # Update the user's main role
+        old_role = target_user.role
+        target_user.role = new_role
+        db.session.commit()
+
+        log_audit_event(
+            'UPDATE_ROLE',
+            'users',
+            user_id,
+            old_value={'role': old_role},
+            new_value={'role': new_role},
+            details=f"Updated {target_user.username}'s role to {new_role} in primary org"
+        )
+    else:
+        # Update membership role
+        membership = target_user.org_memberships.filter_by(organization_id=org_id).first()
+        if not membership:
+            return jsonify({'error': 'User is not a member of this organization'}), 404
+
+        old_role = membership.role
+        membership.role = new_role
+        membership.assigned_by = current_user_id
+        db.session.commit()
+
+        log_audit_event(
+            'UPDATE_ORG_ROLE',
+            'users',
+            user_id,
+            old_value={'organization_id': org_id, 'role': old_role},
+            new_value={'organization_id': org_id, 'role': new_role},
+            details=f"Updated {target_user.username}'s role to {new_role}"
+        )
+
+    org = Organization.query.get(org_id)
+    return jsonify({
+        'success': True,
+        'message': f'Role updated to {new_role} for {org.display_name if org else "organization"}'
+    })
+
+
+@bp.route('/api/users/<int:user_id>/organizations/<int:org_id>', methods=['DELETE'])
+@login_required
+def remove_user_organization(user_id, org_id):
+    """Remove a user from an organization"""
+    from app.models import UserOrganization
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get_or_404(user_id)
+
+    # Permission checks
+    if not current_user.is_super_admin() and not current_user.is_org_admin_for(org_id):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Cannot remove from primary org this way
+    if target_user.organization_id == org_id:
+        return jsonify({'error': 'Cannot remove user from their primary organization. Change primary org first or delete user.'}), 400
+
+    # Remove membership
+    membership = target_user.org_memberships.filter_by(organization_id=org_id).first()
+    if not membership:
+        return jsonify({'error': 'User is not a member of this organization'}), 404
+
+    org = Organization.query.get(org_id)
+    old_role = membership.role
+
+    db.session.delete(membership)
+    db.session.commit()
+
+    log_audit_event(
+        'REMOVE_ORG_MEMBERSHIP',
+        'users',
+        user_id,
+        old_value={'organization_id': org_id, 'role': old_role},
+        details=f"Removed {target_user.username} from {org.display_name if org else 'organization'}"
+    )
+
+    return jsonify({
+        'success': True,
+        'message': f'User removed from {org.display_name if org else "organization"}'
+    })
+
+
+# ============================================================================
 # DEBUG & DIAGNOSTICS
 # ============================================================================
 

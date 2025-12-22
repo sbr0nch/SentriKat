@@ -10,6 +10,44 @@ product_organizations = db.Table('product_organizations',
     db.Column('assigned_at', db.DateTime, default=datetime.utcnow)
 )
 
+
+class UserOrganization(db.Model):
+    """
+    Many-to-many relationship between users and organizations with role per org.
+    Allows a user to belong to multiple organizations with different roles.
+    """
+    __tablename__ = 'user_organizations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    role = db.Column(db.String(20), default='user', nullable=False)  # super_admin, org_admin, manager, user
+
+    # Metadata
+    assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    assigned_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Unique constraint: user can only have one role per organization
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'organization_id', name='unique_user_org'),
+    )
+
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('org_memberships', lazy='dynamic', cascade='all, delete-orphan'))
+    organization = db.relationship('Organization', backref=db.backref('user_memberships', lazy='dynamic'))
+    assigner = db.relationship('User', foreign_keys=[assigned_by])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'organization_id': self.organization_id,
+            'organization_name': self.organization.display_name if self.organization else None,
+            'role': self.role,
+            'assigned_at': self.assigned_at.isoformat() if self.assigned_at else None,
+            'assigned_by': self.assigner.username if self.assigner else None
+        }
+
 class Organization(db.Model):
     """Represents a team, vault, or organizational unit with separate settings"""
     __tablename__ = 'organizations'
@@ -417,7 +455,12 @@ class User(db.Model):
         """Check if user can manage a specific organization"""
         if self.is_super_admin():
             return True
+        # Check legacy single org
         if self.role == 'org_admin' and self.organization_id == org_id:
+            return True
+        # Check multi-org memberships
+        membership = self.org_memberships.filter_by(organization_id=org_id).first()
+        if membership and membership.role == 'org_admin':
             return True
         return False
 
@@ -431,13 +474,116 @@ class User(db.Model):
                     not target_user.is_super_admin())
         return False
 
+    # =========================================================================
+    # Multi-Organization Methods
+    # =========================================================================
+
+    def get_all_organizations(self):
+        """Get all organizations the user has access to (both legacy and multi-org)"""
+        orgs = []
+
+        # Add legacy organization if exists
+        if self.organization_id and self.organization:
+            orgs.append({
+                'id': self.organization.id,
+                'name': self.organization.name,
+                'display_name': self.organization.display_name,
+                'role': self.role,
+                'is_primary': True
+            })
+
+        # Add multi-org memberships
+        for membership in self.org_memberships.all():
+            # Skip if already added as primary
+            if membership.organization_id == self.organization_id:
+                continue
+            orgs.append({
+                'id': membership.organization.id,
+                'name': membership.organization.name,
+                'display_name': membership.organization.display_name,
+                'role': membership.role,
+                'is_primary': False
+            })
+
+        return orgs
+
+    def get_role_for_org(self, org_id):
+        """Get user's role for a specific organization"""
+        # Super admins have super_admin role everywhere
+        if self.is_super_admin():
+            return 'super_admin'
+
+        # Check legacy organization
+        if self.organization_id == org_id:
+            return self.role
+
+        # Check multi-org membership
+        membership = self.org_memberships.filter_by(organization_id=org_id).first()
+        if membership:
+            return membership.role
+
+        return None
+
+    def has_access_to_org(self, org_id):
+        """Check if user has any access to a specific organization"""
+        if self.is_super_admin() or self.can_view_all_orgs:
+            return True
+
+        # Check legacy organization
+        if self.organization_id == org_id:
+            return True
+
+        # Check multi-org membership
+        membership = self.org_memberships.filter_by(organization_id=org_id).first()
+        return membership is not None
+
+    def is_org_admin_for(self, org_id):
+        """Check if user is org_admin for a specific organization"""
+        if self.is_super_admin():
+            return True
+
+        role = self.get_role_for_org(org_id)
+        return role == 'org_admin'
+
+    def add_to_organization(self, org_id, role='user', assigned_by_id=None):
+        """Add user to an organization with specified role"""
+        # Check if already exists
+        existing = self.org_memberships.filter_by(organization_id=org_id).first()
+        if existing:
+            # Update role
+            existing.role = role
+            existing.assigned_by = assigned_by_id
+            existing.assigned_at = datetime.utcnow()
+        else:
+            # Create new membership
+            membership = UserOrganization(
+                user_id=self.id,
+                organization_id=org_id,
+                role=role,
+                assigned_by=assigned_by_id
+            )
+            db.session.add(membership)
+        return True
+
+    def remove_from_organization(self, org_id):
+        """Remove user from an organization"""
+        membership = self.org_memberships.filter_by(organization_id=org_id).first()
+        if membership:
+            db.session.delete(membership)
+            return True
+        return False
+
     def to_dict(self):
+        # Get org memberships
+        org_memberships = [m.to_dict() for m in self.org_memberships.all()]
+
         return {
             'id': self.id,
             'username': self.username,
             'email': self.email,
             'full_name': self.full_name,
             'organization_id': self.organization_id,
+            'organization_name': self.organization.display_name if self.organization else None,
             'auth_type': self.auth_type,
             'role': self.role,
             'is_admin': self.is_admin,
@@ -445,7 +591,10 @@ class User(db.Model):
             'can_manage_products': self.can_manage_products,
             'can_view_all_orgs': self.can_view_all_orgs,
             'last_login': self.last_login.isoformat() if self.last_login else None,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            # Multi-org data
+            'org_memberships': org_memberships,
+            'all_organizations': self.get_all_organizations()
         }
 
 class SystemSettings(db.Model):
