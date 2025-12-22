@@ -192,6 +192,58 @@
         </div>
     </div>
 
+    <!-- Report Export Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="bi bi-file-earmark-pdf me-2"></i>Export Report
+        </div>
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Report Type</label>
+                    <select class="form-select" id="reportType" onchange="toggleReportDateFields()">
+                        <option value="monthly">Monthly Report</option>
+                        <option value="custom">Custom Date Range</option>
+                    </select>
+                </div>
+                <div class="col-md-2" id="reportMonthCol">
+                    <label class="form-label fw-semibold">Month</label>
+                    <select class="form-select" id="reportMonth">
+                        <option value="1">January</option>
+                        <option value="2">February</option>
+                        <option value="3">March</option>
+                        <option value="4">April</option>
+                        <option value="5">May</option>
+                        <option value="6">June</option>
+                        <option value="7">July</option>
+                        <option value="8">August</option>
+                        <option value="9">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                    </select>
+                </div>
+                <div class="col-md-2" id="reportYearCol">
+                    <label class="form-label fw-semibold">Year</label>
+                    <select class="form-select" id="reportYear"></select>
+                </div>
+                <div class="col-md-2" id="reportStartDateCol" style="display: none;">
+                    <label class="form-label fw-semibold">Start Date</label>
+                    <input type="date" class="form-control" id="reportStartDate">
+                </div>
+                <div class="col-md-2" id="reportEndDateCol" style="display: none;">
+                    <label class="form-label fw-semibold">End Date</label>
+                    <input type="date" class="form-control" id="reportEndDate">
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary w-100" onclick="exportReport()">
+                        <i class="bi bi-download me-2"></i>Export PDF
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Advanced Filters Panel -->
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -475,6 +527,116 @@
         };
         return colors[priority?.toLowerCase()] || '#6b7280';
     }
+
+    // Report Export Functions
+    function initReportFields() {
+        // Populate year dropdown
+        const yearSelect = document.getElementById('reportYear');
+        const currentYear = new Date().getFullYear();
+        for (let year = currentYear; year >= currentYear - 5; year--) {
+            const option = document.createElement('option');
+            option.value = year;
+            option.textContent = year;
+            yearSelect.appendChild(option);
+        }
+
+        // Set current month and year
+        const currentMonth = new Date().getMonth() + 1;
+        document.getElementById('reportMonth').value = currentMonth;
+
+        // Set default date range for custom reports (last 30 days)
+        const today = new Date();
+        const thirtyDaysAgo = new Date(today);
+        thirtyDaysAgo.setDate(today.getDate() - 30);
+
+        document.getElementById('reportEndDate').value = today.toISOString().split('T')[0];
+        document.getElementById('reportStartDate').value = thirtyDaysAgo.toISOString().split('T')[0];
+    }
+
+    function toggleReportDateFields() {
+        const reportType = document.getElementById('reportType').value;
+        const monthlyFields = document.getElementById('reportMonthCol');
+        const yearFields = document.getElementById('reportYearCol');
+        const startDateFields = document.getElementById('reportStartDateCol');
+        const endDateFields = document.getElementById('reportEndDateCol');
+
+        if (reportType === 'monthly') {
+            monthlyFields.style.display = 'block';
+            yearFields.style.display = 'block';
+            startDateFields.style.display = 'none';
+            endDateFields.style.display = 'none';
+        } else {
+            monthlyFields.style.display = 'none';
+            yearFields.style.display = 'none';
+            startDateFields.style.display = 'block';
+            endDateFields.style.display = 'block';
+        }
+    }
+
+    async function exportReport() {
+        const reportType = document.getElementById('reportType').value;
+        let url;
+
+        if (reportType === 'monthly') {
+            const month = document.getElementById('reportMonth').value;
+            const year = document.getElementById('reportYear').value;
+            url = `/api/reports/monthly?month=${month}&year=${year}`;
+        } else {
+            const startDate = document.getElementById('reportStartDate').value;
+            const endDate = document.getElementById('reportEndDate').value;
+
+            if (!startDate || !endDate) {
+                showToast('Please select both start and end dates', 'warning');
+                return;
+            }
+
+            url = `/api/reports/custom?start_date=${startDate}&end_date=${endDate}`;
+        }
+
+        try {
+            showLoading();
+            showToast('Generating report...', 'info');
+
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to generate report');
+            }
+
+            // Download the PDF
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+
+            // Get filename from Content-Disposition header or generate one
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = 'SentriKat_Report.pdf';
+            if (contentDisposition) {
+                const match = contentDisposition.match(/filename="(.+)"/);
+                if (match) filename = match[1];
+            }
+
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(downloadUrl);
+
+            showToast('Report downloaded successfully!', 'success');
+        } catch (error) {
+            console.error('Error generating report:', error);
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Initialize report fields on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        initReportFields();
+    });
 
     let currentVulnerabilities = [];
     let selectedVulns = new Set();

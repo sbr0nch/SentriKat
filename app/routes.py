@@ -1627,6 +1627,124 @@ def check_cve_service_status():
         })
 
 # ============================================================================
+# REPORTS API
+# ============================================================================
+
+@bp.route('/api/reports/monthly', methods=['GET'])
+@login_required
+def generate_monthly_report():
+    """
+    Generate a monthly vulnerability report PDF
+
+    Query parameters:
+        year: Report year (default: current year)
+        month: Report month (default: current month)
+    """
+    from flask import make_response
+    from app.reports import VulnerabilityReportGenerator
+    from datetime import datetime
+
+    try:
+        year = request.args.get('year', type=int, default=datetime.now().year)
+        month = request.args.get('month', type=int, default=datetime.now().month)
+
+        # Validate month
+        if month < 1 or month > 12:
+            return jsonify({'error': 'Invalid month'}), 400
+
+        # Get organization from session
+        org_id = session.get('organization_id')
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
+
+        # Non-super admins can only see their organization
+        if current_user and not current_user.is_super_admin() and not current_user.can_view_all_orgs:
+            org_id = current_user.organization_id
+
+        # Generate report
+        generator = VulnerabilityReportGenerator(organization_id=org_id)
+        pdf_buffer = generator.generate_monthly_report(year=year, month=month)
+
+        # Create response
+        month_name = datetime(year, month, 1).strftime('%B_%Y')
+        filename = f"SentriKat_Vulnerability_Report_{month_name}.pdf"
+
+        response = make_response(pdf_buffer.getvalue())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/reports/custom', methods=['GET'])
+@login_required
+def generate_custom_report():
+    """
+    Generate a custom date range vulnerability report PDF
+
+    Query parameters:
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+        include_acknowledged: Include acknowledged vulnerabilities (default: true)
+        include_pending: Include pending vulnerabilities (default: true)
+    """
+    from flask import make_response
+    from app.reports import VulnerabilityReportGenerator
+    from datetime import datetime
+
+    try:
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+
+        if not start_date_str or not end_date_str:
+            return jsonify({'error': 'start_date and end_date are required'}), 400
+
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+
+        include_acknowledged = request.args.get('include_acknowledged', 'true').lower() == 'true'
+        include_pending = request.args.get('include_pending', 'true').lower() == 'true'
+
+        # Get organization from session
+        org_id = session.get('organization_id')
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
+
+        # Non-super admins can only see their organization
+        if current_user and not current_user.is_super_admin() and not current_user.can_view_all_orgs:
+            org_id = current_user.organization_id
+
+        # Generate report
+        generator = VulnerabilityReportGenerator(organization_id=org_id)
+        pdf_buffer = generator.generate_custom_report(
+            start_date=start_date,
+            end_date=end_date,
+            include_acknowledged=include_acknowledged,
+            include_pending=include_pending
+        )
+
+        # Create response
+        filename = f"SentriKat_Report_{start_date_str}_to_{end_date_str}.pdf"
+
+        response = make_response(pdf_buffer.getvalue())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
+    except ValueError as e:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# ============================================================================
 # SESSION MANAGEMENT (Organization Switching)
 # ============================================================================
 
