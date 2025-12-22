@@ -90,6 +90,8 @@ def get_products():
     - Others: Only see products assigned to their organization
     """
     from app.models import product_organizations
+    import logging
+    logger = logging.getLogger(__name__)
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -97,13 +99,19 @@ def get_products():
     if not current_user:
         return jsonify({'error': 'User not found'}), 401
 
+    logger.info(f"get_products: user={current_user.username}, role={current_user.role}, is_super_admin={current_user.is_super_admin()}")
+
     # Super admins see all products
     if current_user.is_super_admin():
         products = Product.query.order_by(Product.vendor, Product.product_name).all()
+        logger.info(f"get_products: super_admin sees all {len(products)} products")
     else:
-        # Get user's organization
+        # Get user's current organization from session
         org_id = session.get('organization_id') or current_user.organization_id
+        logger.info(f"get_products: org_id from session={session.get('organization_id')}, from user={current_user.organization_id}, using={org_id}")
+
         if not org_id:
+            logger.info("get_products: no org_id, returning empty list")
             return jsonify([])  # No org = no products
 
         # Get products assigned via many-to-many table
@@ -123,6 +131,8 @@ def get_products():
         products = products_via_m2m.union(products_via_legacy).order_by(
             Product.vendor, Product.product_name
         ).all()
+
+        logger.info(f"get_products: org {org_id} has {len(products)} products")
 
     return jsonify([p.to_dict() for p in products])
 
@@ -200,6 +210,15 @@ def create_product():
             catalog_entry.usage_frequency += 1
 
     db.session.add(product)
+    db.session.flush()  # Get the product ID
+
+    # Also add to product_organizations many-to-many table
+    org_to_assign = data.get('organization_id', org_id)
+    if org_to_assign:
+        org = Organization.query.get(org_to_assign)
+        if org and org not in product.organizations.all():
+            product.organizations.append(org)
+
     db.session.commit()
 
     # Re-run matching for new product
