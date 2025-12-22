@@ -308,7 +308,11 @@ def api_login():
         logger.warning(f"Login failed: missing username or password from {request.remote_addr}")
         return jsonify({'error': 'Username and password required'}), 400
 
-    # Find user
+    # Find user - check for duplicates
+    matching_users = User.query.filter_by(username=username).all()
+    if len(matching_users) > 1:
+        logger.warning(f"DUPLICATE USERS FOUND for username '{username}': {[(u.id, u.is_active, u.auth_type) for u in matching_users]}")
+
     user = User.query.filter_by(username=username, is_active=True).first()
 
     if not user:
