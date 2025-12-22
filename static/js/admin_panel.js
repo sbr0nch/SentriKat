@@ -719,6 +719,13 @@ function showCreateOrgModal() {
         currentOrgId = null;
         document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-building me-2"></i>Create Organization';
         document.getElementById('orgForm').reset();
+
+        // Make sure orgName is enabled and editable for new organizations
+        const orgNameField = document.getElementById('orgName');
+        orgNameField.disabled = false;
+        orgNameField.readOnly = false;
+        orgNameField.value = '';
+
         document.getElementById('orgActive').checked = true;
         document.getElementById('alertCritical').checked = true;
         document.getElementById('alertNewCVE').checked = true;

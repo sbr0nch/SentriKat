@@ -1016,7 +1016,7 @@ def fix_admin_role():
     })
 
 @bp.route('/api/users', methods=['GET'])
-@admin_required
+@org_admin_required
 def get_users():
     """
     Get users based on permissions
@@ -1033,12 +1033,11 @@ def get_users():
 
     # Super admins see all users
     if current_user.is_super_admin():
-        users = User.query.filter_by(is_active=True).order_by(User.username).all()
+        users = User.query.order_by(User.username).all()
     # Org admins see only their organization's users
     elif current_user.is_org_admin():
         users = User.query.filter_by(
-            organization_id=current_user.organization_id,
-            is_active=True
+            organization_id=current_user.organization_id
         ).order_by(User.username).all()
     else:
         return jsonify({'error': 'Insufficient permissions'}), 403
@@ -1046,7 +1045,7 @@ def get_users():
     return jsonify([u.to_dict() for u in users])
 
 @bp.route('/api/users', methods=['POST'])
-@admin_required
+@org_admin_required
 def create_user():
     """Create a new user (local auth only - LDAP users must be discovered/invited)"""
     data = request.get_json()
@@ -1092,14 +1091,14 @@ def create_user():
     return jsonify(user.to_dict()), 201
 
 @bp.route('/api/users/<int:user_id>', methods=['GET'])
-@admin_required
+@org_admin_required
 def get_user(user_id):
     """Get a specific user"""
     user = User.query.get_or_404(user_id)
     return jsonify(user.to_dict())
 
 @bp.route('/api/users/<int:user_id>', methods=['PUT'])
-@admin_required
+@org_admin_required
 def update_user(user_id):
     """
     Update a user
@@ -1214,7 +1213,7 @@ def update_user(user_id):
     return jsonify(result)
 
 @bp.route('/api/users/<int:user_id>', methods=['DELETE'])
-@admin_required
+@org_admin_required
 def delete_user(user_id):
     """
     Permanently delete a user from the system.
@@ -1273,7 +1272,7 @@ def delete_user(user_id):
         return jsonify({'error': f'Failed to delete user: {str(e)}'}), 500
 
 @bp.route('/api/users/<int:user_id>/toggle-active', methods=['POST'])
-@admin_required
+@org_admin_required
 def toggle_user_active(user_id):
     """
     Toggle user active status (block/unblock)
