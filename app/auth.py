@@ -298,6 +298,12 @@ def api_login():
 
     logger.info(f"Login attempt for username: {username} from {request.remote_addr}")
 
+    # Log password hash for debugging (to verify same password across attempts)
+    if password:
+        import hashlib
+        pwd_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()[:16]
+        logger.info(f"Login: Password hash (first 16 chars): {pwd_hash}, length: {len(password)}")
+
     if not username or not password:
         logger.warning(f"Login failed: missing username or password from {request.remote_addr}")
         return jsonify({'error': 'Username and password required'}), 400
@@ -423,6 +429,10 @@ def authenticate_ldap(user, password):
     logger.info(f"LDAP: Starting authentication for user {user.username} (id={user.id}, auth_type={user.auth_type})")
     logger.info(f"LDAP: User active={user.is_active}, organization_id={user.organization_id}")
     logger.info(f"LDAP: Password length: {len(password) if password else 0}, contains special chars: {any(not c.isalnum() for c in password) if password else False}")
+    # Log password hash for debugging (to verify same password across attempts)
+    import hashlib
+    pwd_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()[:16] if password else 'none'
+    logger.info(f"LDAP: Password hash (first 16 chars): {pwd_hash}")
 
     # LDAP configuration from database (GUI settings)
     from app.models import SystemSettings
@@ -512,7 +522,10 @@ def authenticate_ldap(user, password):
         user_dn = str(user_entry.entry_dn)
 
         logger.info(f"LDAP: Found user {user.username}, DN: {user_dn}")
+        logger.info(f"LDAP: DN bytes: {user_dn.encode('utf-8')}")
         logger.info(f"LDAP: Stored DN in database: {user.ldap_dn}")
+        if user.ldap_dn:
+            logger.info(f"LDAP: Stored DN bytes: {user.ldap_dn.encode('utf-8')}")
 
         # Update user's LDAP DN in database if not set or changed
         if user.ldap_dn != user_dn:
