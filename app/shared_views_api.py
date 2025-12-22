@@ -8,6 +8,7 @@ from app import db
 from app.models import User
 from app.shared_views import SharedView
 from app.auth import login_required
+from config import Config
 from datetime import datetime, timedelta
 import json
 
@@ -91,7 +92,9 @@ def create_shared_view():
         db.session.add(shared_view)
         db.session.commit()
 
-        share_url = request.host_url.rstrip('/') + shared_view.get_share_url()
+        # Use configured SENTRIKAT_URL or fall back to request host
+        base_url = Config.SENTRIKAT_URL or request.host_url.rstrip('/')
+        share_url = base_url + shared_view.get_share_url()
 
         # Log audit event
         log_audit_event(

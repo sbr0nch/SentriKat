@@ -7,6 +7,10 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///sentrikat.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # Application URL (for generating share links, email links, etc.)
+    # If not set, falls back to request.host_url at runtime
+    SENTRIKAT_URL = os.environ.get('SENTRIKAT_URL', '').rstrip('/')
+
     # CISA KEV Feed URL
     CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
 

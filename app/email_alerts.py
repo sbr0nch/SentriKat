@@ -10,6 +10,12 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date, time as dt_time
 from app.models import Organization, VulnerabilityMatch, AlertLog, Vulnerability
 from app import db
+from config import Config
+
+
+def get_app_url():
+    """Get the configured SentriKat URL or fallback to localhost"""
+    return Config.SENTRIKAT_URL or 'http://localhost:5001'
 
 class EmailAlertManager:
     """Manages email alerts for critical vulnerabilities"""
@@ -313,14 +319,14 @@ class EmailAlertManager:
 <body>
     <div class="container">
         <div class="header">
-            <h1>🛡️ SentriKat Vulnerability Alert</h1>
+            <h1>SentriKat Security Alert</h1>
             <p><strong>Organization:</strong> {organization.display_name}</p>
             <p><strong>Alert Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
         </div>
 
         <div class="content">
             <div class="summary-box">
-                <h2>⚠️ Action Required</h2>
+                <h2>Action Required</h2>
                 <p><strong>{len(matches)}</strong> critical vulnerabilities require your immediate attention:</p>
                 <div class="priority-stats">
                     <div class="priority-badge" style="background: {priority_colors['critical']};">
@@ -698,7 +704,7 @@ def _build_user_invite_email_html(user, organization):
 <body>
     <div class="container">
         <div class="header">
-            <h1>🛡️ Welcome to SentriKat</h1>
+            <h1>Welcome to SentriKat</h1>
             <p>Vulnerability Management Platform</p>
         </div>
 
@@ -731,7 +737,7 @@ def _build_user_invite_email_html(user, organization):
             </div>
 
             <div style="text-align: center;">
-                <a href="https://your-sentrikat-url.com/login" class="button">Login to SentriKat</a>
+                <a href="{get_app_url()}/login" class="button">Login to SentriKat</a>
             </div>
 
             <div class="features">
