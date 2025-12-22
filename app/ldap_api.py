@@ -275,8 +275,8 @@ def bulk_invite_ldap_users():
     if not users_data or not organization_id:
         return jsonify({'error': 'Users list and organization_id are required'}), 400
 
-    # Permission check
-    if current_user.role == 'org_admin':
+    # Permission check - non-super-admins have restrictions
+    if not current_user.is_super_admin():
         if organization_id != current_user.organization_id:
             return jsonify({'error': 'Org admins can only invite to their own organization'}), 403
         if role in ['super_admin', 'org_admin']:

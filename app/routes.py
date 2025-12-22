@@ -1152,8 +1152,8 @@ def update_user(user_id):
         if new_role == 'super_admin' and not current_user.is_super_admin():
             return jsonify({'error': 'Only super admins can create super admin users'}), 403
 
-        # Org admins cannot set org_admin or super_admin roles (except for themselves - they can demote)
-        if current_user.role == 'org_admin' and new_role in ['super_admin', 'org_admin']:
+        # Non-super-admins cannot set org_admin or super_admin roles (except for themselves - they can demote)
+        if not current_user.is_super_admin() and new_role in ['super_admin', 'org_admin']:
             if not is_self_edit:  # Org admins can demote themselves but not promote others
                 return jsonify({'error': 'Org admins cannot create admin users'}), 403
 
