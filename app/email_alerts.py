@@ -425,7 +425,6 @@ class EmailAlertManager:
 
         <div class="footer">
             <p><strong>SentriKat</strong> - Enterprise Vulnerability Management Platform</p>
-            <p>Copyright © 2025 Denis Sota. Licensed to Zertificon Solutions GmbH.</p>
             <p style="margin-top: 15px; font-size: 11px;">
                 This is an automated security alert. Please do not reply to this email.<br>
                 For support, contact your system administrator.
