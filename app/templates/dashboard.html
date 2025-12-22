@@ -1099,20 +1099,30 @@
     }
 
     /**
-     * Share a single CVE with NVD link
+     * Share a single CVE with NVD link - copies to clipboard automatically
      */
     async function shareSingleCVE(cveId, vulnName) {
-        try {
-            // Use NVD URL for sharing
-            const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}`;
+        const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}`;
 
-            // Copy to clipboard
+        try {
+            // Try modern clipboard API first
             await navigator.clipboard.writeText(nvdUrl);
-            showToast(`✓ NVD link for ${cveId} copied to clipboard!`, 'success');
+            showToast(`NVD link copied to clipboard`, 'success');
         } catch (error) {
-            // Fallback: show URL in prompt
-            const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}`;
-            prompt(`Copy this NVD link for ${cveId}:`, nvdUrl);
+            // Fallback for older browsers or non-HTTPS
+            const textArea = document.createElement('textarea');
+            textArea.value = nvdUrl;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showToast(`NVD link copied to clipboard`, 'success');
+            } catch (e) {
+                showToast(`Could not copy. URL: ${nvdUrl}`, 'warning');
+            }
+            document.body.removeChild(textArea);
         }
     }
 

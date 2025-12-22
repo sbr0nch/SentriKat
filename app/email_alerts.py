@@ -179,18 +179,20 @@ class EmailAlertManager:
             background: white;
         }}
         .header {{
+            background-color: #1e40af;
             background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-            color: white;
+            color: #ffffff;
             padding: 30px 20px;
             text-align: center;
         }}
         .header h1 {{
             margin: 0 0 10px 0;
             font-size: 28px;
+            color: #ffffff;
         }}
         .header p {{
             margin: 5px 0;
-            opacity: 0.9;
+            color: #e0e7ff;
         }}
         .content {{
             padding: 30px 20px;
@@ -617,18 +619,20 @@ def _build_user_invite_email_html(user, organization):
             background: white;
         }}
         .header {{
+            background-color: #1e40af;
             background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-            color: white;
+            color: #ffffff;
             padding: 40px 20px;
             text-align: center;
         }}
         .header h1 {{
             margin: 0 0 10px 0;
             font-size: 28px;
+            color: #ffffff;
         }}
         .header p {{
             margin: 5px 0;
-            opacity: 0.9;
+            color: #e0e7ff;
             font-size: 16px;
         }}
         .content {{

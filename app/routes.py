@@ -78,21 +78,27 @@ def create_product():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
-    # Check for duplicate product
+    # Check for duplicate product (case-insensitive)
     # For multi-org support, check if product exists globally (regardless of org)
     # since products can now be assigned to multiple organizations
-    version = data.get('version')
+    version = data.get('version', '').strip() or None  # Treat empty string as None
+    vendor_lower = data['vendor'].lower().strip()
+    product_name_lower = data['product_name'].lower().strip()
 
-    duplicate_query = Product.query.filter_by(
-        vendor=data['vendor'],
-        product_name=data['product_name']
+    duplicate_query = Product.query.filter(
+        db.func.lower(Product.vendor) == vendor_lower,
+        db.func.lower(Product.product_name) == product_name_lower
     )
 
-    # Only check version if it's provided
+    # Check version - treat empty string and None as equivalent
     if version:
-        duplicate_query = duplicate_query.filter_by(version=version)
+        duplicate_query = duplicate_query.filter(
+            db.func.lower(Product.version) == version.lower()
+        )
     else:
-        duplicate_query = duplicate_query.filter(Product.version.is_(None))
+        duplicate_query = duplicate_query.filter(
+            db.or_(Product.version.is_(None), Product.version == '')
+        )
 
     existing_product = duplicate_query.first()
 
@@ -104,9 +110,9 @@ def create_product():
     product = Product(
         organization_id=data.get('organization_id', org_id),
         service_catalog_id=data.get('service_catalog_id'),
-        vendor=data['vendor'],
-        product_name=data['product_name'],
-        version=data.get('version'),
+        vendor=data['vendor'].strip(),
+        product_name=data['product_name'].strip(),
+        version=version,  # Already normalized above (empty string -> None)
         keywords=data.get('keywords'),
         description=data.get('description'),
         active=data.get('active', True),

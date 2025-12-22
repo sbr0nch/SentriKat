@@ -44,10 +44,59 @@ class Config:
 
     @staticmethod
     def get_proxies():
-        """Get proxy configuration as dict for requests library"""
+        """
+        Get proxy configuration as dict for requests library.
+
+        Priority: GUI settings (database) > .env settings
+
+        Returns dict like {'http': 'http://proxy:port', 'https': 'http://proxy:port'}
+        """
         proxies = {}
+
+        # Try to get from database first (GUI settings)
+        try:
+            from app.models import SystemSettings
+            http_proxy_setting = SystemSettings.query.filter_by(key='http_proxy').first()
+            https_proxy_setting = SystemSettings.query.filter_by(key='https_proxy').first()
+
+            http_proxy = http_proxy_setting.value if http_proxy_setting and http_proxy_setting.value else None
+            https_proxy = https_proxy_setting.value if https_proxy_setting and https_proxy_setting.value else None
+
+            # Use database settings if configured
+            if http_proxy:
+                proxies['http'] = http_proxy
+            if https_proxy:
+                proxies['https'] = https_proxy
+
+            # If any proxy found in DB, return it
+            if proxies:
+                return proxies
+
+        except Exception:
+            # Database not available (e.g., during app init), use .env
+            pass
+
+        # Fallback to .env settings
         if Config.HTTP_PROXY:
             proxies['http'] = Config.HTTP_PROXY
         if Config.HTTPS_PROXY:
             proxies['https'] = Config.HTTPS_PROXY
+
         return proxies if proxies else None
+
+    @staticmethod
+    def get_verify_ssl():
+        """
+        Get SSL verification setting.
+
+        Priority: GUI settings (database) > .env settings
+        """
+        try:
+            from app.models import SystemSettings
+            verify_ssl_setting = SystemSettings.query.filter_by(key='verify_ssl').first()
+            if verify_ssl_setting:
+                return verify_ssl_setting.value.lower() != 'false'
+        except Exception:
+            pass
+
+        return Config.VERIFY_SSL
