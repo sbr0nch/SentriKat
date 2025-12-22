@@ -1217,12 +1217,17 @@ def update_user(user_id):
 @admin_required
 def delete_user(user_id):
     """
-    Delete a user (soft delete - deactivate)
+    Permanently delete a user from the system.
 
     Permissions:
     - Super Admin: Can delete any user
     - Org Admin: Can only delete users in their organization (except super admins)
+
+    Note: This is a PERMANENT deletion. Use toggle-active endpoint for blocking/unblocking.
     """
+    from app.models import UserOrganization
+    from app.logging_config import log_audit_event
+
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
@@ -1231,13 +1236,41 @@ def delete_user(user_id):
     if user_id == current_user_id:
         return jsonify({'error': 'Cannot delete your own account'}), 400
 
+    # Cannot delete super admins (only other super admins can, with confirmation)
+    if user.is_super_admin() and not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can delete other super admins'}), 403
+
     # Check permissions
     if not current_user.can_manage_user(user):
         return jsonify({'error': 'Insufficient permissions to delete this user'}), 403
 
-    user.is_active = False
-    db.session.commit()
-    return jsonify({'success': True})
+    # Store user info for audit log before deletion
+    deleted_username = user.username
+    deleted_email = user.email
+    deleted_role = user.role
+
+    try:
+        # Delete organization memberships first
+        UserOrganization.query.filter_by(user_id=user_id).delete()
+
+        # Delete the user
+        db.session.delete(user)
+        db.session.commit()
+
+        # Log audit event
+        log_audit_event(
+            'USER_DELETE',
+            'users',
+            user_id,
+            old_value={'username': deleted_username, 'email': deleted_email, 'role': deleted_role},
+            details=f"Permanently deleted user {deleted_username}"
+        )
+
+        return jsonify({'success': True, 'message': f'User {deleted_username} permanently deleted'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to delete user: {str(e)}'}), 500
 
 @bp.route('/api/users/<int:user_id>/toggle-active', methods=['POST'])
 @admin_required

@@ -848,11 +848,12 @@
                             <input type="password" class="form-control" id="passwordConfirm">
                         </div>
 
-                        <div class="col-md-6">
-                            <label for="organization" class="form-label fw-semibold">Organization *</label>
+                        <div class="col-md-6" id="primaryOrgField">
+                            <label for="organization" class="form-label fw-semibold">Primary Organization *</label>
                             <select class="form-select" id="organization" required>
                                 <option value="">Loading...</option>
                             </select>
+                            <small class="text-muted">Initial organization for the user. Additional orgs can be added after creation.</small>
                         </div>
 
                         <div class="col-md-12">

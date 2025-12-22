@@ -209,6 +209,10 @@ function showCreateUserModal() {
         // Hide org memberships section (only shown when editing)
         document.getElementById('orgMembershipsSection').style.display = 'none';
 
+        // Show primary org field (for new users)
+        document.getElementById('primaryOrgField').style.display = 'block';
+        document.getElementById('organization').required = true;
+
         toggleAuthFields();
         updateRoleDescription();
 
@@ -266,6 +270,10 @@ async function editUser(userId) {
         // For edit mode, password is optional
         document.getElementById('password').required = false;
         document.getElementById('passwordConfirm').required = false;
+
+        // Hide primary org field (managed via memberships when editing)
+        document.getElementById('primaryOrgField').style.display = 'none';
+        document.getElementById('organization').required = false;
 
         // Show organization memberships section and load memberships
         document.getElementById('orgMembershipsSection').style.display = 'block';
@@ -552,9 +560,12 @@ async function saveUser() {
 
 async function deleteUser(userId, username) {
     const confirmed = await showConfirm(
-        `Are you sure you want to delete user "<strong>${username}</strong>"?<br><br>This action cannot be undone.`,
-        'Delete User',
-        'Delete',
+        `<strong>⚠️ PERMANENT DELETION</strong><br><br>` +
+        `Are you sure you want to permanently delete user "<strong>${username}</strong>"?<br><br>` +
+        `<span class="text-danger">This will remove the user from the database entirely and cannot be undone.</span><br><br>` +
+        `<small class="text-muted">Tip: Use the block button (🚫) to temporarily disable a user without deleting them.</small>`,
+        'Permanently Delete User',
+        'Delete Permanently',
         'btn-danger'
     );
 
@@ -567,12 +578,13 @@ async function deleteUser(userId, username) {
             method: 'DELETE'
         });
 
+        const result = await response.json();
+
         if (response.ok) {
-            showToast('✓ User deleted successfully', 'success');
+            showToast(result.message || '✓ User permanently deleted', 'success');
             loadUsers();
         } else {
-            const error = await response.json();
-            showToast(`Error: ${error.error}`, 'danger');
+            showToast(`Error: ${result.error}`, 'danger');
         }
     } catch (error) {
         showToast(`Error deleting user: ${error.message}`, 'danger');
