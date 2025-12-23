@@ -51,10 +51,14 @@ def check_match(vulnerability, product):
             match_reasons.append(f"Product match: {product.product_name}")
 
     # Keywords provide additional matching (should be specific like "http server")
+    # Keywords must match as whole words, not substrings (e.g., "httpd" should NOT match "nhttpd")
+    import re
     for keyword in keywords:
         if keyword and len(keyword) >= 3:  # Minimum 3 chars to avoid too broad matches
-            # Keywords should match in the product name specifically, not just vendor
-            if keyword in vuln_product:
+            # Use word boundary matching: keyword must be a complete word
+            # \b matches word boundaries (start/end of string, spaces, punctuation)
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, vuln_product):
                 match_reasons.append(f"Keyword match: {keyword}")
 
     return match_reasons
