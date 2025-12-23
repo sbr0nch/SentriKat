@@ -151,14 +151,43 @@ async function deleteUser(userId) {
 // ORGANIZATION MANAGEMENT
 // ============================================================================
 
+function showCreateOrgModal() {
+    // Clear the form for new organization
+    document.getElementById('orgId').value = '';
+    document.getElementById('orgName').value = '';
+    document.getElementById('orgDescription').value = '';
+    document.getElementById('orgEmails').value = '';
+    document.getElementById('orgActive').checked = true;
+
+    // Clear SMTP fields if they exist
+    const smtpFields = ['smtpHost', 'smtpPort', 'smtpUsername', 'smtpPassword', 'smtpFromEmail', 'smtpFromName'];
+    smtpFields.forEach(field => {
+        const el = document.getElementById(field);
+        if (el) el.value = field === 'smtpPort' ? '587' : '';
+    });
+
+    // Update modal title
+    document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-building me-2"></i>Create Organization';
+
+    // Show modal
+    new bootstrap.Modal(document.getElementById('orgModal')).show();
+}
+
 async function saveOrganization() {
     const orgId = document.getElementById('orgId').value;
     const isEdit = !!orgId;
 
+    // Parse notification emails from comma-separated input
+    const emailsInput = document.getElementById('orgEmails').value.trim();
+    const notificationEmails = emailsInput
+        ? emailsInput.split(',').map(e => e.trim()).filter(e => e.length > 0)
+        : [];
+
     const orgData = {
         name: document.getElementById('orgName').value.trim(),
         description: document.getElementById('orgDescription').value.trim(),
-        active: document.getElementById('orgActive').checked
+        active: document.getElementById('orgActive').checked,
+        notification_emails: notificationEmails
     };
 
     if (!orgData.name) {
@@ -248,6 +277,10 @@ async function editOrganization(orgId) {
         document.getElementById('orgName').value = org.name || '';
         document.getElementById('orgDescription').value = org.description || '';
         document.getElementById('orgActive').checked = org.active;
+
+        // Populate notification emails (array to comma-separated string)
+        const emails = org.notification_emails || [];
+        document.getElementById('orgEmails').value = Array.isArray(emails) ? emails.join(', ') : '';
 
         // Update modal title
         document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Organization';
