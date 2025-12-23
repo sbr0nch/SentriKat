@@ -8,7 +8,15 @@ def normalize_string(s):
     return s.lower().strip()
 
 def check_match(vulnerability, product):
-    """Check if a vulnerability matches a product"""
+    """
+    Check if a vulnerability matches a product.
+
+    Matching logic (strict by default):
+    - If BOTH vendor AND product_name are specified: BOTH must match
+    - If only vendor is specified: vendor must match (use with caution)
+    - If only product_name is specified: product_name must match
+    - Keywords provide additional matches but should be specific
+    """
     vuln_vendor = normalize_string(vulnerability.vendor_project)
     vuln_product = normalize_string(vulnerability.product)
 
@@ -22,35 +30,37 @@ def check_match(vulnerability, product):
 
     match_reasons = []
 
-    # Match by vendor
-    if prod_vendor and prod_vendor in vuln_vendor:
-        match_reasons.append(f"Vendor match: {product.vendor}")
+    # Strict matching: if both vendor AND product are specified, BOTH must match
+    if prod_vendor and prod_name:
+        vendor_matches = prod_vendor in vuln_vendor
+        # Product matches if either contains the other (handles "HTTP Server" vs "Apache HTTP Server")
+        # Only compare product names, not cross-check with vendor
+        product_matches = prod_name in vuln_product or vuln_product in prod_name
 
-    # Match by product name
-    if prod_name and prod_name in vuln_product:
-        match_reasons.append(f"Product match: {product.product_name}")
+        if vendor_matches and product_matches:
+            match_reasons.append(f"Vendor+Product match: {product.vendor} - {product.product_name}")
 
-    # Match by keywords in either vendor or product
+    # If only vendor specified (no product name), match vendor alone
+    elif prod_vendor and not prod_name:
+        if prod_vendor in vuln_vendor:
+            match_reasons.append(f"Vendor match: {product.vendor}")
+
+    # If only product name specified (no vendor), match product alone
+    elif prod_name and not prod_vendor:
+        if prod_name in vuln_product:
+            match_reasons.append(f"Product match: {product.product_name}")
+
+    # Keywords provide additional matching (should be specific like "http server")
     for keyword in keywords:
-        if keyword:
-            if keyword in vuln_vendor or keyword in vuln_product:
+        if keyword and len(keyword) >= 3:  # Minimum 3 chars to avoid too broad matches
+            # Keywords should match in the product name specifically, not just vendor
+            if keyword in vuln_product:
                 match_reasons.append(f"Keyword match: {keyword}")
-
-    # Also check if vulnerability product contains our vendor
-    if prod_vendor and prod_vendor in vuln_product:
-        match_reasons.append(f"Vendor in product: {product.vendor}")
-
-    # Check if product name is in vendor_project
-    if prod_name and prod_name in vuln_vendor:
-        match_reasons.append(f"Product in vendor: {product.product_name}")
 
     return match_reasons
 
 def match_vulnerabilities_to_products():
     """Match all active vulnerabilities against active products"""
-    # Clear old matches (optional - you may want to keep historical data)
-    # VulnerabilityMatch.query.delete()
-
     # Get all active products
     products = Product.query.filter_by(active=True).all()
 
@@ -82,6 +92,47 @@ def match_vulnerabilities_to_products():
 
     db.session.commit()
     return matches_count
+
+
+def cleanup_invalid_matches():
+    """
+    Remove matches that no longer pass the matching criteria.
+    Call this after updating matching logic to clean up stale data.
+    Returns count of removed matches.
+    """
+    all_matches = VulnerabilityMatch.query.all()
+    removed_count = 0
+
+    for match in all_matches:
+        product = match.product
+        vulnerability = match.vulnerability
+
+        # Skip if product or vulnerability was deleted
+        if not product or not vulnerability:
+            db.session.delete(match)
+            removed_count += 1
+            continue
+
+        # Re-check if this match is still valid with current logic
+        match_reasons = check_match(vulnerability, product)
+
+        if not match_reasons:
+            # Match no longer valid - remove it
+            db.session.delete(match)
+            removed_count += 1
+
+    db.session.commit()
+    return removed_count
+
+
+def rematch_all_products():
+    """
+    Full rematch: cleanup invalid matches then add new valid ones.
+    Returns tuple of (removed_count, added_count).
+    """
+    removed = cleanup_invalid_matches()
+    added = match_vulnerabilities_to_products()
+    return removed, added
 
 def get_filtered_vulnerabilities(filters=None):
     """Get vulnerabilities filtered by various criteria"""

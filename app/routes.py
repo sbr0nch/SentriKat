@@ -663,6 +663,31 @@ def sync_history():
     syncs = SyncLog.query.order_by(SyncLog.sync_date.desc()).limit(limit).all()
     return jsonify([s.to_dict() for s in syncs])
 
+
+@bp.route('/api/products/rematch', methods=['POST'])
+@admin_required
+def rematch_products():
+    """
+    Re-run product matching with current (stricter) logic.
+    Removes invalid matches and adds new valid ones.
+
+    Permissions:
+    - Super Admin only: Can trigger product rematch
+    """
+    from app.filters import rematch_all_products
+
+    try:
+        removed, added = rematch_all_products()
+        return jsonify({
+            'status': 'success',
+            'removed': removed,
+            'added': added,
+            'message': f'Removed {removed} invalid matches, added {added} new matches'
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @bp.route('/api/alerts/trigger-critical', methods=['POST'])
 @admin_required
 def trigger_critical_cve_alerts():

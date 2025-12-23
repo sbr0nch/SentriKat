@@ -205,15 +205,15 @@ class EmailAlertManager:
 
                     <!-- Header with Logo -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #3b82f6 100%); padding: 40px 30px; text-align: center;">
+                        <td style="background-color: #1e40af; background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #3b82f6 100%); padding: 40px 30px; text-align: center;">
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                                 <tr>
                                     <td align="center">
-                                        <!-- Logo Text -->
-                                        <h1 style="margin: 0; font-size: 32px; font-weight: 800; color: white; letter-spacing: -0.5px;">
+                                        <!-- Logo Text - using dark blue for visibility on both light and dark backgrounds -->
+                                        <h1 style="margin: 0; font-size: 32px; font-weight: 800; color: #ffffff; background-color: #1e40af; letter-spacing: -0.5px;">
                                             SentriKat
                                         </h1>
-                                        <p style="margin: 8px 0 0 0; font-size: 14px; color: #bfdbfe; text-transform: uppercase; letter-spacing: 2px;">
+                                        <p style="margin: 8px 0 0 0; font-size: 14px; color: #93c5fd; text-transform: uppercase; letter-spacing: 2px;">
                                             Security Alert
                                         </p>
                                     </td>
