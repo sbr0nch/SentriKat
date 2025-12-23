@@ -105,22 +105,21 @@ class EmailAlertManager:
             priority = match.calculate_effective_priority()
             vuln = match.vulnerability
 
+            # Calculate CVE age
+            days_old = (date.today() - vuln.date_added).days if vuln.date_added else 999
+
             should_alert = False
 
-            # Check alert settings - CRITICAL ONLY (high priority disabled to prevent spam)
-            if organization.alert_on_critical and priority == 'critical':
+            # Check alert settings - CRITICAL ONLY and RECENT (≤7 days)
+            # This prevents sending hundreds of old critical CVEs
+            if organization.alert_on_critical and priority == 'critical' and days_old <= 7:
                 should_alert = True
-            # Note: alert_on_high is intentionally disabled - too many alerts cause spam
-            # elif organization.alert_on_high and priority == 'high':
-            #     should_alert = True
-            elif organization.alert_on_ransomware and vuln.known_ransomware and priority == 'critical':
-                # Ransomware alerts only for critical severity
+            # Ransomware alerts for recent critical vulnerabilities
+            elif organization.alert_on_ransomware and vuln.known_ransomware and priority == 'critical' and days_old <= 7:
                 should_alert = True
-            elif organization.alert_on_new_cve and priority == 'critical':
-                # New CVE within 7 days
-                days_old = (date.today() - vuln.date_added).days if vuln.date_added else 999
-                if days_old <= 7:
-                    should_alert = True
+            # New CVE alert (within 7 days, any matching CVE)
+            elif organization.alert_on_new_cve and priority == 'critical' and days_old <= 7:
+                should_alert = True
 
             if should_alert:
                 filtered_matches.append(match)
@@ -201,16 +200,39 @@ class EmailAlertManager:
         <tr>
             <td align="center" style="padding: 40px 20px;">
                 <!-- Main Container -->
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 680px; background: white; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); overflow: hidden;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 680px; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); overflow: hidden;">
 
                     <!-- Header with Logo -->
                     <tr>
-                        <td style="background-color: #1e40af; background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #3b82f6 100%); padding: 40px 30px; text-align: center;">
+                        <td style="background-color: #1e3a8a; padding: 40px 30px; text-align: center;">
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                                 <tr>
                                     <td align="center">
-                                        <!-- Logo Text - using dark blue for visibility on both light and dark backgrounds -->
-                                        <h1 style="margin: 0; font-size: 32px; font-weight: 800; color: #ffffff; background-color: #1e40af; letter-spacing: -0.5px;">
+                                        <!-- Logo SVG - Cat icon with shield -->
+                                        <div style="margin-bottom: 15px;">
+                                            <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                                                <defs>
+                                                    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                        <stop offset="0%" style="stop-color:#3b82f6"/>
+                                                        <stop offset="100%" style="stop-color:#1e40af"/>
+                                                    </linearGradient>
+                                                </defs>
+                                                <!-- Shield shape -->
+                                                <path d="M32 4 L56 12 L56 28 C56 44 44 56 32 60 C20 56 8 44 8 28 L8 12 Z" fill="url(#shieldGrad)" stroke="#60a5fa" stroke-width="2"/>
+                                                <!-- Cat face -->
+                                                <ellipse cx="32" cy="36" rx="14" ry="12" fill="#f8fafc"/>
+                                                <!-- Cat ears -->
+                                                <path d="M20 28 L18 16 L26 24 Z" fill="#f8fafc"/>
+                                                <path d="M44 28 L46 16 L38 24 Z" fill="#f8fafc"/>
+                                                <!-- Cat eyes -->
+                                                <ellipse cx="26" cy="34" rx="3" ry="4" fill="#1e3a8a"/>
+                                                <ellipse cx="38" cy="34" rx="3" ry="4" fill="#1e3a8a"/>
+                                                <!-- Cat nose -->
+                                                <path d="M32 40 L30 43 L34 43 Z" fill="#ec4899"/>
+                                            </svg>
+                                        </div>
+                                        <!-- Logo Text -->
+                                        <h1 style="margin: 0; font-size: 32px; font-weight: 800; color: #f8fafc; letter-spacing: -0.5px;">
                                             SentriKat
                                         </h1>
                                         <p style="margin: 8px 0 0 0; font-size: 14px; color: #93c5fd; text-transform: uppercase; letter-spacing: 2px;">
@@ -224,11 +246,11 @@ class EmailAlertManager:
 
                     <!-- Alert Banner -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); padding: 20px 30px;">
+                        <td style="background-color: #dc2626; padding: 20px 30px;">
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                                 <tr>
                                     <td align="center">
-                                        <p style="margin: 0; font-size: 18px; font-weight: 700; color: white;">
+                                        <p style="margin: 0; font-size: 18px; font-weight: 700; color: #fef2f2;">
                                             ⚠️ {len(matches)} Critical Vulnerabilities Detected
                                         </p>
                                         <p style="margin: 8px 0 0 0; font-size: 14px; color: #fecaca;">
