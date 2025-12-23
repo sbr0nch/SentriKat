@@ -105,20 +105,24 @@ class EmailAlertManager:
             priority = match.calculate_effective_priority()
             vuln = match.vulnerability
 
-            # Calculate CVE age
-            days_old = (date.today() - vuln.date_added).days if vuln.date_added else 999
+            # Calculate urgency based on due date (days until remediation deadline)
+            # This matches the dashboard "Urgency" filter behavior
+            if vuln.due_date:
+                days_until_due = (vuln.due_date - date.today()).days
+            else:
+                days_until_due = 999  # No due date = not urgent
 
             should_alert = False
 
-            # Check alert settings - CRITICAL ONLY and RECENT (≤7 days)
-            # This prevents sending hundreds of old critical CVEs
-            if organization.alert_on_critical and priority == 'critical' and days_old <= 7:
+            # Check alert settings - CRITICAL + URGENT (due within 7 days)
+            # This matches dashboard filter: Severity=Critical, Urgency=≤7 Days
+            if organization.alert_on_critical and priority == 'critical' and days_until_due <= 7:
                 should_alert = True
-            # Ransomware alerts for recent critical vulnerabilities
-            elif organization.alert_on_ransomware and vuln.known_ransomware and priority == 'critical' and days_old <= 7:
+            # Ransomware alerts for urgent critical vulnerabilities
+            elif organization.alert_on_ransomware and vuln.known_ransomware and priority == 'critical' and days_until_due <= 7:
                 should_alert = True
-            # New CVE alert (within 7 days, any matching CVE)
-            elif organization.alert_on_new_cve and priority == 'critical' and days_old <= 7:
+            # New CVE alert - also use urgency filter
+            elif organization.alert_on_new_cve and priority == 'critical' and days_until_due <= 7:
                 should_alert = True
 
             if should_alert:
