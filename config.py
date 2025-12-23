@@ -1,6 +1,9 @@
 import os
 from datetime import timedelta
 
+# Determine base directory for default database path
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 class Config:
     """Application configuration"""
     # Secret key for session signing - MUST be set in production
@@ -17,7 +20,19 @@ class Config:
     # MUST be set in production to encrypt/decrypt sensitive settings
     ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY')
 
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///sentrikat.db'
+    # Database configuration
+    # IMPORTANT: Always use absolute paths to avoid database location confusion
+    # For production, set DATABASE_URL environment variable:
+    #   DATABASE_URL=sqlite:////opt/sentrikat/data/sentrikat.db
+    #   DATABASE_URL=postgresql://user:pass@host/dbname
+    _db_url = os.environ.get('DATABASE_URL')
+    if _db_url:
+        SQLALCHEMY_DATABASE_URI = _db_url
+    else:
+        # Default: use absolute path in 'data' subdirectory of app
+        _default_db_path = os.path.join(BASE_DIR, 'data', 'sentrikat.db')
+        SQLALCHEMY_DATABASE_URI = f'sqlite:///{_default_db_path}'
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Application URL (for generating share links, email links, etc.)

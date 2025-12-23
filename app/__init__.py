@@ -90,6 +90,40 @@ def create_app(config_class=Config):
                 return redirect(url_for('setup.setup_wizard'))
 
     with app.app_context():
-        db.create_all()
+        # Check if database exists before auto-creating
+        # This prevents silently creating empty databases in wrong locations
+        db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+
+        if db_uri.startswith('sqlite'):
+            # Extract path from sqlite URI (sqlite:/// or sqlite:////)
+            if db_uri.startswith('sqlite:////'):
+                db_path = db_uri[10:]  # Absolute path (4 slashes)
+            elif db_uri.startswith('sqlite:///'):
+                db_path = db_uri[9:]   # Could be relative
+                if not os.path.isabs(db_path):
+                    # Make relative paths absolute from app root
+                    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), db_path)
+
+            db_exists = os.path.exists(db_path)
+
+            if not db_exists:
+                # Create data directory if needed
+                db_dir = os.path.dirname(db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
+
+                # Create tables - this is first run or setup
+                import logging
+                logging.getLogger(__name__).info(f"Creating new database at: {db_path}")
+                db.create_all()
+            else:
+                # Database exists - DON'T run create_all() to avoid issues
+                # Migrations should handle schema changes
+                import logging
+                logging.getLogger(__name__).info(f"Using existing database at: {db_path}")
+        else:
+            # Non-SQLite database (PostgreSQL, etc.) - always run create_all for safety
+            # In production, migrations should be used instead
+            db.create_all()
 
     return app
