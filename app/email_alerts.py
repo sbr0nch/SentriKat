@@ -200,42 +200,22 @@ class EmailAlertManager:
         <tr>
             <td align="center" style="padding: 40px 20px;">
                 <!-- Main Container -->
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 680px; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); overflow: hidden;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 680px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e5e7eb; overflow: hidden;">
 
-                    <!-- Header with Logo -->
+                    <!-- Header - Dark text for visibility on any background -->
                     <tr>
-                        <td style="background-color: #1e3a8a; padding: 40px 30px; text-align: center;">
+                        <td style="background-color: #1e3a8a; padding: 30px; text-align: center; border-bottom: 4px solid #3b82f6;">
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                                 <tr>
                                     <td align="center">
-                                        <!-- Logo SVG - Cat icon with shield -->
-                                        <div style="margin-bottom: 15px;">
-                                            <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-                                                <defs>
-                                                    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                                        <stop offset="0%" style="stop-color:#3b82f6"/>
-                                                        <stop offset="100%" style="stop-color:#1e40af"/>
-                                                    </linearGradient>
-                                                </defs>
-                                                <!-- Shield shape -->
-                                                <path d="M32 4 L56 12 L56 28 C56 44 44 56 32 60 C20 56 8 44 8 28 L8 12 Z" fill="url(#shieldGrad)" stroke="#60a5fa" stroke-width="2"/>
-                                                <!-- Cat face -->
-                                                <ellipse cx="32" cy="36" rx="14" ry="12" fill="#f8fafc"/>
-                                                <!-- Cat ears -->
-                                                <path d="M20 28 L18 16 L26 24 Z" fill="#f8fafc"/>
-                                                <path d="M44 28 L46 16 L38 24 Z" fill="#f8fafc"/>
-                                                <!-- Cat eyes -->
-                                                <ellipse cx="26" cy="34" rx="3" ry="4" fill="#1e3a8a"/>
-                                                <ellipse cx="38" cy="34" rx="3" ry="4" fill="#1e3a8a"/>
-                                                <!-- Cat nose -->
-                                                <path d="M32 40 L30 43 L34 43 Z" fill="#ec4899"/>
-                                            </svg>
+                                        <!-- Text-based logo for maximum compatibility -->
+                                        <div style="display: inline-block; background-color: #ffffff; border-radius: 12px; padding: 12px 20px; margin-bottom: 15px;">
+                                            <span style="font-size: 28px;">🐱🛡️</span>
                                         </div>
-                                        <!-- Logo Text -->
-                                        <h1 style="margin: 0; font-size: 32px; font-weight: 800; color: #f8fafc; letter-spacing: -0.5px;">
+                                        <h1 style="margin: 0; font-size: 28px; font-weight: 800; color: #1e3a8a; background-color: #ffffff; padding: 8px 20px; border-radius: 8px; display: inline-block;">
                                             SentriKat
                                         </h1>
-                                        <p style="margin: 8px 0 0 0; font-size: 14px; color: #93c5fd; text-transform: uppercase; letter-spacing: 2px;">
+                                        <p style="margin: 12px 0 0 0; font-size: 13px; color: #ffffff; background-color: #3b82f6; padding: 6px 16px; border-radius: 4px; display: inline-block; text-transform: uppercase; letter-spacing: 2px; font-weight: 600;">
                                             Security Alert
                                         </p>
                                     </td>
@@ -244,18 +224,20 @@ class EmailAlertManager:
                         </td>
                     </tr>
 
-                    <!-- Alert Banner -->
+                    <!-- Alert Banner - High contrast red -->
                     <tr>
-                        <td style="background-color: #dc2626; padding: 20px 30px;">
+                        <td style="background-color: #dc2626; padding: 24px 30px; border-bottom: 4px solid #991b1b;">
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                                 <tr>
                                     <td align="center">
-                                        <p style="margin: 0; font-size: 18px; font-weight: 700; color: #fef2f2;">
-                                            ⚠️ {len(matches)} Critical Vulnerabilities Detected
-                                        </p>
-                                        <p style="margin: 8px 0 0 0; font-size: 14px; color: #fecaca;">
-                                            Immediate action required for {organization.display_name}
-                                        </p>
+                                        <div style="background-color: #ffffff; border-radius: 8px; padding: 16px 24px; display: inline-block;">
+                                            <p style="margin: 0; font-size: 20px; font-weight: 700; color: #dc2626;">
+                                                ⚠️ {len(matches)} Critical Vulnerabilities Detected
+                                            </p>
+                                            <p style="margin: 8px 0 0 0; font-size: 14px; color: #374151;">
+                                                Immediate action required for <strong>{organization.display_name}</strong>
+                                            </p>
+                                        </div>
                                     </td>
                                 </tr>
                             </table>
