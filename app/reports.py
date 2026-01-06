@@ -123,10 +123,10 @@ class VulnerabilityReportGenerator:
             'total': len(all_matches),
             'acknowledged': sum(1 for m in all_matches if m.acknowledged),
             'unacknowledged': sum(1 for m in all_matches if not m.acknowledged),
-            'critical': sum(1 for m in all_matches if m.effective_priority == 'critical'),
-            'high': sum(1 for m in all_matches if m.effective_priority == 'high'),
-            'medium': sum(1 for m in all_matches if m.effective_priority == 'medium'),
-            'low': sum(1 for m in all_matches if m.effective_priority == 'low'),
+            'critical': sum(1 for m in all_matches if m.calculate_effective_priority() == 'critical'),
+            'high': sum(1 for m in all_matches if m.calculate_effective_priority() == 'high'),
+            'medium': sum(1 for m in all_matches if m.calculate_effective_priority() == 'medium'),
+            'low': sum(1 for m in all_matches if m.calculate_effective_priority() == 'low'),
             'ransomware': sum(1 for m in all_matches if m.vulnerability and m.vulnerability.known_ransomware),
         }
 
@@ -232,7 +232,7 @@ class VulnerabilityReportGenerator:
             product = match.product
 
             status = 'Acknowledged' if match.acknowledged else 'Pending'
-            priority = match.effective_priority or 'N/A'
+            priority = match.calculate_effective_priority() or 'N/A'
             severity = vuln.severity if vuln else 'N/A'
 
             table_data.append([
@@ -273,7 +273,7 @@ class VulnerabilityReportGenerator:
 
             # Priority colors
             match = display_matches[i-1]
-            priority = match.effective_priority
+            priority = match.calculate_effective_priority()
             if priority:
                 color = self._get_priority_color(priority)
                 style_commands.append(('TEXTCOLOR', (2, i), (2, i), color))
@@ -363,7 +363,7 @@ class VulnerabilityReportGenerator:
         # Unacknowledged vulnerabilities (pending action)
         pending = [m for m in all_matches if not m.acknowledged]
         pending_sorted = sorted(pending, key=lambda m: (
-            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.effective_priority, 4)
+            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
         ))
         self._create_vulnerability_list(elements, pending_sorted, "Pending Action Items")
 
@@ -374,7 +374,7 @@ class VulnerabilityReportGenerator:
         # Acknowledged vulnerabilities
         acknowledged = [m for m in all_matches if m.acknowledged]
         acknowledged_sorted = sorted(acknowledged, key=lambda m: (
-            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.effective_priority, 4)
+            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
         ))
         self._create_vulnerability_list(elements, acknowledged_sorted, "Acknowledged Vulnerabilities")
 
@@ -441,7 +441,7 @@ class VulnerabilityReportGenerator:
         if include_pending:
             pending = [m for m in all_matches if not m.acknowledged]
             pending_sorted = sorted(pending, key=lambda m: (
-                {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.effective_priority, 4)
+                {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
             ))
             self._create_vulnerability_list(elements, pending_sorted, "Pending Action Items")
 
@@ -452,7 +452,7 @@ class VulnerabilityReportGenerator:
 
             acknowledged = [m for m in all_matches if m.acknowledged]
             acknowledged_sorted = sorted(acknowledged, key=lambda m: (
-                {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.effective_priority, 4)
+                {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
             ))
             self._create_vulnerability_list(elements, acknowledged_sorted, "Acknowledged Vulnerabilities")
 
