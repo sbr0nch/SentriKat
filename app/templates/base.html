@@ -1892,19 +1892,31 @@
                 const sortType = header.dataset.sortType || 'string';
                 const tableState = this.tables[tableId];
 
-                // Determine sort direction
+                // Determine sort direction (first click = descending, then toggle)
                 if (tableState.currentSort === sortKey) {
                     tableState.currentDirection = tableState.currentDirection === 'asc' ? 'desc' : 'asc';
                 } else {
                     tableState.currentSort = sortKey;
-                    tableState.currentDirection = 'asc';
+                    tableState.currentDirection = 'desc'; // First click shows descending (arrow down)
                 }
 
-                // Update header classes
+                // Update header classes and icons
                 table.querySelectorAll('th[data-sort-key]').forEach(th => {
                     th.classList.remove('sort-asc', 'sort-desc');
+                    const icon = th.querySelector('.sort-icon');
+                    if (icon) {
+                        icon.classList.remove('bi-chevron-up', 'bi-chevron-down');
+                        icon.classList.add('bi-chevron-up'); // Reset to default
+                    }
                 });
                 header.classList.add('sort-' + tableState.currentDirection);
+
+                // Update the clicked header's icon
+                const headerIcon = header.querySelector('.sort-icon');
+                if (headerIcon) {
+                    headerIcon.classList.remove('bi-chevron-up', 'bi-chevron-down');
+                    headerIcon.classList.add(tableState.currentDirection === 'asc' ? 'bi-chevron-up' : 'bi-chevron-down');
+                }
 
                 // Sort rows
                 const direction = tableState.currentDirection === 'asc' ? 1 : -1;
