@@ -997,6 +997,7 @@ async function loadOrganizations() {
                     </tr>
                 `;
             }).join('');
+            console.log('loadOrganizations: Table rendered with', tbody.children.length, 'rows');
         }
 
         // Reset select all checkbox
@@ -1007,8 +1008,9 @@ async function loadOrganizations() {
         if (typeof SortableTable !== 'undefined') {
             SortableTable.init('orgsTableContainer');
         }
+        console.log('loadOrganizations: Complete!');
     } catch (error) {
-        console.error('Error loading organizations:', error);
+        console.error('loadOrganizations: Error:', error);
         tbody.innerHTML = `
             <tr>
                 <td colspan="7" class="text-center text-danger py-4">
