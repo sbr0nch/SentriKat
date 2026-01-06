@@ -495,11 +495,13 @@ def get_product_organizations(product_id):
     assigned_orgs = [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
                      for org in product.organizations.all()]
 
-    # Include legacy organization_id for backwards compatibility
-    if product.organization_id and not assigned_orgs:
-        if product.organization:
-            assigned_orgs = [{'id': product.organization.id, 'name': product.organization.name,
-                             'display_name': product.organization.display_name}]
+    # Also include legacy organization_id (may be in addition to many-to-many)
+    if product.organization_id and product.organization:
+        legacy_org = {'id': product.organization.id, 'name': product.organization.name,
+                      'display_name': product.organization.display_name}
+        # Add if not already in list
+        if not any(org['id'] == legacy_org['id'] for org in assigned_orgs):
+            assigned_orgs.append(legacy_org)
 
     return jsonify({'organizations': assigned_orgs})
 

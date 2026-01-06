@@ -1181,7 +1181,7 @@
     // Bulk Operations
     // ============================================================================
 
-    let selectedProducts = new Set();
+    let selectedProducts = new Map(); // Map of productId -> { id, active, name }
 
     function updateBulkToolbar() {
         const toolbar = document.getElementById('bulkActionsToolbar');
@@ -1190,6 +1190,40 @@
 
         if (count > 0) {
             toolbar.style.display = 'block';
+
+            // Check active states of selected products
+            const activeCount = Array.from(selectedProducts.values()).filter(p => p.active).length;
+            const inactiveCount = count - activeCount;
+
+            // Update Activate button
+            const activateBtn = toolbar.querySelector('button[onclick="bulkActivate()"]');
+            if (activateBtn) {
+                if (inactiveCount === 0) {
+                    // All selected are already active
+                    activateBtn.disabled = true;
+                    activateBtn.title = 'All selected products are already active';
+                } else {
+                    activateBtn.disabled = false;
+                    activateBtn.title = inactiveCount < count
+                        ? `Activate ${inactiveCount} inactive product(s)`
+                        : `Activate ${count} product(s)`;
+                }
+            }
+
+            // Update Deactivate button
+            const deactivateBtn = toolbar.querySelector('button[onclick="bulkDeactivate()"]');
+            if (deactivateBtn) {
+                if (activeCount === 0) {
+                    // All selected are already inactive
+                    deactivateBtn.disabled = true;
+                    deactivateBtn.title = 'All selected products are already inactive';
+                } else {
+                    deactivateBtn.disabled = false;
+                    deactivateBtn.title = activeCount < count
+                        ? `Deactivate ${activeCount} active product(s)`
+                        : `Deactivate ${count} product(s)`;
+                }
+            }
         } else {
             toolbar.style.display = 'none';
         }
@@ -1197,7 +1231,15 @@
 
     function toggleProductSelect(productId, checkbox) {
         if (checkbox.checked) {
-            selectedProducts.add(productId);
+            // Get the product's active status from the row
+            const row = checkbox.closest('tr');
+            const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+            const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+            const vendorCell = row.querySelector('td[data-column="vendor"]');
+            const productCell = row.querySelector('td[data-column="product"]');
+            const name = `${vendorCell?.textContent || ''} ${productCell?.textContent || ''}`.trim();
+
+            selectedProducts.set(productId, { id: productId, active: isActive, name: name });
         } else {
             selectedProducts.delete(productId);
         }
@@ -1235,7 +1277,15 @@
 
             if (!isNaN(productId)) {
                 if (isChecked) {
-                    selectedProducts.add(productId);
+                    // Get product info from the row
+                    const row = checkbox.closest('tr');
+                    const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+                    const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+                    const vendorCell = row.querySelector('td[data-column="vendor"]');
+                    const productCell = row.querySelector('td[data-column="product"]');
+                    const name = `${vendorCell?.textContent || ''} ${productCell?.textContent || ''}`.trim();
+
+                    selectedProducts.set(productId, { id: productId, active: isActive, name: name });
                 } else {
                     selectedProducts.delete(productId);
                 }
@@ -1271,7 +1321,7 @@
 
         showLoading();
         try {
-            const promises = Array.from(selectedProducts).map(productId =>
+            const promises = Array.from(selectedProducts.keys()).map(productId =>
                 fetch(`/api/products/${productId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -1280,7 +1330,7 @@
             );
 
             await Promise.all(promises);
-            showToast(`✓ ${selectedProducts.size} product(s) assigned successfully`, 'success');
+            showToast(`${selectedProducts.size} product(s) assigned successfully`, 'success');
             clearSelection();
             loadProducts();
         } catch (error) {
@@ -1293,10 +1343,37 @@
     async function bulkActivate() {
         if (selectedProducts.size === 0) return;
 
+        // Separate products by current status
+        const toActivate = Array.from(selectedProducts.values()).filter(p => !p.active);
+        const alreadyActive = Array.from(selectedProducts.values()).filter(p => p.active);
+
+        if (toActivate.length === 0) {
+            showToast('All selected products are already active', 'info');
+            return;
+        }
+
+        // Build confirmation message
+        let message = '';
+        if (alreadyActive.length > 0) {
+            message += `<div class="mb-3"><strong>Already active (${alreadyActive.length}):</strong><ul class="mb-0 text-muted small">`;
+            alreadyActive.slice(0, 5).forEach(p => {
+                message += `<li>${escapeHtml(p.name)}</li>`;
+            });
+            if (alreadyActive.length > 5) message += `<li>...and ${alreadyActive.length - 5} more</li>`;
+            message += `</ul></div>`;
+        }
+
+        message += `<div><strong>Will be activated (${toActivate.length}):</strong><ul class="mb-0">`;
+        toActivate.slice(0, 5).forEach(p => {
+            message += `<li>${escapeHtml(p.name)}</li>`;
+        });
+        if (toActivate.length > 5) message += `<li>...and ${toActivate.length - 5} more</li>`;
+        message += `</ul></div>`;
+
         const confirmed = await showConfirm(
-            `Activate ${selectedProducts.size} product(s)?`,
+            message,
             'Activate Products',
-            'Activate',
+            `Activate ${toActivate.length}`,
             'btn-success'
         );
 
@@ -1304,8 +1381,8 @@
 
         showLoading();
         try {
-            const promises = Array.from(selectedProducts).map(productId =>
-                fetch(`/api/products/${productId}`, {
+            const promises = toActivate.map(product =>
+                fetch(`/api/products/${product.id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ active: true })
@@ -1313,7 +1390,7 @@
             );
 
             await Promise.all(promises);
-            showToast(`✓ ${selectedProducts.size} product(s) activated`, 'success');
+            showToast(`${toActivate.length} product(s) activated`, 'success');
             clearSelection();
             loadProducts();
         } catch (error) {
@@ -1326,10 +1403,37 @@
     async function bulkDeactivate() {
         if (selectedProducts.size === 0) return;
 
+        // Separate products by current status
+        const toDeactivate = Array.from(selectedProducts.values()).filter(p => p.active);
+        const alreadyInactive = Array.from(selectedProducts.values()).filter(p => !p.active);
+
+        if (toDeactivate.length === 0) {
+            showToast('All selected products are already inactive', 'info');
+            return;
+        }
+
+        // Build confirmation message
+        let message = '';
+        if (alreadyInactive.length > 0) {
+            message += `<div class="mb-3"><strong>Already inactive (${alreadyInactive.length}):</strong><ul class="mb-0 text-muted small">`;
+            alreadyInactive.slice(0, 5).forEach(p => {
+                message += `<li>${escapeHtml(p.name)}</li>`;
+            });
+            if (alreadyInactive.length > 5) message += `<li>...and ${alreadyInactive.length - 5} more</li>`;
+            message += `</ul></div>`;
+        }
+
+        message += `<div><strong>Will be deactivated (${toDeactivate.length}):</strong><ul class="mb-0">`;
+        toDeactivate.slice(0, 5).forEach(p => {
+            message += `<li>${escapeHtml(p.name)}</li>`;
+        });
+        if (toDeactivate.length > 5) message += `<li>...and ${toDeactivate.length - 5} more</li>`;
+        message += `</ul></div>`;
+
         const confirmed = await showConfirm(
-            `Deactivate ${selectedProducts.size} product(s)?`,
+            message,
             'Deactivate Products',
-            'Deactivate',
+            `Deactivate ${toDeactivate.length}`,
             'btn-warning'
         );
 
@@ -1337,8 +1441,8 @@
 
         showLoading();
         try {
-            const promises = Array.from(selectedProducts).map(productId =>
-                fetch(`/api/products/${productId}`, {
+            const promises = toDeactivate.map(product =>
+                fetch(`/api/products/${product.id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ active: false })
@@ -1346,7 +1450,7 @@
             );
 
             await Promise.all(promises);
-            showToast(`✓ ${selectedProducts.size} product(s) deactivated`, 'success');
+            showToast(`${toDeactivate.length} product(s) deactivated`, 'success');
             clearSelection();
             loadProducts();
         } catch (error) {
@@ -1359,8 +1463,18 @@
     async function bulkDelete() {
         if (selectedProducts.size === 0) return;
 
+        // Build list of products to delete
+        const products = Array.from(selectedProducts.values());
+        let message = `<strong>⚠️ DELETE ${selectedProducts.size} product(s)?</strong><br><br>`;
+        message += `<ul class="mb-0">`;
+        products.slice(0, 5).forEach(p => {
+            message += `<li>${escapeHtml(p.name)}</li>`;
+        });
+        if (products.length > 5) message += `<li>...and ${products.length - 5} more</li>`;
+        message += `</ul><br>This action cannot be undone.`;
+
         const confirmed = await showConfirm(
-            `<strong>⚠️ DELETE ${selectedProducts.size} product(s)?</strong><br><br>This action cannot be undone.`,
+            message,
             'Delete Products',
             'Delete All',
             'btn-danger'
@@ -1370,12 +1484,12 @@
 
         showLoading();
         try {
-            const promises = Array.from(selectedProducts).map(productId =>
+            const promises = Array.from(selectedProducts.keys()).map(productId =>
                 fetch(`/api/products/${productId}`, { method: 'DELETE' })
             );
 
             await Promise.all(promises);
-            showToast(`✓ ${selectedProducts.size} product(s) deleted`, 'success');
+            showToast(`${selectedProducts.size} product(s) deleted`, 'success');
             clearSelection();
             loadProducts();
         } catch (error) {
@@ -1462,10 +1576,22 @@
             const response = await fetch('/api/organizations');
             allOrganizations = await response.json();
 
+            // Get currently assigned organization IDs
+            const assignedResponse = await fetch(`/api/products/${currentOrgProductId}/organizations`);
+            const assignedData = await assignedResponse.json();
+            const assignedOrgIds = new Set((assignedData.organizations || []).map(org => org.id));
+
+            // Filter out already-assigned organizations
+            const availableOrgs = allOrganizations.filter(org => !assignedOrgIds.has(org.id));
+
             const select = document.getElementById('addOrgSelect');
-            select.innerHTML = allOrganizations.map(org =>
-                `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`
-            ).join('');
+            if (availableOrgs.length === 0) {
+                select.innerHTML = '<option value="" disabled>All organizations already assigned</option>';
+            } else {
+                select.innerHTML = availableOrgs.map(org =>
+                    `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`
+                ).join('');
+            }
         } catch (error) {
             showToast(`Error loading organizations: ${error.message}`, 'danger');
         }
