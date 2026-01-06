@@ -527,12 +527,16 @@ function showCreateUserModal() {
 }
 
 async function editUser(userId) {
+    console.log('editUser: Starting for userId:', userId);
     currentUserId = userId;
     document.getElementById('userModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit User';
 
     try {
+        console.log('editUser: Fetching user data...');
         const response = await fetch(`/api/users/${userId}`);
+        console.log('editUser: Response status:', response.status);
         const user = await response.json();
+        console.log('editUser: Got user:', user.username);
 
         document.getElementById('username').value = user.username;
         document.getElementById('email').value = user.email;
@@ -1083,12 +1087,16 @@ function showCreateOrgModal() {
 }
 
 async function editOrganization(orgId) {
+    console.log('editOrganization: Starting for orgId:', orgId);
     currentOrgId = orgId;
     document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Organization';
 
     try {
+        console.log('editOrganization: Fetching org data...');
         const response = await fetch(`/api/organizations/${orgId}`);
+        console.log('editOrganization: Response status:', response.status);
         const org = await response.json();
+        console.log('editOrganization: Got org:', org.name);
 
         // Basic info
         document.getElementById('orgName').value = org.name;
