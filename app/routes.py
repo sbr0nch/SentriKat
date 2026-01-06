@@ -762,6 +762,74 @@ def sync_history():
     return jsonify([s.to_dict() for s in syncs])
 
 
+@bp.route('/api/sync/test-connection', methods=['POST'])
+@admin_required
+def test_connection():
+    """Test external API connection (for proxy settings verification)"""
+    import requests
+    from app.settings_api import get_setting
+
+    # Get proxy settings
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+    http_proxy = get_setting('http_proxy', '')
+    https_proxy = get_setting('https_proxy', '')
+
+    proxies = {}
+    if http_proxy:
+        proxies['http'] = http_proxy
+    if https_proxy:
+        proxies['https'] = https_proxy
+
+    try:
+        # Test connection to CISA KEV catalog
+        test_url = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
+        response = requests.head(
+            test_url,
+            timeout=10,
+            verify=verify_ssl,
+            proxies=proxies if proxies else None,
+            allow_redirects=True
+        )
+
+        if response.status_code == 200:
+            return jsonify({
+                'success': True,
+                'message': 'Connection successful',
+                'status_code': response.status_code
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Received status code {response.status_code}'
+            }), 400
+
+    except requests.exceptions.SSLError as e:
+        return jsonify({
+            'success': False,
+            'error': f'SSL Error: {str(e)}. Try disabling SSL verification if behind a proxy.'
+        }), 400
+    except requests.exceptions.ProxyError as e:
+        return jsonify({
+            'success': False,
+            'error': f'Proxy Error: {str(e)}. Check your proxy settings.'
+        }), 400
+    except requests.exceptions.ConnectionError as e:
+        return jsonify({
+            'success': False,
+            'error': f'Connection Error: {str(e)}'
+        }), 400
+    except requests.exceptions.Timeout as e:
+        return jsonify({
+            'success': False,
+            'error': f'Timeout: {str(e)}'
+        }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @bp.route('/api/products/rematch', methods=['POST'])
 @admin_required
 def rematch_products():

@@ -6,6 +6,279 @@
 let currentUserId = null;
 let currentOrgId = null;
 
+// Selection state for bulk actions
+let selectedUsers = new Map(); // Map of userId -> { id, username, is_active }
+let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
+let selectedLdapUsers = new Map(); // Map of index -> user data
+
+// ============================================================================
+// BULK ACTIONS - USERS
+// ============================================================================
+
+function toggleUserSelect(userId, checkbox) {
+    if (checkbox.checked) {
+        const row = checkbox.closest('tr');
+        const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+        const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+        const username = row.querySelector('td[data-column="username"]')?.textContent || '';
+        selectedUsers.set(userId, { id: userId, username, is_active: isActive });
+    } else {
+        selectedUsers.delete(userId);
+    }
+    updateUsersBulkToolbar();
+}
+
+function toggleSelectAllUsers() {
+    const selectAll = document.getElementById('selectAllUsers');
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+
+    checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+        const userId = parseInt(cb.dataset.userId);
+        if (selectAll.checked) {
+            const row = cb.closest('tr');
+            const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+            const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+            const username = row.querySelector('td[data-column="username"]')?.textContent || '';
+            selectedUsers.set(userId, { id: userId, username, is_active: isActive });
+        } else {
+            selectedUsers.delete(userId);
+        }
+    });
+    updateUsersBulkToolbar();
+}
+
+function clearUserSelection() {
+    selectedUsers.clear();
+    document.querySelectorAll('.user-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('selectAllUsers').checked = false;
+    updateUsersBulkToolbar();
+}
+
+function updateUsersBulkToolbar() {
+    const toolbar = document.getElementById('usersBulkActions');
+    const count = selectedUsers.size;
+    document.getElementById('usersSelectedCount').textContent = count;
+    toolbar.style.display = count > 0 ? 'block' : 'none';
+}
+
+async function bulkActivateUsers() {
+    if (selectedUsers.size === 0) return;
+
+    const toActivate = Array.from(selectedUsers.values()).filter(u => !u.is_active);
+    if (toActivate.length === 0) {
+        showToast('All selected users are already active', 'info');
+        return;
+    }
+
+    if (!confirm(`Activate ${toActivate.length} user(s)?`)) return;
+
+    showLoading();
+    try {
+        for (const user of toActivate) {
+            await fetch(`/api/users/${user.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_active: true })
+            });
+        }
+        showToast(`${toActivate.length} user(s) activated`, 'success');
+        clearUserSelection();
+        loadUsers();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeactivateUsers() {
+    if (selectedUsers.size === 0) return;
+
+    const toDeactivate = Array.from(selectedUsers.values()).filter(u => u.is_active);
+    if (toDeactivate.length === 0) {
+        showToast('All selected users are already inactive', 'info');
+        return;
+    }
+
+    if (!confirm(`Deactivate ${toDeactivate.length} user(s)?`)) return;
+
+    showLoading();
+    try {
+        for (const user of toDeactivate) {
+            await fetch(`/api/users/${user.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_active: false })
+            });
+        }
+        showToast(`${toDeactivate.length} user(s) deactivated`, 'success');
+        clearUserSelection();
+        loadUsers();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeleteUsers() {
+    if (selectedUsers.size === 0) return;
+
+    const userList = Array.from(selectedUsers.values()).map(u => u.username).slice(0, 5).join(', ');
+    const more = selectedUsers.size > 5 ? ` and ${selectedUsers.size - 5} more` : '';
+
+    if (!confirm(`DELETE ${selectedUsers.size} user(s)?\n\n${userList}${more}\n\nThis cannot be undone!`)) return;
+
+    showLoading();
+    try {
+        for (const user of selectedUsers.values()) {
+            await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+        }
+        showToast(`${selectedUsers.size} user(s) deleted`, 'success');
+        clearUserSelection();
+        loadUsers();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ============================================================================
+// BULK ACTIONS - ORGANIZATIONS
+// ============================================================================
+
+function toggleOrgSelect(orgId, checkbox) {
+    if (checkbox.checked) {
+        const row = checkbox.closest('tr');
+        const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+        const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+        const name = row.querySelector('td[data-column="name"]')?.textContent || '';
+        selectedOrgs.set(orgId, { id: orgId, name, active: isActive });
+    } else {
+        selectedOrgs.delete(orgId);
+    }
+    updateOrgsBulkToolbar();
+}
+
+function toggleSelectAllOrgs() {
+    const selectAll = document.getElementById('selectAllOrgs');
+    const checkboxes = document.querySelectorAll('.org-checkbox');
+
+    checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+        const orgId = parseInt(cb.dataset.orgId);
+        if (selectAll.checked) {
+            const row = cb.closest('tr');
+            const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+            const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+            const name = row.querySelector('td[data-column="name"]')?.textContent || '';
+            selectedOrgs.set(orgId, { id: orgId, name, active: isActive });
+        } else {
+            selectedOrgs.delete(orgId);
+        }
+    });
+    updateOrgsBulkToolbar();
+}
+
+function clearOrgSelection() {
+    selectedOrgs.clear();
+    document.querySelectorAll('.org-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('selectAllOrgs').checked = false;
+    updateOrgsBulkToolbar();
+}
+
+function updateOrgsBulkToolbar() {
+    const toolbar = document.getElementById('orgsBulkActions');
+    const count = selectedOrgs.size;
+    document.getElementById('orgsSelectedCount').textContent = count;
+    toolbar.style.display = count > 0 ? 'block' : 'none';
+}
+
+async function bulkActivateOrgs() {
+    if (selectedOrgs.size === 0) return;
+
+    const toActivate = Array.from(selectedOrgs.values()).filter(o => !o.active);
+    if (toActivate.length === 0) {
+        showToast('All selected organizations are already active', 'info');
+        return;
+    }
+
+    if (!confirm(`Activate ${toActivate.length} organization(s)?`)) return;
+
+    showLoading();
+    try {
+        for (const org of toActivate) {
+            await fetch(`/api/organizations/${org.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active: true })
+            });
+        }
+        showToast(`${toActivate.length} organization(s) activated`, 'success');
+        clearOrgSelection();
+        loadOrganizations();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeactivateOrgs() {
+    if (selectedOrgs.size === 0) return;
+
+    const toDeactivate = Array.from(selectedOrgs.values()).filter(o => o.active);
+    if (toDeactivate.length === 0) {
+        showToast('All selected organizations are already inactive', 'info');
+        return;
+    }
+
+    if (!confirm(`Deactivate ${toDeactivate.length} organization(s)?`)) return;
+
+    showLoading();
+    try {
+        for (const org of toDeactivate) {
+            await fetch(`/api/organizations/${org.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active: false })
+            });
+        }
+        showToast(`${toDeactivate.length} organization(s) deactivated`, 'success');
+        clearOrgSelection();
+        loadOrganizations();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeleteOrgs() {
+    if (selectedOrgs.size === 0) return;
+
+    const orgList = Array.from(selectedOrgs.values()).map(o => o.name).slice(0, 5).join(', ');
+    const more = selectedOrgs.size > 5 ? ` and ${selectedOrgs.size - 5} more` : '';
+
+    if (!confirm(`DELETE ${selectedOrgs.size} organization(s)?\n\n${orgList}${more}\n\nThis will also affect users and products!\nThis cannot be undone!`)) return;
+
+    showLoading();
+    try {
+        for (const org of selectedOrgs.values()) {
+            await fetch(`/api/organizations/${org.id}`, { method: 'DELETE' });
+        }
+        showToast(`${selectedOrgs.size} organization(s) deleted`, 'success');
+        clearOrgSelection();
+        loadOrganizations();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
 // ============================================================================
 // USER MANAGEMENT
 // ============================================================================
@@ -78,6 +351,10 @@ async function loadUsers() {
         const tbody = document.getElementById('usersTable');
         if (!tbody) return;
 
+        // Clear selection state
+        selectedUsers.clear();
+        updateUsersBulkToolbar();
+
         tbody.innerHTML = users.map(user => {
             const authBadge = user.auth_type === 'ldap'
                 ? '<span class="badge badge-auth-ldap">LDAP</span>'
@@ -94,6 +371,10 @@ async function loadUsers() {
 
             return `
                 <tr>
+                    <td>
+                        <input type="checkbox" class="form-check-input user-checkbox"
+                               data-user-id="${user.id}" onchange="toggleUserSelect(${user.id}, this)">
+                    </td>
                     <td data-column="username">${escapeHtml(user.username)}</td>
                     <td data-column="fullname">${escapeHtml(user.full_name || '')}</td>
                     <td data-column="email">${escapeHtml(user.email || '')}</td>
@@ -112,6 +393,10 @@ async function loadUsers() {
                 </tr>
             `;
         }).join('');
+
+        // Reset select all checkbox
+        const selectAllUsers = document.getElementById('selectAllUsers');
+        if (selectAllUsers) selectAllUsers.checked = false;
 
         // Initialize sortable table after rendering
         if (typeof SortableTable !== 'undefined') {
@@ -268,6 +553,10 @@ async function loadOrganizations() {
         const tbody = document.getElementById('orgsTable');
         if (!tbody) return;
 
+        // Clear selection state
+        selectedOrgs.clear();
+        updateOrgsBulkToolbar();
+
         tbody.innerHTML = orgs.map(org => {
             const smtpBadge = org.smtp_host
                 ? '<span class="badge badge-status-active">Configured</span>'
@@ -278,6 +567,10 @@ async function loadOrganizations() {
 
             return `
                 <tr>
+                    <td>
+                        <input type="checkbox" class="form-check-input org-checkbox"
+                               data-org-id="${org.id}" onchange="toggleOrgSelect(${org.id}, this)">
+                    </td>
                     <td data-column="name">${escapeHtml(org.name)}</td>
                     <td data-column="displayname">${escapeHtml(org.display_name || org.name)}</td>
                     <td data-column="users">${org.user_count || 0}</td>
@@ -294,6 +587,10 @@ async function loadOrganizations() {
                 </tr>
             `;
         }).join('');
+
+        // Reset select all checkbox
+        const selectAllOrgs = document.getElementById('selectAllOrgs');
+        if (selectAllOrgs) selectAllOrgs.checked = false;
 
         // Initialize sortable table after rendering
         if (typeof SortableTable !== 'undefined') {

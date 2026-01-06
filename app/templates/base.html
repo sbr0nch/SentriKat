@@ -1832,6 +1832,7 @@
          */
         const SortableTable = {
             tables: {},
+            handlers: {}, // Store handlers for cleanup
 
             // Priority order for sorting
             priorityOrder: { 'critical': 0, 'high': 1, 'medium': 2, 'low': 3 },
@@ -1845,6 +1846,14 @@
                 const table = document.getElementById(tableId);
                 if (!table) return;
 
+                // Clean up existing handlers if re-initializing
+                if (this.handlers[tableId]) {
+                    this.handlers[tableId].forEach(({ header, handler }) => {
+                        header.removeEventListener('click', handler);
+                    });
+                }
+                this.handlers[tableId] = [];
+
                 this.tables[tableId] = {
                     currentSort: null,
                     currentDirection: 'asc',
@@ -1852,6 +1861,7 @@
                 };
 
                 const headers = table.querySelectorAll('th[data-sort-key]');
+                const self = this;
                 headers.forEach(header => {
                     // Add sortable class and icon
                     header.classList.add('sortable-header');
@@ -1859,10 +1869,12 @@
                         header.innerHTML += ' <i class="bi bi-chevron-up sort-icon"></i>';
                     }
 
-                    // Add click handler
-                    header.addEventListener('click', () => {
-                        this.sortTable(tableId, header);
-                    });
+                    // Create and store click handler for cleanup
+                    const handler = function() {
+                        self.sortTable(tableId, header);
+                    };
+                    header.addEventListener('click', handler);
+                    self.handlers[tableId].push({ header, handler });
                 });
             },
 

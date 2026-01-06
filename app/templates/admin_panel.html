@@ -54,11 +54,34 @@
                         <i class="bi bi-person-plus-fill me-1"></i>Create User
                     </button>
                 </div>
+                <!-- Bulk Actions Toolbar -->
+                <div id="usersBulkActions" class="card-body bg-primary bg-opacity-10 border-bottom py-2" style="display: none;">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-primary"><span id="usersSelectedCount">0</span> selected</span>
+                            <button class="btn btn-sm btn-success" onclick="bulkActivateUsers()">
+                                <i class="bi bi-check-circle me-1"></i>Activate
+                            </button>
+                            <button class="btn btn-sm btn-warning" onclick="bulkDeactivateUsers()">
+                                <i class="bi bi-pause-circle me-1"></i>Deactivate
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="bulkDeleteUsers()">
+                                <i class="bi bi-trash me-1"></i>Delete
+                            </button>
+                        </div>
+                        <button class="btn btn-sm btn-link text-decoration-none" onclick="clearUserSelection()">
+                            <i class="bi bi-x me-1"></i>Clear
+                        </button>
+                    </div>
+                </div>
                 <div class="card-body">
                     <div class="table-responsive">
                         <table class="table table-hover" id="usersTableContainer" data-sortable="true">
                             <thead>
                                 <tr>
+                                    <th style="width: 40px;">
+                                        <input type="checkbox" class="form-check-input" id="selectAllUsers" onchange="toggleSelectAllUsers()">
+                                    </th>
                                     <th data-sort-key="username" data-sort-type="string">Username</th>
                                     <th data-sort-key="fullname" data-sort-type="string">Full Name</th>
                                     <th data-sort-key="email" data-sort-type="string">Email</th>
@@ -71,7 +94,7 @@
                             </thead>
                             <tbody id="usersTable">
                                 <tr>
-                                    <td colspan="8" class="text-center py-4">
+                                    <td colspan="9" class="text-center py-4">
                                         <div class="spinner-border text-primary" role="status"></div>
                                         <p class="text-muted mt-2">Loading users...</p>
                                     </td>
@@ -156,11 +179,34 @@
                     </button>
                     {% endif %}
                 </div>
+                <!-- Bulk Actions Toolbar -->
+                <div id="orgsBulkActions" class="card-body bg-primary bg-opacity-10 border-bottom py-2" style="display: none;">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-primary"><span id="orgsSelectedCount">0</span> selected</span>
+                            <button class="btn btn-sm btn-success" onclick="bulkActivateOrgs()">
+                                <i class="bi bi-check-circle me-1"></i>Activate
+                            </button>
+                            <button class="btn btn-sm btn-warning" onclick="bulkDeactivateOrgs()">
+                                <i class="bi bi-pause-circle me-1"></i>Deactivate
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="bulkDeleteOrgs()">
+                                <i class="bi bi-trash me-1"></i>Delete
+                            </button>
+                        </div>
+                        <button class="btn btn-sm btn-link text-decoration-none" onclick="clearOrgSelection()">
+                            <i class="bi bi-x me-1"></i>Clear
+                        </button>
+                    </div>
+                </div>
                 <div class="card-body">
                     <div class="table-responsive">
                         <table class="table table-hover" id="orgsTableContainer" data-sortable="true">
                             <thead>
                                 <tr>
+                                    <th style="width: 40px;">
+                                        <input type="checkbox" class="form-check-input" id="selectAllOrgs" onchange="toggleSelectAllOrgs()">
+                                    </th>
                                     <th data-sort-key="name" data-sort-type="string">Name</th>
                                     <th data-sort-key="displayname" data-sort-type="string">Display Name</th>
                                     <th data-sort-key="users" data-sort-type="number">Users</th>
@@ -171,7 +217,7 @@
                             </thead>
                             <tbody id="orgsTable">
                                 <tr>
-                                    <td colspan="6" class="text-center py-4">
+                                    <td colspan="7" class="text-center py-4">
                                         <div class="spinner-border text-primary" role="status"></div>
                                         <p class="text-muted mt-2">Loading organizations...</p>
                                     </td>
@@ -406,8 +452,8 @@
                 </li>
                 {% if current_user and current_user.is_super_admin() %}
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="general-settings-tab" data-bs-toggle="pill" data-bs-target="#generalSettings" type="button">
-                        <i class="bi bi-sliders me-2"></i>General
+                    <button class="nav-link" id="proxy-settings-tab" data-bs-toggle="pill" data-bs-target="#proxySettings" type="button">
+                        <i class="bi bi-hdd-network me-2"></i>Proxy
                     </button>
                 </li>
                 {% endif %}
@@ -735,14 +781,19 @@
                 </div>
 
                 {% if current_user and current_user.is_super_admin() %}
-                <!-- General Settings (Super Admin Only) -->
-                <div class="tab-pane fade" id="generalSettings" role="tabpanel">
+                <!-- Proxy Settings (Super Admin Only) -->
+                <div class="tab-pane fade" id="proxySettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
-                            <i class="bi bi-sliders me-2"></i>General System Settings
+                            <i class="bi bi-hdd-network me-2"></i>Proxy & Network Settings
                         </div>
                         <div class="card-body">
-                            <form id="generalSettingsForm">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure proxy settings for external API connections (CISA KEV, NVD). Required if SentriKat is behind a corporate proxy.
+                            </div>
+
+                            <form id="proxySettingsForm">
                                 <div class="row g-3">
                                     <div class="col-md-12">
                                         <div class="form-check form-switch">
@@ -750,18 +801,20 @@
                                             <label class="form-check-label fw-semibold" for="verifySSL">
                                                 Verify SSL Certificates
                                             </label>
-                                            <small class="form-text text-muted d-block">Disable if behind corporate proxy with SSL inspection</small>
+                                            <small class="form-text text-muted d-block">Disable if behind corporate proxy with SSL inspection (not recommended for production)</small>
                                         </div>
                                     </div>
 
                                     <div class="col-md-6">
                                         <label for="httpProxy" class="form-label fw-semibold">HTTP Proxy</label>
                                         <input type="text" class="form-control" id="httpProxy" placeholder="http://proxy.company.com:3128">
+                                        <small class="form-text text-muted">Proxy for HTTP connections</small>
                                     </div>
 
                                     <div class="col-md-6">
                                         <label for="httpsProxy" class="form-label fw-semibold">HTTPS Proxy</label>
                                         <input type="text" class="form-control" id="httpsProxy" placeholder="http://proxy.company.com:3128">
+                                        <small class="form-text text-muted">Proxy for HTTPS connections</small>
                                     </div>
 
                                     <div class="col-md-12">
@@ -771,15 +824,12 @@
                                     </div>
 
                                     <div class="col-md-12">
-                                        <label for="sessionTimeout" class="form-label fw-semibold">Session Timeout (minutes)</label>
-                                        <input type="number" class="form-control" id="sessionTimeout" value="480">
-                                        <small class="form-text text-muted">User session timeout (default: 480 = 8 hours)</small>
-                                    </div>
-
-                                    <div class="col-md-12">
                                         <hr>
-                                        <button type="button" class="btn btn-primary" onclick="saveGeneralSettings()">
-                                            <i class="bi bi-check-circle me-1"></i>Save General Settings
+                                        <button type="button" class="btn btn-primary" onclick="saveProxySettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save Proxy Settings
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary ms-2" onclick="testProxyConnection()">
+                                            <i class="bi bi-plug me-1"></i>Test Connection
                                         </button>
                                     </div>
                                 </div>

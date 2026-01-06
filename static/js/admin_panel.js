@@ -7,6 +7,284 @@ let currentUserId = null;
 let currentOrgId = null;
 let organizations = [];
 
+// Selection state for bulk actions
+let selectedUsers = new Map(); // Map of userId -> { id, username, is_active }
+let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
+
+// ============================================================================
+// BULK ACTIONS - USERS
+// ============================================================================
+
+function toggleUserSelect(userId, checkbox) {
+    if (checkbox.checked) {
+        const row = checkbox.closest('tr');
+        const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+        const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+        const username = row.querySelector('td[data-column="username"]')?.textContent || '';
+        selectedUsers.set(userId, { id: userId, username, is_active: isActive });
+    } else {
+        selectedUsers.delete(userId);
+    }
+    updateUsersBulkToolbar();
+}
+
+function toggleSelectAllUsers() {
+    const selectAll = document.getElementById('selectAllUsers');
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+
+    checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+        const userId = parseInt(cb.dataset.userId);
+        if (selectAll.checked) {
+            const row = cb.closest('tr');
+            const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+            const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+            const username = row.querySelector('td[data-column="username"]')?.textContent || '';
+            selectedUsers.set(userId, { id: userId, username, is_active: isActive });
+        } else {
+            selectedUsers.delete(userId);
+        }
+    });
+    updateUsersBulkToolbar();
+}
+
+function clearUserSelection() {
+    selectedUsers.clear();
+    document.querySelectorAll('.user-checkbox').forEach(cb => cb.checked = false);
+    const selectAllUsers = document.getElementById('selectAllUsers');
+    if (selectAllUsers) selectAllUsers.checked = false;
+    updateUsersBulkToolbar();
+}
+
+function updateUsersBulkToolbar() {
+    const toolbar = document.getElementById('usersBulkActions');
+    if (!toolbar) return;
+    const count = selectedUsers.size;
+    const countEl = document.getElementById('usersSelectedCount');
+    if (countEl) countEl.textContent = count;
+    toolbar.style.display = count > 0 ? 'block' : 'none';
+}
+
+async function bulkActivateUsers() {
+    if (selectedUsers.size === 0) return;
+
+    const toActivate = Array.from(selectedUsers.values()).filter(u => !u.is_active);
+    if (toActivate.length === 0) {
+        showToast('All selected users are already active', 'info');
+        return;
+    }
+
+    if (!confirm(`Activate ${toActivate.length} user(s)?`)) return;
+
+    showLoading();
+    try {
+        for (const user of toActivate) {
+            await fetch(`/api/users/${user.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_active: true })
+            });
+        }
+        showToast(`${toActivate.length} user(s) activated`, 'success');
+        clearUserSelection();
+        loadUsers();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeactivateUsers() {
+    if (selectedUsers.size === 0) return;
+
+    const toDeactivate = Array.from(selectedUsers.values()).filter(u => u.is_active);
+    if (toDeactivate.length === 0) {
+        showToast('All selected users are already inactive', 'info');
+        return;
+    }
+
+    if (!confirm(`Deactivate ${toDeactivate.length} user(s)?`)) return;
+
+    showLoading();
+    try {
+        for (const user of toDeactivate) {
+            await fetch(`/api/users/${user.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_active: false })
+            });
+        }
+        showToast(`${toDeactivate.length} user(s) deactivated`, 'success');
+        clearUserSelection();
+        loadUsers();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeleteUsers() {
+    if (selectedUsers.size === 0) return;
+
+    const userList = Array.from(selectedUsers.values()).map(u => u.username).slice(0, 5).join(', ');
+    const more = selectedUsers.size > 5 ? ` and ${selectedUsers.size - 5} more` : '';
+
+    if (!confirm(`DELETE ${selectedUsers.size} user(s)?\n\n${userList}${more}\n\nThis cannot be undone!`)) return;
+
+    showLoading();
+    try {
+        for (const user of selectedUsers.values()) {
+            await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+        }
+        showToast(`${selectedUsers.size} user(s) deleted`, 'success');
+        clearUserSelection();
+        loadUsers();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ============================================================================
+// BULK ACTIONS - ORGANIZATIONS
+// ============================================================================
+
+function toggleOrgSelect(orgId, checkbox) {
+    if (checkbox.checked) {
+        const row = checkbox.closest('tr');
+        const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+        const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+        const name = row.querySelector('td[data-column="name"]')?.textContent || '';
+        selectedOrgs.set(orgId, { id: orgId, name, active: isActive });
+    } else {
+        selectedOrgs.delete(orgId);
+    }
+    updateOrgsBulkToolbar();
+}
+
+function toggleSelectAllOrgs() {
+    const selectAll = document.getElementById('selectAllOrgs');
+    const checkboxes = document.querySelectorAll('.org-checkbox');
+
+    checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+        const orgId = parseInt(cb.dataset.orgId);
+        if (selectAll.checked) {
+            const row = cb.closest('tr');
+            const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+            const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+            const name = row.querySelector('td[data-column="name"]')?.textContent || '';
+            selectedOrgs.set(orgId, { id: orgId, name, active: isActive });
+        } else {
+            selectedOrgs.delete(orgId);
+        }
+    });
+    updateOrgsBulkToolbar();
+}
+
+function clearOrgSelection() {
+    selectedOrgs.clear();
+    document.querySelectorAll('.org-checkbox').forEach(cb => cb.checked = false);
+    const selectAllOrgs = document.getElementById('selectAllOrgs');
+    if (selectAllOrgs) selectAllOrgs.checked = false;
+    updateOrgsBulkToolbar();
+}
+
+function updateOrgsBulkToolbar() {
+    const toolbar = document.getElementById('orgsBulkActions');
+    if (!toolbar) return;
+    const count = selectedOrgs.size;
+    const countEl = document.getElementById('orgsSelectedCount');
+    if (countEl) countEl.textContent = count;
+    toolbar.style.display = count > 0 ? 'block' : 'none';
+}
+
+async function bulkActivateOrgs() {
+    if (selectedOrgs.size === 0) return;
+
+    const toActivate = Array.from(selectedOrgs.values()).filter(o => !o.active);
+    if (toActivate.length === 0) {
+        showToast('All selected organizations are already active', 'info');
+        return;
+    }
+
+    if (!confirm(`Activate ${toActivate.length} organization(s)?`)) return;
+
+    showLoading();
+    try {
+        for (const org of toActivate) {
+            await fetch(`/api/organizations/${org.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active: true })
+            });
+        }
+        showToast(`${toActivate.length} organization(s) activated`, 'success');
+        clearOrgSelection();
+        loadOrganizations();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeactivateOrgs() {
+    if (selectedOrgs.size === 0) return;
+
+    const toDeactivate = Array.from(selectedOrgs.values()).filter(o => o.active);
+    if (toDeactivate.length === 0) {
+        showToast('All selected organizations are already inactive', 'info');
+        return;
+    }
+
+    if (!confirm(`Deactivate ${toDeactivate.length} organization(s)?`)) return;
+
+    showLoading();
+    try {
+        for (const org of toDeactivate) {
+            await fetch(`/api/organizations/${org.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active: false })
+            });
+        }
+        showToast(`${toDeactivate.length} organization(s) deactivated`, 'success');
+        clearOrgSelection();
+        loadOrganizations();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeleteOrgs() {
+    if (selectedOrgs.size === 0) return;
+
+    const orgList = Array.from(selectedOrgs.values()).map(o => o.name).slice(0, 5).join(', ');
+    const more = selectedOrgs.size > 5 ? ` and ${selectedOrgs.size - 5} more` : '';
+
+    if (!confirm(`DELETE ${selectedOrgs.size} organization(s)?\n\n${orgList}${more}\n\nThis will also affect users and products!\nThis cannot be undone!`)) return;
+
+    showLoading();
+    try {
+        for (const org of selectedOrgs.values()) {
+            await fetch(`/api/organizations/${org.id}`, { method: 'DELETE' });
+        }
+        showToast(`${selectedOrgs.size} organization(s) deleted`, 'success');
+        clearOrgSelection();
+        loadOrganizations();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================
@@ -96,7 +374,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadUsers() {
     const tbody = document.getElementById('usersTable');
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+
+    // Clear selection state
+    selectedUsers.clear();
+    updateUsersBulkToolbar();
 
     try {
         const response = await fetch('/api/users');
@@ -110,7 +392,7 @@ async function loadUsers() {
         if (users.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="text-center py-5">
+                    <td colspan="9" class="text-center py-5">
                         <i class="bi bi-people text-muted" style="font-size: 3rem;"></i>
                         <h5 class="mt-3 text-muted">No users yet</h5>
                         <p class="text-muted">Click "Create User" to add your first user.</p>
@@ -153,13 +435,17 @@ async function loadUsers() {
 
                 return `
                     <tr>
-                        <td class="fw-semibold">${escapeHtml(user.username)}</td>
-                        <td>${user.full_name ? escapeHtml(user.full_name) : '<span class="text-muted">-</span>'}</td>
-                        <td>${escapeHtml(user.email)}</td>
-                        <td>${orgDisplay}</td>
-                        <td>${authBadge}</td>
-                        <td>${roleBadge}</td>
-                        <td>${statusBadge}</td>
+                        <td>
+                            <input type="checkbox" class="form-check-input user-checkbox"
+                                   data-user-id="${user.id}" onchange="toggleUserSelect(${user.id}, this)">
+                        </td>
+                        <td data-column="username" class="fw-semibold">${escapeHtml(user.username)}</td>
+                        <td data-column="fullname">${user.full_name ? escapeHtml(user.full_name) : '<span class="text-muted">-</span>'}</td>
+                        <td data-column="email">${escapeHtml(user.email)}</td>
+                        <td data-column="organization">${orgDisplay}</td>
+                        <td data-column="authtype">${authBadge}</td>
+                        <td data-column="role">${roleBadge}</td>
+                        <td data-column="status">${statusBadge}</td>
                         <td>
                             <div class="d-flex gap-1">
                                 <button class="btn-action btn-action-edit" onclick="editUser(${user.id})" title="Edit">
@@ -179,11 +465,20 @@ async function loadUsers() {
                 `;
             }).join('');
         }
+
+        // Reset select all checkbox
+        const selectAllUsers = document.getElementById('selectAllUsers');
+        if (selectAllUsers) selectAllUsers.checked = false;
+
+        // Initialize sortable table after rendering
+        if (typeof SortableTable !== 'undefined') {
+            SortableTable.init('usersTableContainer');
+        }
     } catch (error) {
         console.error('Error loading users:', error);
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" class="text-center text-danger py-4">
+                <td colspan="9" class="text-center text-danger py-4">
                     <i class="bi bi-exclamation-triangle"></i> Error loading users: ${error.message}
                 </td>
             </tr>
@@ -633,7 +928,11 @@ async function toggleUserActive(userId, username, isCurrentlyActive) {
 
 async function loadOrganizations() {
     const tbody = document.getElementById('orgsTable');
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+
+    // Clear selection state
+    selectedOrgs.clear();
+    updateOrgsBulkToolbar();
 
     try {
         const response = await fetch('/api/organizations');
@@ -647,7 +946,7 @@ async function loadOrganizations() {
         if (organizations.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="text-center py-5">
+                    <td colspan="7" class="text-center py-5">
                         <i class="bi bi-building text-muted" style="font-size: 3rem;"></i>
                         <h5 class="mt-3 text-muted">No organizations yet</h5>
                         <p class="text-muted">Click "Create Organization" to add your first organization.</p>
@@ -666,11 +965,15 @@ async function loadOrganizations() {
 
                 return `
                     <tr>
-                        <td class="fw-semibold">${escapeHtml(org.name)}</td>
-                        <td>${escapeHtml(org.display_name)}</td>
-                        <td><span class="badge badge-role-manager">${org.user_count || 0}</span></td>
-                        <td>${smtpBadge}</td>
-                        <td>${statusBadge}</td>
+                        <td>
+                            <input type="checkbox" class="form-check-input org-checkbox"
+                                   data-org-id="${org.id}" onchange="toggleOrgSelect(${org.id}, this)">
+                        </td>
+                        <td data-column="name" class="fw-semibold">${escapeHtml(org.name)}</td>
+                        <td data-column="displayname">${escapeHtml(org.display_name)}</td>
+                        <td data-column="users"><span class="badge badge-role-manager">${org.user_count || 0}</span></td>
+                        <td data-column="smtp">${smtpBadge}</td>
+                        <td data-column="status">${statusBadge}</td>
                         <td>
                             <div class="d-flex gap-1">
                                 <button class="btn-action btn-action-edit" onclick="editOrganization(${org.id})" title="Edit">
@@ -687,11 +990,20 @@ async function loadOrganizations() {
                 `;
             }).join('');
         }
+
+        // Reset select all checkbox
+        const selectAllOrgs = document.getElementById('selectAllOrgs');
+        if (selectAllOrgs) selectAllOrgs.checked = false;
+
+        // Initialize sortable table after rendering
+        if (typeof SortableTable !== 'undefined') {
+            SortableTable.init('orgsTableContainer');
+        }
     } catch (error) {
         console.error('Error loading organizations:', error);
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="text-center text-danger py-4">
+                <td colspan="7" class="text-center text-danger py-4">
                     <i class="bi bi-exclamation-triangle"></i> Error loading organizations: ${error.message}
                 </td>
             </tr>
@@ -1302,14 +1614,13 @@ async function triggerCriticalCVEAlerts() {
     }
 }
 
-// General Settings
-async function saveGeneralSettings() {
+// Proxy Settings
+async function saveProxySettings() {
     const settings = {
         verify_ssl: document.getElementById('verifySSL').checked,
         http_proxy: document.getElementById('httpProxy').value,
         https_proxy: document.getElementById('httpsProxy').value,
-        no_proxy: document.getElementById('noProxy').value,
-        session_timeout: document.getElementById('sessionTimeout').value
+        no_proxy: document.getElementById('noProxy').value
     };
 
     try {
@@ -1320,13 +1631,37 @@ async function saveGeneralSettings() {
         });
 
         if (response.ok) {
-            showToast('✓ General settings saved successfully', 'success');
+            showToast('Proxy settings saved successfully', 'success');
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
         }
     } catch (error) {
-        showToast(`Error saving general settings: ${error.message}`, 'danger');
+        showToast(`Error saving proxy settings: ${error.message}`, 'danger');
+    }
+}
+
+// Test Proxy Connection
+async function testProxyConnection() {
+    showLoading();
+    try {
+        // Test by making a request to the CISA KEV endpoint through proxy
+        const response = await fetch('/api/sync/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast('Connection test successful! External API is reachable.', 'success');
+        } else {
+            showToast(`Connection test failed: ${data.error || 'Unknown error'}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Connection test failed: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
     }
 }
 
@@ -1507,15 +1842,18 @@ async function loadAllSettings() {
         }
         loadSyncStatus();
 
-        // Load General settings
+        // Load Proxy settings
         const generalResponse = await fetch('/api/settings/general');
         if (generalResponse.ok) {
             const general = await generalResponse.json();
-            document.getElementById('verifySSL').checked = general.verify_ssl !== false;
-            document.getElementById('httpProxy').value = general.http_proxy || '';
-            document.getElementById('httpsProxy').value = general.https_proxy || '';
-            document.getElementById('noProxy').value = general.no_proxy || '';
-            document.getElementById('sessionTimeout').value = general.session_timeout || 480;
+            const verifySSL = document.getElementById('verifySSL');
+            const httpProxy = document.getElementById('httpProxy');
+            const httpsProxy = document.getElementById('httpsProxy');
+            const noProxy = document.getElementById('noProxy');
+            if (verifySSL) verifySSL.checked = general.verify_ssl !== false;
+            if (httpProxy) httpProxy.value = general.http_proxy || '';
+            if (httpsProxy) httpsProxy.value = general.https_proxy || '';
+            if (noProxy) noProxy.value = general.no_proxy || '';
         }
     } catch (error) {
         console.error('Error loading settings:', error);
