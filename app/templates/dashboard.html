@@ -392,6 +392,26 @@
                 </div>
             </div>
         </div>
+        <!-- Bulk Actions Toolbar (hidden until selection made) -->
+        <div id="bulkActionsBar" class="card-body bg-primary bg-opacity-10 border-bottom py-2" style="display: none;">
+            <div class="d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-primary"><span id="selectedCount">0</span> selected</span>
+                    <button class="btn btn-sm btn-success" id="bulkAckBtn" onclick="bulkAcknowledge()" disabled>
+                        <i class="bi bi-check-circle me-1"></i>Acknowledge
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="bulkUnackBtn" onclick="bulkUnacknowledge()" disabled>
+                        <i class="bi bi-x-circle me-1"></i>Unacknowledge
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" id="bulkExportBtn" onclick="bulkExport()" disabled>
+                        <i class="bi bi-download me-1"></i>Export Selected
+                    </button>
+                </div>
+                <button class="btn btn-sm btn-link text-decoration-none" onclick="clearSelection()">
+                    <i class="bi bi-x me-1"></i>Clear Selection
+                </button>
+            </div>
+        </div>
         <div class="card-body p-0">
             <div id="vulnerabilitiesContainer" class="p-3"></div>
             <!-- Pagination Controls -->
@@ -1051,10 +1071,30 @@
 
     function updateBulkActions() {
         const count = selectedVulns.size;
+        const bulkActionsBar = document.getElementById('bulkActionsBar');
         const selectedCountEl = document.getElementById('selectedCount');
         const bulkAckBtnEl = document.getElementById('bulkAckBtn');
+        const bulkUnackBtnEl = document.getElementById('bulkUnackBtn');
+        const bulkExportBtnEl = document.getElementById('bulkExportBtn');
+
+        // Show/hide bulk actions bar
+        if (bulkActionsBar) {
+            bulkActionsBar.style.display = count > 0 ? 'block' : 'none';
+        }
+
         if (selectedCountEl) selectedCountEl.textContent = count;
         if (bulkAckBtnEl) bulkAckBtnEl.disabled = count === 0;
+        if (bulkUnackBtnEl) bulkUnackBtnEl.disabled = count === 0;
+        if (bulkExportBtnEl) bulkExportBtnEl.disabled = count === 0;
+    }
+
+    function clearSelection() {
+        selectedVulns.clear();
+        document.querySelectorAll('.vuln-card input[type="checkbox"]').forEach(cb => {
+            cb.checked = false;
+        });
+        document.getElementById('selectAll').checked = false;
+        updateBulkActions();
     }
 
     async function bulkAcknowledge() {
@@ -1083,10 +1123,79 @@
         }
 
         hideLoading();
-        showToast(`✓ Acknowledged ${success} vulnerabilities${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'success' : 'danger');
+        showToast(`Acknowledged ${success} vulnerabilities${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'success' : 'danger');
         selectedVulns.clear();
+        updateBulkActions();
         loadVulnerabilities();
         loadStats();
+
+    }
+
+    async function bulkUnacknowledge() {
+        if (selectedVulns.size === 0) return;
+
+        const confirmed = await showConfirm(
+            `Unacknowledge ${selectedVulns.size} vulnerabilities?`,
+            'Bulk Unacknowledge',
+            'Unacknowledge',
+            'btn-secondary'
+        );
+
+        if (!confirmed) return;
+
+        showLoading();
+        let success = 0;
+        let failed = 0;
+
+        for (const matchId of selectedVulns) {
+            try {
+                await fetch(`/api/matches/${matchId}/unacknowledge`, { method: 'POST' });
+                success++;
+            } catch {
+                failed++;
+            }
+        }
+
+        hideLoading();
+        showToast(`Unacknowledged ${success} vulnerabilities${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'info' : 'danger');
+        selectedVulns.clear();
+        updateBulkActions();
+        loadVulnerabilities();
+        loadStats();
+    }
+
+    async function bulkExport() {
+        if (selectedVulns.size === 0) return;
+
+        showLoading();
+        try {
+            // Get match IDs as comma-separated list
+            const matchIds = Array.from(selectedVulns).join(',');
+
+            // Trigger PDF export with selected match IDs
+            const response = await fetch(`/api/reports/export?match_ids=${matchIds}`);
+
+            if (!response.ok) {
+                throw new Error('Export failed');
+            }
+
+            // Download the PDF
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `vulnerabilities_selected_${new Date().toISOString().split('T')[0]}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+
+            showToast(`Exported ${selectedVulns.size} vulnerabilities to PDF`, 'success');
+        } catch (error) {
+            showToast(`Export failed: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
     }
 
     async function acknowledgeMatch(matchId) {

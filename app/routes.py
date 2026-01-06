@@ -84,9 +84,17 @@ def admin_panel():
 @bp.route('/api/products', methods=['GET'])
 @login_required
 def get_products():
-    """Get products based on user permissions.
+    """Get products based on user permissions with optional search, filtering, and pagination.
 
-    - Super Admin: See all products
+    Query parameters:
+    - search: Text search on vendor, product_name, version, keywords
+    - filter_org: Filter by organization ID (super admin only)
+    - criticality: Filter by criticality (critical, high, medium, low)
+    - status: Filter by status (active, inactive)
+    - page: Page number (1-indexed)
+    - per_page: Items per page (default 25, max 100)
+
+    - Super Admin: See all products (can filter by any org)
     - Others: Only see products assigned to their organization
     """
     from app.models import product_organizations
@@ -99,41 +107,96 @@ def get_products():
     if not current_user:
         return jsonify({'error': 'User not found'}), 401
 
+    # Get query parameters
+    search = request.args.get('search', '').strip()
+    filter_org = request.args.get('filter_org', type=int)
+    criticality = request.args.get('criticality', '').strip().lower()
+    status = request.args.get('status', '').strip().lower()
+    page = request.args.get('page', type=int)
+    per_page = request.args.get('per_page', 25, type=int)
+    per_page = min(per_page, 100)  # Limit max items per page
+
     logger.info(f"get_products: user={current_user.username}, role={current_user.role}, is_super_admin={current_user.is_super_admin()}")
 
-    # Super admins see all products
+    # Build base query based on permissions
     if current_user.is_super_admin():
-        products = Product.query.order_by(Product.vendor, Product.product_name).all()
-        logger.info(f"get_products: super_admin sees all {len(products)} products")
+        query = Product.query
+        logger.info("get_products: super_admin sees all products")
+
+        # Super admin can filter by specific organization
+        if filter_org:
+            query = query.join(
+                product_organizations,
+                Product.id == product_organizations.c.product_id
+            ).filter(
+                db.or_(
+                    product_organizations.c.organization_id == filter_org,
+                    Product.organization_id == filter_org
+                )
+            )
     else:
         # Get user's current organization from session
         org_id = session.get('organization_id') or current_user.organization_id
-        logger.info(f"get_products: org_id from session={session.get('organization_id')}, from user={current_user.organization_id}, using={org_id}")
+        logger.info(f"get_products: org_id={org_id}")
 
         if not org_id:
             logger.info("get_products: no org_id, returning empty list")
-            return jsonify([])  # No org = no products
+            if page:
+                return jsonify({'products': [], 'total': 0, 'page': 1, 'per_page': per_page, 'pages': 0})
+            return jsonify([])
 
-        # Get products assigned via many-to-many table
-        products_via_m2m = Product.query.join(
+        # Get products assigned via many-to-many table or legacy field
+        query = Product.query.outerjoin(
             product_organizations,
             Product.id == product_organizations.c.product_id
         ).filter(
-            product_organizations.c.organization_id == org_id
+            db.or_(
+                product_organizations.c.organization_id == org_id,
+                Product.organization_id == org_id
+            )
+        ).distinct()
+
+        logger.info(f"get_products: filtered to org {org_id}")
+
+    # Apply search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                Product.vendor.ilike(search_term),
+                Product.product_name.ilike(search_term),
+                Product.version.ilike(search_term),
+                Product.keywords.ilike(search_term)
+            )
         )
 
-        # Also get products with legacy organization_id field
-        products_via_legacy = Product.query.filter(
-            Product.organization_id == org_id
-        )
+    # Apply criticality filter
+    if criticality and criticality in ['critical', 'high', 'medium', 'low']:
+        query = query.filter(Product.criticality == criticality)
 
-        # Union both queries and remove duplicates
-        products = products_via_m2m.union(products_via_legacy).order_by(
-            Product.vendor, Product.product_name
-        ).all()
+    # Apply status filter
+    if status == 'active':
+        query = query.filter(Product.active == True)
+    elif status == 'inactive':
+        query = query.filter(Product.active == False)
 
-        logger.info(f"get_products: org {org_id} has {len(products)} products")
+    # Order by vendor, product name
+    query = query.order_by(Product.vendor, Product.product_name)
 
+    # If pagination requested, return paginated result
+    if page:
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        return jsonify({
+            'products': [p.to_dict() for p in pagination.items],
+            'total': pagination.total,
+            'page': pagination.page,
+            'per_page': per_page,
+            'pages': pagination.pages
+        })
+
+    # Default: return all as array (backward compatibility)
+    products = query.all()
+    logger.info(f"get_products: returning {len(products)} products")
     return jsonify([p.to_dict() for p in products])
 
 @bp.route('/api/products', methods=['POST'])
@@ -305,8 +368,19 @@ def update_product(product_id):
         org_id = data['organization_id']
         if org_id == '' or org_id is None:
             product.organization_id = None
+            # Clear multi-org assignments too
+            for org in list(product.organizations):
+                product.organizations.remove(org)
         else:
-            product.organization_id = int(org_id)
+            new_org_id = int(org_id)
+            product.organization_id = new_org_id
+            # Sync with multi-org: ensure the new org is in the organizations list
+            new_org = Organization.query.get(new_org_id)
+            if new_org:
+                # Clear existing and set to just this org for consistency
+                for org in list(product.organizations):
+                    product.organizations.remove(org)
+                product.organizations.append(new_org)
 
     db.session.commit()
 
@@ -484,21 +558,43 @@ def remove_product_organization(product_id, org_id):
     product = Product.query.get_or_404(product_id)
     org = Organization.query.get_or_404(org_id)
 
+    # Check if confirm_delete parameter is passed (for deleting product with last org)
+    confirm_delete = request.args.get('confirm_delete', 'false').lower() == 'true'
+
     try:
+        # Check if org is actually assigned to this product
+        is_in_many_to_many = org in product.organizations.all()
+        is_legacy_org = product.organization_id == org_id
+
+        if not is_in_many_to_many and not is_legacy_org:
+            return jsonify({'error': 'Organization not assigned to this product'}), 404
+
+        # Count current organizations BEFORE removal
+        current_org_count = product.organizations.count()
+        has_legacy_org = product.organization_id is not None and product.organization_id != org_id
+
+        # Calculate what would be left after removal
+        orgs_after_removal = current_org_count - (1 if is_in_many_to_many else 0)
+        would_have_orgs = orgs_after_removal > 0 or has_legacy_org
+
+        # If this is the last organization and no confirmation, return error
+        if not would_have_orgs and not confirm_delete:
+            return jsonify({
+                'error': 'This is the last organization assigned to this product.',
+                'requires_confirmation': True,
+                'message': 'Removing the last organization will delete the product. Do you want to delete the entire product?'
+            }), 400
+
+        # Proceed with removal
         removed = False
 
-        # Check many-to-many relationship
-        if org in product.organizations.all():
+        if is_in_many_to_many:
             product.organizations.remove(org)
             removed = True
 
-        # Also check legacy organization_id
-        if product.organization_id == org_id:
+        if is_legacy_org:
             product.organization_id = None
             removed = True
-
-        if not removed:
-            return jsonify({'error': 'Organization not assigned to this product'}), 404
 
         db.session.commit()
 
@@ -508,12 +604,12 @@ def remove_product_organization(product_id, org_id):
         except Exception as e:
             print(f"Failed to send notification to {org.name}: {str(e)}")
 
-        # Check if product has any organizations left
+        # Check if product has any organizations left after removal
         remaining_orgs = product.organizations.count()
-        has_legacy_org = product.organization_id is not None
+        has_remaining_legacy = product.organization_id is not None
 
-        # If no organizations left, delete the product entirely
-        if remaining_orgs == 0 and not has_legacy_org:
+        # If no organizations left and confirm_delete was passed, delete the product
+        if remaining_orgs == 0 and not has_remaining_legacy:
             # Delete associated vulnerability matches first
             VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
 
@@ -522,7 +618,7 @@ def remove_product_organization(product_id, org_id):
 
             return jsonify({
                 'success': True,
-                'message': f'Organization removed. Product deleted (no organizations remaining).',
+                'message': f'Product "{product.product_name}" has been deleted.',
                 'product_deleted': True
             })
 
@@ -2028,6 +2124,55 @@ def generate_custom_report():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/reports/export', methods=['GET'])
+@login_required
+def export_selected_matches():
+    """
+    Export selected vulnerability matches as PDF
+
+    Query params:
+        match_ids: Comma-separated list of match IDs to export
+    """
+    from app.reports import VulnerabilityReportGenerator
+
+    match_ids_str = request.args.get('match_ids', '')
+    if not match_ids_str:
+        return jsonify({'error': 'No match IDs provided'}), 400
+
+    try:
+        match_ids = [int(id.strip()) for id in match_ids_str.split(',') if id.strip()]
+    except ValueError:
+        return jsonify({'error': 'Invalid match ID format'}), 400
+
+    if not match_ids:
+        return jsonify({'error': 'No valid match IDs provided'}), 400
+
+    try:
+        # Get current user's organization
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
+        org_id = session.get('organization_id') or (current_user.organization_id if current_user else None)
+
+        # Generate report for selected matches
+        generator = VulnerabilityReportGenerator(organization_id=org_id)
+        pdf_buffer = generator.generate_selected_report(match_ids=match_ids)
+
+        # Create response
+        filename = f"SentriKat_Selected_Vulnerabilities_{datetime.now().strftime('%Y%m%d')}.pdf"
+
+        response = make_response(pdf_buffer.getvalue())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 
 # ============================================================================
 # SESSION MANAGEMENT (Organization Switching)

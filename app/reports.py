@@ -464,3 +464,112 @@ class VulnerabilityReportGenerator:
         buffer.seek(0)
 
         return buffer
+
+    def generate_selected_report(self, match_ids):
+        """
+        Generate a report for specifically selected vulnerability matches
+
+        Args:
+            match_ids: List of VulnerabilityMatch IDs to include
+
+        Returns:
+            BytesIO: PDF file buffer
+        """
+        # Get organization name
+        org_name = "All Organizations"
+        if self.organization_id:
+            org = Organization.query.get(self.organization_id)
+            if org:
+                org_name = org.display_name
+
+        # Get the selected matches
+        matches = VulnerabilityMatch.query.filter(
+            VulnerabilityMatch.id.in_(match_ids)
+        ).all()
+
+        if not matches:
+            # Create empty report
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            elements = []
+            self._create_header(elements, "Selected Vulnerabilities Report", org_name)
+            elements.append(Paragraph("No vulnerabilities found with the specified IDs.", self.styles['ReportBody']))
+            doc.build(elements)
+            buffer.seek(0)
+            return buffer
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=50,
+            leftMargin=50,
+            topMargin=50,
+            bottomMargin=50
+        )
+
+        elements = []
+
+        # Header
+        self._create_header(
+            elements,
+            f"Selected Vulnerabilities Report",
+            f"{len(matches)} Selected Items | {org_name}"
+        )
+
+        # Calculate stats for selected matches
+        stats = {
+            'total': len(matches),
+            'critical': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'acknowledged': 0,
+            'pending': 0,
+            'ransomware': 0
+        }
+
+        for m in matches:
+            priority = m.calculate_effective_priority()
+            if priority in stats:
+                stats[priority] += 1
+            if m.acknowledged:
+                stats['acknowledged'] += 1
+            else:
+                stats['pending'] += 1
+            if m.vulnerability and m.vulnerability.known_ransomware:
+                stats['ransomware'] += 1
+
+        # Summary
+        self._create_summary_table(elements, stats)
+
+        # Priority breakdown
+        self._create_priority_breakdown(elements, stats)
+
+        # Pending vulnerabilities
+        pending = [m for m in matches if not m.acknowledged]
+        pending_sorted = sorted(pending, key=lambda m: (
+            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
+        ))
+        if pending_sorted:
+            self._create_vulnerability_list(elements, pending_sorted, "Pending Action Items")
+
+        # Acknowledged vulnerabilities
+        acknowledged = [m for m in matches if m.acknowledged]
+        acknowledged_sorted = sorted(acknowledged, key=lambda m: (
+            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
+        ))
+        if acknowledged_sorted:
+            if pending_sorted and len(pending_sorted) > 20:
+                elements.append(PageBreak())
+            self._create_vulnerability_list(elements, acknowledged_sorted, "Acknowledged Vulnerabilities")
+
+        # Footer
+        self._create_footer(elements, datetime.now())
+
+        # Build PDF
+        doc.build(elements)
+        buffer.seek(0)
+
+        return buffer

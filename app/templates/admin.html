@@ -91,6 +91,47 @@
                 </div>
             </div>
         </div>
+        <!-- Search and Filter Bar -->
+        <div class="card-body border-bottom py-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="productSearch" placeholder="Search vendor, product, version..."
+                               oninput="debounceSearch()">
+                        <button class="btn btn-outline-secondary" type="button" onclick="clearSearch()" title="Clear search">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    </div>
+                </div>
+                {% if current_user and current_user.is_super_admin() %}
+                <div class="col-md-2">
+                    <select class="form-select form-select-sm" id="filterOrg" onchange="loadProducts()">
+                        <option value="">All Organizations</option>
+                    </select>
+                </div>
+                {% endif %}
+                <div class="col-md-2">
+                    <select class="form-select form-select-sm" id="filterCriticality" onchange="loadProducts()">
+                        <option value="">All Criticalities</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select class="form-select form-select-sm" id="filterStatus" onchange="loadProducts()">
+                        <option value="">All Statuses</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                    </select>
+                </div>
+                <div class="col-md-2 text-end">
+                    <span class="text-muted small" id="productCount">-</span>
+                </div>
+            </div>
+        </div>
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-hover table-compact mb-0" id="productsTableContainer">
@@ -120,6 +161,21 @@
                     </tbody>
                 </table>
             </div>
+        </div>
+        <!-- Pagination Controls -->
+        <div class="card-footer d-flex justify-content-between align-items-center" id="paginationContainer" style="display: none !important;">
+            <div class="d-flex align-items-center gap-2">
+                <label class="form-label mb-0 small text-muted">Per page:</label>
+                <select class="form-select form-select-sm" style="width: auto;" id="perPage" onchange="loadProducts()">
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <nav aria-label="Products pagination">
+                <ul class="pagination pagination-sm mb-0" id="paginationNav">
+                </ul>
+            </nav>
         </div>
     </div>
 </div>
@@ -377,22 +433,145 @@
     let serviceCatalog = [];
     let selectedCatalogItems = new Set();
     let selectedVersions = {};  // Store selected versions by catalog ID
+    let currentPage = 1;
+    let searchTimeout = null;
+
+    // Debounce search input
+    function debounceSearch() {
+        if (searchTimeout) clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            currentPage = 1; // Reset to first page on search
+            loadProducts();
+        }, 300);
+    }
+
+    function clearSearch() {
+        document.getElementById('productSearch').value = '';
+        currentPage = 1;
+        loadProducts();
+    }
+
+    function goToPage(page) {
+        currentPage = page;
+        loadProducts();
+    }
+
+    function renderPagination(total, currentPage, pages, perPage) {
+        const container = document.getElementById('paginationContainer');
+        const nav = document.getElementById('paginationNav');
+        const countEl = document.getElementById('productCount');
+
+        // Update count display
+        const start = (currentPage - 1) * perPage + 1;
+        const end = Math.min(currentPage * perPage, total);
+        countEl.textContent = total > 0 ? `Showing ${start}-${end} of ${total} products` : 'No products found';
+
+        // Show/hide pagination
+        if (pages <= 1) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'flex';
+
+        let html = '';
+
+        // Previous button
+        html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="goToPage(${currentPage - 1}); return false;">
+                <i class="bi bi-chevron-left"></i>
+            </a>
+        </li>`;
+
+        // Page numbers
+        const maxVisible = 5;
+        let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+        let endPage = Math.min(pages, startPage + maxVisible - 1);
+
+        if (endPage - startPage + 1 < maxVisible) {
+            startPage = Math.max(1, endPage - maxVisible + 1);
+        }
+
+        if (startPage > 1) {
+            html += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(1); return false;">1</a></li>`;
+            if (startPage > 2) {
+                html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" onclick="goToPage(${i}); return false;">${i}</a>
+            </li>`;
+        }
+
+        if (endPage < pages) {
+            if (endPage < pages - 1) {
+                html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+            html += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(${pages}); return false;">${pages}</a></li>`;
+        }
+
+        // Next button
+        html += `<li class="page-item ${currentPage === pages ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="goToPage(${currentPage + 1}); return false;">
+                <i class="bi bi-chevron-right"></i>
+            </a>
+        </li>`;
+
+        nav.innerHTML = html;
+    }
 
     async function loadProducts() {
         showLoading();
         const tbody = document.getElementById('productsTable');
 
+        // Build query parameters
+        const params = new URLSearchParams();
+
+        const search = document.getElementById('productSearch')?.value?.trim();
+        if (search) params.append('search', search);
+
+        const filterOrgEl = document.getElementById('filterOrg');
+        if (filterOrgEl && filterOrgEl.value) params.append('filter_org', filterOrgEl.value);
+
+        const criticality = document.getElementById('filterCriticality')?.value;
+        if (criticality) params.append('criticality', criticality);
+
+        const status = document.getElementById('filterStatus')?.value;
+        if (status) params.append('status', status);
+
+        const perPage = parseInt(document.getElementById('perPage')?.value || '25');
+        params.append('page', currentPage);
+        params.append('per_page', perPage);
+
         try {
-            const response = await fetch('/api/products');
-            const products = await response.json();
+            const response = await fetch(`/api/products?${params.toString()}`);
+            const data = await response.json();
+
+            // Handle paginated response
+            const products = data.products || data;
+            const total = data.total || products.length;
+            const pages = data.pages || 1;
+
+            // Update count and pagination
+            if (data.products) {
+                renderPagination(total, data.page, pages, perPage);
+            } else {
+                // Non-paginated response (backward compatibility)
+                document.getElementById('productCount').textContent = `${products.length} products`;
+                document.getElementById('paginationContainer').style.display = 'none';
+            }
 
             if (products.length === 0) {
+                const hasFilters = search || criticality || status || (filterOrgEl && filterOrgEl.value);
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="8" class="text-center py-5">
-                            <i class="bi bi-inbox text-muted" style="font-size: 3rem;"></i>
-                            <h5 class="mt-3 text-muted">No products added yet</h5>
-                            <p class="text-muted">Click "Add Product" to start tracking vulnerabilities for your software inventory.</p>
+                            <i class="bi bi-${hasFilters ? 'search' : 'inbox'} text-muted" style="font-size: 3rem;"></i>
+                            <h5 class="mt-3 text-muted">${hasFilters ? 'No products match your filters' : 'No products added yet'}</h5>
+                            <p class="text-muted">${hasFilters ? 'Try adjusting your search or filters.' : 'Click "Add Product" to start tracking vulnerabilities for your software inventory.'}</p>
+                            ${hasFilters ? '<button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()"><i class="bi bi-x me-1"></i>Clear Filters</button>' : ''}
                         </td>
                     </tr>
                 `;
@@ -461,6 +640,32 @@
             hideLoading();
             // Restore column visibility after loading
             restoreColumnPrefs();
+        }
+    }
+
+    function resetFilters() {
+        document.getElementById('productSearch').value = '';
+        const filterOrgEl = document.getElementById('filterOrg');
+        if (filterOrgEl) filterOrgEl.value = '';
+        document.getElementById('filterCriticality').value = '';
+        document.getElementById('filterStatus').value = '';
+        currentPage = 1;
+        loadProducts();
+    }
+
+    // Load organizations for filter dropdown (super admin only)
+    async function loadFilterOrganizations() {
+        const filterOrgEl = document.getElementById('filterOrg');
+        if (!filterOrgEl) return; // Not super admin
+
+        try {
+            const response = await fetch('/api/organizations');
+            const orgs = await response.json();
+
+            filterOrgEl.innerHTML = '<option value="">All Organizations</option>' +
+                orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+        } catch (error) {
+            console.error('Failed to load organizations for filter:', error);
         }
     }
 
@@ -1341,10 +1546,15 @@
         `;
     }
 
-    async function confirmRemoveOrganization(orgId) {
+    async function confirmRemoveOrganization(orgId, forceDelete = false) {
         try {
             showLoading();
-            const response = await fetch(`/api/products/${currentOrgProductId}/organizations/${orgId}`, {
+            let url = `/api/products/${currentOrgProductId}/organizations/${orgId}`;
+            if (forceDelete) {
+                url += '?confirm_delete=true';
+            }
+
+            const response = await fetch(url, {
                 method: 'DELETE'
             });
 
@@ -1366,6 +1576,10 @@
                 }
 
                 loadProducts(); // Refresh product list
+            } else if (data.requires_confirmation) {
+                // This is the last organization - show confirmation dialog
+                hideLoading();
+                showLastOrgConfirmation(orgId, data.message);
             } else {
                 showToast(data.error || 'Failed to remove organization', 'danger');
             }
@@ -1374,6 +1588,25 @@
         } finally {
             hideLoading();
         }
+    }
+
+    function showLastOrgConfirmation(orgId, message) {
+        // Show a modal asking user what to do with the last organization
+        const actionsDiv = document.getElementById(`org-actions-${orgId}`);
+        actionsDiv.innerHTML = `
+            <div class="alert alert-warning p-2 mb-0" style="font-size: 0.875rem;">
+                <div class="mb-2"><i class="bi bi-exclamation-triangle"></i> <strong>Last Organization</strong></div>
+                <div class="mb-2">${message}</div>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-danger btn-sm" onclick="confirmRemoveOrganization(${orgId}, true)">
+                        <i class="bi bi-trash"></i> Delete Product
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="loadAssignedOrganizations(${currentOrgProductId})">
+                        <i class="bi bi-x"></i> Cancel
+                    </button>
+                </div>
+            </div>
+        `;
     }
 
     // Column visibility toggle
@@ -1417,6 +1650,7 @@
     }
 
     document.addEventListener('DOMContentLoaded', function() {
+        loadFilterOrganizations(); // Load org filter dropdown (super admin only)
         loadProducts();
         restoreColumnPrefs();
     });
