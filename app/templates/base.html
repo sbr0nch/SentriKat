@@ -1123,6 +1123,42 @@
             color: var(--gray-500);
             margin-top: 0.5rem;
         }
+
+        /* Sortable Table Headers */
+        .sortable-header {
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            transition: background-color 0.15s;
+        }
+
+        .sortable-header:hover {
+            background-color: var(--gray-100);
+        }
+
+        .sortable-header .sort-icon {
+            display: inline-block;
+            margin-left: 0.25rem;
+            opacity: 0.3;
+            transition: opacity 0.15s, transform 0.15s;
+        }
+
+        .sortable-header:hover .sort-icon {
+            opacity: 0.6;
+        }
+
+        .sortable-header.sort-asc .sort-icon,
+        .sortable-header.sort-desc .sort-icon {
+            opacity: 1;
+        }
+
+        .sortable-header.sort-desc .sort-icon {
+            transform: rotate(180deg);
+        }
+
+        [data-theme="dark"] .sortable-header:hover {
+            background-color: var(--gray-100);
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -1765,6 +1801,219 @@
         // Load organizations on page load
         document.addEventListener('DOMContentLoaded', function() {
             loadOrganizations();
+        });
+
+        // ============================================================================
+        // Sortable Table Utility
+        // ============================================================================
+
+        /**
+         * SortableTable - Makes any table sortable by clicking column headers
+         *
+         * Usage:
+         *   1. Add data-sortable="true" to the table
+         *   2. Add data-sort-key="fieldName" to sortable th elements
+         *   3. Add data-sort-type="string|number|date|priority|boolean" for proper sorting
+         *   4. Call SortableTable.init('tableId') or let auto-init find tables
+         *
+         * Example:
+         *   <table id="myTable" data-sortable="true">
+         *     <thead>
+         *       <tr>
+         *         <th data-sort-key="name" data-sort-type="string">Name</th>
+         *         <th data-sort-key="count" data-sort-type="number">Count</th>
+         *         <th data-sort-key="date" data-sort-type="date">Date</th>
+         *         <th data-sort-key="priority" data-sort-type="priority">Priority</th>
+         *         <th data-sort-key="active" data-sort-type="boolean">Status</th>
+         *       </tr>
+         *     </thead>
+         *     <tbody>...</tbody>
+         *   </table>
+         */
+        const SortableTable = {
+            tables: {},
+
+            // Priority order for sorting
+            priorityOrder: { 'critical': 0, 'high': 1, 'medium': 2, 'low': 3 },
+
+            /**
+             * Initialize sorting for a table
+             * @param {string} tableId - The table element ID
+             * @param {function} dataExtractor - Optional function to extract sort data from row
+             */
+            init: function(tableId, dataExtractor = null) {
+                const table = document.getElementById(tableId);
+                if (!table) return;
+
+                this.tables[tableId] = {
+                    currentSort: null,
+                    currentDirection: 'asc',
+                    dataExtractor: dataExtractor
+                };
+
+                const headers = table.querySelectorAll('th[data-sort-key]');
+                headers.forEach(header => {
+                    // Add sortable class and icon
+                    header.classList.add('sortable-header');
+                    if (!header.querySelector('.sort-icon')) {
+                        header.innerHTML += ' <i class="bi bi-chevron-up sort-icon"></i>';
+                    }
+
+                    // Add click handler
+                    header.addEventListener('click', () => {
+                        this.sortTable(tableId, header);
+                    });
+                });
+            },
+
+            /**
+             * Sort the table by the clicked header
+             */
+            sortTable: function(tableId, header) {
+                const table = document.getElementById(tableId);
+                const tbody = table.querySelector('tbody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                const sortKey = header.dataset.sortKey;
+                const sortType = header.dataset.sortType || 'string';
+                const tableState = this.tables[tableId];
+
+                // Determine sort direction
+                if (tableState.currentSort === sortKey) {
+                    tableState.currentDirection = tableState.currentDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    tableState.currentSort = sortKey;
+                    tableState.currentDirection = 'asc';
+                }
+
+                // Update header classes
+                table.querySelectorAll('th[data-sort-key]').forEach(th => {
+                    th.classList.remove('sort-asc', 'sort-desc');
+                });
+                header.classList.add('sort-' + tableState.currentDirection);
+
+                // Sort rows
+                const direction = tableState.currentDirection === 'asc' ? 1 : -1;
+
+                rows.sort((a, b) => {
+                    let aVal, bVal;
+
+                    // Use custom data extractor if provided
+                    if (tableState.dataExtractor) {
+                        const aData = tableState.dataExtractor(a);
+                        const bData = tableState.dataExtractor(b);
+                        aVal = aData[sortKey];
+                        bVal = bData[sortKey];
+                    } else {
+                        // Default: extract from cell content
+                        const aCell = a.querySelector(`td[data-column="${sortKey}"]`) ||
+                                     a.cells[this.getColumnIndex(table, sortKey)];
+                        const bCell = b.querySelector(`td[data-column="${sortKey}"]`) ||
+                                     b.cells[this.getColumnIndex(table, sortKey)];
+
+                        aVal = this.getCellValue(aCell, sortType);
+                        bVal = this.getCellValue(bCell, sortType);
+                    }
+
+                    return this.compareValues(aVal, bVal, sortType) * direction;
+                });
+
+                // Re-append rows in sorted order
+                rows.forEach(row => tbody.appendChild(row));
+            },
+
+            /**
+             * Get column index by sort key
+             */
+            getColumnIndex: function(table, sortKey) {
+                const headers = table.querySelectorAll('th');
+                for (let i = 0; i < headers.length; i++) {
+                    if (headers[i].dataset.sortKey === sortKey) {
+                        return i;
+                    }
+                }
+                return 0;
+            },
+
+            /**
+             * Extract value from cell based on type
+             */
+            getCellValue: function(cell, sortType) {
+                if (!cell) return '';
+
+                const text = cell.textContent.trim();
+
+                // Check for badge content
+                const badge = cell.querySelector('.badge');
+                if (badge) {
+                    return badge.textContent.trim().toLowerCase();
+                }
+
+                return text;
+            },
+
+            /**
+             * Compare two values based on type
+             */
+            compareValues: function(a, b, sortType) {
+                // Handle empty/null values
+                if (a === null || a === undefined || a === '' || a === '-') a = null;
+                if (b === null || b === undefined || b === '' || b === '-') b = null;
+
+                // Nulls go to end
+                if (a === null && b === null) return 0;
+                if (a === null) return 1;
+                if (b === null) return -1;
+
+                switch (sortType) {
+                    case 'number':
+                        return parseFloat(a) - parseFloat(b);
+
+                    case 'date':
+                        const dateA = new Date(a);
+                        const dateB = new Date(b);
+                        return dateA - dateB;
+
+                    case 'priority':
+                        const priorityA = this.priorityOrder[a.toLowerCase()] ?? 999;
+                        const priorityB = this.priorityOrder[b.toLowerCase()] ?? 999;
+                        return priorityA - priorityB;
+
+                    case 'boolean':
+                        const boolA = a.toLowerCase() === 'active' || a.toLowerCase() === 'true' || a.toLowerCase() === 'yes' ? 1 : 0;
+                        const boolB = b.toLowerCase() === 'active' || b.toLowerCase() === 'true' || b.toLowerCase() === 'yes' ? 1 : 0;
+                        return boolB - boolA; // Active first
+
+                    case 'string':
+                    default:
+                        return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+                }
+            },
+
+            /**
+             * Reset sort state for a table
+             */
+            reset: function(tableId) {
+                if (this.tables[tableId]) {
+                    this.tables[tableId].currentSort = null;
+                    this.tables[tableId].currentDirection = 'asc';
+                }
+
+                const table = document.getElementById(tableId);
+                if (table) {
+                    table.querySelectorAll('th[data-sort-key]').forEach(th => {
+                        th.classList.remove('sort-asc', 'sort-desc');
+                    });
+                }
+            }
+        };
+
+        // Auto-initialize sortable tables on DOM ready
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('table[data-sortable="true"]').forEach(table => {
+                if (table.id) {
+                    SortableTable.init(table.id);
+                }
+            });
         });
     </script>
     {% block extra_js %}{% endblock %}

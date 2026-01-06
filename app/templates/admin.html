@@ -134,18 +134,18 @@
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover table-compact mb-0" id="productsTableContainer">
+                <table class="table table-hover table-compact mb-0" id="productsTableContainer" data-sortable="true">
                     <thead>
                         <tr>
                             <th style="width: 40px;">
                                 <input type="checkbox" class="form-check-input" id="selectAllCheckbox" onchange="toggleSelectAll()">
                             </th>
-                            <th data-column="vendor">Vendor</th>
-                            <th data-column="product">Product</th>
-                            <th data-column="version">Version</th>
-                            <th data-column="organization">Organization</th>
-                            <th data-column="criticality">Criticality</th>
-                            <th data-column="status">Status</th>
+                            <th data-column="vendor" data-sort-key="vendor" data-sort-type="string">Vendor</th>
+                            <th data-column="product" data-sort-key="product" data-sort-type="string">Product</th>
+                            <th data-column="version" data-sort-key="version" data-sort-type="string">Version</th>
+                            <th data-column="organization" data-sort-key="organization" data-sort-type="string">Organization</th>
+                            <th data-column="criticality" data-sort-key="criticality" data-sort-type="priority">Criticality</th>
+                            <th data-column="status" data-sort-key="status" data-sort-type="boolean">Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -640,6 +640,8 @@
             hideLoading();
             // Restore column visibility after loading
             restoreColumnPrefs();
+            // Re-initialize sortable table after dynamic content load
+            SortableTable.init('productsTableContainer');
         }
     }
 

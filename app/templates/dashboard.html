@@ -379,6 +379,19 @@
                         </button>
                     </div>
                 </div>
+                <!-- Sort By -->
+                <select class="form-select form-select-sm" id="sortBy" style="width: auto;" onchange="loadVulnerabilities()" title="Sort by">
+                    <option value="priority-asc">Priority (Critical first)</option>
+                    <option value="priority-desc">Priority (Low first)</option>
+                    <option value="cve-asc">CVE ID (A-Z)</option>
+                    <option value="cve-desc">CVE ID (Z-A)</option>
+                    <option value="product-asc">Product (A-Z)</option>
+                    <option value="product-desc">Product (Z-A)</option>
+                    <option value="due-asc">Due Date (Soonest)</option>
+                    <option value="due-desc">Due Date (Latest)</option>
+                    <option value="date-asc">Date Added (Oldest)</option>
+                    <option value="date-desc">Date Added (Newest)</option>
+                </select>
                 <!-- Page Size -->
                 <select class="form-select form-select-sm" id="pageSize" style="width: 75px;" onchange="changePageSize()" title="Items per page">
                     <option value="15" selected>15</option>
@@ -911,33 +924,67 @@
     }
 
     function sortVulnerabilities() {
-        const sortBy = document.getElementById('sortBy').value;
+        const sortBy = document.getElementById('sortBy')?.value || 'priority-asc';
         const priorityOrder = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1};
 
         switch(sortBy) {
-            case 'priority':
+            case 'priority-asc': // Critical first
                 currentVulnerabilities.sort((a, b) => {
                     const priorityDiff = priorityOrder[b.effective_priority] - priorityOrder[a.effective_priority];
                     if (priorityDiff !== 0) return priorityDiff;
-                    // If same priority, sort by date (newest first)
                     return new Date(b.vulnerability.date_added) - new Date(a.vulnerability.date_added);
                 });
                 break;
-            case 'date_desc':
-                currentVulnerabilities.sort((a, b) =>
-                    new Date(b.vulnerability.date_added) - new Date(a.vulnerability.date_added));
+            case 'priority-desc': // Low first
+                currentVulnerabilities.sort((a, b) => {
+                    const priorityDiff = priorityOrder[a.effective_priority] - priorityOrder[b.effective_priority];
+                    if (priorityDiff !== 0) return priorityDiff;
+                    return new Date(a.vulnerability.date_added) - new Date(b.vulnerability.date_added);
+                });
                 break;
-            case 'date_asc':
+            case 'cve-asc':
                 currentVulnerabilities.sort((a, b) =>
-                    new Date(a.vulnerability.date_added) - new Date(b.vulnerability.date_added));
+                    a.vulnerability.cve_id.localeCompare(b.vulnerability.cve_id));
                 break;
-            case 'cve_desc':
+            case 'cve-desc':
                 currentVulnerabilities.sort((a, b) =>
                     b.vulnerability.cve_id.localeCompare(a.vulnerability.cve_id));
                 break;
-            case 'cve_asc':
+            case 'product-asc':
+                currentVulnerabilities.sort((a, b) => {
+                    const aName = `${a.product?.vendor || ''} ${a.product?.product_name || ''}`.trim().toLowerCase();
+                    const bName = `${b.product?.vendor || ''} ${b.product?.product_name || ''}`.trim().toLowerCase();
+                    return aName.localeCompare(bName);
+                });
+                break;
+            case 'product-desc':
+                currentVulnerabilities.sort((a, b) => {
+                    const aName = `${a.product?.vendor || ''} ${a.product?.product_name || ''}`.trim().toLowerCase();
+                    const bName = `${b.product?.vendor || ''} ${b.product?.product_name || ''}`.trim().toLowerCase();
+                    return bName.localeCompare(aName);
+                });
+                break;
+            case 'due-asc': // Soonest first
+                currentVulnerabilities.sort((a, b) => {
+                    const aDue = a.vulnerability.due_date ? new Date(a.vulnerability.due_date) : new Date('2999-12-31');
+                    const bDue = b.vulnerability.due_date ? new Date(b.vulnerability.due_date) : new Date('2999-12-31');
+                    return aDue - bDue;
+                });
+                break;
+            case 'due-desc': // Latest first
+                currentVulnerabilities.sort((a, b) => {
+                    const aDue = a.vulnerability.due_date ? new Date(a.vulnerability.due_date) : new Date('1970-01-01');
+                    const bDue = b.vulnerability.due_date ? new Date(b.vulnerability.due_date) : new Date('1970-01-01');
+                    return bDue - aDue;
+                });
+                break;
+            case 'date-asc': // Oldest first
                 currentVulnerabilities.sort((a, b) =>
-                    a.vulnerability.cve_id.localeCompare(b.vulnerability.cve_id));
+                    new Date(a.vulnerability.date_added) - new Date(b.vulnerability.date_added));
+                break;
+            case 'date-desc': // Newest first
+                currentVulnerabilities.sort((a, b) =>
+                    new Date(b.vulnerability.date_added) - new Date(a.vulnerability.date_added));
                 break;
         }
     }

@@ -56,16 +56,16 @@
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-hover">
+                        <table class="table table-hover" id="usersTableContainer" data-sortable="true">
                             <thead>
                                 <tr>
-                                    <th>Username</th>
-                                    <th>Full Name</th>
-                                    <th>Email</th>
-                                    <th>Organization</th>
-                                    <th>Auth Type</th>
-                                    <th>Role</th>
-                                    <th>Status</th>
+                                    <th data-sort-key="username" data-sort-type="string">Username</th>
+                                    <th data-sort-key="fullname" data-sort-type="string">Full Name</th>
+                                    <th data-sort-key="email" data-sort-type="string">Email</th>
+                                    <th data-sort-key="organization" data-sort-type="string">Organization</th>
+                                    <th data-sort-key="authtype" data-sort-type="string">Auth Type</th>
+                                    <th data-sort-key="role" data-sort-type="string">Role</th>
+                                    <th data-sort-key="status" data-sort-type="boolean">Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -158,14 +158,14 @@
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-hover">
+                        <table class="table table-hover" id="orgsTableContainer" data-sortable="true">
                             <thead>
                                 <tr>
-                                    <th>Name</th>
-                                    <th>Display Name</th>
-                                    <th>Users</th>
-                                    <th>SMTP Configured</th>
-                                    <th>Status</th>
+                                    <th data-sort-key="name" data-sort-type="string">Name</th>
+                                    <th data-sort-key="displayname" data-sort-type="string">Display Name</th>
+                                    <th data-sort-key="users" data-sort-type="number">Users</th>
+                                    <th data-sort-key="smtp" data-sort-type="boolean">SMTP Configured</th>
+                                    <th data-sort-key="status" data-sort-type="boolean">Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -347,18 +347,18 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-hover table-sm">
+                                <table class="table table-hover table-sm" id="syncHistoryTableContainer" data-sortable="true">
                                     <thead>
                                         <tr>
-                                            <th>Sync ID</th>
-                                            <th>Type</th>
-                                            <th>Started</th>
-                                            <th>Duration</th>
-                                            <th>Status</th>
-                                            <th>Added</th>
-                                            <th>Updated</th>
-                                            <th>Deactivated</th>
-                                            <th>Errors</th>
+                                            <th data-sort-key="id" data-sort-type="number">Sync ID</th>
+                                            <th data-sort-key="type" data-sort-type="string">Type</th>
+                                            <th data-sort-key="started" data-sort-type="date">Started</th>
+                                            <th data-sort-key="duration" data-sort-type="number">Duration</th>
+                                            <th data-sort-key="status" data-sort-type="string">Status</th>
+                                            <th data-sort-key="added" data-sort-type="number">Added</th>
+                                            <th data-sort-key="updated" data-sort-type="number">Updated</th>
+                                            <th data-sort-key="deactivated" data-sort-type="number">Deactivated</th>
+                                            <th data-sort-key="errors" data-sort-type="number">Errors</th>
                                         </tr>
                                     </thead>
                                     <tbody id="syncHistoryTable">

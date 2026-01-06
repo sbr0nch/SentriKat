@@ -78,23 +78,45 @@ async function loadUsers() {
         const tbody = document.getElementById('usersTable');
         if (!tbody) return;
 
-        tbody.innerHTML = users.map(user => `
-            <tr>
-                <td>${escapeHtml(user.username)}</td>
-                <td>${escapeHtml(user.email || '')}</td>
-                <td>${escapeHtml(user.full_name || '')}</td>
-                <td><span class="badge bg-${user.is_active ? 'success' : 'secondary'}">${user.is_active ? 'Active' : 'Inactive'}</span></td>
-                <td><span class="badge bg-info">${user.role}</span></td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editUser(${user.id})">
-                        <i class="bi bi-pencil"></i> Edit
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${user.id})">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = users.map(user => {
+            const authBadge = user.auth_type === 'ldap'
+                ? '<span class="badge badge-auth-ldap">LDAP</span>'
+                : '<span class="badge badge-auth-local">Local</span>';
+            const roleBadge = {
+                'super_admin': '<span class="badge badge-role-super">Super Admin</span>',
+                'org_admin': '<span class="badge badge-role-admin">Org Admin</span>',
+                'manager': '<span class="badge badge-role-manager">Manager</span>',
+                'user': '<span class="badge badge-role-user">User</span>'
+            }[user.role] || `<span class="badge bg-secondary">${user.role}</span>`;
+            const statusBadge = user.is_active
+                ? '<span class="badge badge-status-active">Active</span>'
+                : '<span class="badge badge-status-inactive">Inactive</span>';
+
+            return `
+                <tr>
+                    <td data-column="username">${escapeHtml(user.username)}</td>
+                    <td data-column="fullname">${escapeHtml(user.full_name || '')}</td>
+                    <td data-column="email">${escapeHtml(user.email || '')}</td>
+                    <td data-column="organization">${escapeHtml(user.organization_name || '-')}</td>
+                    <td data-column="authtype">${authBadge}</td>
+                    <td data-column="role">${roleBadge}</td>
+                    <td data-column="status">${statusBadge}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="editUser(${user.id})">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${user.id})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Initialize sortable table after rendering
+        if (typeof SortableTable !== 'undefined') {
+            SortableTable.init('usersTableContainer');
+        }
     } catch (error) {
         console.error('Error loading users:', error);
         showToast('Failed to load users', 'danger');
@@ -243,24 +265,40 @@ async function loadOrganizations() {
         const response = await fetch('/api/organizations');
         const orgs = await response.json();
 
-        const tbody = document.getElementById('organizationsTable');
+        const tbody = document.getElementById('orgsTable');
         if (!tbody) return;
 
-        tbody.innerHTML = orgs.map(org => `
-            <tr>
-                <td>${escapeHtml(org.name)}</td>
-                <td>${escapeHtml(org.description || '')}</td>
-                <td><span class="badge bg-${org.active ? 'success' : 'secondary'}">${org.active ? 'Active' : 'Inactive'}</span></td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editOrganization(${org.id})">
-                        <i class="bi bi-pencil"></i> Edit
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteOrganization(${org.id})">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = orgs.map(org => {
+            const smtpBadge = org.smtp_host
+                ? '<span class="badge badge-status-active">Configured</span>'
+                : '<span class="badge badge-status-inactive">Not Set</span>';
+            const statusBadge = org.active
+                ? '<span class="badge badge-status-active">Active</span>'
+                : '<span class="badge badge-status-inactive">Inactive</span>';
+
+            return `
+                <tr>
+                    <td data-column="name">${escapeHtml(org.name)}</td>
+                    <td data-column="displayname">${escapeHtml(org.display_name || org.name)}</td>
+                    <td data-column="users">${org.user_count || 0}</td>
+                    <td data-column="smtp">${smtpBadge}</td>
+                    <td data-column="status">${statusBadge}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="editOrganization(${org.id})">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteOrganization(${org.id})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Initialize sortable table after rendering
+        if (typeof SortableTable !== 'undefined') {
+            SortableTable.init('orgsTableContainer');
+        }
     } catch (error) {
         console.error('Error loading organizations:', error);
         showToast('Failed to load organizations', 'danger');
@@ -395,14 +433,14 @@ async function searchLdapUsersInline() {
         // Build results table
         let tableHTML = `
             <div class="table-responsive">
-                <table class="table table-hover">
+                <table class="table table-hover" id="ldapResultsTableContainer" data-sortable="true">
                     <thead>
                         <tr>
-                            <th>Username</th>
-                            <th>Full Name</th>
-                            <th>Email</th>
-                            <th>Groups</th>
-                            <th>Status</th>
+                            <th data-sort-key="username" data-sort-type="string">Username</th>
+                            <th data-sort-key="fullname" data-sort-type="string">Full Name</th>
+                            <th data-sort-key="email" data-sort-type="string">Email</th>
+                            <th data-sort-key="groups" data-sort-type="string">Groups</th>
+                            <th data-sort-key="status" data-sort-type="boolean">Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -434,11 +472,11 @@ async function searchLdapUsersInline() {
 
             tableHTML += `
                 <tr>
-                    <td><strong>${user.username}</strong></td>
-                    <td>${user.full_name || '<span class="text-muted">N/A</span>'}</td>
-                    <td>${user.email}</td>
-                    <td>${groupsDisplay}</td>
-                    <td>${statusBadge}</td>
+                    <td data-column="username"><strong>${user.username}</strong></td>
+                    <td data-column="fullname">${user.full_name || '<span class="text-muted">N/A</span>'}</td>
+                    <td data-column="email">${user.email}</td>
+                    <td data-column="groups">${groupsDisplay}</td>
+                    <td data-column="status">${statusBadge}</td>
                     <td>${actionButton}</td>
                 </tr>
             `;
@@ -451,6 +489,11 @@ async function searchLdapUsersInline() {
         `;
 
         resultsDiv.innerHTML = tableHTML;
+
+        // Initialize sortable table after rendering
+        if (typeof SortableTable !== 'undefined') {
+            SortableTable.init('ldapResultsTableContainer');
+        }
 
     } catch (error) {
         console.error('LDAP search error:', error);
