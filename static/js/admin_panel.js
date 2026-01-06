@@ -927,7 +927,12 @@ async function toggleUserActive(userId, username, isCurrentlyActive) {
 // ============================================================================
 
 async function loadOrganizations() {
+    console.log('loadOrganizations: Starting...');
     const tbody = document.getElementById('orgsTable');
+    if (!tbody) {
+        console.error('loadOrganizations: orgsTable element not found!');
+        return;
+    }
     tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
     // Clear selection state
@@ -935,13 +940,16 @@ async function loadOrganizations() {
     updateOrgsBulkToolbar();
 
     try {
+        console.log('loadOrganizations: Fetching /api/organizations...');
         const response = await fetch('/api/organizations');
+        console.log('loadOrganizations: Response status:', response.status);
 
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
         organizations = await response.json();
+        console.log('loadOrganizations: Loaded', organizations.length, 'organizations');
 
         if (organizations.length === 0) {
             tbody.innerHTML = `
