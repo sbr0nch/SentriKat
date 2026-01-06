@@ -55,23 +55,26 @@
                     </button>
                 </div>
                 <!-- Bulk Actions Toolbar -->
-                <div id="usersBulkActions" class="card-body bg-primary bg-opacity-10 border-bottom py-2" style="display: none;">
-                    <div class="d-flex align-items-center justify-content-between">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="badge bg-primary"><span id="usersSelectedCount">0</span> selected</span>
-                            <button class="btn btn-sm btn-success" onclick="bulkActivateUsers()">
+                <div id="usersBulkActions" class="alert alert-info mx-3 mt-3 mb-0" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>
+                            <i class="bi bi-check-square me-2"></i>
+                            <strong><span id="usersSelectedCount">0</span> user(s) selected</strong>
+                        </span>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-success" onclick="bulkActivateUsers()">
                                 <i class="bi bi-check-circle me-1"></i>Activate
                             </button>
-                            <button class="btn btn-sm btn-warning" onclick="bulkDeactivateUsers()">
+                            <button class="btn btn-outline-secondary" onclick="bulkDeactivateUsers()">
                                 <i class="bi bi-pause-circle me-1"></i>Deactivate
                             </button>
-                            <button class="btn btn-sm btn-danger" onclick="bulkDeleteUsers()">
+                            <button class="btn btn-outline-danger" onclick="bulkDeleteUsers()">
                                 <i class="bi bi-trash me-1"></i>Delete
                             </button>
+                            <button class="btn btn-outline-secondary" onclick="clearUserSelection()">
+                                <i class="bi bi-x me-1"></i>Clear
+                            </button>
                         </div>
-                        <button class="btn btn-sm btn-link text-decoration-none" onclick="clearUserSelection()">
-                            <i class="bi bi-x me-1"></i>Clear
-                        </button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -180,23 +183,26 @@
                     {% endif %}
                 </div>
                 <!-- Bulk Actions Toolbar -->
-                <div id="orgsBulkActions" class="card-body bg-primary bg-opacity-10 border-bottom py-2" style="display: none;">
-                    <div class="d-flex align-items-center justify-content-between">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="badge bg-primary"><span id="orgsSelectedCount">0</span> selected</span>
-                            <button class="btn btn-sm btn-success" onclick="bulkActivateOrgs()">
+                <div id="orgsBulkActions" class="alert alert-info mx-3 mt-3 mb-0" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>
+                            <i class="bi bi-check-square me-2"></i>
+                            <strong><span id="orgsSelectedCount">0</span> organization(s) selected</strong>
+                        </span>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-success" onclick="bulkActivateOrgs()">
                                 <i class="bi bi-check-circle me-1"></i>Activate
                             </button>
-                            <button class="btn btn-sm btn-warning" onclick="bulkDeactivateOrgs()">
+                            <button class="btn btn-outline-secondary" onclick="bulkDeactivateOrgs()">
                                 <i class="bi bi-pause-circle me-1"></i>Deactivate
                             </button>
-                            <button class="btn btn-sm btn-danger" onclick="bulkDeleteOrgs()">
+                            <button class="btn btn-outline-danger" onclick="bulkDeleteOrgs()">
                                 <i class="bi bi-trash me-1"></i>Delete
                             </button>
+                            <button class="btn btn-outline-secondary" onclick="clearOrgSelection()">
+                                <i class="bi bi-x me-1"></i>Clear
+                            </button>
                         </div>
-                        <button class="btn btn-sm btn-link text-decoration-none" onclick="clearOrgSelection()">
-                            <i class="bi bi-x me-1"></i>Clear
-                        </button>
                     </div>
                 </div>
                 <div class="card-body">

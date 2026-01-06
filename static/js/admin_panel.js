@@ -1012,16 +1012,28 @@ async function loadOrganizations() {
 }
 
 async function loadOrganizationsDropdown() {
+    const select = document.getElementById('organization');
+    if (!select) {
+        console.warn('Organization select element not found');
+        return;
+    }
+
     try {
         const response = await fetch('/api/organizations');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
         const orgs = await response.json();
 
-        const select = document.getElementById('organization');
-        select.innerHTML = orgs.map(org =>
-            `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`
-        ).join('');
+        if (orgs.length === 0) {
+            select.innerHTML = '<option value="">No organizations available</option>';
+        } else {
+            select.innerHTML = '<option value="">Select organization...</option>' +
+                orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+        }
     } catch (error) {
         console.error('Error loading organizations dropdown:', error);
+        select.innerHTML = '<option value="">Error loading organizations</option>';
     }
 }
 
