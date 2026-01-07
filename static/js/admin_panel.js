@@ -588,6 +588,16 @@ async function loadUsers() {
                                     <i class="bi bi-unlock-fill"></i>
                                 </button>
                                 ` : ''}
+                                ${user.totp_enabled ? `
+                                <button class="btn-action btn-action-warning" onclick="reset2FA(${user.id}, '${escapeHtml(user.username)}')" title="Reset 2FA">
+                                    <i class="bi bi-phone-flip"></i>
+                                </button>
+                                ` : ''}
+                                ${user.auth_type === 'local' ? `
+                                <button class="btn-action" onclick="forcePasswordChange(${user.id}, '${escapeHtml(user.username)}')" title="Force Password Change" style="color: #7c3aed;">
+                                    <i class="bi bi-key-fill"></i>
+                                </button>
+                                ` : ''}
                                 <button class="btn-action ${user.is_active ? 'btn-action-block' : 'btn-action-success'}"
                                         onclick="toggleUserActive(${user.id}, '${escapeHtml(user.username)}', ${user.is_active})"
                                         title="${user.is_active ? 'Block' : 'Unblock'}">
@@ -1091,6 +1101,67 @@ async function unlockUser(userId, username) {
         }
     } catch (error) {
         showToast(`Error unlocking user: ${error.message}`, 'danger');
+    }
+}
+
+async function reset2FA(userId, username) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to reset 2FA for "<strong>${username}</strong>"?<br><br>` +
+        'This will disable their two-factor authentication. They will need to set it up again.',
+        'Reset Two-Factor Authentication',
+        'Reset 2FA',
+        'btn-warning'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/reset-2fa`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast(result.message || `✓ 2FA has been reset for ${username}`, 'success');
+            loadUsers();
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error resetting 2FA: ${error.message}`, 'danger');
+    }
+}
+
+async function forcePasswordChange(userId, username) {
+    const confirmed = await showConfirm(
+        `Force "<strong>${username}</strong>" to change their password on next login?`,
+        'Force Password Change',
+        'Force Change',
+        'btn-primary'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/force-password-change`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast(result.message || `✓ ${username} will be required to change password`, 'success');
+            loadUsers();
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error forcing password change: ${error.message}`, 'danger');
     }
 }
 

@@ -1747,6 +1747,95 @@ def unlock_user(user_id):
         'message': f'User {user.username} has been unlocked'
     })
 
+@bp.route('/api/users/<int:user_id>/reset-2fa', methods=['POST'])
+@org_admin_required
+def reset_user_2fa(user_id):
+    """
+    Reset a user's 2FA (disable it) when they lose access to their authenticator.
+
+    Permissions:
+    - Super Admin: Can reset any user's 2FA
+    - Org Admin: Can only reset 2FA for users in their organization
+    """
+    from app.logging_config import log_audit_event
+    import logging
+    logger = logging.getLogger('security')
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions to reset 2FA for this user'}), 403
+
+    # Check if 2FA is enabled
+    if not user.totp_enabled:
+        return jsonify({'error': 'User does not have 2FA enabled'}), 400
+
+    # Disable 2FA
+    user.disable_totp()
+
+    # Log the action
+    log_audit_event(
+        'RESET_2FA',
+        'users',
+        user.id,
+        old_value={'totp_enabled': True},
+        new_value={'totp_enabled': False},
+        details=f"2FA reset for {user.username} by {current_user.username}"
+    )
+
+    logger.warning(f"2FA reset for user {user.username} (id={user.id}) by admin {current_user.username}")
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'Two-factor authentication has been reset for {user.username}. They will need to set it up again.'
+    })
+
+@bp.route('/api/users/<int:user_id>/force-password-change', methods=['POST'])
+@org_admin_required
+def force_password_change(user_id):
+    """
+    Force a user to change their password on next login.
+
+    Permissions:
+    - Super Admin: Can force any user
+    - Org Admin: Can only force users in their organization
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Only for local users
+    if user.auth_type != 'local':
+        return jsonify({'error': 'Password changes only apply to local users'}), 400
+
+    # Set flag
+    user.must_change_password = True
+
+    log_audit_event(
+        'FORCE_PASSWORD_CHANGE',
+        'users',
+        user.id,
+        details=f"Password change forced for {user.username} by {current_user.username}"
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'{user.username} will be required to change their password on next login'
+    })
+
 # ============================================================================
 # USER ORGANIZATION ASSIGNMENTS (Multi-Org Support)
 # ============================================================================

@@ -1510,6 +1510,14 @@
                                 </span>
                             </li>
                             <li><hr class="dropdown-divider"></li>
+                            {% if current_user.auth_type == 'local' %}
+                            <li>
+                                <a class="dropdown-item" href="#" onclick="openSecuritySettings(); return false;">
+                                    <i class="bi bi-shield-lock me-2"></i>Security Settings
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            {% endif %}
                             <li>
                                 <a class="dropdown-item text-danger" href="/logout">
                                     <i class="bi bi-box-arrow-right me-2"></i>Logout
@@ -2696,6 +2704,295 @@
             });
         });
     </script>
+
+    <!-- Security Settings Modal -->
+    {% if auth_enabled and current_user and current_user.auth_type == 'local' %}
+    <div class="modal fade" id="securitySettingsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-shield-lock me-2"></i>Security Settings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Password Change Section -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <i class="bi bi-key me-2"></i>Change Password
+                        </div>
+                        <div class="card-body">
+                            <form id="changePasswordForm">
+                                <div class="row g-3">
+                                    <div class="col-md-12">
+                                        <label class="form-label">Current Password</label>
+                                        <input type="password" class="form-control" id="secCurrentPassword" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">New Password</label>
+                                        <input type="password" class="form-control" id="secNewPassword" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Confirm New Password</label>
+                                        <input type="password" class="form-control" id="secConfirmPassword" required>
+                                    </div>
+                                    <div class="col-12">
+                                        <button type="submit" class="btn btn-primary">
+                                            <i class="bi bi-check-circle me-1"></i>Update Password
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Two-Factor Authentication Section -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-phone me-2"></i>Two-Factor Authentication
+                        </div>
+                        <div class="card-body">
+                            <div id="2faStatus">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border text-primary"></div>
+                                </div>
+                            </div>
+
+                            <!-- 2FA Disabled State -->
+                            <div id="2faDisabled" class="d-none">
+                                <div class="alert alert-info">
+                                    <i class="bi bi-info-circle me-2"></i>
+                                    Two-factor authentication adds an extra layer of security to your account by requiring a code from your authenticator app when you sign in.
+                                </div>
+                                <button type="button" class="btn btn-success" onclick="setup2FA()">
+                                    <i class="bi bi-shield-plus me-1"></i>Enable 2FA
+                                </button>
+                            </div>
+
+                            <!-- 2FA Setup State -->
+                            <div id="2faSetup" class="d-none">
+                                <div class="alert alert-warning">
+                                    <i class="bi bi-exclamation-triangle me-2"></i>
+                                    Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.) then enter the verification code.
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6 text-center">
+                                        <div id="qrCodeContainer" class="mb-3 p-3 bg-white rounded border d-inline-block">
+                                            <!-- QR Code will be generated here -->
+                                        </div>
+                                        <div class="mt-2">
+                                            <small class="text-muted">Can't scan? Use this code:</small><br>
+                                            <code id="totpSecretDisplay" class="user-select-all"></code>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-semibold">Verification Code</label>
+                                        <input type="text" class="form-control form-control-lg text-center"
+                                               id="verify2FACode" maxlength="6" pattern="[0-9]{6}"
+                                               placeholder="000000" style="letter-spacing: 0.5rem; font-family: monospace;">
+                                        <small class="form-text text-muted">Enter the 6-digit code from your app</small>
+                                        <div class="mt-3">
+                                            <button type="button" class="btn btn-success me-2" onclick="verify2FA()">
+                                                <i class="bi bi-check-circle me-1"></i>Verify & Enable
+                                            </button>
+                                            <button type="button" class="btn btn-outline-secondary" onclick="cancel2FASetup()">
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 2FA Enabled State -->
+                            <div id="2faEnabled" class="d-none">
+                                <div class="alert alert-success">
+                                    <i class="bi bi-shield-check me-2"></i>
+                                    Two-factor authentication is enabled on your account.
+                                </div>
+                                <button type="button" class="btn btn-danger" onclick="disable2FA()">
+                                    <i class="bi bi-shield-x me-1"></i>Disable 2FA
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Security Settings Functions
+        let securityModal = null;
+
+        function openSecuritySettings() {
+            if (!securityModal) {
+                securityModal = new bootstrap.Modal(document.getElementById('securitySettingsModal'));
+            }
+            securityModal.show();
+            load2FAStatus();
+        }
+
+        async function load2FAStatus() {
+            const statusDiv = document.getElementById('2faStatus');
+            const disabledDiv = document.getElementById('2faDisabled');
+            const setupDiv = document.getElementById('2faSetup');
+            const enabledDiv = document.getElementById('2faEnabled');
+
+            statusDiv.classList.remove('d-none');
+            disabledDiv.classList.add('d-none');
+            setupDiv.classList.add('d-none');
+            enabledDiv.classList.add('d-none');
+
+            try {
+                const response = await fetch('/api/auth/2fa/status');
+                const data = await response.json();
+
+                statusDiv.classList.add('d-none');
+
+                if (data.enabled) {
+                    enabledDiv.classList.remove('d-none');
+                } else {
+                    disabledDiv.classList.remove('d-none');
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<div class="alert alert-danger">Error loading 2FA status</div>';
+            }
+        }
+
+        async function setup2FA() {
+            const disabledDiv = document.getElementById('2faDisabled');
+            const setupDiv = document.getElementById('2faSetup');
+
+            try {
+                const response = await fetch('/api/auth/2fa/setup', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    // Display secret
+                    document.getElementById('totpSecretDisplay').textContent = data.secret;
+
+                    // Generate QR code using a simple library-free approach
+                    const qrContainer = document.getElementById('qrCodeContainer');
+                    // Use Google Charts API for QR code (simple, no library needed)
+                    const qrUrl = `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(data.totp_uri)}`;
+                    qrContainer.innerHTML = `<img src="${qrUrl}" alt="QR Code" style="width: 200px; height: 200px;">`;
+
+                    disabledDiv.classList.add('d-none');
+                    setupDiv.classList.remove('d-none');
+
+                    document.getElementById('verify2FACode').focus();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to setup 2FA'));
+                }
+            } catch (error) {
+                alert('Error setting up 2FA: ' + error.message);
+            }
+        }
+
+        async function verify2FA() {
+            const code = document.getElementById('verify2FACode').value;
+
+            if (!code || code.length !== 6) {
+                alert('Please enter a valid 6-digit code');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/2fa/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('Two-factor authentication has been enabled successfully!');
+                    load2FAStatus();
+                } else {
+                    alert('Error: ' + (data.error || 'Invalid verification code'));
+                    document.getElementById('verify2FACode').value = '';
+                    document.getElementById('verify2FACode').focus();
+                }
+            } catch (error) {
+                alert('Error verifying code: ' + error.message);
+            }
+        }
+
+        function cancel2FASetup() {
+            document.getElementById('2faSetup').classList.add('d-none');
+            document.getElementById('2faDisabled').classList.remove('d-none');
+            document.getElementById('verify2FACode').value = '';
+        }
+
+        async function disable2FA() {
+            const password = prompt('Enter your password to disable 2FA:');
+            if (!password) return;
+
+            try {
+                const response = await fetch('/api/auth/2fa/disable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('Two-factor authentication has been disabled.');
+                    load2FAStatus();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to disable 2FA'));
+                }
+            } catch (error) {
+                alert('Error disabling 2FA: ' + error.message);
+            }
+        }
+
+        // Password Change Form
+        document.getElementById('changePasswordForm')?.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const currentPassword = document.getElementById('secCurrentPassword').value;
+            const newPassword = document.getElementById('secNewPassword').value;
+            const confirmPassword = document.getElementById('secConfirmPassword').value;
+
+            if (newPassword !== confirmPassword) {
+                alert('New passwords do not match');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        current_password: currentPassword,
+                        new_password: newPassword
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('Password changed successfully!');
+                    document.getElementById('secCurrentPassword').value = '';
+                    document.getElementById('secNewPassword').value = '';
+                    document.getElementById('secConfirmPassword').value = '';
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to change password'));
+                }
+            } catch (error) {
+                alert('Error changing password: ' + error.message);
+            }
+        });
+
+        // Auto-format 2FA code input
+        document.getElementById('verify2FACode')?.addEventListener('input', function(e) {
+            this.value = this.value.replace(/[^0-9]/g, '').slice(0, 6);
+        });
+    </script>
+    {% endif %}
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>
