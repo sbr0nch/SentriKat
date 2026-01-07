@@ -10,6 +10,7 @@ let organizations = [];
 // Selection state for bulk actions
 let selectedUsers = new Map(); // Map of userId -> { id, username, is_active }
 let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
+let selectedMappings = new Map(); // Map of mappingId -> { id, group_cn, is_active }
 
 // ============================================================================
 // BULK ACTIONS - USERS
@@ -278,6 +279,132 @@ async function bulkDeleteOrgs() {
         showToast(`${selectedOrgs.size} organization(s) deleted`, 'success');
         clearOrgSelection();
         loadOrganizations();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ============================================================================
+// BULK ACTIONS - LDAP GROUP MAPPINGS
+// ============================================================================
+
+function toggleMappingSelect(mappingId, checkbox) {
+    if (checkbox.checked) {
+        const row = checkbox.closest('tr');
+        const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+        const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+        const groupCn = row.querySelector('td[data-column="group"] strong')?.textContent || '';
+        selectedMappings.set(mappingId, { id: mappingId, group_cn: groupCn, is_active: isActive });
+    } else {
+        selectedMappings.delete(mappingId);
+    }
+    updateMappingsBulkToolbar();
+}
+
+function toggleSelectAllMappings() {
+    const selectAll = document.getElementById('selectAllMappings');
+    const checkboxes = document.querySelectorAll('.mapping-checkbox');
+
+    checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+        const mappingId = parseInt(cb.dataset.mappingId);
+        if (selectAll.checked) {
+            const row = cb.closest('tr');
+            const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
+            const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+            const groupCn = row.querySelector('td[data-column="group"] strong')?.textContent || '';
+            selectedMappings.set(mappingId, { id: mappingId, group_cn: groupCn, is_active: isActive });
+        } else {
+            selectedMappings.delete(mappingId);
+        }
+    });
+    updateMappingsBulkToolbar();
+}
+
+function updateMappingsBulkToolbar() {
+    const toolbar = document.getElementById('mappingsBulkActions');
+    const count = document.getElementById('mappingsSelectedCount');
+    if (toolbar && count) {
+        count.textContent = selectedMappings.size;
+        toolbar.style.display = selectedMappings.size > 0 ? 'block' : 'none';
+    }
+}
+
+function clearMappingSelection() {
+    selectedMappings.clear();
+    document.querySelectorAll('.mapping-checkbox').forEach(cb => cb.checked = false);
+    const selectAllMappings = document.getElementById('selectAllMappings');
+    if (selectAllMappings) selectAllMappings.checked = false;
+    updateMappingsBulkToolbar();
+}
+
+async function bulkActivateMappings() {
+    if (selectedMappings.size === 0) return;
+    showLoading();
+    try {
+        for (const [mappingId, mapping] of selectedMappings) {
+            const response = await fetch(`/api/ldap/groups/mappings/${mappingId}/activate`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) throw new Error(`Failed to activate mapping ${mappingId}`);
+        }
+        showToast(`${selectedMappings.size} mapping(s) activated`, 'success');
+        clearMappingSelection();
+        loadGroupMappings();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeactivateMappings() {
+    if (selectedMappings.size === 0) return;
+    showLoading();
+    try {
+        for (const [mappingId, mapping] of selectedMappings) {
+            const response = await fetch(`/api/ldap/groups/mappings/${mappingId}/deactivate`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) throw new Error(`Failed to deactivate mapping ${mappingId}`);
+        }
+        showToast(`${selectedMappings.size} mapping(s) deactivated`, 'success');
+        clearMappingSelection();
+        loadGroupMappings();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function bulkDeleteMappings() {
+    if (selectedMappings.size === 0) return;
+
+    const confirmed = await showConfirm(
+        `Are you sure you want to delete <strong>${selectedMappings.size}</strong> mapping(s)?<br><br>This action cannot be undone.`,
+        'Delete Mappings',
+        'Delete',
+        'btn-danger'
+    );
+
+    if (!confirmed) return;
+
+    showLoading();
+    try {
+        for (const [mappingId, mapping] of selectedMappings) {
+            const response = await fetch(`/api/ldap/groups/mappings/${mappingId}`, {
+                method: 'DELETE'
+            });
+            if (!response.ok) throw new Error(`Failed to delete mapping ${mappingId}`);
+        }
+        showToast(`${selectedMappings.size} mapping(s) deleted`, 'success');
+        clearMappingSelection();
+        loadGroupMappings();
     } catch (error) {
         showToast(`Error: ${error.message}`, 'danger');
     } finally {
@@ -2630,7 +2757,7 @@ async function loadGroupMappings() {
             if (mappings.length === 0) {
                 tableBody.innerHTML = `
                     <tr>
-                        <td colspan="9" class="text-center py-4">
+                        <td colspan="10" class="text-center py-4">
                             <i class="bi bi-inbox text-muted" style="font-size: 3rem;"></i>
                             <p class="text-muted mt-3">No LDAP group mappings configured.</p>
                             <p class="text-muted">Click "Discover Groups" to find LDAP groups or "Create Mapping" to add one manually.</p>
@@ -2664,6 +2791,10 @@ async function loadGroupMappings() {
 
                 return `
                     <tr>
+                        <td>
+                            <input type="checkbox" class="form-check-input mapping-checkbox"
+                                   data-mapping-id="${mapping.id}" onchange="toggleMappingSelect(${mapping.id}, this)">
+                        </td>
                         <td data-column="group">
                             <strong>${escapeHtml(mapping.ldap_group_cn)}</strong><br>
                             <small class="text-muted">${escapeHtml(mapping.ldap_group_dn)}</small>
@@ -2689,6 +2820,14 @@ async function loadGroupMappings() {
                 `;
             }).join('');
 
+            // Reset select all checkbox
+            const selectAllMappings = document.getElementById('selectAllMappings');
+            if (selectAllMappings) selectAllMappings.checked = false;
+
+            // Clear selection state
+            selectedMappings.clear();
+            updateMappingsBulkToolbar();
+
             // Initialize table enhancements
             if (typeof SortableTable !== 'undefined') {
                 SortableTable.init('groupMappingsTableContainer');
@@ -2700,7 +2839,7 @@ async function loadGroupMappings() {
             const error = await response.json();
             tableBody.innerHTML = `
                 <tr>
-                    <td colspan="9" class="text-center py-4 text-danger">
+                    <td colspan="10" class="text-center py-4 text-danger">
                         <i class="bi bi-exclamation-triangle" style="font-size: 3rem;"></i>
                         <p class="mt-3">Error loading mappings: ${escapeHtml(error.error)}</p>
                     </td>
@@ -2722,18 +2861,34 @@ async function loadGroupMappings() {
 /**
  * Show modal to create a new group mapping
  */
-function showCreateMappingModal() {
-    // Reset form
-    document.getElementById('groupMappingForm').reset();
-    document.getElementById('mappingId').value = '';
-    document.getElementById('groupMappingModalTitle').textContent = 'Create Group Mapping';
+async function showCreateMappingModal() {
+    try {
+        // Reset form
+        const form = document.getElementById('groupMappingForm');
+        if (form) form.reset();
 
-    // Load organizations dropdown
-    loadOrganizationsForMapping();
+        const mappingIdEl = document.getElementById('mappingId');
+        if (mappingIdEl) mappingIdEl.value = '';
 
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('groupMappingModal'));
-    modal.show();
+        const titleEl = document.getElementById('groupMappingModalTitle');
+        if (titleEl) titleEl.textContent = 'Create Group Mapping';
+
+        // Load organizations dropdown
+        await loadOrganizationsForMapping();
+
+        // Show modal
+        const modalEl = document.getElementById('groupMappingModal');
+        if (!modalEl) {
+            console.error('groupMappingModal element not found');
+            showToast('Error: Modal not found', 'danger');
+            return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+    } catch (error) {
+        console.error('Error showing create mapping modal:', error);
+        showToast('Error opening modal: ' + error.message, 'danger');
+    }
 }
 
 /**

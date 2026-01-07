@@ -307,11 +307,37 @@
                                 <i class="bi bi-plus-circle me-1"></i>Create Mapping
                             </button>
                         </div>
+                        <!-- Bulk Actions Toolbar -->
+                        <div id="mappingsBulkActions" class="alert alert-info mx-3 mt-3 mb-0" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>
+                                    <i class="bi bi-check-square me-2"></i>
+                                    <strong><span id="mappingsSelectedCount">0</span> mapping(s) selected</strong>
+                                </span>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-success" onclick="bulkActivateMappings()">
+                                        <i class="bi bi-check-circle me-1"></i>Activate
+                                    </button>
+                                    <button class="btn btn-outline-secondary" onclick="bulkDeactivateMappings()">
+                                        <i class="bi bi-pause-circle me-1"></i>Deactivate
+                                    </button>
+                                    <button class="btn btn-outline-danger" onclick="bulkDeleteMappings()">
+                                        <i class="bi bi-trash me-1"></i>Delete
+                                    </button>
+                                    <button class="btn btn-outline-secondary" onclick="clearMappingSelection()">
+                                        <i class="bi bi-x me-1"></i>Clear
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="card-body">
                             <div class="table-responsive">
                                 <table class="table table-hover" id="groupMappingsTableContainer" data-sortable="true" data-enhanced="true">
                                     <thead>
                                         <tr>
+                                            <th style="width: 40px;">
+                                                <input type="checkbox" class="form-check-input" id="selectAllMappings" onchange="toggleSelectAllMappings()">
+                                            </th>
                                             <th data-column="group" data-column-label="LDAP Group" data-sort-key="group" data-sort-type="string">LDAP Group</th>
                                             <th data-column="organization" data-column-label="Organization" data-sort-key="organization" data-sort-type="string">Organization</th>
                                             <th data-column="role" data-column-label="Role" data-sort-key="role" data-sort-type="string">Role</th>
@@ -325,7 +351,7 @@
                                     </thead>
                                     <tbody id="groupMappingsTable">
                                         <tr>
-                                            <td colspan="9" class="text-center py-4">
+                                            <td colspan="10" class="text-center py-4">
                                                 <div class="spinner-border text-primary" role="status"></div>
                                                 <p class="text-muted mt-2">Loading group mappings...</p>
                                             </td>

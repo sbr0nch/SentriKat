@@ -119,8 +119,16 @@ def update_group_mapping(mapping_id):
     data = request.get_json()
 
     # Update fields
+    if 'ldap_group_dn' in data:
+        mapping.ldap_group_dn = data['ldap_group_dn']
+    if 'ldap_group_cn' in data:
+        mapping.ldap_group_cn = data['ldap_group_cn']
     if 'ldap_group_description' in data:
         mapping.ldap_group_description = data['ldap_group_description']
+    if 'organization_id' in data:
+        # Only super_admin can change organization, or org_admin can set to their own org
+        if current_user.role == 'super_admin' or data['organization_id'] == current_user.organization_id or data['organization_id'] is None:
+            mapping.organization_id = data['organization_id'] if data['organization_id'] else None
     if 'role' in data:
         mapping.role = data['role']
     if 'auto_provision' in data:
@@ -183,6 +191,70 @@ def delete_group_mapping(mapping_id):
     db.session.commit()
 
     return jsonify({'success': True, 'message': 'Mapping deleted'})
+
+
+@ldap_group_bp.route('/mappings/<int:mapping_id>/activate', methods=['PUT'])
+@org_admin_required
+def activate_group_mapping(mapping_id):
+    """Activate an LDAP group mapping"""
+    mapping = LDAPGroupMapping.query.get_or_404(mapping_id)
+    current_user = User.query.get(session.get('user_id'))
+
+    # Check permissions
+    if current_user.role == 'org_admin' and mapping.organization_id != current_user.organization_id:
+        return jsonify({'error': 'Cannot modify mappings for other organizations'}), 403
+
+    mapping.is_active = True
+    mapping.updated_at = datetime.utcnow()
+    mapping.updated_by = current_user.id
+
+    # Log audit event
+    audit_log = LDAPAuditLog(
+        event_type='group_mapping_activated',
+        user_id=current_user.id,
+        organization_id=mapping.organization_id,
+        ldap_dn=mapping.ldap_group_dn,
+        description=f"Activated LDAP group mapping: {mapping.ldap_group_cn}",
+        success=True,
+        ip_address=request.remote_addr
+    )
+    db.session.add(audit_log)
+
+    db.session.commit()
+
+    return jsonify({'success': True, 'message': 'Mapping activated'})
+
+
+@ldap_group_bp.route('/mappings/<int:mapping_id>/deactivate', methods=['PUT'])
+@org_admin_required
+def deactivate_group_mapping(mapping_id):
+    """Deactivate an LDAP group mapping"""
+    mapping = LDAPGroupMapping.query.get_or_404(mapping_id)
+    current_user = User.query.get(session.get('user_id'))
+
+    # Check permissions
+    if current_user.role == 'org_admin' and mapping.organization_id != current_user.organization_id:
+        return jsonify({'error': 'Cannot modify mappings for other organizations'}), 403
+
+    mapping.is_active = False
+    mapping.updated_at = datetime.utcnow()
+    mapping.updated_by = current_user.id
+
+    # Log audit event
+    audit_log = LDAPAuditLog(
+        event_type='group_mapping_deactivated',
+        user_id=current_user.id,
+        organization_id=mapping.organization_id,
+        ldap_dn=mapping.ldap_group_dn,
+        description=f"Deactivated LDAP group mapping: {mapping.ldap_group_cn}",
+        success=True,
+        ip_address=request.remote_addr
+    )
+    db.session.add(audit_log)
+
+    db.session.commit()
+
+    return jsonify({'success': True, 'message': 'Mapping deactivated'})
 
 
 # ============================================================================
