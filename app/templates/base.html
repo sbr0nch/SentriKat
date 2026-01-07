@@ -1693,7 +1693,7 @@
         }
 
         // Organization Switcher Functions
-        async function loadOrganizations() {
+        async function loadNavbarOrganizations() {
             try {
                 // Show cached organization name immediately to avoid "Loading..." flash
                 const cachedOrgName = localStorage.getItem('currentOrgName');
@@ -1801,9 +1801,9 @@
         // Initialize theme immediately to prevent flash
         initTheme();
 
-        // Load organizations on page load
+        // Load navbar organizations on page load
         document.addEventListener('DOMContentLoaded', function() {
-            loadOrganizations();
+            loadNavbarOrganizations();
         });
 
         // ============================================================================
