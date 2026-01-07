@@ -1282,15 +1282,21 @@
                             </div>
                         </div>
                         <div class="card-body">
-                            <div class="alert alert-info">
+                            <div class="alert alert-info mb-3">
                                 <i class="bi bi-info-circle me-2"></i>
                                 View and export audit logs for compliance and security review. Logs include user actions, configuration changes, and security events.
                             </div>
 
-                            <!-- Filters -->
-                            <div class="row g-3 mb-3">
-                                <div class="col-md-3">
-                                    <label class="form-label fw-semibold">Action Type</label>
+                            <!-- Search and Filters Row 1 -->
+                            <div class="row g-2 mb-2">
+                                <div class="col-md-4">
+                                    <div class="input-group">
+                                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                        <input type="text" class="form-control" id="auditSearchInput" placeholder="Search logs..." onkeyup="if(event.key==='Enter') loadAuditLogs()">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="loadAuditLogs()">Search</button>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
                                     <select class="form-select" id="auditActionFilter" onchange="loadAuditLogs()">
                                         <option value="">All Actions</option>
                                         <option value="CREATE">Create</option>
@@ -1298,47 +1304,88 @@
                                         <option value="DELETE">Delete</option>
                                         <option value="LOGIN">Login</option>
                                         <option value="LOGOUT">Logout</option>
+                                        <option value="LOGIN_FAILED">Login Failed</option>
                                         <option value="BLOCK">Block</option>
                                         <option value="UNBLOCK">Unblock</option>
                                         <option value="UNLOCK">Unlock</option>
+                                        <option value="RESET_2FA">Reset 2FA</option>
+                                        <option value="FORCE_PASSWORD_CHANGE">Force Password</option>
                                     </select>
                                 </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-semibold">Resource Type</label>
+                                <div class="col-md-2">
                                     <select class="form-select" id="auditResourceFilter" onchange="loadAuditLogs()">
                                         <option value="">All Resources</option>
                                         <option value="users">Users</option>
                                         <option value="products">Products</option>
                                         <option value="organizations">Organizations</option>
                                         <option value="settings">Settings</option>
+                                        <option value="ldap">LDAP</option>
+                                        <option value="auth">Authentication</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="date" class="form-control" id="auditStartDate" onchange="loadAuditLogs()" title="Start Date">
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="date" class="form-control" id="auditEndDate" onchange="loadAuditLogs()" title="End Date">
+                                </div>
+                            </div>
+
+                            <!-- Controls Row 2 -->
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-2">
+                                    <select class="form-select form-select-sm" id="auditPerPage" onchange="loadAuditLogs()">
+                                        <option value="25">25 per page</option>
+                                        <option value="50" selected>50 per page</option>
+                                        <option value="100">100 per page</option>
+                                        <option value="200">200 per page</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <select class="form-select form-select-sm" id="auditSortField" onchange="loadAuditLogs()">
+                                        <option value="timestamp">Sort: Time</option>
+                                        <option value="action">Sort: Action</option>
+                                        <option value="resource">Sort: Resource</option>
+                                        <option value="user_id">Sort: User</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <select class="form-select form-select-sm" id="auditSortOrder" onchange="loadAuditLogs()">
+                                        <option value="desc">Newest First</option>
+                                        <option value="asc">Oldest First</option>
                                     </select>
                                 </div>
                                 <div class="col-md-3">
-                                    <label class="form-label fw-semibold">Limit</label>
-                                    <select class="form-select" id="auditLimitFilter" onchange="loadAuditLogs()">
-                                        <option value="50">50 entries</option>
-                                        <option value="100" selected>100 entries</option>
-                                        <option value="250">250 entries</option>
-                                        <option value="500">500 entries</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-3 d-flex align-items-end">
-                                    <button type="button" class="btn btn-outline-secondary w-100" onclick="loadAuditLogs()">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearAuditFilters()">
+                                        <i class="bi bi-x-circle me-1"></i>Clear Filters
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="loadAuditLogs()">
                                         <i class="bi bi-arrow-clockwise me-1"></i>Refresh
                                     </button>
+                                </div>
+                                <div class="col-md-3 text-end">
+                                    <span id="auditLogsInfo" class="text-muted small"></span>
                                 </div>
                             </div>
 
                             <!-- Audit Logs Table -->
-                            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
-                                <table class="table table-hover table-sm">
+                            <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+                                <table class="table table-hover table-sm" id="auditLogsTableContainer">
                                     <thead class="sticky-top bg-light">
                                         <tr>
-                                            <th>Timestamp</th>
-                                            <th>Action</th>
-                                            <th>Resource</th>
-                                            <th>User</th>
-                                            <th>IP Address</th>
+                                            <th style="width: 160px; cursor: pointer;" onclick="sortAuditLogs('timestamp')">
+                                                Timestamp <i class="bi bi-arrow-down-up text-muted"></i>
+                                            </th>
+                                            <th style="width: 120px; cursor: pointer;" onclick="sortAuditLogs('action')">
+                                                Action <i class="bi bi-arrow-down-up text-muted"></i>
+                                            </th>
+                                            <th style="width: 150px; cursor: pointer;" onclick="sortAuditLogs('resource')">
+                                                Resource <i class="bi bi-arrow-down-up text-muted"></i>
+                                            </th>
+                                            <th style="width: 120px; cursor: pointer;" onclick="sortAuditLogs('user_id')">
+                                                User <i class="bi bi-arrow-down-up text-muted"></i>
+                                            </th>
+                                            <th style="width: 120px;">IP Address</th>
                                             <th>Details</th>
                                         </tr>
                                     </thead>
@@ -1350,6 +1397,17 @@
                                         </tr>
                                     </tbody>
                                 </table>
+                            </div>
+
+                            <!-- Pagination -->
+                            <div class="d-flex justify-content-between align-items-center mt-3" id="auditPaginationContainer">
+                                <div>
+                                    <span id="auditPaginationInfo" class="text-muted small"></span>
+                                </div>
+                                <nav>
+                                    <ul class="pagination pagination-sm mb-0" id="auditPagination">
+                                    </ul>
+                                </nav>
                             </div>
                         </div>
                     </div>

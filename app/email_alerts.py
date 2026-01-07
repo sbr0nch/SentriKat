@@ -1115,3 +1115,302 @@ def _role_level(role):
         'super_admin': 4
     }
     return levels.get(role, 0)
+
+
+# ============================================================================
+# Admin-Triggered 2FA Reset Email
+# ============================================================================
+
+def send_2fa_reset_email(user, reset_by_username=None):
+    """
+    Send email notification when an admin resets a user's 2FA
+
+    Args:
+        user: User object whose 2FA was reset
+        reset_by_username: Username of admin who performed the reset
+
+    Returns:
+        tuple: (success: bool, details: str) - success status and details message
+    """
+    from app.models import Organization
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        organization = Organization.query.get(user.organization_id)
+        if not organization:
+            msg = f"No organization found for user {user.username}"
+            logger.warning(msg)
+            return False, msg
+
+        smtp_config = organization.get_smtp_config()
+        smtp_source = "organization"
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            smtp_source = "global"
+            from app.settings_api import get_setting
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587') or '587'),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat')
+            }
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            msg = "No SMTP configured (neither org nor global)"
+            logger.warning(f"{msg} - cannot send 2FA reset email to {user.email}")
+            return False, msg
+
+        subject = f"SentriKat - Two-Factor Authentication Reset"
+        html_body = _build_2fa_reset_email_html(user, organization, reset_by_username)
+
+        logger.info(f"Sending 2FA reset email to {user.email} via {smtp_source} SMTP")
+
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=[user.email],
+            subject=subject,
+            html_body=html_body
+        )
+
+        msg = f"Email sent via {smtp_source} SMTP to {user.email}"
+        logger.info(msg)
+        return True, msg
+
+    except Exception as e:
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"Failed to send 2FA reset email to {user.email}: {error_detail}")
+        logger.error(traceback.format_exc())
+        return False, error_detail
+
+
+def _build_2fa_reset_email_html(user, organization, reset_by_username=None):
+    """Build HTML email for 2FA reset notification"""
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
+            <div style="font-size: 48px; margin-bottom: 10px;">🔐</div>
+            <h1 style="color: white; margin: 0; font-size: 24px;">Two-Factor Authentication Reset</h1>
+        </div>
+
+        <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+            <p style="font-size: 16px; color: #374151;">Hello <strong>{user.full_name or user.username}</strong>,</p>
+
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0; color: #92400e; font-weight: 600;">
+                    ⚠️ Your two-factor authentication has been reset by an administrator.
+                </p>
+            </div>
+
+            <p style="color: #374151; font-size: 16px;">
+                This means:
+            </p>
+            <ul style="color: #374151; font-size: 16px;">
+                <li>Your previous 2FA setup has been disabled</li>
+                <li>You can now log in without a 2FA code</li>
+                <li>You should set up 2FA again from your Security Settings after logging in</li>
+            </ul>
+
+            <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <div style="margin-bottom: 10px;">
+                    <strong>Username:</strong> {user.username}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Organization:</strong> {organization.display_name}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Reset by:</strong> {reset_by_username or 'Administrator'}
+                </div>
+                <div>
+                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </div>
+            </div>
+
+            <p style="color: #dc2626; font-size: 14px; font-weight: 600;">
+                🔒 Security Recommendation: Set up 2FA again as soon as possible to protect your account.
+            </p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{get_app_url()}/login" style="display: inline-block; background: #7c3aed; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px;">
+                    Login to SentriKat
+                </a>
+            </div>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                If you did not request this reset, please contact your administrator immediately.
+            </p>
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>This is an automated security notification from SentriKat</p>
+            <p>© {datetime.now().year} {organization.display_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    return html
+
+
+# ============================================================================
+# Admin-Triggered Password Change Email
+# ============================================================================
+
+def send_password_change_forced_email(user, forced_by_username=None):
+    """
+    Send email notification when an admin forces a user to change password
+
+    Args:
+        user: User object who must change password
+        forced_by_username: Username of admin who triggered this
+
+    Returns:
+        tuple: (success: bool, details: str) - success status and details message
+    """
+    from app.models import Organization
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        organization = Organization.query.get(user.organization_id)
+        if not organization:
+            msg = f"No organization found for user {user.username}"
+            logger.warning(msg)
+            return False, msg
+
+        smtp_config = organization.get_smtp_config()
+        smtp_source = "organization"
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            smtp_source = "global"
+            from app.settings_api import get_setting
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587') or '587'),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat')
+            }
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            msg = "No SMTP configured (neither org nor global)"
+            logger.warning(f"{msg} - cannot send password change email to {user.email}")
+            return False, msg
+
+        subject = f"SentriKat - Password Change Required"
+        html_body = _build_password_change_forced_email_html(user, organization, forced_by_username)
+
+        logger.info(f"Sending password change required email to {user.email} via {smtp_source} SMTP")
+
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=[user.email],
+            subject=subject,
+            html_body=html_body
+        )
+
+        msg = f"Email sent via {smtp_source} SMTP to {user.email}"
+        logger.info(msg)
+        return True, msg
+
+    except Exception as e:
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"Failed to send password change email to {user.email}: {error_detail}")
+        logger.error(traceback.format_exc())
+        return False, error_detail
+
+
+def _build_password_change_forced_email_html(user, organization, forced_by_username=None):
+    """Build HTML email for forced password change notification"""
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
+            <div style="font-size: 48px; margin-bottom: 10px;">🔑</div>
+            <h1 style="color: white; margin: 0; font-size: 24px;">Password Change Required</h1>
+        </div>
+
+        <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+            <p style="font-size: 16px; color: #374151;">Hello <strong>{user.full_name or user.username}</strong>,</p>
+
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0; color: #92400e; font-weight: 600;">
+                    ⚠️ An administrator has required you to change your password.
+                </p>
+            </div>
+
+            <p style="color: #374151; font-size: 16px;">
+                On your next login, you will be prompted to create a new password. This is a security measure to ensure your account remains protected.
+            </p>
+
+            <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <div style="margin-bottom: 10px;">
+                    <strong>Username:</strong> {user.username}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Organization:</strong> {organization.display_name}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Required by:</strong> {forced_by_username or 'Administrator'}
+                </div>
+                <div>
+                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </div>
+            </div>
+
+            <p style="color: #374151; font-size: 14px;">
+                <strong>What happens next:</strong>
+            </p>
+            <ol style="color: #374151; font-size: 14px;">
+                <li>Log in with your current password</li>
+                <li>You'll be prompted to create a new password</li>
+                <li>Choose a strong, unique password</li>
+                <li>You'll be logged in with your new credentials</li>
+            </ol>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{get_app_url()}/login" style="display: inline-block; background: #ea580c; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px;">
+                    Login to SentriKat
+                </a>
+            </div>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                If you did not expect this requirement, please contact your administrator.
+            </p>
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>This is an automated security notification from SentriKat</p>
+            <p>© {datetime.now().year} {organization.display_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    return html

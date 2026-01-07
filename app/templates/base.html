@@ -1558,6 +1558,11 @@
                     <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
                 </div>
                 {% endif %}
+                {% if branding.show_powered_by | default(true) %}
+                <p class="text-muted mt-1 mb-0" style="font-size: 0.7rem; opacity: 0.7;">
+                    Powered by <a href="https://github.com/sbr0nch/SentriKat" target="_blank" class="text-muted text-decoration-none">SentriKat</a>
+                </p>
+                {% endif %}
             </div>
         </div>
     </footer>
@@ -2870,11 +2875,11 @@
                     // Display secret
                     document.getElementById('totpSecretDisplay').textContent = data.secret;
 
-                    // Generate QR code using a simple library-free approach
+                    // Generate QR code using server-side endpoint
                     const qrContainer = document.getElementById('qrCodeContainer');
-                    // Use Google Charts API for QR code (simple, no library needed)
-                    const qrUrl = `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(data.totp_uri)}`;
-                    qrContainer.innerHTML = `<img src="${qrUrl}" alt="QR Code" style="width: 200px; height: 200px;">`;
+                    // Add timestamp to prevent caching
+                    const qrUrl = `/api/auth/2fa/qrcode?t=${Date.now()}`;
+                    qrContainer.innerHTML = `<img src="${qrUrl}" alt="QR Code" style="width: 200px; height: 200px; border: 1px solid #dee2e6; border-radius: 8px;">`;
 
                     disabledDiv.classList.add('d-none');
                     setupDiv.classList.remove('d-none');

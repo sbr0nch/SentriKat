@@ -1765,6 +1765,10 @@ def reset_user_2fa(user_id):
     current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
 
+    # Cannot reset your own 2FA through admin panel
+    if user_id == current_user_id:
+        return jsonify({'error': 'Cannot reset your own 2FA through admin panel. Use Security Settings instead.'}), 400
+
     # Check permissions
     if not current_user.can_manage_user(user):
         return jsonify({'error': 'Insufficient permissions to reset 2FA for this user'}), 403
@@ -1790,9 +1794,26 @@ def reset_user_2fa(user_id):
 
     db.session.commit()
 
+    # Send email notification
+    email_sent = False
+    email_details = None
+    try:
+        from app.email_alerts import send_2fa_reset_email
+        email_sent, email_details = send_2fa_reset_email(user, current_user.username)
+    except Exception as e:
+        email_details = str(e)
+        logger.warning(f"Failed to send 2FA reset email: {e}")
+
+    message = f'Two-factor authentication has been reset for {user.username}. They will need to set it up again.'
+    if email_sent:
+        message += ' (notification email sent)'
+    elif email_details:
+        message += f' (email failed: {email_details})'
+
     return jsonify({
         'success': True,
-        'message': f'Two-factor authentication has been reset for {user.username}. They will need to set it up again.'
+        'message': message,
+        'email_sent': email_sent
     })
 
 @bp.route('/api/users/<int:user_id>/force-password-change', methods=['POST'])
@@ -1810,6 +1831,10 @@ def force_password_change(user_id):
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
+
+    # Cannot force your own password change
+    if user_id == current_user_id:
+        return jsonify({'error': 'Cannot force password change on your own account. Use Security Settings instead.'}), 400
 
     # Check permissions
     if not current_user.can_manage_user(user):
@@ -1831,9 +1856,27 @@ def force_password_change(user_id):
 
     db.session.commit()
 
+    # Send email notification
+    email_sent = False
+    email_details = None
+    try:
+        from app.email_alerts import send_password_change_forced_email
+        email_sent, email_details = send_password_change_forced_email(user, current_user.username)
+    except Exception as e:
+        email_details = str(e)
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to send password change email: {e}")
+
+    message = f'{user.username} will be required to change their password on next login'
+    if email_sent:
+        message += ' (notification email sent)'
+    elif email_details:
+        message += f' (email failed: {email_details})'
+
     return jsonify({
         'success': True,
-        'message': f'{user.username} will be required to change their password on next login'
+        'message': message,
+        'email_sent': email_sent
     })
 
 # ============================================================================
@@ -2108,9 +2151,22 @@ def get_audit_logs():
     """
     Get audit logs from the audit.log file
     Only accessible by super admins
+
+    Query params:
+    - page: Page number (default: 1)
+    - per_page: Items per page (default: 50, max: 500)
+    - action: Filter by action type (CREATE, UPDATE, DELETE, etc.)
+    - resource: Filter by resource type (users, products, etc.)
+    - user_id: Filter by user ID
+    - search: Text search in message/details
+    - start_date: Filter from date (ISO format)
+    - end_date: Filter to date (ISO format)
+    - sort: Sort field (timestamp, action, resource, user_id)
+    - order: Sort order (asc, desc - default: desc)
     """
     import os
     import json
+    from datetime import datetime
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -2120,10 +2176,16 @@ def get_audit_logs():
         return jsonify({'error': 'Only super admins can view audit logs'}), 403
 
     # Get query parameters
-    limit = request.args.get('limit', 100, type=int)
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 50, type=int), 500)
     action_filter = request.args.get('action')
     resource_filter = request.args.get('resource')
     user_filter = request.args.get('user_id')
+    search_query = request.args.get('search', '').lower()
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    sort_field = request.args.get('sort', 'timestamp')
+    sort_order = request.args.get('order', 'desc')
 
     # Find the audit log file
     log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
@@ -2133,44 +2195,81 @@ def get_audit_logs():
     audit_log_path = os.path.join(log_dir, 'audit.log')
 
     if not os.path.exists(audit_log_path):
-        return jsonify({'logs': [], 'total': 0, 'message': 'No audit logs found'})
+        return jsonify({
+            'logs': [],
+            'total': 0,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': 0,
+            'message': 'No audit logs found'
+        })
 
-    logs = []
+    all_logs = []
     try:
-        # Read the file in reverse to get most recent first
+        # Read all logs and filter
         with open(audit_log_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-        # Parse JSON lines (most recent first)
-        for line in reversed(lines):
-            if not line.strip():
-                continue
-            try:
-                log_entry = json.loads(line.strip())
-
-                # Apply filters
-                if action_filter and log_entry.get('action') != action_filter:
+            for line in f:
+                if not line.strip():
                     continue
-                if resource_filter and not log_entry.get('resource', '').startswith(resource_filter):
+                try:
+                    log_entry = json.loads(line.strip())
+
+                    # Apply filters
+                    if action_filter and log_entry.get('action') != action_filter:
+                        continue
+                    if resource_filter:
+                        resource = log_entry.get('resource', '')
+                        # Handle resource:id format
+                        base_resource = resource.split(':')[0] if ':' in resource else resource
+                        if base_resource != resource_filter:
+                            continue
+                    if user_filter and str(log_entry.get('user_id')) != str(user_filter):
+                        continue
+
+                    # Text search
+                    if search_query:
+                        searchable = json.dumps(log_entry).lower()
+                        if search_query not in searchable:
+                            continue
+
+                    # Date range filtering
+                    log_timestamp = log_entry.get('timestamp', '')
+                    if start_date:
+                        if log_timestamp < start_date:
+                            continue
+                    if end_date:
+                        if log_timestamp > end_date + 'T23:59:59Z':
+                            continue
+
+                    all_logs.append(log_entry)
+
+                except json.JSONDecodeError:
                     continue
-                if user_filter and str(log_entry.get('user_id')) != str(user_filter):
-                    continue
 
-                logs.append(log_entry)
+        # Sort logs
+        reverse_sort = (sort_order == 'desc')
+        if sort_field in ['timestamp', 'action', 'resource', 'user_id']:
+            all_logs.sort(key=lambda x: x.get(sort_field, ''), reverse=reverse_sort)
+        else:
+            # Default: sort by timestamp descending (most recent first)
+            all_logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
 
-                if len(logs) >= limit:
-                    break
-
-            except json.JSONDecodeError:
-                continue
+        # Calculate pagination
+        total = len(all_logs)
+        total_pages = (total + per_page - 1) // per_page
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_logs = all_logs[start_idx:end_idx]
 
     except Exception as e:
         return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
 
     return jsonify({
-        'logs': logs,
-        'total': len(logs),
-        'limit': limit
+        'logs': paginated_logs,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'total_pages': total_pages
     })
 
 @bp.route('/api/audit-logs/export', methods=['GET'])

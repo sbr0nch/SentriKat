@@ -526,6 +526,40 @@ def setup_2fa():
         'message': 'Scan the QR code with your authenticator app, then verify with a code'
     })
 
+@auth_bp.route('/api/auth/2fa/qrcode', methods=['GET'])
+@login_required
+def get_2fa_qrcode():
+    """Generate QR code image for 2FA setup"""
+    import qrcode
+    import io
+    from flask import Response
+
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    if not current_user.totp_secret:
+        return jsonify({'error': 'Run 2FA setup first'}), 400
+
+    # Get TOTP URI
+    from app.models import SystemSettings
+    app_name_setting = SystemSettings.query.filter_by(key='app_name').first()
+    app_name = app_name_setting.value if app_name_setting else 'SentriKat'
+    totp_uri = current_user.get_totp_uri(app_name)
+
+    # Generate QR code
+    qr = qrcode.QRCode(version=1, box_size=6, border=2)
+    qr.add_data(totp_uri)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    # Convert to bytes
+    img_io = io.BytesIO()
+    img.save(img_io, 'PNG')
+    img_io.seek(0)
+
+    return Response(img_io.getvalue(), mimetype='image/png')
+
 @auth_bp.route('/api/auth/2fa/verify', methods=['POST'])
 @login_required
 def verify_2fa():

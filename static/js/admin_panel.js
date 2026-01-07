@@ -4255,13 +4255,23 @@ function escapeHtml(text) {
 // AUDIT LOGS
 // ============================================================================
 
-async function loadAuditLogs() {
+let currentAuditPage = 1;
+
+async function loadAuditLogs(page = 1) {
     const tbody = document.getElementById('auditLogsTable');
     if (!tbody) return;
 
+    currentAuditPage = page;
+
+    // Get filter values
     const action = document.getElementById('auditActionFilter')?.value || '';
     const resource = document.getElementById('auditResourceFilter')?.value || '';
-    const limit = document.getElementById('auditLimitFilter')?.value || '100';
+    const search = document.getElementById('auditSearchInput')?.value || '';
+    const startDate = document.getElementById('auditStartDate')?.value || '';
+    const endDate = document.getElementById('auditEndDate')?.value || '';
+    const perPage = document.getElementById('auditPerPage')?.value || '50';
+    const sortField = document.getElementById('auditSortField')?.value || 'timestamp';
+    const sortOrder = document.getElementById('auditSortOrder')?.value || 'desc';
 
     tbody.innerHTML = `
         <tr>
@@ -4272,11 +4282,20 @@ async function loadAuditLogs() {
     `;
 
     try {
-        let url = `/api/audit-logs?limit=${limit}`;
-        if (action) url += `&action=${action}`;
-        if (resource) url += `&resource=${resource}`;
+        // Build URL with all parameters
+        const params = new URLSearchParams({
+            page: page,
+            per_page: perPage,
+            sort: sortField,
+            order: sortOrder
+        });
+        if (action) params.append('action', action);
+        if (resource) params.append('resource', resource);
+        if (search) params.append('search', search);
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
 
-        const response = await fetch(url);
+        const response = await fetch(`/api/audit-logs?${params}`);
 
         if (!response.ok) {
             const error = await response.json();
@@ -4287,39 +4306,73 @@ async function loadAuditLogs() {
                     </td>
                 </tr>
             `;
+            updateAuditPagination(0, 0, 0);
             return;
         }
 
         const data = await response.json();
 
+        // Update info display
+        const infoEl = document.getElementById('auditPaginationInfo');
+        if (infoEl) {
+            const start = (data.page - 1) * data.per_page + 1;
+            const end = Math.min(data.page * data.per_page, data.total);
+            infoEl.textContent = data.total > 0
+                ? `Showing ${start}-${end} of ${data.total} entries`
+                : 'No entries';
+        }
+
         if (!data.logs || data.logs.length === 0) {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="6" class="text-center text-muted py-4">
-                        <i class="bi bi-journal-text me-2"></i>No audit logs found
+                        <i class="bi bi-journal-text me-2"></i>No audit logs found matching your criteria
                     </td>
                 </tr>
             `;
+            updateAuditPagination(0, 0, 0);
             return;
         }
 
         tbody.innerHTML = data.logs.map(log => {
             const timestamp = log.timestamp ? new Date(log.timestamp).toLocaleString() : '-';
             const actionBadge = getActionBadge(log.action);
-            const details = log.details ? (typeof log.details === 'string' ? log.details : JSON.stringify(log.details)) : '-';
-            const truncatedDetails = details.length > 80 ? details.substring(0, 80) + '...' : details;
+
+            // Build details from message and/or structured data
+            let details = '';
+            if (log.message) {
+                details = log.message;
+            }
+            if (log.old_value || log.new_value) {
+                const changes = [];
+                if (log.old_value) changes.push(`From: ${JSON.stringify(log.old_value)}`);
+                if (log.new_value) changes.push(`To: ${JSON.stringify(log.new_value)}`);
+                if (details) details += ' | ';
+                details += changes.join(' ');
+            }
+            if (!details) details = '-';
+
+            const truncatedDetails = details.length > 100 ? details.substring(0, 100) + '...' : details;
+
+            // Parse resource to get type and ID
+            const resourceParts = (log.resource || '').split(':');
+            const resourceType = resourceParts[0] || '-';
+            const resourceId = resourceParts[1] || '';
 
             return `
                 <tr>
                     <td class="text-nowrap"><small>${timestamp}</small></td>
                     <td>${actionBadge}</td>
-                    <td><small>${escapeHtml(log.resource || '-')}${log.resource_id ? ` #${log.resource_id}` : ''}</small></td>
-                    <td><small>${escapeHtml(log.username || '-')}</small></td>
+                    <td><small>${escapeHtml(resourceType)}${resourceId ? `:<strong>${resourceId}</strong>` : ''}</small></td>
+                    <td><small>${escapeHtml(log.user_id || '-')}</small></td>
                     <td><small class="text-muted">${escapeHtml(log.ip_address || '-')}</small></td>
-                    <td><small class="text-muted" title="${escapeHtml(details)}">${escapeHtml(truncatedDetails)}</small></td>
+                    <td><small class="text-muted" title="${escapeHtml(details)}" style="cursor: help;">${escapeHtml(truncatedDetails)}</small></td>
                 </tr>
             `;
         }).join('');
+
+        // Update pagination
+        updateAuditPagination(data.page, data.total_pages, data.total);
 
     } catch (error) {
         console.error('Error loading audit logs:', error);
@@ -4330,7 +4383,94 @@ async function loadAuditLogs() {
                 </td>
             </tr>
         `;
+        updateAuditPagination(0, 0, 0);
     }
+}
+
+function updateAuditPagination(currentPage, totalPages, total) {
+    const pagination = document.getElementById('auditPagination');
+    if (!pagination) return;
+
+    if (totalPages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+
+    // Previous button
+    html += `
+        <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="loadAuditLogs(${currentPage - 1}); return false;">&laquo;</a>
+        </li>
+    `;
+
+    // Page numbers (show max 7 pages)
+    const maxPages = 7;
+    let startPage = Math.max(1, currentPage - Math.floor(maxPages / 2));
+    let endPage = Math.min(totalPages, startPage + maxPages - 1);
+
+    if (endPage - startPage < maxPages - 1) {
+        startPage = Math.max(1, endPage - maxPages + 1);
+    }
+
+    if (startPage > 1) {
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="loadAuditLogs(1); return false;">1</a></li>`;
+        if (startPage > 2) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        html += `
+            <li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" onclick="loadAuditLogs(${i}); return false;">${i}</a>
+            </li>
+        `;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="loadAuditLogs(${totalPages}); return false;">${totalPages}</a></li>`;
+    }
+
+    // Next button
+    html += `
+        <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="loadAuditLogs(${currentPage + 1}); return false;">&raquo;</a>
+        </li>
+    `;
+
+    pagination.innerHTML = html;
+}
+
+function sortAuditLogs(field) {
+    const sortFieldEl = document.getElementById('auditSortField');
+    const sortOrderEl = document.getElementById('auditSortOrder');
+
+    if (sortFieldEl.value === field) {
+        // Toggle order if same field
+        sortOrderEl.value = sortOrderEl.value === 'desc' ? 'asc' : 'desc';
+    } else {
+        sortFieldEl.value = field;
+        sortOrderEl.value = 'desc';
+    }
+
+    loadAuditLogs(1);
+}
+
+function clearAuditFilters() {
+    document.getElementById('auditSearchInput').value = '';
+    document.getElementById('auditActionFilter').value = '';
+    document.getElementById('auditResourceFilter').value = '';
+    document.getElementById('auditStartDate').value = '';
+    document.getElementById('auditEndDate').value = '';
+    document.getElementById('auditPerPage').value = '50';
+    document.getElementById('auditSortField').value = 'timestamp';
+    document.getElementById('auditSortOrder').value = 'desc';
+    loadAuditLogs(1);
 }
 
 function getActionBadge(action) {
@@ -4340,10 +4480,15 @@ function getActionBadge(action) {
         'DELETE': '<span class="badge bg-danger">DELETE</span>',
         'LOGIN': '<span class="badge bg-info">LOGIN</span>',
         'LOGOUT': '<span class="badge bg-secondary">LOGOUT</span>',
+        'LOGIN_FAILED': '<span class="badge bg-danger">LOGIN FAILED</span>',
         'BLOCK': '<span class="badge bg-warning text-dark">BLOCK</span>',
         'UNBLOCK': '<span class="badge bg-success">UNBLOCK</span>',
         'UNLOCK': '<span class="badge bg-warning text-dark">UNLOCK</span>',
-        'SYNC': '<span class="badge bg-info">SYNC</span>'
+        'RESET_2FA': '<span class="badge bg-purple text-white" style="background-color: #7c3aed;">RESET 2FA</span>',
+        'FORCE_PASSWORD_CHANGE': '<span class="badge bg-purple text-white" style="background-color: #7c3aed;">FORCE PWD</span>',
+        'SYNC': '<span class="badge bg-info">SYNC</span>',
+        'BACKUP': '<span class="badge bg-secondary">BACKUP</span>',
+        'RESTORE': '<span class="badge bg-warning text-dark">RESTORE</span>'
     };
     return badges[action] || `<span class="badge bg-secondary">${escapeHtml(action || 'UNKNOWN')}</span>`;
 }
@@ -4351,10 +4496,12 @@ function getActionBadge(action) {
 function exportAuditLogs(format, days) {
     const action = document.getElementById('auditActionFilter')?.value || '';
     const resource = document.getElementById('auditResourceFilter')?.value || '';
+    const search = document.getElementById('auditSearchInput')?.value || '';
 
     let url = `/api/audit-logs/export?format=${format}&days=${days}`;
-    if (action) url += `&action=${action}`;
-    if (resource) url += `&resource=${resource}`;
+    if (action) url += `&action=${encodeURIComponent(action)}`;
+    if (resource) url += `&resource=${encodeURIComponent(resource)}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
 
     // Trigger download
     window.location.href = url;
@@ -4366,7 +4513,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const auditLogsTab = document.getElementById('audit-logs-tab');
     if (auditLogsTab) {
         auditLogsTab.addEventListener('shown.bs.tab', function() {
-            loadAuditLogs();
+            loadAuditLogs(1);
         });
     }
 });
