@@ -3114,18 +3114,19 @@ async function performGroupDiscoveryInline() {
                             </tr>
                         </thead>
                         <tbody>
-                            ${groups.map(group => `
+                            ${groups.map((group, index) => `
                                 <tr>
                                     <td class="fw-semibold">${escapeHtml(group.cn)}</td>
                                     <td><small class="text-muted">${escapeHtml(group.dn)}</small></td>
                                     <td>
-                                        <span class="badge bg-info">${group.member_count || 0} members</span>
+                                        <span class="badge bg-success">${group.member_count || 0} members</span>
                                     </td>
                                     <td><small>${escapeHtml(group.description || '-')}</small></td>
                                     <td>
-                                        <button class="btn btn-sm btn-primary"
-                                                onclick="createMappingFromDiscoveryInline('${escapeHtml(group.dn)}', '${escapeHtml(group.cn)}', '${escapeHtml(group.description || '')}')">
-                                            <i class="bi bi-plus-circle me-1"></i>Create Mapping
+                                        <button class="btn btn-outline-primary btn-sm create-mapping-btn"
+                                                data-group-index="${index}"
+                                                title="Create mapping for ${escapeHtml(group.cn)}">
+                                            <i class="bi bi-plus-circle"></i> Map
                                         </button>
                                     </td>
                                 </tr>
@@ -3134,6 +3135,16 @@ async function performGroupDiscoveryInline() {
                     </table>
                 </div>
             `;
+
+            // Store groups data and attach click handlers
+            container.discoveredGroups = groups;
+            container.querySelectorAll('.create-mapping-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const index = parseInt(this.dataset.groupIndex);
+                    const group = container.discoveredGroups[index];
+                    createMappingFromDiscoveryInline(group.dn, group.cn, group.description || '');
+                });
+            });
         } else {
             const error = await response.json();
             container.innerHTML = `
@@ -3157,22 +3168,28 @@ async function performGroupDiscoveryInline() {
 /**
  * Create mapping from inline discovery results
  */
-function createMappingFromDiscoveryInline(dn, cn, description) {
-    // Pre-fill the create mapping modal with discovered group info
-    document.getElementById('groupDN').value = dn;
-    document.getElementById('groupName').value = cn;
-    if (description) {
-        document.getElementById('mappingDescription').value = description;
-    }
+async function createMappingFromDiscoveryInline(dn, cn, description) {
+    // Show the create mapping modal first
+    await showCreateMappingModal();
 
-    // Show the create mapping modal
-    showCreateMappingModal();
+    // Pre-fill the form with discovered group info
+    const dnField = document.getElementById('ldapGroupDn');
+    const cnField = document.getElementById('ldapGroupCn');
+    const descField = document.getElementById('ldapGroupDescription');
+
+    if (dnField) dnField.value = dn;
+    if (cnField) cnField.value = cn;
+    if (descField && description) descField.value = description;
+
+    // Update modal title
+    const titleEl = document.getElementById('groupMappingModalTitle');
+    if (titleEl) titleEl.textContent = 'Create Group Mapping';
 
     // Optionally collapse the discovery panel
     const panel = document.getElementById('groupDiscoveryPanel');
     const icon = document.getElementById('discoveryToggleIcon');
-    panel.style.display = 'none';
-    icon.className = 'bi bi-chevron-down';
+    if (panel) panel.style.display = 'none';
+    if (icon) icon.className = 'bi bi-chevron-down';
 }
 
 // Keep old function for backward compatibility
@@ -3238,15 +3255,17 @@ async function performGroupDiscovery() {
                             </tr>
                         </thead>
                         <tbody>
-                            ${groups.map(group => `
+                            ${groups.map((group, index) => `
                                 <tr>
                                     <td><strong>${escapeHtml(group.cn)}</strong></td>
                                     <td><small>${escapeHtml(group.dn)}</small></td>
-                                    <td>${group.member_count || 0}</td>
+                                    <td><span class="badge bg-success">${group.member_count || 0}</span></td>
                                     <td><small>${escapeHtml(group.description || '-')}</small></td>
                                     <td>
-                                        <button class="btn btn-sm btn-primary" onclick="createMappingFromDiscovery('${escapeHtml(group.dn)}', '${escapeHtml(group.cn)}', '${escapeHtml(group.description || '')}')">
-                                            <i class="bi bi-plus-circle me-1"></i>Create Mapping
+                                        <button class="btn btn-outline-primary btn-sm create-mapping-btn2"
+                                                data-group-index="${index}"
+                                                title="Create mapping for ${escapeHtml(group.cn)}">
+                                            <i class="bi bi-plus-circle"></i> Map
                                         </button>
                                     </td>
                                 </tr>
@@ -3255,6 +3274,16 @@ async function performGroupDiscovery() {
                     </table>
                 </div>
             `;
+
+            // Store groups data and attach click handlers
+            container.discoveredGroups = groups;
+            container.querySelectorAll('.create-mapping-btn2').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const index = parseInt(this.dataset.groupIndex);
+                    const group = container.discoveredGroups[index];
+                    createMappingFromDiscovery(group.dn, group.cn, group.description || '');
+                });
+            });
         } else {
             const error = await response.json();
             container.innerHTML = `
