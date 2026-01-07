@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 # RSA Public Key for license validation (embedded in app)
 # The private key is kept secure by the vendor for generating licenses
 LICENSE_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z3VS5JJcds3xfn/ygWy
-Qa7hLPj5HQmcKw3HqjpHBxWKxGjnSfvldrUmpFKez1GiWCUxpapqAUCmhHzT7BpE
-xMGBn9L4v8Y9pxJjKhUgM3JnSVv4E0EFBWV0zqMZKq4hE5N/gvLMZGm8JVXoYQpo
-qSNv9b3qJEZN/psh0HfRkKjUKo1jTBVfLMgqDJHE2N9E6VWlzKY9Tz3FbZr+Fn0V
-5kf8MqNx0kHLQ8gEp0pjHfZ7Q8vtLwB2nPkDO5kLyBBq0tKbPMVYz5dEQfG3MZ0x
-VavvfGBkI0h1PzVfE5JNpNvl7RE8bScx1Z3fLL7z7uLSoUQX5fR7vnKu5kPkac7j
-pwIDAQAB
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3vVRIgzYRX3ikhfymPhO
+E2Sl13baVqnqUgWt+vwXRxNek114ToNZaOfka75HxD7bHFq6+nGscUyp+I6Uq0l5
+YXYCqeA9euHhWS/uH367xOo3J2tugH+9jMxHUlnOVD+XpUv9TShePwwWIN7h5jWs
+TWGHjF0yg+nOb1NjHf9UBYLhATNHsoajWEFptYlr8YtbmeegC6m3+6fF9mB0PdN9
+Lp+Ty4P6GfcuCkGA1GIAFNquN+W4x1Q47n0zj7TJ/wwy4cDe2TTIRi+2xosmdXs4
+jMD7apb2qLXSRm6ZHkUTw/8O1r4FrSrIIg7Yz1dpHCrs7kCafpBEQOEUobdm65TX
+rwIDAQAB
 -----END PUBLIC KEY-----"""
 
 # License tiers and their limits
