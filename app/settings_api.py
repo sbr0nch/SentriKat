@@ -452,7 +452,8 @@ def get_branding_settings():
         'app_name': get_setting('app_name', 'SentriKat'),
         'login_message': get_setting('login_message', ''),
         'support_email': get_setting('support_email', ''),
-        'show_version': get_setting('show_version', 'true') == 'true'
+        'show_version': get_setting('show_version', 'true') == 'true',
+        'logo_url': get_setting('logo_url', '/static/images/favicon-128x128.png')
     }
     return jsonify(settings)
 
@@ -601,4 +602,94 @@ def save_retention_settings():
 
         return jsonify({'success': True, 'message': 'Retention settings saved successfully'})
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Logo Upload
+# ============================================================================
+
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'}
+MAX_LOGO_SIZE = 2 * 1024 * 1024  # 2MB
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
+
+@settings_bp.route('/branding/logo', methods=['POST'])
+@admin_required
+def upload_logo():
+    """Upload a custom logo"""
+    import os
+    from werkzeug.utils import secure_filename
+
+    if 'logo' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['logo']
+
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'error': f'Invalid file type. Allowed: {", ".join(ALLOWED_IMAGE_EXTENSIONS)}'}), 400
+
+    # Check file size
+    file.seek(0, 2)  # Seek to end
+    size = file.tell()
+    file.seek(0)  # Seek back to start
+
+    if size > MAX_LOGO_SIZE:
+        return jsonify({'error': f'File too large. Maximum size: {MAX_LOGO_SIZE // (1024*1024)}MB'}), 400
+
+    try:
+        # Create uploads directory if it doesn't exist
+        upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'uploads')
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # Generate safe filename
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        filename = f'custom_logo.{ext}'
+        filepath = os.path.join(upload_dir, filename)
+
+        # Save file
+        file.save(filepath)
+
+        # Update branding setting with logo path
+        logo_url = f'/static/uploads/{filename}'
+        set_setting('logo_url', logo_url, 'branding', 'Custom logo URL')
+
+        return jsonify({
+            'success': True,
+            'message': 'Logo uploaded successfully',
+            'logo_url': logo_url
+        })
+    except Exception as e:
+        logger.error(f"Logo upload failed: {e}")
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+@settings_bp.route('/branding/logo', methods=['DELETE'])
+@admin_required
+def delete_logo():
+    """Remove custom logo and revert to default"""
+    import os
+
+    try:
+        # Get current logo path
+        logo_url = get_setting('logo_url', '')
+
+        if logo_url and logo_url.startswith('/static/uploads/'):
+            # Delete file
+            filepath = os.path.join(os.path.dirname(os.path.dirname(__file__)), logo_url.lstrip('/'))
+            if os.path.exists(filepath):
+                os.remove(filepath)
+
+        # Remove setting
+        setting = SystemSettings.query.filter_by(key='logo_url').first()
+        if setting:
+            db.session.delete(setting)
+            db.session.commit()
+
+        return jsonify({'success': True, 'message': 'Logo removed, reverted to default'})
+    except Exception as e:
+        logger.error(f"Logo deletion failed: {e}")
         return jsonify({'error': str(e)}), 500

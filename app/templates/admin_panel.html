@@ -1119,6 +1119,29 @@
                                         </div>
                                     </div>
 
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-image me-2"></i>Custom Logo</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-semibold">Current Logo</label>
+                                        <div class="d-flex align-items-center gap-3">
+                                            <img id="currentLogoPreview" src="/static/images/favicon-128x128.png" alt="Logo" style="width: 64px; height: 64px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; padding: 4px;">
+                                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteLogo()" id="deleteLogoBtn" style="display: none;">
+                                                <i class="bi bi-trash me-1"></i>Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="logoUpload" class="form-label fw-semibold">Upload New Logo</label>
+                                        <input type="file" class="form-control" id="logoUpload" accept=".png,.jpg,.jpeg,.gif,.svg,.webp">
+                                        <small class="form-text text-muted">Max 2MB. Recommended: 128x128px PNG with transparent background</small>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <button type="button" class="btn btn-outline-primary" onclick="uploadLogo()">
+                                            <i class="bi bi-upload me-1"></i>Upload Logo
+                                        </button>
+                                    </div>
+
                                     <div class="col-md-12">
                                         <hr>
                                         <button type="button" class="btn btn-primary" onclick="saveBrandingSettings()">

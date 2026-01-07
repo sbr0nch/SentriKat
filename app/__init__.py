@@ -75,13 +75,15 @@ def create_app(config_class=Config):
             'app_name': 'SentriKat',
             'login_message': '',
             'support_email': '',
-            'show_version': True
+            'show_version': True,
+            'logo_url': '/static/images/favicon-128x128.png'  # Default logo
         }
         try:
             app_name = SystemSettings.query.filter_by(key='app_name').first()
             login_message = SystemSettings.query.filter_by(key='login_message').first()
             support_email = SystemSettings.query.filter_by(key='support_email').first()
             show_version = SystemSettings.query.filter_by(key='show_version').first()
+            logo_url = SystemSettings.query.filter_by(key='logo_url').first()
 
             if app_name and app_name.value:
                 branding['app_name'] = app_name.value
@@ -91,6 +93,8 @@ def create_app(config_class=Config):
                 branding['support_email'] = support_email.value
             if show_version:
                 branding['show_version'] = show_version.value != 'false'
+            if logo_url and logo_url.value:
+                branding['logo_url'] = logo_url.value
         except:
             pass  # Use defaults if DB not ready
 

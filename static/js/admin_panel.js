@@ -1915,14 +1915,91 @@ async function loadBrandingSettings() {
             const loginMessage = document.getElementById('loginMessage');
             const supportEmail = document.getElementById('supportEmail');
             const showVersion = document.getElementById('showVersion');
+            const logoPreview = document.getElementById('currentLogoPreview');
+            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
 
             if (appName) appName.value = settings.app_name || 'SentriKat';
             if (loginMessage) loginMessage.value = settings.login_message || '';
             if (supportEmail) supportEmail.value = settings.support_email || '';
             if (showVersion) showVersion.checked = settings.show_version !== false;
+
+            // Show custom logo if set
+            if (settings.logo_url && logoPreview) {
+                logoPreview.src = settings.logo_url;
+                if (deleteLogoBtn && settings.logo_url.includes('/uploads/')) {
+                    deleteLogoBtn.style.display = 'inline-block';
+                }
+            }
         }
     } catch (error) {
         console.error('Error loading branding settings:', error);
+    }
+}
+
+async function uploadLogo() {
+    const fileInput = document.getElementById('logoUpload');
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showToast('Please select a file to upload', 'warning');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('logo', file);
+
+    showLoading();
+    try {
+        const response = await fetch('/api/settings/branding/logo', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast('Logo uploaded successfully', 'success');
+            // Update preview
+            const logoPreview = document.getElementById('currentLogoPreview');
+            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
+            if (logoPreview) logoPreview.src = data.logo_url + '?t=' + Date.now();
+            if (deleteLogoBtn) deleteLogoBtn.style.display = 'inline-block';
+            // Clear input
+            fileInput.value = '';
+        } else {
+            showToast(`Error: ${data.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Upload failed: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function deleteLogo() {
+    if (!confirm('Remove custom logo and revert to default?')) return;
+
+    showLoading();
+    try {
+        const response = await fetch('/api/settings/branding/logo', {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast('Logo removed, reverted to default', 'success');
+            // Reset preview
+            const logoPreview = document.getElementById('currentLogoPreview');
+            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
+            if (logoPreview) logoPreview.src = '/static/images/favicon-128x128.png';
+            if (deleteLogoBtn) deleteLogoBtn.style.display = 'none';
+        } else {
+            showToast(`Error: ${data.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Failed: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
     }
 }
 

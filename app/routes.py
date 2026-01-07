@@ -32,22 +32,44 @@ def validate_username(username):
 
 def validate_password_strength(password):
     """
-    Validate password meets security requirements:
-    - At least 12 characters
-    - Contains uppercase and lowercase
-    - Contains digit
-    - Contains special character
+    Validate password meets security requirements from database settings.
+    Only applies to local users.
     """
-    if not password or len(password) < 12:
-        return False, "Password must be at least 12 characters"
-    if not re.search(r'[A-Z]', password):
-        return False, "Password must contain at least one uppercase letter"
-    if not re.search(r'[a-z]', password):
-        return False, "Password must contain at least one lowercase letter"
-    if not re.search(r'[0-9]', password):
-        return False, "Password must contain at least one digit"
-    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-        return False, "Password must contain at least one special character"
+    from app.models import SystemSettings
+
+    # Get policy settings from database
+    min_length = SystemSettings.query.filter_by(key='password_min_length').first()
+    req_upper = SystemSettings.query.filter_by(key='password_require_uppercase').first()
+    req_lower = SystemSettings.query.filter_by(key='password_require_lowercase').first()
+    req_numbers = SystemSettings.query.filter_by(key='password_require_numbers').first()
+    req_special = SystemSettings.query.filter_by(key='password_require_special').first()
+
+    # Use settings or defaults
+    min_len = int(min_length.value) if min_length else 8
+    require_upper = req_upper.value == 'true' if req_upper else True
+    require_lower = req_lower.value == 'true' if req_lower else True
+    require_numbers = req_numbers.value == 'true' if req_numbers else True
+    require_special = req_special.value == 'true' if req_special else False
+
+    errors = []
+
+    if not password or len(password) < min_len:
+        errors.append(f'Password must be at least {min_len} characters')
+
+    if require_upper and not re.search(r'[A-Z]', password):
+        errors.append('Password must contain at least one uppercase letter')
+
+    if require_lower and not re.search(r'[a-z]', password):
+        errors.append('Password must contain at least one lowercase letter')
+
+    if require_numbers and not re.search(r'[0-9]', password):
+        errors.append('Password must contain at least one digit')
+
+    if require_special and not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        errors.append('Password must contain at least one special character')
+
+    if errors:
+        return False, '; '.join(errors)
     return True, None
 
 @bp.route('/')
@@ -1519,8 +1541,11 @@ def update_user(user_id):
     if 'can_view_all_orgs' in data and current_user.is_super_admin():
         user.can_view_all_orgs = data['can_view_all_orgs']
 
-    # Update password if provided
+    # Update password if provided (with validation for local users)
     if 'password' in data and user.auth_type == 'local':
+        is_valid, error_msg = validate_password_strength(data['password'])
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
         user.set_password(data['password'])
 
     db.session.commit()

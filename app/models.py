@@ -455,6 +455,49 @@ class User(db.Model):
             return False
         return check_password_hash(self.password_hash, password)
 
+    @staticmethod
+    def validate_password_policy(password):
+        """
+        Validate password against policy settings.
+        Returns (is_valid, error_message)
+        Only applies to local users.
+        """
+        # Get policy settings
+        min_length = SystemSettings.query.filter_by(key='password_min_length').first()
+        req_upper = SystemSettings.query.filter_by(key='password_require_uppercase').first()
+        req_lower = SystemSettings.query.filter_by(key='password_require_lowercase').first()
+        req_numbers = SystemSettings.query.filter_by(key='password_require_numbers').first()
+        req_special = SystemSettings.query.filter_by(key='password_require_special').first()
+
+        min_len = int(min_length.value) if min_length else 8
+        require_upper = req_upper.value == 'true' if req_upper else True
+        require_lower = req_lower.value == 'true' if req_lower else True
+        require_numbers = req_numbers.value == 'true' if req_numbers else True
+        require_special = req_special.value == 'true' if req_special else False
+
+        errors = []
+
+        if len(password) < min_len:
+            errors.append(f'Password must be at least {min_len} characters')
+
+        if require_upper and not any(c.isupper() for c in password):
+            errors.append('Password must contain at least one uppercase letter')
+
+        if require_lower and not any(c.islower() for c in password):
+            errors.append('Password must contain at least one lowercase letter')
+
+        if require_numbers and not any(c.isdigit() for c in password):
+            errors.append('Password must contain at least one number')
+
+        if require_special:
+            special_chars = '!@#$%^&*()_+-=[]{}|;:,.<>?'
+            if not any(c in special_chars for c in password):
+                errors.append('Password must contain at least one special character (!@#$%^&*)')
+
+        if errors:
+            return False, '; '.join(errors)
+        return True, None
+
     def is_super_admin(self):
         """Check if user is a super admin - only role-based, not legacy flags"""
         return self.role == 'super_admin'
