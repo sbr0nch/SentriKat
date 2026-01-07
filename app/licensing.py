@@ -87,42 +87,104 @@ class LicenseInfo:
         self.is_expired = False
         self.days_until_expiry = None
         self.error = None
+        self.expiration_reason = None  # 'expired', 'grace_period', etc.
+
+    def get_effective_edition(self):
+        """
+        Get the effective edition considering expiration.
+        Expired licenses revert to Community behavior.
+        """
+        if self.is_expired:
+            return 'community'
+        if not self.is_valid:
+            return 'community'
+        return self.edition
+
+    def get_effective_limits(self):
+        """
+        Get effective limits considering expiration.
+        Expired Professional licenses get Community limits.
+        """
+        effective_edition = self.get_effective_edition()
+        if effective_edition == 'community':
+            return {
+                'max_users': LICENSE_TIERS['community']['max_users'],
+                'max_organizations': LICENSE_TIERS['community']['max_organizations'],
+                'max_products': LICENSE_TIERS['community']['max_products']
+            }
+        return {
+            'max_users': self.max_users,
+            'max_organizations': self.max_organizations,
+            'max_products': self.max_products
+        }
 
     def has_feature(self, feature):
-        """Check if license includes a specific feature"""
-        if self.edition == 'professional':
+        """
+        Check if license includes a specific feature.
+        Expired licenses lose all premium features.
+        """
+        effective_edition = self.get_effective_edition()
+        if effective_edition == 'professional':
             return True
-        return feature in self.features
+        return False  # Community has no premium features
 
     def is_professional(self):
-        """Check if this is a Professional license"""
-        return self.edition == 'professional' and self.is_valid and not self.is_expired
+        """
+        Check if this is an active Professional license.
+        Returns False if expired, invalid, or Community.
+        """
+        return (
+            self.edition == 'professional' and
+            self.is_valid and
+            not self.is_expired
+        )
 
     def check_limit(self, limit_type, current_count):
         """
-        Check if a limit is exceeded
+        Check if a limit is exceeded.
+        Uses effective limits (Community limits if expired).
         Returns: (allowed: bool, limit: int, message: str)
         """
-        limits = {
-            'users': self.max_users,
-            'organizations': self.max_organizations,
-            'products': self.max_products
+        effective_limits = self.get_effective_limits()
+
+        limit_map = {
+            'users': effective_limits['max_users'],
+            'organizations': effective_limits['max_organizations'],
+            'products': effective_limits['max_products']
         }
 
-        limit = limits.get(limit_type, 0)
+        limit = limit_map.get(limit_type, 0)
         if limit == -1:  # Unlimited
             return True, -1, None
 
         if current_count >= limit:
+            if self.is_expired:
+                return False, limit, f'License expired. Community limit: {limit} {limit_type} maximum. Please renew your license.'
             return False, limit, f'Community license limit: {limit} {limit_type} maximum. Upgrade to Professional for unlimited.'
 
         return True, limit, None
 
+    def get_status_message(self):
+        """Get a human-readable status message"""
+        if not self.is_valid and self.error:
+            return f'Invalid license: {self.error}'
+        if self.is_expired:
+            return f'License expired on {self.expires_at}. Reverted to Community edition.'
+        if self.days_until_expiry is not None and self.days_until_expiry <= 30:
+            return f'License expires in {self.days_until_expiry} days'
+        if self.is_professional():
+            return f'Professional license active for {self.customer}'
+        return 'Community edition'
+
     def to_dict(self):
         """Convert to dictionary for API responses"""
+        effective_limits = self.get_effective_limits()
+        effective_edition = self.get_effective_edition()
+
         return {
             'edition': self.edition,
-            'edition_name': LICENSE_TIERS.get(self.edition, {}).get('name', 'Unknown'),
+            'effective_edition': effective_edition,
+            'edition_name': LICENSE_TIERS.get(effective_edition, {}).get('name', 'Unknown'),
             'customer': self.customer,
             'license_id': self.license_id,
             'is_valid': self.is_valid,
@@ -130,13 +192,15 @@ class LicenseInfo:
             'is_professional': self.is_professional(),
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
             'days_until_expiry': self.days_until_expiry,
-            'limits': {
+            'status_message': self.get_status_message(),
+            'limits': effective_limits,
+            'original_limits': {
                 'max_users': self.max_users,
                 'max_organizations': self.max_organizations,
                 'max_products': self.max_products
             },
-            'features': self.features if self.edition == 'professional' else [],
-            'powered_by_required': LICENSE_TIERS.get(self.edition, {}).get('powered_by_required', True),
+            'features': PROFESSIONAL_FEATURES if self.is_professional() else [],
+            'powered_by_required': not self.is_professional(),
             'error': self.error
         }
 
