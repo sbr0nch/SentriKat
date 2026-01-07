@@ -315,14 +315,35 @@ def api_login():
 
     logger.info(f"User found: {user.username} (id={user.id}, auth_type={user.auth_type}, role={user.role})")
 
+    # Check if account is locked (only for local users)
+    if user.auth_type == 'local' and user.is_locked():
+        remaining = user.get_lockout_remaining_minutes()
+        logger.warning(f"Login blocked: user {username} is locked for {remaining} more minutes")
+        return jsonify({
+            'error': f'Account is temporarily locked. Try again in {remaining} minutes.'
+        }), 401
+
     # Check authentication type
     if user.auth_type == 'local':
         # Local authentication
         if not user.check_password(password):
+            # Record failed attempt and potentially lock
+            user.record_failed_login()
+            db.session.commit()
+
+            # Check if now locked
+            if user.is_locked():
+                remaining = user.get_lockout_remaining_minutes()
+                logger.warning(f"User {username} locked after {user.failed_login_attempts} failed attempts")
+                return jsonify({
+                    'error': f'Account locked due to too many failed attempts. Try again in {remaining} minutes.'
+                }), 401
+
+            logger.warning(f"Login failed for {username}: invalid password (attempt {user.failed_login_attempts})")
             return jsonify({'error': 'Invalid username or password'}), 401
 
     elif user.auth_type == 'ldap':
-        # LDAP authentication
+        # LDAP authentication - lockout handled by AD, not locally
         try:
             auth_result = authenticate_ldap(user, password)
             if auth_result is not True:
@@ -339,6 +360,11 @@ def api_login():
     else:
         logger.error(f"Login failed: unknown auth_type '{user.auth_type}' for user {username}")
         return jsonify({'error': 'Invalid authentication type'}), 500
+
+    # Reset failed login attempts on successful login (for local users)
+    if user.auth_type == 'local' and (user.failed_login_attempts or 0) > 0:
+        user.reset_failed_login_attempts()
+        logger.info(f"Reset failed login attempts for {username}")
 
     # Update last login
     logger.info(f"Authentication successful for {username}, updating last login")

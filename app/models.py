@@ -438,6 +438,10 @@ class User(db.Model):
     last_login = db.Column(db.DateTime, nullable=True)
     last_login_ip = db.Column(db.String(50), nullable=True)
 
+    # Failed login tracking
+    failed_login_attempts = db.Column(db.Integer, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -454,6 +458,43 @@ class User(db.Model):
         if not self.password_hash:
             return False
         return check_password_hash(self.password_hash, password)
+
+    def is_locked(self):
+        """Check if account is locked due to failed login attempts"""
+        if self.locked_until is None:
+            return False
+        return datetime.utcnow() < self.locked_until
+
+    def get_lockout_remaining_minutes(self):
+        """Get remaining lockout time in minutes"""
+        if not self.is_locked():
+            return 0
+        remaining = (self.locked_until - datetime.utcnow()).total_seconds() / 60
+        return max(0, int(remaining) + 1)  # Round up
+
+    def record_failed_login(self):
+        """Record a failed login attempt and lock if threshold reached"""
+        from app.models import SystemSettings
+
+        # Get lockout settings
+        max_attempts_setting = SystemSettings.query.filter_by(key='failed_login_attempts').first()
+        lockout_duration_setting = SystemSettings.query.filter_by(key='lockout_duration').first()
+
+        max_attempts = int(max_attempts_setting.value) if max_attempts_setting else 5
+        lockout_minutes = int(lockout_duration_setting.value) if lockout_duration_setting else 15
+
+        # Increment failed attempts
+        self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
+
+        # Lock if threshold reached
+        if self.failed_login_attempts >= max_attempts:
+            from datetime import timedelta
+            self.locked_until = datetime.utcnow() + timedelta(minutes=lockout_minutes)
+
+    def reset_failed_login_attempts(self):
+        """Reset failed login counter on successful login"""
+        self.failed_login_attempts = 0
+        self.locked_until = None
 
     @staticmethod
     def validate_password_policy(password):
