@@ -516,6 +516,26 @@
                         <i class="bi bi-hdd-network me-2"></i>Proxy
                     </button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="security-settings-tab" data-bs-toggle="pill" data-bs-target="#securitySettings" type="button">
+                        <i class="bi bi-shield-lock me-2"></i>Security
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="notifications-settings-tab" data-bs-toggle="pill" data-bs-target="#notificationsSettings" type="button">
+                        <i class="bi bi-bell me-2"></i>Notifications
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="branding-settings-tab" data-bs-toggle="pill" data-bs-target="#brandingSettings" type="button">
+                        <i class="bi bi-palette me-2"></i>Branding
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="retention-settings-tab" data-bs-toggle="pill" data-bs-target="#retentionSettings" type="button">
+                        <i class="bi bi-archive me-2"></i>Data Retention
+                    </button>
+                </li>
                 {% endif %}
             </ul>
 
@@ -890,6 +910,256 @@
                                         </button>
                                         <button type="button" class="btn btn-outline-secondary ms-2" onclick="testProxyConnection()">
                                             <i class="bi bi-plug me-1"></i>Test Connection
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security Settings -->
+                <div class="tab-pane fade" id="securitySettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-shield-lock me-2"></i>Security Settings
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure session security, login protection, and password policies.
+                            </div>
+
+                            <form id="securitySettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-clock me-2"></i>Session Settings</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="sessionTimeout" class="form-label fw-semibold">Session Timeout (minutes)</label>
+                                        <input type="number" class="form-control" id="sessionTimeout" value="480" min="5" max="10080">
+                                        <small class="form-text text-muted">User sessions expire after this period of inactivity (5 min - 7 days)</small>
+                                    </div>
+
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-lock me-2"></i>Login Protection</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="maxFailedLogins" class="form-label fw-semibold">Max Failed Login Attempts</label>
+                                        <input type="number" class="form-control" id="maxFailedLogins" value="5" min="3" max="20">
+                                        <small class="form-text text-muted">Lock account after this many failed attempts</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="lockoutDuration" class="form-label fw-semibold">Lockout Duration (minutes)</label>
+                                        <input type="number" class="form-control" id="lockoutDuration" value="30" min="5" max="1440">
+                                        <small class="form-text text-muted">How long account stays locked</small>
+                                    </div>
+
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-key me-2"></i>Password Policy (Local Users)</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="passwordMinLength" class="form-label fw-semibold">Minimum Password Length</label>
+                                        <input type="number" class="form-control" id="passwordMinLength" value="8" min="6" max="32">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="pt-4">
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="passwordRequireUppercase" checked>
+                                                <label class="form-check-label" for="passwordRequireUppercase">Require uppercase letter (A-Z)</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="passwordRequireLowercase" checked>
+                                                <label class="form-check-label" for="passwordRequireLowercase">Require lowercase letter (a-z)</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="passwordRequireNumbers" checked>
+                                                <label class="form-check-label" for="passwordRequireNumbers">Require number (0-9)</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="passwordRequireSpecial">
+                                                <label class="form-check-label" for="passwordRequireSpecial">Require special character (!@#$%^&*)</label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary" onclick="saveSecuritySettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save Security Settings
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notifications Settings -->
+                <div class="tab-pane fade" id="notificationsSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-bell me-2"></i>Notification Integrations
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure webhooks to receive vulnerability alerts in Slack or Microsoft Teams.
+                            </div>
+
+                            <form id="notificationsSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-slack me-2"></i>Slack Integration</h6>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch mb-2">
+                                            <input type="checkbox" class="form-check-input" id="slackEnabled">
+                                            <label class="form-check-label fw-semibold" for="slackEnabled">Enable Slack Notifications</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-10">
+                                        <label for="slackWebhookUrl" class="form-label">Slack Webhook URL</label>
+                                        <input type="text" class="form-control" id="slackWebhookUrl" placeholder="https://hooks.slack.com/services/...">
+                                        <small class="form-text text-muted">Create an incoming webhook in your Slack workspace settings</small>
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button type="button" class="btn btn-outline-secondary w-100" onclick="testWebhook('slack')">
+                                            <i class="bi bi-send me-1"></i>Test
+                                        </button>
+                                    </div>
+
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-microsoft-teams me-2"></i>Microsoft Teams Integration</h6>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch mb-2">
+                                            <input type="checkbox" class="form-check-input" id="teamsEnabled">
+                                            <label class="form-check-label fw-semibold" for="teamsEnabled">Enable Teams Notifications</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-10">
+                                        <label for="teamsWebhookUrl" class="form-label">Teams Webhook URL</label>
+                                        <input type="text" class="form-control" id="teamsWebhookUrl" placeholder="https://outlook.office.com/webhook/...">
+                                        <small class="form-text text-muted">Create an incoming webhook connector in your Teams channel</small>
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button type="button" class="btn btn-outline-secondary w-100" onclick="testWebhook('teams')">
+                                            <i class="bi bi-send me-1"></i>Test
+                                        </button>
+                                    </div>
+
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-envelope-paper me-2"></i>Daily Digest</h6>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch mb-2">
+                                            <input type="checkbox" class="form-check-input" id="dailyDigestEnabled">
+                                            <label class="form-check-label fw-semibold" for="dailyDigestEnabled">Enable Daily Digest Email</label>
+                                        </div>
+                                        <small class="form-text text-muted">Send a daily summary of new vulnerabilities to organization notification emails</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="dailyDigestTime" class="form-label">Digest Time (UTC)</label>
+                                        <input type="time" class="form-control" id="dailyDigestTime" value="09:00">
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary" onclick="saveNotificationSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save Notification Settings
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Branding Settings -->
+                <div class="tab-pane fade" id="brandingSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-palette me-2"></i>Branding & Appearance
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Customize the application name and appearance.
+                            </div>
+
+                            <form id="brandingSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="appName" class="form-label fw-semibold">Application Name</label>
+                                        <input type="text" class="form-control" id="appName" value="SentriKat" maxlength="50">
+                                        <small class="form-text text-muted">Displayed in browser title and header</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="supportEmail" class="form-label fw-semibold">Support Email</label>
+                                        <input type="email" class="form-control" id="supportEmail" placeholder="support@company.com">
+                                        <small class="form-text text-muted">Shown on login page and error messages</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="loginMessage" class="form-label fw-semibold">Login Page Message</label>
+                                        <textarea class="form-control" id="loginMessage" rows="2" maxlength="500" placeholder="Welcome message or security notice for users..."></textarea>
+                                        <small class="form-text text-muted">Optional message displayed on the login page</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="showVersion" checked>
+                                            <label class="form-check-label fw-semibold" for="showVersion">Show Version in Footer</label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary" onclick="saveBrandingSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save Branding Settings
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Data Retention Settings -->
+                <div class="tab-pane fade" id="retentionSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-archive me-2"></i>Data Retention
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                <strong>Caution:</strong> Data older than the retention period will be permanently deleted during cleanup tasks.
+                            </div>
+
+                            <form id="retentionSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label for="auditLogRetention" class="form-label fw-semibold">Audit Log Retention (days)</label>
+                                        <input type="number" class="form-control" id="auditLogRetention" value="365" min="30" max="3650">
+                                        <small class="form-text text-muted">User activity and change logs</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="syncHistoryRetention" class="form-label fw-semibold">Sync History Retention (days)</label>
+                                        <input type="number" class="form-control" id="syncHistoryRetention" value="90" min="7" max="365">
+                                        <small class="form-text text-muted">CISA/NVD sync logs</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="sessionLogRetention" class="form-label fw-semibold">Session Log Retention (days)</label>
+                                        <input type="number" class="form-control" id="sessionLogRetention" value="30" min="7" max="365">
+                                        <small class="form-text text-muted">User login sessions</small>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary" onclick="saveRetentionSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save Retention Settings
                                         </button>
                                     </div>
                                 </div>

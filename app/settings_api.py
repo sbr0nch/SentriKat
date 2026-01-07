@@ -371,7 +371,7 @@ def get_sync_status():
 @settings_bp.route('/general', methods=['GET'])
 @admin_required
 def get_general_settings():
-    """Get general system settings"""
+    """Get general system settings (proxy/network)"""
     settings = {
         'verify_ssl': get_setting('verify_ssl', 'true') == 'true',
         'http_proxy': get_setting('http_proxy', ''),
@@ -384,7 +384,7 @@ def get_general_settings():
 @settings_bp.route('/general', methods=['POST'])
 @admin_required
 def save_general_settings():
-    """Save general system settings"""
+    """Save general system settings (proxy/network)"""
     data = request.get_json()
 
     try:
@@ -395,5 +395,208 @@ def save_general_settings():
         set_setting('session_timeout', str(data.get('session_timeout', 480)), 'general', 'Session timeout (minutes)')
 
         return jsonify({'success': True, 'message': 'General settings saved successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Security Settings
+# ============================================================================
+
+@settings_bp.route('/security', methods=['GET'])
+@admin_required
+def get_security_settings():
+    """Get security settings"""
+    settings = {
+        'session_timeout': int(get_setting('session_timeout', '480')),
+        'max_failed_logins': int(get_setting('max_failed_logins', '5')),
+        'lockout_duration': int(get_setting('lockout_duration', '30')),
+        'password_min_length': int(get_setting('password_min_length', '8')),
+        'password_require_uppercase': get_setting('password_require_uppercase', 'true') == 'true',
+        'password_require_lowercase': get_setting('password_require_lowercase', 'true') == 'true',
+        'password_require_numbers': get_setting('password_require_numbers', 'true') == 'true',
+        'password_require_special': get_setting('password_require_special', 'false') == 'true'
+    }
+    return jsonify(settings)
+
+@settings_bp.route('/security', methods=['POST'])
+@admin_required
+def save_security_settings():
+    """Save security settings"""
+    data = request.get_json()
+
+    try:
+        set_setting('session_timeout', str(data.get('session_timeout', 480)), 'security', 'Session timeout (minutes)')
+        set_setting('max_failed_logins', str(data.get('max_failed_logins', 5)), 'security', 'Max failed login attempts before lockout')
+        set_setting('lockout_duration', str(data.get('lockout_duration', 30)), 'security', 'Account lockout duration (minutes)')
+        set_setting('password_min_length', str(data.get('password_min_length', 8)), 'security', 'Minimum password length')
+        set_setting('password_require_uppercase', 'true' if data.get('password_require_uppercase') else 'false', 'security', 'Require uppercase letter')
+        set_setting('password_require_lowercase', 'true' if data.get('password_require_lowercase') else 'false', 'security', 'Require lowercase letter')
+        set_setting('password_require_numbers', 'true' if data.get('password_require_numbers') else 'false', 'security', 'Require number')
+        set_setting('password_require_special', 'true' if data.get('password_require_special') else 'false', 'security', 'Require special character')
+
+        return jsonify({'success': True, 'message': 'Security settings saved successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Branding Settings
+# ============================================================================
+
+@settings_bp.route('/branding', methods=['GET'])
+@admin_required
+def get_branding_settings():
+    """Get branding/UI settings"""
+    settings = {
+        'app_name': get_setting('app_name', 'SentriKat'),
+        'login_message': get_setting('login_message', ''),
+        'support_email': get_setting('support_email', ''),
+        'show_version': get_setting('show_version', 'true') == 'true'
+    }
+    return jsonify(settings)
+
+@settings_bp.route('/branding', methods=['POST'])
+@admin_required
+def save_branding_settings():
+    """Save branding/UI settings"""
+    data = request.get_json()
+
+    try:
+        set_setting('app_name', data.get('app_name', 'SentriKat'), 'branding', 'Application name')
+        set_setting('login_message', data.get('login_message', ''), 'branding', 'Login page message')
+        set_setting('support_email', data.get('support_email', ''), 'branding', 'Support email address')
+        set_setting('show_version', 'true' if data.get('show_version') else 'false', 'branding', 'Show version in footer')
+
+        return jsonify({'success': True, 'message': 'Branding settings saved successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Notification Settings (Webhooks)
+# ============================================================================
+
+@settings_bp.route('/notifications', methods=['GET'])
+@admin_required
+def get_notification_settings():
+    """Get notification/webhook settings"""
+    settings = {
+        'slack_webhook_url': get_setting('slack_webhook_url', ''),
+        'slack_enabled': get_setting('slack_enabled', 'false') == 'true',
+        'teams_webhook_url': get_setting('teams_webhook_url', ''),
+        'teams_enabled': get_setting('teams_enabled', 'false') == 'true',
+        'daily_digest_enabled': get_setting('daily_digest_enabled', 'false') == 'true',
+        'daily_digest_time': get_setting('daily_digest_time', '09:00')
+    }
+    return jsonify(settings)
+
+@settings_bp.route('/notifications', methods=['POST'])
+@admin_required
+def save_notification_settings():
+    """Save notification/webhook settings"""
+    data = request.get_json()
+
+    try:
+        set_setting('slack_enabled', 'true' if data.get('slack_enabled') else 'false', 'notifications', 'Enable Slack notifications')
+        if data.get('slack_webhook_url'):
+            set_setting('slack_webhook_url', data['slack_webhook_url'], 'notifications', 'Slack webhook URL', is_encrypted=True)
+
+        set_setting('teams_enabled', 'true' if data.get('teams_enabled') else 'false', 'notifications', 'Enable Teams notifications')
+        if data.get('teams_webhook_url'):
+            set_setting('teams_webhook_url', data['teams_webhook_url'], 'notifications', 'Microsoft Teams webhook URL', is_encrypted=True)
+
+        set_setting('daily_digest_enabled', 'true' if data.get('daily_digest_enabled') else 'false', 'notifications', 'Enable daily digest')
+        set_setting('daily_digest_time', data.get('daily_digest_time', '09:00'), 'notifications', 'Daily digest time (UTC)')
+
+        return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@settings_bp.route('/notifications/test', methods=['POST'])
+@admin_required
+def test_notification():
+    """Test webhook notification"""
+    import requests
+    data = request.get_json()
+    webhook_type = data.get('type', 'slack')
+
+    try:
+        if webhook_type == 'slack':
+            webhook_url = get_setting('slack_webhook_url')
+            if not webhook_url:
+                return jsonify({'success': False, 'error': 'Slack webhook URL not configured'})
+
+            payload = {
+                "text": "🔒 SentriKat Test Notification",
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "*SentriKat Webhook Test*\n✓ Your Slack integration is working correctly!"
+                        }
+                    }
+                ]
+            }
+            response = requests.post(webhook_url, json=payload, timeout=10)
+
+        elif webhook_type == 'teams':
+            webhook_url = get_setting('teams_webhook_url')
+            if not webhook_url:
+                return jsonify({'success': False, 'error': 'Teams webhook URL not configured'})
+
+            payload = {
+                "@type": "MessageCard",
+                "@context": "http://schema.org/extensions",
+                "themeColor": "1e40af",
+                "summary": "SentriKat Test Notification",
+                "sections": [{
+                    "activityTitle": "🔒 SentriKat Webhook Test",
+                    "activitySubtitle": "Your Microsoft Teams integration is working correctly!",
+                    "markdown": True
+                }]
+            }
+            response = requests.post(webhook_url, json=payload, timeout=10)
+
+        else:
+            return jsonify({'success': False, 'error': f'Unknown webhook type: {webhook_type}'})
+
+        if response.status_code in [200, 204]:
+            return jsonify({'success': True, 'message': f'Test notification sent to {webhook_type.title()}'})
+        else:
+            return jsonify({'success': False, 'error': f'Webhook returned status {response.status_code}'})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+# ============================================================================
+# Data Retention Settings
+# ============================================================================
+
+@settings_bp.route('/retention', methods=['GET'])
+@admin_required
+def get_retention_settings():
+    """Get data retention settings"""
+    settings = {
+        'audit_log_retention_days': int(get_setting('audit_log_retention_days', '365')),
+        'sync_history_retention_days': int(get_setting('sync_history_retention_days', '90')),
+        'session_log_retention_days': int(get_setting('session_log_retention_days', '30'))
+    }
+    return jsonify(settings)
+
+@settings_bp.route('/retention', methods=['POST'])
+@admin_required
+def save_retention_settings():
+    """Save data retention settings"""
+    data = request.get_json()
+
+    try:
+        set_setting('audit_log_retention_days', str(data.get('audit_log_retention_days', 365)), 'retention', 'Audit log retention (days)')
+        set_setting('sync_history_retention_days', str(data.get('sync_history_retention_days', 90)), 'retention', 'Sync history retention (days)')
+        set_setting('session_log_retention_days', str(data.get('session_log_retention_days', 30)), 'retention', 'Session log retention (days)')
+
+        return jsonify({'success': True, 'message': 'Retention settings saved successfully'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500

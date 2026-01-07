@@ -1815,6 +1815,244 @@ async function testProxyConnection() {
 }
 
 // ============================================================================
+// Security Settings
+// ============================================================================
+
+async function saveSecuritySettings() {
+    const settings = {
+        session_timeout: parseInt(document.getElementById('sessionTimeout').value) || 480,
+        max_failed_logins: parseInt(document.getElementById('maxFailedLogins').value) || 5,
+        lockout_duration: parseInt(document.getElementById('lockoutDuration').value) || 30,
+        password_min_length: parseInt(document.getElementById('passwordMinLength').value) || 8,
+        password_require_uppercase: document.getElementById('passwordRequireUppercase').checked,
+        password_require_lowercase: document.getElementById('passwordRequireLowercase').checked,
+        password_require_numbers: document.getElementById('passwordRequireNumbers').checked,
+        password_require_special: document.getElementById('passwordRequireSpecial').checked
+    };
+
+    try {
+        const response = await fetch('/api/settings/security', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('Security settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving security settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadSecuritySettings() {
+    try {
+        const response = await fetch('/api/settings/security');
+        if (response.ok) {
+            const settings = await response.json();
+            const sessionTimeout = document.getElementById('sessionTimeout');
+            const maxFailedLogins = document.getElementById('maxFailedLogins');
+            const lockoutDuration = document.getElementById('lockoutDuration');
+            const passwordMinLength = document.getElementById('passwordMinLength');
+            const passwordRequireUppercase = document.getElementById('passwordRequireUppercase');
+            const passwordRequireLowercase = document.getElementById('passwordRequireLowercase');
+            const passwordRequireNumbers = document.getElementById('passwordRequireNumbers');
+            const passwordRequireSpecial = document.getElementById('passwordRequireSpecial');
+
+            if (sessionTimeout) sessionTimeout.value = settings.session_timeout || 480;
+            if (maxFailedLogins) maxFailedLogins.value = settings.max_failed_logins || 5;
+            if (lockoutDuration) lockoutDuration.value = settings.lockout_duration || 30;
+            if (passwordMinLength) passwordMinLength.value = settings.password_min_length || 8;
+            if (passwordRequireUppercase) passwordRequireUppercase.checked = settings.password_require_uppercase !== false;
+            if (passwordRequireLowercase) passwordRequireLowercase.checked = settings.password_require_lowercase !== false;
+            if (passwordRequireNumbers) passwordRequireNumbers.checked = settings.password_require_numbers !== false;
+            if (passwordRequireSpecial) passwordRequireSpecial.checked = settings.password_require_special === true;
+        }
+    } catch (error) {
+        console.error('Error loading security settings:', error);
+    }
+}
+
+// ============================================================================
+// Branding Settings
+// ============================================================================
+
+async function saveBrandingSettings() {
+    const settings = {
+        app_name: document.getElementById('appName').value || 'SentriKat',
+        login_message: document.getElementById('loginMessage').value || '',
+        support_email: document.getElementById('supportEmail').value || '',
+        show_version: document.getElementById('showVersion').checked
+    };
+
+    try {
+        const response = await fetch('/api/settings/branding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('Branding settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving branding settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadBrandingSettings() {
+    try {
+        const response = await fetch('/api/settings/branding');
+        if (response.ok) {
+            const settings = await response.json();
+            const appName = document.getElementById('appName');
+            const loginMessage = document.getElementById('loginMessage');
+            const supportEmail = document.getElementById('supportEmail');
+            const showVersion = document.getElementById('showVersion');
+
+            if (appName) appName.value = settings.app_name || 'SentriKat';
+            if (loginMessage) loginMessage.value = settings.login_message || '';
+            if (supportEmail) supportEmail.value = settings.support_email || '';
+            if (showVersion) showVersion.checked = settings.show_version !== false;
+        }
+    } catch (error) {
+        console.error('Error loading branding settings:', error);
+    }
+}
+
+// ============================================================================
+// Notification Settings
+// ============================================================================
+
+async function saveNotificationSettings() {
+    const settings = {
+        slack_enabled: document.getElementById('slackEnabled').checked,
+        slack_webhook_url: document.getElementById('slackWebhookUrl').value || '',
+        teams_enabled: document.getElementById('teamsEnabled').checked,
+        teams_webhook_url: document.getElementById('teamsWebhookUrl').value || '',
+        daily_digest_enabled: document.getElementById('dailyDigestEnabled').checked,
+        daily_digest_time: document.getElementById('dailyDigestTime').value || '09:00'
+    };
+
+    try {
+        const response = await fetch('/api/settings/notifications', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('Notification settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving notification settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadNotificationSettings() {
+    try {
+        const response = await fetch('/api/settings/notifications');
+        if (response.ok) {
+            const settings = await response.json();
+            const slackEnabled = document.getElementById('slackEnabled');
+            const slackWebhookUrl = document.getElementById('slackWebhookUrl');
+            const teamsEnabled = document.getElementById('teamsEnabled');
+            const teamsWebhookUrl = document.getElementById('teamsWebhookUrl');
+            const dailyDigestEnabled = document.getElementById('dailyDigestEnabled');
+            const dailyDigestTime = document.getElementById('dailyDigestTime');
+
+            if (slackEnabled) slackEnabled.checked = settings.slack_enabled === true;
+            if (slackWebhookUrl) slackWebhookUrl.value = settings.slack_webhook_url || '';
+            if (teamsEnabled) teamsEnabled.checked = settings.teams_enabled === true;
+            if (teamsWebhookUrl) teamsWebhookUrl.value = settings.teams_webhook_url || '';
+            if (dailyDigestEnabled) dailyDigestEnabled.checked = settings.daily_digest_enabled === true;
+            if (dailyDigestTime) dailyDigestTime.value = settings.daily_digest_time || '09:00';
+        }
+    } catch (error) {
+        console.error('Error loading notification settings:', error);
+    }
+}
+
+async function testWebhook(type) {
+    showLoading();
+    try {
+        const response = await fetch('/api/settings/notifications/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: type })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            showToast(`Test failed: ${data.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Test failed: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ============================================================================
+// Data Retention Settings
+// ============================================================================
+
+async function saveRetentionSettings() {
+    const settings = {
+        audit_log_retention_days: parseInt(document.getElementById('auditLogRetention').value) || 365,
+        sync_history_retention_days: parseInt(document.getElementById('syncHistoryRetention').value) || 90,
+        session_log_retention_days: parseInt(document.getElementById('sessionLogRetention').value) || 30
+    };
+
+    try {
+        const response = await fetch('/api/settings/retention', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('Retention settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving retention settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadRetentionSettings() {
+    try {
+        const response = await fetch('/api/settings/retention');
+        if (response.ok) {
+            const settings = await response.json();
+            const auditLogRetention = document.getElementById('auditLogRetention');
+            const syncHistoryRetention = document.getElementById('syncHistoryRetention');
+            const sessionLogRetention = document.getElementById('sessionLogRetention');
+
+            if (auditLogRetention) auditLogRetention.value = settings.audit_log_retention_days || 365;
+            if (syncHistoryRetention) syncHistoryRetention.value = settings.sync_history_retention_days || 90;
+            if (sessionLogRetention) sessionLogRetention.value = settings.session_log_retention_days || 30;
+        }
+    } catch (error) {
+        console.error('Error loading retention settings:', error);
+    }
+}
+
+// ============================================================================
 // Audit Logs
 // ============================================================================
 
@@ -2004,6 +2242,12 @@ async function loadAllSettings() {
             if (httpsProxy) httpsProxy.value = general.https_proxy || '';
             if (noProxy) noProxy.value = general.no_proxy || '';
         }
+
+        // Load additional settings (security, branding, notifications, retention)
+        loadSecuritySettings();
+        loadBrandingSettings();
+        loadNotificationSettings();
+        loadRetentionSettings();
     } catch (error) {
         console.error('Error loading settings:', error);
     }

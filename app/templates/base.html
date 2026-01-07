@@ -2092,7 +2092,15 @@
                     }
 
                     // Create and store click handler for cleanup
-                    const handler = function() {
+                    const handler = function(e) {
+                        // Prevent sorting if we just finished resizing a column
+                        if (typeof TableEnhancements !== 'undefined' && TableEnhancements.justResized) {
+                            return;
+                        }
+                        // Prevent sorting if click was on resize handle
+                        if (e.target.classList.contains('resize-handle')) {
+                            return;
+                        }
                         self.sortTable(tableId, header);
                     };
                     header.addEventListener('click', handler);
@@ -2283,6 +2291,7 @@
         const TableEnhancements = {
             tables: {},
             resizeState: null,
+            justResized: false, // Flag to prevent click-to-sort after resize
 
             /**
              * Initialize enhancements for a table
@@ -2454,6 +2463,12 @@
                 // Save width preference
                 this.savePreferences(tableId);
                 this.resizeState = null;
+
+                // Set flag to prevent click-to-sort from triggering
+                this.justResized = true;
+                setTimeout(() => {
+                    this.justResized = false;
+                }, 100);
             },
 
             /**
