@@ -56,18 +56,49 @@ def create_app(config_class=Config):
     app.register_blueprint(ldap_group_api.ldap_group_bp)
     app.register_blueprint(shared_views_api.shared_views_bp)
 
-    # Make current user available in all templates
+    # Make current user and branding available in all templates
     @app.context_processor
-    def inject_user():
+    def inject_globals():
         from flask import session
-        from app.models import User
+        from app.models import User, SystemSettings
         import os
+
         current_user = None
         if 'user_id' in session:
             current_user = User.query.get(session['user_id'])
+
         # Match auth.py: AUTH_ENABLED = DISABLE_AUTH != 'true'
         auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
-        return dict(current_user=current_user, auth_enabled=auth_enabled)
+
+        # Load branding settings
+        branding = {
+            'app_name': 'SentriKat',
+            'login_message': '',
+            'support_email': '',
+            'show_version': True
+        }
+        try:
+            app_name = SystemSettings.query.filter_by(key='app_name').first()
+            login_message = SystemSettings.query.filter_by(key='login_message').first()
+            support_email = SystemSettings.query.filter_by(key='support_email').first()
+            show_version = SystemSettings.query.filter_by(key='show_version').first()
+
+            if app_name and app_name.value:
+                branding['app_name'] = app_name.value
+            if login_message and login_message.value:
+                branding['login_message'] = login_message.value
+            if support_email and support_email.value:
+                branding['support_email'] = support_email.value
+            if show_version:
+                branding['show_version'] = show_version.value != 'false'
+        except:
+            pass  # Use defaults if DB not ready
+
+        return dict(
+            current_user=current_user,
+            auth_enabled=auth_enabled,
+            branding=branding
+        )
 
     # Setup wizard redirect
     @app.before_request

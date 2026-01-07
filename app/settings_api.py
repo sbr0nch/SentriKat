@@ -486,8 +486,9 @@ def get_notification_settings():
         'slack_enabled': get_setting('slack_enabled', 'false') == 'true',
         'teams_webhook_url': get_setting('teams_webhook_url', ''),
         'teams_enabled': get_setting('teams_enabled', 'false') == 'true',
-        'daily_digest_enabled': get_setting('daily_digest_enabled', 'false') == 'true',
-        'daily_digest_time': get_setting('daily_digest_time', '09:00')
+        'critical_email_enabled': get_setting('critical_email_enabled', 'true') == 'true',
+        'critical_email_time': get_setting('critical_email_time', '09:00'),
+        'critical_email_max_age_days': int(get_setting('critical_email_max_age_days', '30'))
     }
     return jsonify(settings)
 
@@ -506,8 +507,9 @@ def save_notification_settings():
         if data.get('teams_webhook_url'):
             set_setting('teams_webhook_url', data['teams_webhook_url'], 'notifications', 'Microsoft Teams webhook URL', is_encrypted=True)
 
-        set_setting('daily_digest_enabled', 'true' if data.get('daily_digest_enabled') else 'false', 'notifications', 'Enable daily digest')
-        set_setting('daily_digest_time', data.get('daily_digest_time', '09:00'), 'notifications', 'Daily digest time (UTC)')
+        set_setting('critical_email_enabled', 'true' if data.get('critical_email_enabled') else 'false', 'notifications', 'Enable critical CVE reminder emails')
+        set_setting('critical_email_time', data.get('critical_email_time', '09:00'), 'notifications', 'Critical CVE email time (UTC)')
+        set_setting('critical_email_max_age_days', str(data.get('critical_email_max_age_days', 30)), 'notifications', 'Max age for CVEs in reminder (days)')
 
         return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
     except Exception as e:

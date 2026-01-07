@@ -1050,18 +1050,23 @@
                                     </div>
 
                                     <div class="col-12 mt-4">
-                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-envelope-paper me-2"></i>Daily Digest</h6>
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-envelope-exclamation me-2"></i>Critical CVE Email Reminders</h6>
                                     </div>
                                     <div class="col-md-12">
                                         <div class="form-check form-switch mb-2">
-                                            <input type="checkbox" class="form-check-input" id="dailyDigestEnabled">
-                                            <label class="form-check-label fw-semibold" for="dailyDigestEnabled">Enable Daily Digest Email</label>
+                                            <input type="checkbox" class="form-check-input" id="criticalEmailEnabled" checked>
+                                            <label class="form-check-label fw-semibold" for="criticalEmailEnabled">Enable Daily Critical CVE Reminder Emails</label>
                                         </div>
-                                        <small class="form-text text-muted">Send a daily summary of new vulnerabilities to organization notification emails</small>
+                                        <small class="form-text text-muted">Send daily reminder emails about unacknowledged CRITICAL CVEs to organization notification emails</small>
                                     </div>
                                     <div class="col-md-4">
-                                        <label for="dailyDigestTime" class="form-label">Digest Time (UTC)</label>
-                                        <input type="time" class="form-control" id="dailyDigestTime" value="09:00">
+                                        <label for="criticalEmailTime" class="form-label">Email Time (UTC)</label>
+                                        <input type="time" class="form-control" id="criticalEmailTime" value="09:00">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="criticalEmailMaxAge" class="form-label">Max CVE Age (days)</label>
+                                        <input type="number" class="form-control" id="criticalEmailMaxAge" value="30" min="7" max="90">
+                                        <small class="form-text text-muted">Only include CVEs discovered within this many days</small>
                                     </div>
 
                                     <div class="col-md-12">

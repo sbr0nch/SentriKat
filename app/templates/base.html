@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}SentriKat - Enterprise Vulnerability Management{% endblock %}</title>
+    <title>{% block title %}{{ branding.app_name }} - Enterprise Vulnerability Management{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -1396,8 +1396,8 @@
         <div class="container-fluid px-4">
             <div class="d-flex justify-content-between align-items-center">
                 <a class="navbar-brand" href="/">
-                    <img src="/static/images/favicon-128x128.png" alt="SentriKat" style="width: 96px; height: 96px;">
-                    <span>SentriKat</span>
+                    <img src="/static/images/favicon-128x128.png" alt="{{ branding.app_name }}" style="width: 96px; height: 96px;">
+                    <span>{{ branding.app_name }}</span>
                 </a>
                 <div class="d-flex align-items-center gap-3">
                     <a class="nav-link {{ 'active' if request.endpoint == 'main.index' else '' }}" href="/">
@@ -1525,16 +1525,21 @@
         <div class="container-fluid px-4">
             <div class="text-center">
                 <p class="mb-1">
-                    <strong>SentriKat</strong> - Enterprise Vulnerability Management Platform
+                    <strong>{{ branding.app_name }}</strong> - Enterprise Vulnerability Management Platform
                 </p>
                 <p class="copyright-notice mb-1">
                     Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
+                    {% if branding.support_email %}
+                    | <a href="mailto:{{ branding.support_email }}">Support</a>
+                    {% endif %}
                 </p>
                 <!-- CVE Service Status Indicator -->
+                {% if branding.show_version %}
                 <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
                     <span class="status-led status-led-yellow" id="cveStatusLed"></span>
                     <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
                 </div>
+                {% endif %}
             </div>
         </div>
     </footer>

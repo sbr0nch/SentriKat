@@ -1936,8 +1936,9 @@ async function saveNotificationSettings() {
         slack_webhook_url: document.getElementById('slackWebhookUrl').value || '',
         teams_enabled: document.getElementById('teamsEnabled').checked,
         teams_webhook_url: document.getElementById('teamsWebhookUrl').value || '',
-        daily_digest_enabled: document.getElementById('dailyDigestEnabled').checked,
-        daily_digest_time: document.getElementById('dailyDigestTime').value || '09:00'
+        critical_email_enabled: document.getElementById('criticalEmailEnabled').checked,
+        critical_email_time: document.getElementById('criticalEmailTime').value || '09:00',
+        critical_email_max_age_days: parseInt(document.getElementById('criticalEmailMaxAge').value) || 30
     };
 
     try {
@@ -1967,15 +1968,17 @@ async function loadNotificationSettings() {
             const slackWebhookUrl = document.getElementById('slackWebhookUrl');
             const teamsEnabled = document.getElementById('teamsEnabled');
             const teamsWebhookUrl = document.getElementById('teamsWebhookUrl');
-            const dailyDigestEnabled = document.getElementById('dailyDigestEnabled');
-            const dailyDigestTime = document.getElementById('dailyDigestTime');
+            const criticalEmailEnabled = document.getElementById('criticalEmailEnabled');
+            const criticalEmailTime = document.getElementById('criticalEmailTime');
+            const criticalEmailMaxAge = document.getElementById('criticalEmailMaxAge');
 
             if (slackEnabled) slackEnabled.checked = settings.slack_enabled === true;
             if (slackWebhookUrl) slackWebhookUrl.value = settings.slack_webhook_url || '';
             if (teamsEnabled) teamsEnabled.checked = settings.teams_enabled === true;
             if (teamsWebhookUrl) teamsWebhookUrl.value = settings.teams_webhook_url || '';
-            if (dailyDigestEnabled) dailyDigestEnabled.checked = settings.daily_digest_enabled === true;
-            if (dailyDigestTime) dailyDigestTime.value = settings.daily_digest_time || '09:00';
+            if (criticalEmailEnabled) criticalEmailEnabled.checked = settings.critical_email_enabled !== false;
+            if (criticalEmailTime) criticalEmailTime.value = settings.critical_email_time || '09:00';
+            if (criticalEmailMaxAge) criticalEmailMaxAge.value = settings.critical_email_max_age_days || 30;
         }
     } catch (error) {
         console.error('Error loading notification settings:', error);
