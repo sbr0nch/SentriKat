@@ -47,6 +47,10 @@
     <div class="tab-content" id="adminTabsContent">
         <!-- Users Tab -->
         <div class="tab-pane fade show active" id="users" role="tabpanel">
+            <div class="alert alert-light border mb-3 small">
+                <i class="bi bi-info-circle me-1"></i>
+                <strong>Local users</strong> can be created manually below. <strong>LDAP users</strong> are auto-created when they first log in (if Auto-Provision is enabled in LDAP Group Mappings).
+            </div>
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-people me-2"></i>User Management</span>
@@ -173,6 +177,10 @@
 
         <!-- Organizations Tab -->
         <div class="tab-pane fade" id="organizations" role="tabpanel">
+            <div class="alert alert-light border mb-3 small">
+                <i class="bi bi-info-circle me-1"></i>
+                <strong>Organizations</strong> are logical groups (e.g., tenants, departments, teams) that contain users and products. Each organization can have its own SMTP settings for notifications. Users are assigned to one organization, while Super Admins can access all.
+            </div>
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-building me-2"></i>Organization Management</span>
@@ -239,9 +247,24 @@
         <div class="tab-pane fade" id="ldapGroups" role="tabpanel">
             <div class="row">
                 <div class="col-12">
-                    <div class="alert alert-info">
-                        <i class="bi bi-info-circle me-2"></i>
-                        <strong>Enterprise LDAP Group Management:</strong> Map LDAP/Active Directory groups to SentriKat roles. Users are automatically assigned roles based on their group memberships.
+                    <div class="alert alert-info mb-3">
+                        <h6 class="alert-heading mb-2"><i class="bi bi-info-circle me-2"></i>How LDAP Group Mapping Works</h6>
+                        <p class="mb-2">Map LDAP/Active Directory groups to SentriKat roles. When users log in via LDAP, they are automatically assigned roles based on their group memberships.</p>
+                        <hr class="my-2">
+                        <div class="row small">
+                            <div class="col-md-4">
+                                <strong><i class="bi bi-person-plus me-1"></i>Auto-Provision:</strong><br>
+                                Creates user accounts when they <u>first log in</u> via LDAP (if enabled for the mapping).
+                            </div>
+                            <div class="col-md-4">
+                                <strong><i class="bi bi-arrow-repeat me-1"></i>Sync Now:</strong><br>
+                                Updates roles/organizations for <u>existing</u> LDAP users based on current group memberships.
+                            </div>
+                            <div class="col-md-4">
+                                <strong><i class="bi bi-people me-1"></i>Members Count:</strong><br>
+                                Shows how many users are in the LDAP group (from directory, not SentriKat).
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -362,6 +385,14 @@
 
                 <!-- Sync Dashboard Sub-tab -->
                 <div class="tab-pane fade" id="syncDashboard" role="tabpanel">
+                    <div class="alert alert-secondary mb-3">
+                        <h6 class="alert-heading mb-2"><i class="bi bi-arrow-repeat me-2"></i>Sync Dashboard</h6>
+                        <p class="mb-0 small">
+                            <strong>Sync Now</strong> re-evaluates all existing LDAP users' group memberships and updates their roles/organizations accordingly.
+                            This does <u>not</u> create new users - use Auto-Provision for that (users are created when they first log in).
+                            Run a sync after changing group mappings to apply changes to existing users immediately.
+                        </p>
+                    </div>
                     <div class="row mb-4">
                         <div class="col-md-3">
                             <div class="card text-center">
