@@ -988,6 +988,26 @@
                                         </div>
                                     </div>
 
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-calendar-x me-2"></i>Password Expiration</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="passwordExpiryDays" class="form-label fw-semibold">Password Expiry (days)</label>
+                                        <input type="number" class="form-control" id="passwordExpiryDays" value="0" min="0" max="365">
+                                        <small class="form-text text-muted">Set to 0 to disable password expiration. Users must change password after this many days.</small>
+                                    </div>
+
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-phone me-2"></i>Two-Factor Authentication</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="require2FA">
+                                            <label class="form-check-label" for="require2FA">Require 2FA for all users</label>
+                                        </div>
+                                        <small class="form-text text-muted">When enabled, users must set up TOTP-based two-factor authentication</small>
+                                    </div>
+
                                     <div class="col-md-12">
                                         <hr>
                                         <button type="button" class="btn btn-primary" onclick="saveSecuritySettings()">
@@ -996,6 +1016,47 @@
                                     </div>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+
+                    <!-- Backup & Restore Card -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <i class="bi bi-cloud-download me-2"></i>Backup & Restore
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                Backup includes settings, organizations, and user accounts (without passwords). Use with caution when restoring.
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <i class="bi bi-download display-4 text-primary mb-3"></i>
+                                            <h5>Export Backup</h5>
+                                            <p class="text-muted small">Download a JSON backup of your settings and configuration</p>
+                                            <button type="button" class="btn btn-primary" onclick="downloadBackup()">
+                                                <i class="bi bi-cloud-download me-1"></i>Download Backup
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <i class="bi bi-upload display-4 text-warning mb-3"></i>
+                                            <h5>Restore Backup</h5>
+                                            <p class="text-muted small">Restore settings from a previously exported backup file</p>
+                                            <input type="file" class="form-control mb-2" id="restoreFile" accept=".json" style="display: none;">
+                                            <button type="button" class="btn btn-warning" onclick="document.getElementById('restoreFile').click()">
+                                                <i class="bi bi-cloud-upload me-1"></i>Select Backup File
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -1868,7 +1868,9 @@ async function saveSecuritySettings() {
         password_require_uppercase: document.getElementById('passwordRequireUppercase').checked,
         password_require_lowercase: document.getElementById('passwordRequireLowercase').checked,
         password_require_numbers: document.getElementById('passwordRequireNumbers').checked,
-        password_require_special: document.getElementById('passwordRequireSpecial').checked
+        password_require_special: document.getElementById('passwordRequireSpecial').checked,
+        password_expiry_days: parseInt(document.getElementById('passwordExpiryDays').value) || 0,
+        require_2fa: document.getElementById('require2FA').checked
     };
 
     try {
@@ -1911,11 +1913,86 @@ async function loadSecuritySettings() {
             if (passwordRequireLowercase) passwordRequireLowercase.checked = settings.password_require_lowercase !== false;
             if (passwordRequireNumbers) passwordRequireNumbers.checked = settings.password_require_numbers !== false;
             if (passwordRequireSpecial) passwordRequireSpecial.checked = settings.password_require_special === true;
+
+            // Password expiration and 2FA settings
+            const passwordExpiryDays = document.getElementById('passwordExpiryDays');
+            const require2FA = document.getElementById('require2FA');
+            if (passwordExpiryDays) passwordExpiryDays.value = settings.password_expiry_days || 0;
+            if (require2FA) require2FA.checked = settings.require_2fa === true;
         }
     } catch (error) {
         console.error('Error loading security settings:', error);
     }
 }
+
+// ============================================================================
+// Backup & Restore
+// ============================================================================
+
+async function downloadBackup() {
+    try {
+        const response = await fetch('/api/settings/backup');
+        if (response.ok) {
+            const data = await response.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sentrikat-backup-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast('Backup downloaded successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error downloading backup: ${error.message}`, 'danger');
+    }
+}
+
+async function restoreBackup(file) {
+    if (!confirm('Are you sure you want to restore from this backup? This will overwrite current settings.')) {
+        return;
+    }
+
+    try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        const response = await fetch('/api/settings/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            showToast('Backup restored successfully. Reloading settings...', 'success');
+            // Reload all settings
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error restoring backup: ${error.message}`, 'danger');
+    }
+}
+
+// Setup restore file input listener
+document.addEventListener('DOMContentLoaded', function() {
+    const restoreFile = document.getElementById('restoreFile');
+    if (restoreFile) {
+        restoreFile.addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                restoreBackup(e.target.files[0]);
+                e.target.value = ''; // Reset file input
+            }
+        });
+    }
+});
 
 // ============================================================================
 // Branding Settings

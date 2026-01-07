@@ -442,6 +442,14 @@ class User(db.Model):
     failed_login_attempts = db.Column(db.Integer, default=0)
     locked_until = db.Column(db.DateTime, nullable=True)
 
+    # Password expiration
+    password_changed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    must_change_password = db.Column(db.Boolean, default=False)
+
+    # Two-Factor Authentication
+    totp_secret = db.Column(db.String(32), nullable=True)
+    totp_enabled = db.Column(db.Boolean, default=False)
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -495,6 +503,113 @@ class User(db.Model):
         """Reset failed login counter on successful login"""
         self.failed_login_attempts = 0
         self.locked_until = None
+
+    def is_password_expired(self):
+        """Check if password has expired based on settings"""
+        if self.auth_type != 'local':
+            return False  # LDAP handles its own expiration
+
+        if self.must_change_password:
+            return True
+
+        # Get expiration setting
+        expiry_setting = SystemSettings.query.filter_by(key='password_expiry_days').first()
+        expiry_days = int(expiry_setting.value) if expiry_setting else 0
+
+        if expiry_days <= 0:
+            return False  # Password expiration disabled
+
+        if not self.password_changed_at:
+            return True  # Never set, force change
+
+        from datetime import timedelta
+        expiry_date = self.password_changed_at + timedelta(days=expiry_days)
+        return datetime.utcnow() > expiry_date
+
+    def get_password_days_until_expiry(self):
+        """Get number of days until password expires"""
+        if self.auth_type != 'local':
+            return None
+
+        expiry_setting = SystemSettings.query.filter_by(key='password_expiry_days').first()
+        expiry_days = int(expiry_setting.value) if expiry_setting else 0
+
+        if expiry_days <= 0:
+            return None  # Never expires
+
+        if not self.password_changed_at:
+            return 0
+
+        from datetime import timedelta
+        expiry_date = self.password_changed_at + timedelta(days=expiry_days)
+        remaining = (expiry_date - datetime.utcnow()).days
+        return max(0, remaining)
+
+    def update_password(self, new_password):
+        """Update password and reset expiration timer"""
+        self.set_password(new_password)
+        self.password_changed_at = datetime.utcnow()
+        self.must_change_password = False
+
+    def setup_totp(self):
+        """Generate a new TOTP secret for 2FA setup"""
+        import secrets
+        import base64
+        # Generate 20 random bytes and encode as base32
+        secret_bytes = secrets.token_bytes(20)
+        self.totp_secret = base64.b32encode(secret_bytes).decode('utf-8')
+        return self.totp_secret
+
+    def get_totp_uri(self, app_name='SentriKat'):
+        """Get the TOTP URI for QR code generation"""
+        if not self.totp_secret:
+            return None
+        from urllib.parse import quote
+        return f'otpauth://totp/{quote(app_name)}:{quote(self.email)}?secret={self.totp_secret}&issuer={quote(app_name)}'
+
+    def verify_totp(self, code):
+        """Verify a TOTP code"""
+        if not self.totp_secret:
+            return False
+        try:
+            import hmac
+            import struct
+            import time
+            import base64
+            import hashlib
+
+            # Decode the secret
+            key = base64.b32decode(self.totp_secret, casefold=True)
+
+            # Get the current time step (30-second window)
+            counter = int(time.time()) // 30
+
+            # Check current and adjacent time windows for clock skew
+            for offset in range(-1, 2):
+                check_counter = counter + offset
+                # Generate TOTP
+                counter_bytes = struct.pack('>Q', check_counter)
+                hmac_hash = hmac.new(key, counter_bytes, hashlib.sha1).digest()
+                offset_val = hmac_hash[-1] & 0x0f
+                truncated = struct.unpack('>I', hmac_hash[offset_val:offset_val + 4])[0]
+                totp_code = (truncated & 0x7fffffff) % 1000000
+
+                if str(totp_code).zfill(6) == str(code).zfill(6):
+                    return True
+
+            return False
+        except Exception:
+            return False
+
+    def enable_totp(self):
+        """Enable 2FA after verification"""
+        if self.totp_secret:
+            self.totp_enabled = True
+
+    def disable_totp(self):
+        """Disable 2FA"""
+        self.totp_secret = None
+        self.totp_enabled = False
 
     @staticmethod
     def validate_password_policy(password):
@@ -692,6 +807,12 @@ class User(db.Model):
             'is_locked': self.is_locked(),
             'failed_login_attempts': self.failed_login_attempts or 0,
             'locked_until': self.locked_until.isoformat() if self.locked_until else None,
+            # Password expiration
+            'password_expired': self.is_password_expired() if self.auth_type == 'local' else False,
+            'password_days_until_expiry': self.get_password_days_until_expiry(),
+            'must_change_password': self.must_change_password or False,
+            # 2FA status
+            'totp_enabled': self.totp_enabled or False,
             # Multi-org data
             'org_memberships': org_memberships,
             'all_organizations': self.get_all_organizations()

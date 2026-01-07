@@ -415,7 +415,9 @@ def get_security_settings():
         'password_require_uppercase': get_setting('password_require_uppercase', 'true') == 'true',
         'password_require_lowercase': get_setting('password_require_lowercase', 'true') == 'true',
         'password_require_numbers': get_setting('password_require_numbers', 'true') == 'true',
-        'password_require_special': get_setting('password_require_special', 'false') == 'true'
+        'password_require_special': get_setting('password_require_special', 'false') == 'true',
+        'password_expiry_days': int(get_setting('password_expiry_days', '0')),  # 0 = disabled
+        'require_2fa': get_setting('require_2fa', 'false') == 'true'
     }
     return jsonify(settings)
 
@@ -434,6 +436,8 @@ def save_security_settings():
         set_setting('password_require_lowercase', 'true' if data.get('password_require_lowercase') else 'false', 'security', 'Require lowercase letter')
         set_setting('password_require_numbers', 'true' if data.get('password_require_numbers') else 'false', 'security', 'Require number')
         set_setting('password_require_special', 'true' if data.get('password_require_special') else 'false', 'security', 'Require special character')
+        set_setting('password_expiry_days', str(data.get('password_expiry_days', 0)), 'security', 'Password expiration (days, 0 = disabled)')
+        set_setting('require_2fa', 'true' if data.get('require_2fa') else 'false', 'security', 'Require 2FA for all local users')
 
         return jsonify({'success': True, 'message': 'Security settings saved successfully'})
     except Exception as e:
@@ -693,3 +697,214 @@ def delete_logo():
     except Exception as e:
         logger.error(f"Logo deletion failed: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Backup & Restore
+# ============================================================================
+
+@settings_bp.route('/backup', methods=['GET'])
+@admin_required
+def create_backup():
+    """
+    Create a backup of all settings and configuration.
+    Only accessible by super admins.
+
+    Returns a JSON file containing:
+    - System settings
+    - Organizations
+    - Users (without password hashes)
+    - Products
+    - Service catalog
+    """
+    import json
+    from datetime import datetime
+    from flask import Response
+
+    from app.auth import get_current_user
+    current_user = get_current_user()
+
+    if not current_user or not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can create backups'}), 403
+
+    try:
+        from app.models import Organization, Product, User, ServiceCatalog
+
+        backup_data = {
+            'backup_info': {
+                'version': '1.0',
+                'created_at': datetime.utcnow().isoformat(),
+                'created_by': current_user.username,
+                'app_name': get_setting('app_name', 'SentriKat')
+            },
+            'settings': {},
+            'organizations': [],
+            'users': [],
+            'products': [],
+            'service_catalog': []
+        }
+
+        # Export settings
+        settings = SystemSettings.query.all()
+        for s in settings:
+            # Skip encrypted settings for security
+            if s.is_encrypted:
+                backup_data['settings'][s.key] = '***ENCRYPTED***'
+            else:
+                backup_data['settings'][s.key] = {
+                    'value': s.value,
+                    'category': s.category,
+                    'description': s.description
+                }
+
+        # Export organizations
+        for org in Organization.query.all():
+            org_data = {
+                'id': org.id,
+                'name': org.name,
+                'display_name': org.display_name,
+                'description': org.description,
+                'notification_emails': org.notification_emails,
+                'alert_on_critical': org.alert_on_critical,
+                'alert_on_high': org.alert_on_high,
+                'alert_on_new_cve': org.alert_on_new_cve,
+                'alert_on_ransomware': org.alert_on_ransomware,
+                'active': org.active
+                # SMTP credentials excluded for security
+            }
+            backup_data['organizations'].append(org_data)
+
+        # Export users (without sensitive data)
+        for user in User.query.all():
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'full_name': user.full_name,
+                'organization_id': user.organization_id,
+                'auth_type': user.auth_type,
+                'role': user.role,
+                'is_admin': user.is_admin,
+                'is_active': user.is_active,
+                'can_manage_products': user.can_manage_products,
+                'can_view_all_orgs': user.can_view_all_orgs
+                # Password hash, TOTP secret excluded for security
+            }
+            backup_data['users'].append(user_data)
+
+        # Export products
+        for product in Product.query.all():
+            product_data = {
+                'id': product.id,
+                'organization_id': product.organization_id,
+                'vendor': product.vendor,
+                'product_name': product.product_name,
+                'version': product.version,
+                'keywords': product.keywords,
+                'description': product.description,
+                'active': product.active,
+                'criticality': product.criticality
+            }
+            backup_data['products'].append(product_data)
+
+        # Export service catalog
+        for catalog in ServiceCatalog.query.all():
+            catalog_data = {
+                'id': catalog.id,
+                'vendor': catalog.vendor,
+                'product_name': catalog.product_name,
+                'category': catalog.category,
+                'subcategory': catalog.subcategory,
+                'common_names': catalog.common_names,
+                'description': catalog.description,
+                'is_popular': catalog.is_popular
+            }
+            backup_data['service_catalog'].append(catalog_data)
+
+        # Generate filename
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        filename = f'sentrikat_backup_{timestamp}.json'
+
+        output = json.dumps(backup_data, indent=2)
+
+        logger.info(f"Backup created by {current_user.username}")
+
+        return Response(
+            output,
+            mimetype='application/json',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+
+    except Exception as e:
+        logger.error(f"Backup creation failed: {e}")
+        return jsonify({'error': f'Backup failed: {str(e)}'}), 500
+
+
+@settings_bp.route('/restore', methods=['POST'])
+@admin_required
+def restore_backup():
+    """
+    Restore settings from a backup file.
+    Only accessible by super admins.
+
+    Only restores settings - does not restore users/products to prevent data loss.
+    """
+    import json
+
+    from app.auth import get_current_user
+    current_user = get_current_user()
+
+    if not current_user or not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can restore backups'}), 403
+
+    if 'backup' not in request.files:
+        return jsonify({'error': 'No backup file provided'}), 400
+
+    file = request.files['backup']
+
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    try:
+        backup_data = json.load(file)
+
+        # Validate backup format
+        if 'backup_info' not in backup_data or 'settings' not in backup_data:
+            return jsonify({'error': 'Invalid backup file format'}), 400
+
+        restored_count = 0
+        skipped_count = 0
+
+        # Restore settings (excluding encrypted ones)
+        for key, value in backup_data['settings'].items():
+            if value == '***ENCRYPTED***':
+                skipped_count += 1
+                continue
+
+            if isinstance(value, dict):
+                set_setting(
+                    key,
+                    value.get('value', ''),
+                    value.get('category', 'general'),
+                    value.get('description', '')
+                )
+                restored_count += 1
+
+        db.session.commit()
+
+        logger.info(f"Backup restored by {current_user.username}: {restored_count} settings restored, {skipped_count} skipped")
+
+        return jsonify({
+            'success': True,
+            'message': f'Restore complete: {restored_count} settings restored, {skipped_count} encrypted settings skipped',
+            'restored_count': restored_count,
+            'skipped_count': skipped_count,
+            'backup_info': backup_data.get('backup_info', {})
+        })
+
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid JSON file'}), 400
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Restore failed: {e}")
+        return jsonify({'error': f'Restore failed: {str(e)}'}), 500

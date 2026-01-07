@@ -366,6 +366,33 @@ def api_login():
         user.reset_failed_login_attempts()
         logger.info(f"Reset failed login attempts for {username}")
 
+    # Check if 2FA is required
+    if user.totp_enabled:
+        totp_code = data.get('totp_code')
+        if not totp_code:
+            # 2FA required but not provided - return partial auth
+            logger.info(f"2FA required for {username}")
+            db.session.commit()  # Save failed attempts reset
+            return jsonify({
+                'success': False,
+                'requires_2fa': True,
+                'user_id': user.id,
+                'message': 'Two-factor authentication required'
+            })
+
+        # Verify TOTP code
+        if not user.verify_totp(totp_code):
+            logger.warning(f"Invalid 2FA code for {username}")
+            return jsonify({'error': 'Invalid two-factor authentication code'}), 401
+
+        logger.info(f"2FA verified for {username}")
+
+    # Check for password expiration (local users only)
+    password_expired = False
+    if user.auth_type == 'local' and user.is_password_expired():
+        password_expired = True
+        logger.info(f"Password expired for {username}")
+
     # Update last login
     logger.info(f"Authentication successful for {username}, updating last login")
     user.last_login = datetime.utcnow()
@@ -379,6 +406,10 @@ def api_login():
     session['username'] = user.username
     session['is_admin'] = user.is_admin
 
+    # Set flag for password change requirement
+    if password_expired:
+        session['must_change_password'] = True
+
     # Set organization
     if user.organization_id:
         session['organization_id'] = user.organization_id
@@ -390,6 +421,7 @@ def api_login():
 
     return jsonify({
         'success': True,
+        'password_expired': password_expired,
         'user': user.to_dict(),
         'redirect': url_for('main.index')
     })
@@ -413,6 +445,156 @@ def auth_status():
         'enabled': AUTH_ENABLED,
         'authenticated': 'user_id' in session,
         'user': get_current_user().to_dict() if get_current_user() else None
+    })
+
+# ============================================================================
+# PASSWORD CHANGE
+# ============================================================================
+
+@auth_bp.route('/api/auth/change-password', methods=['POST'])
+@login_required
+def change_password():
+    """Change user password (for expired passwords or voluntary change)"""
+    import logging
+    logger = logging.getLogger('security')
+
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    if current_user.auth_type != 'local':
+        return jsonify({'error': 'Password change not available for LDAP users'}), 400
+
+    data = request.get_json()
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current and new passwords are required'}), 400
+
+    # Verify current password
+    if not current_user.check_password(current_password):
+        logger.warning(f"Password change failed for {current_user.username}: incorrect current password")
+        return jsonify({'error': 'Current password is incorrect'}), 401
+
+    # Validate new password against policy
+    is_valid, error_msg = User.validate_password_policy(new_password)
+    if not is_valid:
+        return jsonify({'error': error_msg}), 400
+
+    # Update password
+    current_user.update_password(new_password)
+    session.pop('must_change_password', None)
+    db.session.commit()
+
+    logger.info(f"Password changed successfully for {current_user.username}")
+    return jsonify({'success': True, 'message': 'Password changed successfully'})
+
+# ============================================================================
+# TWO-FACTOR AUTHENTICATION
+# ============================================================================
+
+@auth_bp.route('/api/auth/2fa/setup', methods=['POST'])
+@login_required
+def setup_2fa():
+    """Generate 2FA secret and return QR code data"""
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    if current_user.auth_type != 'local':
+        return jsonify({'error': '2FA is only available for local users'}), 400
+
+    if current_user.totp_enabled:
+        return jsonify({'error': '2FA is already enabled. Disable it first to set up again.'}), 400
+
+    # Generate new TOTP secret
+    secret = current_user.setup_totp()
+    db.session.commit()
+
+    # Get TOTP URI for QR code
+    from app.models import SystemSettings
+    app_name_setting = SystemSettings.query.filter_by(key='app_name').first()
+    app_name = app_name_setting.value if app_name_setting else 'SentriKat'
+
+    totp_uri = current_user.get_totp_uri(app_name)
+
+    return jsonify({
+        'success': True,
+        'secret': secret,
+        'totp_uri': totp_uri,
+        'message': 'Scan the QR code with your authenticator app, then verify with a code'
+    })
+
+@auth_bp.route('/api/auth/2fa/verify', methods=['POST'])
+@login_required
+def verify_2fa():
+    """Verify 2FA code and enable 2FA"""
+    import logging
+    logger = logging.getLogger('security')
+
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    if not current_user.totp_secret:
+        return jsonify({'error': 'Run 2FA setup first'}), 400
+
+    data = request.get_json()
+    code = data.get('code')
+
+    if not code:
+        return jsonify({'error': 'Verification code is required'}), 400
+
+    if current_user.verify_totp(code):
+        current_user.enable_totp()
+        db.session.commit()
+        logger.info(f"2FA enabled for {current_user.username}")
+        return jsonify({'success': True, 'message': 'Two-factor authentication enabled successfully'})
+    else:
+        return jsonify({'error': 'Invalid verification code. Please try again.'}), 400
+
+@auth_bp.route('/api/auth/2fa/disable', methods=['POST'])
+@login_required
+def disable_2fa():
+    """Disable 2FA (requires password verification)"""
+    import logging
+    logger = logging.getLogger('security')
+
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    if not current_user.totp_enabled:
+        return jsonify({'error': '2FA is not enabled'}), 400
+
+    data = request.get_json()
+    password = data.get('password')
+
+    if not password:
+        return jsonify({'error': 'Password is required to disable 2FA'}), 400
+
+    if not current_user.check_password(password):
+        logger.warning(f"2FA disable failed for {current_user.username}: incorrect password")
+        return jsonify({'error': 'Incorrect password'}), 401
+
+    current_user.disable_totp()
+    db.session.commit()
+
+    logger.info(f"2FA disabled for {current_user.username}")
+    return jsonify({'success': True, 'message': 'Two-factor authentication disabled'})
+
+@auth_bp.route('/api/auth/2fa/status', methods=['GET'])
+@login_required
+def get_2fa_status():
+    """Get current 2FA status"""
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    return jsonify({
+        'enabled': current_user.totp_enabled or False,
+        'available': current_user.auth_type == 'local'
     })
 
 def authenticate_ldap(user, password):
