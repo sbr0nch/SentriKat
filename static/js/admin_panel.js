@@ -446,7 +446,7 @@ async function loadUsers() {
                         <td data-column="authtype">${authBadge}</td>
                         <td data-column="role">${roleBadge}</td>
                         <td data-column="status">${statusBadge}</td>
-                        <td>
+                        <td data-column="actions">
                             <div class="d-flex gap-1">
                                 <button class="btn-action btn-action-edit" onclick="editUser(${user.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
@@ -473,6 +473,10 @@ async function loadUsers() {
         // Initialize sortable table after rendering
         if (typeof SortableTable !== 'undefined') {
             SortableTable.init('usersTableContainer');
+        }
+        // Restore table enhancements (column visibility, widths)
+        if (typeof TableEnhancements !== 'undefined') {
+            TableEnhancements.refresh('usersTableContainer');
         }
     } catch (error) {
         console.error('Error loading users:', error);
@@ -976,7 +980,7 @@ async function loadOrganizations() {
                         <td data-column="users"><span class="badge badge-role-manager">${org.user_count || 0}</span></td>
                         <td data-column="smtp">${smtpBadge}</td>
                         <td data-column="status">${statusBadge}</td>
-                        <td>
+                        <td data-column="actions">
                             <div class="d-flex gap-1">
                                 <button class="btn-action btn-action-edit" onclick="editOrganization(${org.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
@@ -1000,6 +1004,10 @@ async function loadOrganizations() {
         // Initialize sortable table after rendering
         if (typeof SortableTable !== 'undefined') {
             SortableTable.init('orgsTableContainer');
+        }
+        // Restore table enhancements
+        if (typeof TableEnhancements !== 'undefined') {
+            TableEnhancements.refresh('orgsTableContainer');
         }
     } catch (error) {
         console.error('loadOrganizations: Error:', error);
@@ -2656,18 +2664,18 @@ async function loadGroupMappings() {
 
                 return `
                     <tr>
-                        <td>
+                        <td data-column="group">
                             <strong>${escapeHtml(mapping.ldap_group_cn)}</strong><br>
                             <small class="text-muted">${escapeHtml(mapping.ldap_group_dn)}</small>
                         </td>
-                        <td>${escapeHtml(orgName)}</td>
-                        <td>${roleBadge}</td>
-                        <td><span class="badge bg-primary">${mapping.priority}</span></td>
-                        <td class="text-center">${autoProvisionIcon}</td>
-                        <td>${mapping.member_count || 0}</td>
-                        <td><small>${lastSync}</small></td>
-                        <td>${statusBadge}</td>
-                        <td>
+                        <td data-column="organization">${escapeHtml(orgName)}</td>
+                        <td data-column="role">${roleBadge}</td>
+                        <td data-column="priority"><span class="badge bg-primary">${mapping.priority}</span></td>
+                        <td data-column="autoprovision" class="text-center">${autoProvisionIcon}</td>
+                        <td data-column="members">${mapping.member_count || 0}</td>
+                        <td data-column="lastsync"><small>${lastSync}</small></td>
+                        <td data-column="status">${statusBadge}</td>
+                        <td data-column="actions">
                             <div class="d-flex gap-1">
                                 <button class="btn-action btn-action-edit" onclick="editGroupMapping(${mapping.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
@@ -2680,6 +2688,14 @@ async function loadGroupMappings() {
                     </tr>
                 `;
             }).join('');
+
+            // Initialize table enhancements
+            if (typeof SortableTable !== 'undefined') {
+                SortableTable.init('groupMappingsTableContainer');
+            }
+            if (typeof TableEnhancements !== 'undefined') {
+                TableEnhancements.refresh('groupMappingsTableContainer');
+            }
         } else {
             const error = await response.json();
             tableBody.innerHTML = `
@@ -3296,18 +3312,26 @@ async function loadSyncHistory() {
 
                 return `
                     <tr>
-                        <td><small>${escapeHtml(sync.sync_id)}</small></td>
-                        <td>${escapeHtml(sync.sync_type)}</td>
-                        <td><small>${startedAt}</small></td>
-                        <td>${duration}</td>
-                        <td>${statusBadge}</td>
-                        <td>${sync.users_added || 0}</td>
-                        <td>${sync.users_updated || 0}</td>
-                        <td>${sync.users_deactivated || 0}</td>
-                        <td>${sync.error_count || 0}</td>
+                        <td data-column="syncid"><small>${escapeHtml(sync.sync_id)}</small></td>
+                        <td data-column="type">${escapeHtml(sync.sync_type)}</td>
+                        <td data-column="started"><small>${startedAt}</small></td>
+                        <td data-column="duration">${duration}</td>
+                        <td data-column="status">${statusBadge}</td>
+                        <td data-column="added">${sync.users_added || 0}</td>
+                        <td data-column="updated">${sync.users_updated || 0}</td>
+                        <td data-column="deactivated">${sync.users_deactivated || 0}</td>
+                        <td data-column="errors">${sync.error_count || 0}</td>
                     </tr>
                 `;
             }).join('');
+
+            // Initialize table enhancements
+            if (typeof SortableTable !== 'undefined') {
+                SortableTable.init('syncHistoryTableContainer');
+            }
+            if (typeof TableEnhancements !== 'undefined') {
+                TableEnhancements.refresh('syncHistoryTableContainer');
+            }
         } else {
             // Handle API errors (403, 500, etc.)
             tableBody.innerHTML = `

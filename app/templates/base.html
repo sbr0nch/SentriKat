@@ -1162,6 +1162,225 @@
         [data-theme="dark"] .sortable-header:hover {
             background-color: var(--gray-100);
         }
+
+        /* ============================================================================
+           Resizable Columns
+           ============================================================================ */
+        .resizable-table th {
+            position: relative;
+        }
+
+        .resizable-table th .resize-handle {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 6px;
+            cursor: col-resize;
+            background: transparent;
+            z-index: 10;
+            transition: background-color 0.2s;
+        }
+
+        .resizable-table th .resize-handle:hover,
+        .resizable-table th .resize-handle.resizing {
+            background: var(--primary-color);
+            opacity: 0.5;
+        }
+
+        .resizable-table th .resize-handle::after {
+            content: '';
+            position: absolute;
+            right: 2px;
+            top: 25%;
+            height: 50%;
+            width: 2px;
+            background: var(--gray-300);
+            border-radius: 1px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .resizable-table th:hover .resize-handle::after {
+            opacity: 1;
+        }
+
+        /* Prevent text selection while resizing */
+        .resizing-active {
+            user-select: none;
+            cursor: col-resize !important;
+        }
+
+        .resizing-active * {
+            cursor: col-resize !important;
+        }
+
+        /* ============================================================================
+           Column Visibility Dropdown (SentriKat Styled)
+           ============================================================================ */
+        .column-dropdown {
+            min-width: 220px;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+        }
+
+        .column-dropdown .dropdown-header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 12px 16px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: none;
+        }
+
+        .column-dropdown .dropdown-header i {
+            font-size: 1rem;
+        }
+
+        .column-dropdown .column-list {
+            padding: 8px 0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .column-dropdown .column-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 16px;
+            cursor: pointer;
+            transition: background-color 0.15s;
+            gap: 10px;
+        }
+
+        .column-dropdown .column-item:hover {
+            background-color: var(--gray-100);
+        }
+
+        .column-dropdown .column-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            border: 2px solid var(--gray-300);
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .column-dropdown .column-item input[type="checkbox"]:checked {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .column-dropdown .column-item .column-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            background: var(--gray-100);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            color: var(--gray-600);
+            flex-shrink: 0;
+        }
+
+        .column-dropdown .column-item label {
+            flex: 1;
+            margin: 0;
+            cursor: pointer;
+            font-size: 0.875rem;
+            color: var(--text-color);
+        }
+
+        .column-dropdown .dropdown-divider {
+            margin: 8px 0;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .column-dropdown .dropdown-footer {
+            padding: 8px 12px;
+            background: var(--gray-50);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .column-dropdown .reset-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border: 1px dashed var(--gray-300);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--gray-600);
+            font-size: 0.8125rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .column-dropdown .reset-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            background: var(--primary-color);
+            background: rgba(30, 64, 175, 0.05);
+        }
+
+        /* Column toggle button */
+        .btn-column-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--surface-color);
+            color: var(--gray-600);
+            transition: all 0.2s;
+        }
+
+        .btn-column-toggle:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            background: var(--surface-color);
+        }
+
+        .btn-column-toggle i {
+            font-size: 1rem;
+        }
+
+        /* Dark mode adjustments */
+        [data-theme="dark"] .column-dropdown {
+            background: var(--surface-color);
+            border-color: var(--border-color);
+        }
+
+        [data-theme="dark"] .column-dropdown .column-item:hover {
+            background-color: var(--gray-100);
+        }
+
+        [data-theme="dark"] .column-dropdown .dropdown-footer {
+            background: var(--gray-100);
+        }
+
+        [data-theme="dark"] .column-dropdown .column-item .column-icon {
+            background: var(--gray-100);
+            color: var(--gray-400);
+        }
+
+        [data-theme="dark"] .btn-column-toggle {
+            background: var(--surface-color);
+            border-color: var(--border-color);
+            color: var(--text-muted);
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -2039,6 +2258,410 @@
             document.querySelectorAll('table[data-sortable="true"]').forEach(table => {
                 if (table.id) {
                     SortableTable.init(table.id);
+                }
+            });
+        });
+
+        // ============================================================================
+        // Table Enhancements Utility
+        // ============================================================================
+
+        /**
+         * TableEnhancements - Adds resizable columns and column visibility to tables
+         *
+         * Usage:
+         *   1. Add data-enhanced="true" to the table
+         *   2. Add data-column="columnName" to both th and td elements
+         *   3. Optionally add data-column-label="Display Name" to th for dropdown label
+         *   4. Call TableEnhancements.init('tableId') or let auto-init find tables
+         *
+         * Features:
+         *   - Draggable column resize handles
+         *   - Column visibility dropdown with modern SentriKat styling
+         *   - Persistent settings via localStorage
+         */
+        const TableEnhancements = {
+            tables: {},
+            resizeState: null,
+
+            /**
+             * Initialize enhancements for a table
+             * @param {string} tableId - The table element ID
+             * @param {object} options - Optional configuration
+             */
+            init: function(tableId, options = {}) {
+                const table = document.getElementById(tableId);
+                if (!table) return;
+
+                const defaults = {
+                    resizable: true,
+                    columnToggle: true,
+                    storageKey: `table_${tableId}_prefs`,
+                    dropdownContainer: null, // If null, auto-create in card header
+                    excludeColumns: ['actions', 'checkbox'], // Columns to exclude from toggle
+                    columnIcons: {} // Map of columnName -> bootstrap icon class
+                };
+
+                const config = { ...defaults, ...options };
+
+                this.tables[tableId] = {
+                    table,
+                    config,
+                    columns: this.getColumns(table, config)
+                };
+
+                // Add resizable class
+                table.classList.add('resizable-table');
+
+                // Initialize features
+                if (config.resizable) {
+                    this.initResizable(tableId);
+                }
+
+                if (config.columnToggle) {
+                    this.initColumnToggle(tableId);
+                }
+
+                // Restore saved preferences
+                this.restorePreferences(tableId);
+            },
+
+            /**
+             * Get column definitions from table headers
+             */
+            getColumns: function(table, config) {
+                const columns = [];
+                const headers = table.querySelectorAll('thead th[data-column]');
+
+                headers.forEach((th, index) => {
+                    const columnName = th.dataset.column;
+                    if (!config.excludeColumns.includes(columnName)) {
+                        columns.push({
+                            name: columnName,
+                            label: th.dataset.columnLabel || th.textContent.trim().replace(/[\u25B2\u25BC]/g, '').trim(),
+                            index: index,
+                            element: th,
+                            icon: config.columnIcons[columnName] || this.getDefaultIcon(columnName)
+                        });
+                    }
+                });
+
+                return columns;
+            },
+
+            /**
+             * Get default icon for common column types
+             */
+            getDefaultIcon: function(columnName) {
+                const iconMap = {
+                    'vendor': 'bi-building',
+                    'product': 'bi-box',
+                    'version': 'bi-tag',
+                    'organization': 'bi-people',
+                    'criticality': 'bi-exclamation-triangle',
+                    'status': 'bi-toggle-on',
+                    'username': 'bi-person',
+                    'fullname': 'bi-person-badge',
+                    'email': 'bi-envelope',
+                    'role': 'bi-shield',
+                    'authtype': 'bi-key',
+                    'name': 'bi-card-text',
+                    'displayname': 'bi-type',
+                    'users': 'bi-people',
+                    'smtp': 'bi-envelope-at',
+                    'group': 'bi-diagram-3',
+                    'priority': 'bi-sort-numeric-up',
+                    'members': 'bi-person-lines-fill',
+                    'lastsync': 'bi-clock-history',
+                    'date': 'bi-calendar',
+                    'duration': 'bi-stopwatch',
+                    'added': 'bi-plus-circle',
+                    'updated': 'bi-pencil',
+                    'deactivated': 'bi-x-circle',
+                    'errors': 'bi-exclamation-octagon'
+                };
+                return iconMap[columnName.toLowerCase()] || 'bi-grip-vertical';
+            },
+
+            /**
+             * Initialize resizable columns
+             */
+            initResizable: function(tableId) {
+                const { table } = this.tables[tableId];
+                const headers = table.querySelectorAll('thead th');
+                const self = this;
+
+                headers.forEach((th, index) => {
+                    // Skip last column (usually actions)
+                    if (index === headers.length - 1) return;
+
+                    // Create resize handle
+                    const handle = document.createElement('div');
+                    handle.className = 'resize-handle';
+                    handle.addEventListener('mousedown', function(e) {
+                        self.startResize(e, tableId, th, index);
+                    });
+                    th.appendChild(handle);
+                });
+
+                // Global mouse events for resizing
+                document.addEventListener('mousemove', this.handleResize.bind(this));
+                document.addEventListener('mouseup', this.stopResize.bind(this));
+            },
+
+            /**
+             * Start column resize
+             */
+            startResize: function(e, tableId, th, columnIndex) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                this.resizeState = {
+                    tableId,
+                    th,
+                    columnIndex,
+                    startX: e.pageX,
+                    startWidth: th.offsetWidth
+                };
+
+                th.querySelector('.resize-handle').classList.add('resizing');
+                document.body.classList.add('resizing-active');
+            },
+
+            /**
+             * Handle resize drag
+             */
+            handleResize: function(e) {
+                if (!this.resizeState) return;
+
+                const { th, startX, startWidth } = this.resizeState;
+                const diff = e.pageX - startX;
+                const newWidth = Math.max(50, startWidth + diff);
+                th.style.width = newWidth + 'px';
+                th.style.minWidth = newWidth + 'px';
+            },
+
+            /**
+             * Stop resizing
+             */
+            stopResize: function() {
+                if (!this.resizeState) return;
+
+                const { tableId, th } = this.resizeState;
+                th.querySelector('.resize-handle').classList.remove('resizing');
+                document.body.classList.remove('resizing-active');
+
+                // Save width preference
+                this.savePreferences(tableId);
+                this.resizeState = null;
+            },
+
+            /**
+             * Initialize column visibility toggle dropdown
+             */
+            initColumnToggle: function(tableId) {
+                const { table, config, columns } = this.tables[tableId];
+
+                // Find or create dropdown container
+                let container = config.dropdownContainer
+                    ? document.querySelector(config.dropdownContainer)
+                    : table.closest('.card')?.querySelector('.card-header');
+
+                if (!container) {
+                    // Create container before table
+                    container = document.createElement('div');
+                    container.className = 'd-flex justify-content-end mb-2';
+                    table.parentNode.insertBefore(container, table);
+                }
+
+                // Check if dropdown already exists
+                const existingDropdown = container.querySelector(`[data-column-toggle="${tableId}"]`);
+                if (existingDropdown) return;
+
+                // Create dropdown HTML
+                const dropdownId = `columnToggle_${tableId}`;
+                const dropdownHTML = `
+                    <div class="dropdown" data-column-toggle="${tableId}">
+                        <button class="btn-column-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                            <i class="bi bi-layout-three-columns"></i>
+                            <span>Columns</span>
+                            <i class="bi bi-chevron-down" style="font-size: 0.625rem; margin-left: 2px;"></i>
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-end column-dropdown" id="${dropdownId}">
+                            <div class="dropdown-header">
+                                <i class="bi bi-eye"></i>
+                                Show/Hide Columns
+                            </div>
+                            <div class="column-list">
+                                ${columns.map(col => `
+                                    <div class="column-item" onclick="TableEnhancements.toggleColumnCheckbox('${tableId}', '${col.name}', event)">
+                                        <input type="checkbox" class="form-check-input"
+                                               id="col_${tableId}_${col.name}"
+                                               data-column="${col.name}"
+                                               checked
+                                               onclick="event.stopPropagation(); TableEnhancements.toggleColumn('${tableId}', '${col.name}', this.checked)">
+                                        <div class="column-icon">
+                                            <i class="bi ${col.icon}"></i>
+                                        </div>
+                                        <label for="col_${tableId}_${col.name}">${col.label}</label>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div class="dropdown-footer">
+                                <button class="reset-btn" onclick="TableEnhancements.resetColumns('${tableId}')">
+                                    <i class="bi bi-arrow-counterclockwise"></i>
+                                    Reset All
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Insert dropdown
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = dropdownHTML;
+                container.appendChild(wrapper.firstElementChild);
+            },
+
+            /**
+             * Toggle column checkbox from row click
+             */
+            toggleColumnCheckbox: function(tableId, columnName, event) {
+                if (event.target.type === 'checkbox') return;
+                const checkbox = document.getElementById(`col_${tableId}_${columnName}`);
+                if (checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                    this.toggleColumn(tableId, columnName, checkbox.checked);
+                }
+            },
+
+            /**
+             * Toggle column visibility
+             */
+            toggleColumn: function(tableId, columnName, visible) {
+                const { table } = this.tables[tableId];
+
+                // Toggle header
+                const header = table.querySelector(`th[data-column="${columnName}"]`);
+                if (header) {
+                    header.style.display = visible ? '' : 'none';
+                }
+
+                // Toggle all cells in that column
+                const cells = table.querySelectorAll(`td[data-column="${columnName}"]`);
+                cells.forEach(cell => {
+                    cell.style.display = visible ? '' : 'none';
+                });
+
+                // Save preference
+                this.savePreferences(tableId);
+            },
+
+            /**
+             * Reset all columns to visible
+             */
+            resetColumns: function(tableId) {
+                const { columns } = this.tables[tableId];
+
+                columns.forEach(col => {
+                    const checkbox = document.getElementById(`col_${tableId}_${col.name}`);
+                    if (checkbox) {
+                        checkbox.checked = true;
+                    }
+                    this.toggleColumn(tableId, col.name, true);
+                });
+
+                // Clear saved preferences
+                localStorage.removeItem(this.tables[tableId].config.storageKey);
+
+                if (typeof showToast === 'function') {
+                    showToast('Columns reset to default', 'info');
+                }
+            },
+
+            /**
+             * Save preferences to localStorage
+             */
+            savePreferences: function(tableId) {
+                const { table, config, columns } = this.tables[tableId];
+                const prefs = {
+                    columnWidths: {},
+                    hiddenColumns: []
+                };
+
+                // Save column widths
+                const headers = table.querySelectorAll('thead th');
+                headers.forEach((th, index) => {
+                    if (th.style.width) {
+                        prefs.columnWidths[index] = th.style.width;
+                    }
+                });
+
+                // Save hidden columns
+                columns.forEach(col => {
+                    const checkbox = document.getElementById(`col_${tableId}_${col.name}`);
+                    if (checkbox && !checkbox.checked) {
+                        prefs.hiddenColumns.push(col.name);
+                    }
+                });
+
+                localStorage.setItem(config.storageKey, JSON.stringify(prefs));
+            },
+
+            /**
+             * Restore preferences from localStorage
+             */
+            restorePreferences: function(tableId) {
+                const { table, config } = this.tables[tableId];
+                const saved = localStorage.getItem(config.storageKey);
+                if (!saved) return;
+
+                try {
+                    const prefs = JSON.parse(saved);
+
+                    // Restore column widths
+                    if (prefs.columnWidths) {
+                        const headers = table.querySelectorAll('thead th');
+                        Object.entries(prefs.columnWidths).forEach(([index, width]) => {
+                            if (headers[index]) {
+                                headers[index].style.width = width;
+                                headers[index].style.minWidth = width;
+                            }
+                        });
+                    }
+
+                    // Restore hidden columns
+                    if (prefs.hiddenColumns) {
+                        prefs.hiddenColumns.forEach(columnName => {
+                            const checkbox = document.getElementById(`col_${tableId}_${columnName}`);
+                            if (checkbox) {
+                                checkbox.checked = false;
+                            }
+                            this.toggleColumn(tableId, columnName, false);
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Failed to restore table preferences:', e);
+                }
+            },
+
+            /**
+             * Reinitialize after dynamic content load
+             */
+            refresh: function(tableId) {
+                const tableData = this.tables[tableId];
+                if (!tableData) return;
+
+                // Restore preferences after content reload
+                this.restorePreferences(tableId);
+            }
+        };
+
+        // Auto-initialize enhanced tables on DOM ready
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('table[data-enhanced="true"]').forEach(table => {
+                if (table.id) {
+                    TableEnhancements.init(table.id);
                 }
             });
         });

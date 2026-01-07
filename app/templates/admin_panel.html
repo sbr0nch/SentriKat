@@ -79,20 +79,20 @@
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-hover" id="usersTableContainer" data-sortable="true">
+                        <table class="table table-hover" id="usersTableContainer" data-sortable="true" data-enhanced="true">
                             <thead>
                                 <tr>
                                     <th style="width: 40px;">
                                         <input type="checkbox" class="form-check-input" id="selectAllUsers" onchange="toggleSelectAllUsers()">
                                     </th>
-                                    <th data-sort-key="username" data-sort-type="string">Username</th>
-                                    <th data-sort-key="fullname" data-sort-type="string">Full Name</th>
-                                    <th data-sort-key="email" data-sort-type="string">Email</th>
-                                    <th data-sort-key="organization" data-sort-type="string">Organization</th>
-                                    <th data-sort-key="authtype" data-sort-type="string">Auth Type</th>
-                                    <th data-sort-key="role" data-sort-type="string">Role</th>
-                                    <th data-sort-key="status" data-sort-type="boolean">Status</th>
-                                    <th>Actions</th>
+                                    <th data-column="username" data-column-label="Username" data-sort-key="username" data-sort-type="string">Username</th>
+                                    <th data-column="fullname" data-column-label="Full Name" data-sort-key="fullname" data-sort-type="string">Full Name</th>
+                                    <th data-column="email" data-column-label="Email" data-sort-key="email" data-sort-type="string">Email</th>
+                                    <th data-column="organization" data-column-label="Organization" data-sort-key="organization" data-sort-type="string">Organization</th>
+                                    <th data-column="authtype" data-column-label="Auth Type" data-sort-key="authtype" data-sort-type="string">Auth Type</th>
+                                    <th data-column="role" data-column-label="Role" data-sort-key="role" data-sort-type="string">Role</th>
+                                    <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="boolean">Status</th>
+                                    <th data-column="actions">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="usersTable">
@@ -207,18 +207,18 @@
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-hover" id="orgsTableContainer" data-sortable="true">
+                        <table class="table table-hover" id="orgsTableContainer" data-sortable="true" data-enhanced="true">
                             <thead>
                                 <tr>
                                     <th style="width: 40px;">
                                         <input type="checkbox" class="form-check-input" id="selectAllOrgs" onchange="toggleSelectAllOrgs()">
                                     </th>
-                                    <th data-sort-key="name" data-sort-type="string">Name</th>
-                                    <th data-sort-key="displayname" data-sort-type="string">Display Name</th>
-                                    <th data-sort-key="users" data-sort-type="number">Users</th>
-                                    <th data-sort-key="smtp" data-sort-type="boolean">SMTP Configured</th>
-                                    <th data-sort-key="status" data-sort-type="boolean">Status</th>
-                                    <th>Actions</th>
+                                    <th data-column="name" data-column-label="Name" data-sort-key="name" data-sort-type="string">Name</th>
+                                    <th data-column="displayname" data-column-label="Display Name" data-sort-key="displayname" data-sort-type="string">Display Name</th>
+                                    <th data-column="users" data-column-label="Users" data-sort-key="users" data-sort-type="number">Users</th>
+                                    <th data-column="smtp" data-column-label="SMTP" data-sort-key="smtp" data-sort-type="boolean">SMTP Configured</th>
+                                    <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="boolean">Status</th>
+                                    <th data-column="actions">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="orgsTable">
@@ -309,18 +309,18 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-hover">
+                                <table class="table table-hover" id="groupMappingsTableContainer" data-sortable="true" data-enhanced="true">
                                     <thead>
                                         <tr>
-                                            <th>LDAP Group</th>
-                                            <th>Organization</th>
-                                            <th>Role</th>
-                                            <th>Priority</th>
-                                            <th>Auto-Provision</th>
-                                            <th>Members</th>
-                                            <th>Last Sync</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
+                                            <th data-column="group" data-column-label="LDAP Group" data-sort-key="group" data-sort-type="string">LDAP Group</th>
+                                            <th data-column="organization" data-column-label="Organization" data-sort-key="organization" data-sort-type="string">Organization</th>
+                                            <th data-column="role" data-column-label="Role" data-sort-key="role" data-sort-type="string">Role</th>
+                                            <th data-column="priority" data-column-label="Priority" data-sort-key="priority" data-sort-type="number">Priority</th>
+                                            <th data-column="autoprovision" data-column-label="Auto-Provision" data-sort-key="autoprovision" data-sort-type="boolean">Auto-Provision</th>
+                                            <th data-column="members" data-column-label="Members" data-sort-key="members" data-sort-type="number">Members</th>
+                                            <th data-column="lastsync" data-column-label="Last Sync" data-sort-key="lastsync" data-sort-type="date">Last Sync</th>
+                                            <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="boolean">Status</th>
+                                            <th data-column="actions">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="groupMappingsTable">
@@ -399,18 +399,18 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-hover table-sm" id="syncHistoryTableContainer" data-sortable="true">
+                                <table class="table table-hover table-sm" id="syncHistoryTableContainer" data-sortable="true" data-enhanced="true">
                                     <thead>
                                         <tr>
-                                            <th data-sort-key="id" data-sort-type="number">Sync ID</th>
-                                            <th data-sort-key="type" data-sort-type="string">Type</th>
-                                            <th data-sort-key="started" data-sort-type="date">Started</th>
-                                            <th data-sort-key="duration" data-sort-type="number">Duration</th>
-                                            <th data-sort-key="status" data-sort-type="string">Status</th>
-                                            <th data-sort-key="added" data-sort-type="number">Added</th>
-                                            <th data-sort-key="updated" data-sort-type="number">Updated</th>
-                                            <th data-sort-key="deactivated" data-sort-type="number">Deactivated</th>
-                                            <th data-sort-key="errors" data-sort-type="number">Errors</th>
+                                            <th data-column="syncid" data-column-label="Sync ID" data-sort-key="id" data-sort-type="number">Sync ID</th>
+                                            <th data-column="type" data-column-label="Type" data-sort-key="type" data-sort-type="string">Type</th>
+                                            <th data-column="started" data-column-label="Started" data-sort-key="started" data-sort-type="date">Started</th>
+                                            <th data-column="duration" data-column-label="Duration" data-sort-key="duration" data-sort-type="number">Duration</th>
+                                            <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="string">Status</th>
+                                            <th data-column="added" data-column-label="Added" data-sort-key="added" data-sort-type="number">Added</th>
+                                            <th data-column="updated" data-column-label="Updated" data-sort-key="updated" data-sort-type="number">Updated</th>
+                                            <th data-column="deactivated" data-column-label="Deactivated" data-sort-key="deactivated" data-sort-type="number">Deactivated</th>
+                                            <th data-column="errors" data-column-label="Errors" data-sort-key="errors" data-sort-type="number">Errors</th>
                                         </tr>
                                     </thead>
                                     <tbody id="syncHistoryTable">
