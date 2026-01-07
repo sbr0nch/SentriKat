@@ -527,16 +527,12 @@ function showCreateUserModal() {
 }
 
 async function editUser(userId) {
-    console.log('editUser: Starting for userId:', userId);
     currentUserId = userId;
     document.getElementById('userModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit User';
 
     try {
-        console.log('editUser: Fetching user data...');
         const response = await fetch(`/api/users/${userId}`);
-        console.log('editUser: Response status:', response.status);
         const user = await response.json();
-        console.log('editUser: Got user:', user.username);
 
         document.getElementById('username').value = user.username;
         document.getElementById('email').value = user.email;
@@ -931,12 +927,9 @@ async function toggleUserActive(userId, username, isCurrentlyActive) {
 // ============================================================================
 
 async function loadOrganizations() {
-    console.log('loadOrganizations: Starting...');
     const tbody = document.getElementById('orgsTable');
-    if (!tbody) {
-        console.error('loadOrganizations: orgsTable element not found!');
-        return;
-    }
+    if (!tbody) return;
+
     tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
     // Clear selection state
@@ -944,16 +937,13 @@ async function loadOrganizations() {
     updateOrgsBulkToolbar();
 
     try {
-        console.log('loadOrganizations: Fetching /api/organizations...');
         const response = await fetch('/api/organizations');
-        console.log('loadOrganizations: Response status:', response.status);
 
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
         organizations = await response.json();
-        console.log('loadOrganizations: Loaded', organizations.length, 'organizations');
 
         if (organizations.length === 0) {
             tbody.innerHTML = `
@@ -1001,7 +991,6 @@ async function loadOrganizations() {
                     </tr>
                 `;
             }).join('');
-            console.log('loadOrganizations: Table rendered with', tbody.children.length, 'rows');
         }
 
         // Reset select all checkbox
@@ -1012,7 +1001,6 @@ async function loadOrganizations() {
         if (typeof SortableTable !== 'undefined') {
             SortableTable.init('orgsTableContainer');
         }
-        console.log('loadOrganizations: Complete!');
     } catch (error) {
         console.error('loadOrganizations: Error:', error);
         tbody.innerHTML = `
@@ -1087,16 +1075,12 @@ function showCreateOrgModal() {
 }
 
 async function editOrganization(orgId) {
-    console.log('editOrganization: Starting for orgId:', orgId);
     currentOrgId = orgId;
     document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Organization';
 
     try {
-        console.log('editOrganization: Fetching org data...');
         const response = await fetch(`/api/organizations/${orgId}`);
-        console.log('editOrganization: Response status:', response.status);
         const org = await response.json();
-        console.log('editOrganization: Got org:', org.name);
 
         // Basic info
         document.getElementById('orgName').value = org.name;
