@@ -47,7 +47,7 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
@@ -55,6 +55,7 @@ def create_app(config_class=Config):
     app.register_blueprint(ldap_api.ldap_bp)
     app.register_blueprint(ldap_group_api.ldap_group_bp)
     app.register_blueprint(shared_views_api.shared_views_bp)
+    app.register_blueprint(licensing.license_bp)
 
     # Make current user and branding available in all templates
     @app.context_processor
@@ -98,10 +99,24 @@ def create_app(config_class=Config):
         except:
             pass  # Use defaults if DB not ready
 
+        # Load license info
+        license_info = None
+        try:
+            from app.licensing import get_license
+            license_info = get_license()
+            # Update branding based on license
+            if license_info and license_info.is_professional():
+                branding['show_powered_by'] = False
+            else:
+                branding['show_powered_by'] = True
+        except:
+            branding['show_powered_by'] = True
+
         return dict(
             current_user=current_user,
             auth_enabled=auth_enabled,
-            branding=branding
+            branding=branding,
+            license=license_info
         )
 
     # Setup wizard redirect

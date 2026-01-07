@@ -541,6 +541,11 @@
                         <i class="bi bi-journal-text me-2"></i>Audit Logs
                     </button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="license-tab" data-bs-toggle="pill" data-bs-target="#licenseSettings" type="button">
+                        <i class="bi bi-key me-2"></i>License
+                    </button>
+                </li>
                 {% endif %}
             </ul>
 
@@ -1408,6 +1413,157 @@
                                     <ul class="pagination pagination-sm mb-0" id="auditPagination">
                                     </ul>
                                 </nav>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- License Settings -->
+                <div class="tab-pane fade" id="licenseSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-key me-2"></i>License Management</span>
+                            <span class="badge" id="licenseEditionBadge">Loading...</span>
+                        </div>
+                        <div class="card-body">
+                            <!-- Current License Status -->
+                            <div id="licenseStatusCard" class="mb-4">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="card bg-light">
+                                            <div class="card-body">
+                                                <h5 class="card-title mb-3">
+                                                    <i class="bi bi-shield-check me-2"></i>Current License
+                                                </h5>
+                                                <div id="licenseDetails">
+                                                    <div class="text-center py-3">
+                                                        <div class="spinner-border spinner-border-sm text-primary"></div>
+                                                        <span class="ms-2">Loading license info...</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="card bg-light">
+                                            <div class="card-body">
+                                                <h5 class="card-title mb-3">
+                                                    <i class="bi bi-bar-chart me-2"></i>Usage
+                                                </h5>
+                                                <div id="licenseUsage">
+                                                    <div class="text-center py-3">
+                                                        <div class="spinner-border spinner-border-sm text-primary"></div>
+                                                        <span class="ms-2">Loading usage data...</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- License Key Input -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <i class="bi bi-key-fill me-2"></i>Activate License
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted mb-3">
+                                        Enter your license key to activate Professional features. License keys are provided after purchase.
+                                    </p>
+                                    <div class="mb-3">
+                                        <label for="licenseKeyInput" class="form-label fw-semibold">License Key</label>
+                                        <textarea class="form-control font-monospace" id="licenseKeyInput" rows="3" placeholder="Paste your license key here..."></textarea>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button type="button" class="btn btn-primary" onclick="activateLicense()">
+                                            <i class="bi bi-check-circle me-1"></i>Activate License
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" onclick="removeLicense()" id="removeLicenseBtn" style="display: none;">
+                                            <i class="bi bi-x-circle me-1"></i>Remove License
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Feature Comparison -->
+                            <div class="card mt-4">
+                                <div class="card-header">
+                                    <i class="bi bi-list-check me-2"></i>Feature Comparison
+                                </div>
+                                <div class="card-body p-0">
+                                    <table class="table table-striped mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Feature</th>
+                                                <th class="text-center">Community</th>
+                                                <th class="text-center">Professional</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>Vulnerability Management</td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                            <tr>
+                                                <td>CISA KEV Sync</td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Dashboard & Reporting</td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Organizations</td>
+                                                <td class="text-center">1</td>
+                                                <td class="text-center text-success">Unlimited</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Users</td>
+                                                <td class="text-center">3</td>
+                                                <td class="text-center text-success">Unlimited</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Products</td>
+                                                <td class="text-center">20</td>
+                                                <td class="text-center text-success">Unlimited</td>
+                                            </tr>
+                                            <tr>
+                                                <td>LDAP / Active Directory</td>
+                                                <td class="text-center text-muted"><i class="bi bi-x-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Email Alerts</td>
+                                                <td class="text-center text-muted"><i class="bi bi-x-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Full White-Labeling</td>
+                                                <td class="text-center text-muted"><i class="bi bi-x-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                            <tr>
+                                                <td>API Access</td>
+                                                <td class="text-center text-muted"><i class="bi bi-x-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Backup & Restore</td>
+                                                <td class="text-center text-muted"><i class="bi bi-x-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Audit Log Export</td>
+                                                <td class="text-center text-muted"><i class="bi bi-x-lg"></i></td>
+                                                <td class="text-center text-success"><i class="bi bi-check-lg"></i></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     </div>

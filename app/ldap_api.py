@@ -8,6 +8,7 @@ from app import db, csrf
 from app.models import User
 from app.auth import admin_required, org_admin_required
 from app.ldap_manager import LDAPManager
+from app.licensing import requires_professional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ def can_manage_ldap_users(current_user):
 # ============================================================================
 
 @ldap_bp.route('/search', methods=['POST'])
+@requires_professional('LDAP')
 @org_admin_required
 def search_ldap_users():
     """
@@ -69,6 +71,7 @@ def search_ldap_users():
 
 
 @ldap_bp.route('/user/<username>/groups', methods=['GET'])
+@requires_professional('LDAP')
 @org_admin_required
 def get_user_ldap_groups(username):
     """
@@ -98,6 +101,7 @@ def get_user_ldap_groups(username):
 
 
 @ldap_bp.route('/user-groups', methods=['POST'])
+@requires_professional('LDAP')
 @org_admin_required
 def get_user_ldap_groups_post():
     """
@@ -142,6 +146,7 @@ def get_user_ldap_groups_post():
 # ============================================================================
 
 @ldap_bp.route('/invite', methods=['POST'])
+@requires_professional('LDAP')
 @org_admin_required
 def invite_ldap_user():
     """
@@ -208,6 +213,7 @@ def invite_ldap_user():
 # ============================================================================
 
 @ldap_bp.route('/user/<int:user_id>/sync', methods=['POST'])
+@requires_professional('LDAP')
 @org_admin_required
 def sync_ldap_user(user_id):
     """
@@ -243,6 +249,7 @@ def sync_ldap_user(user_id):
 # ============================================================================
 
 @ldap_bp.route('/bulk-invite', methods=['POST'])
+@requires_professional('LDAP')
 @org_admin_required
 def bulk_invite_ldap_users():
     """

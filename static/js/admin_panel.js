@@ -4516,4 +4516,207 @@ document.addEventListener('DOMContentLoaded', function() {
             loadAuditLogs(1);
         });
     }
+
+    // Load license info when tab is shown
+    const licenseTab = document.getElementById('license-tab');
+    if (licenseTab) {
+        licenseTab.addEventListener('shown.bs.tab', function() {
+            loadLicenseInfo();
+        });
+    }
 });
+
+// ============================================================================
+// LICENSE MANAGEMENT
+// ============================================================================
+
+async function loadLicenseInfo() {
+    try {
+        const response = await fetch('/api/license');
+        if (!response.ok) {
+            throw new Error('Failed to load license info');
+        }
+
+        const data = await response.json();
+        displayLicenseInfo(data);
+
+    } catch (error) {
+        console.error('Error loading license:', error);
+        document.getElementById('licenseDetails').innerHTML = `
+            <div class="alert alert-danger mb-0">
+                <i class="bi bi-exclamation-triangle me-2"></i>Failed to load license info
+            </div>
+        `;
+    }
+}
+
+function displayLicenseInfo(data) {
+    const detailsEl = document.getElementById('licenseDetails');
+    const usageEl = document.getElementById('licenseUsage');
+    const badgeEl = document.getElementById('licenseEditionBadge');
+    const removeBtn = document.getElementById('removeLicenseBtn');
+
+    // Update edition badge
+    if (data.is_professional) {
+        badgeEl.className = 'badge bg-success';
+        badgeEl.textContent = 'Professional';
+        removeBtn.style.display = 'inline-block';
+    } else {
+        badgeEl.className = 'badge bg-secondary';
+        badgeEl.textContent = 'Community';
+        removeBtn.style.display = 'none';
+    }
+
+    // License details
+    let statusHtml = '';
+    if (data.is_professional) {
+        statusHtml = `
+            <div class="mb-2">
+                <span class="badge bg-success mb-2"><i class="bi bi-patch-check me-1"></i>Professional License</span>
+            </div>
+            <table class="table table-sm table-borderless mb-0">
+                <tr>
+                    <td class="text-muted" style="width: 100px;">Customer</td>
+                    <td><strong>${escapeHtml(data.customer || '-')}</strong></td>
+                </tr>
+                <tr>
+                    <td class="text-muted">License ID</td>
+                    <td><code>${escapeHtml(data.license_id || '-')}</code></td>
+                </tr>
+                <tr>
+                    <td class="text-muted">Expires</td>
+                    <td>${data.expires_at ? formatDate(data.expires_at) : '<span class="text-success">Never (Perpetual)</span>'}</td>
+                </tr>
+                ${data.days_until_expiry !== null ? `
+                <tr>
+                    <td class="text-muted">Status</td>
+                    <td>${data.is_expired
+                        ? '<span class="badge bg-danger">Expired</span>'
+                        : data.days_until_expiry <= 30
+                            ? `<span class="badge bg-warning text-dark">${data.days_until_expiry} days remaining</span>`
+                            : `<span class="badge bg-success">${data.days_until_expiry} days remaining</span>`
+                    }</td>
+                </tr>
+                ` : ''}
+            </table>
+        `;
+    } else {
+        statusHtml = `
+            <div class="mb-2">
+                <span class="badge bg-secondary mb-2"><i class="bi bi-box me-1"></i>Community Edition</span>
+            </div>
+            <p class="text-muted small mb-2">Free for personal and small team use.</p>
+            <p class="mb-0">
+                <a href="#" class="text-primary" onclick="document.getElementById('licenseKeyInput').focus(); return false;">
+                    <i class="bi bi-arrow-up-circle me-1"></i>Upgrade to Professional
+                </a>
+            </p>
+        `;
+    }
+    detailsEl.innerHTML = statusHtml;
+
+    // Usage info
+    const limits = data.limits || {};
+    const usage = data.usage || {};
+
+    const formatLimit = (current, max) => {
+        if (max === -1) return `${current} <span class="text-success">(unlimited)</span>`;
+        const percent = (current / max) * 100;
+        const colorClass = percent >= 100 ? 'text-danger' : percent >= 80 ? 'text-warning' : 'text-success';
+        return `<span class="${colorClass}">${current}</span> / ${max}`;
+    };
+
+    usageEl.innerHTML = `
+        <table class="table table-sm table-borderless mb-0">
+            <tr>
+                <td class="text-muted" style="width: 100px;">Users</td>
+                <td>${formatLimit(usage.users || 0, limits.max_users)}</td>
+            </tr>
+            <tr>
+                <td class="text-muted">Organizations</td>
+                <td>${formatLimit(usage.organizations || 0, limits.max_organizations)}</td>
+            </tr>
+            <tr>
+                <td class="text-muted">Products</td>
+                <td>${formatLimit(usage.products || 0, limits.max_products)}</td>
+            </tr>
+        </table>
+        ${!data.is_professional && (
+            (usage.users >= limits.max_users) ||
+            (usage.organizations >= limits.max_organizations) ||
+            (usage.products >= limits.max_products)
+        ) ? `
+            <div class="alert alert-warning mt-3 mb-0 py-2">
+                <small><i class="bi bi-exclamation-triangle me-1"></i>You've reached Community limits. Upgrade to Professional for unlimited usage.</small>
+            </div>
+        ` : ''}
+    `;
+}
+
+async function activateLicense() {
+    const licenseKey = document.getElementById('licenseKeyInput').value.trim();
+
+    if (!licenseKey) {
+        showToast('Please enter a license key', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/license', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ license_key: licenseKey })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast(data.message, 'success');
+            document.getElementById('licenseKeyInput').value = '';
+            loadLicenseInfo();
+            // Reload page to apply license changes (like removing "Powered by")
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showToast(data.error || 'Failed to activate license', 'error');
+        }
+
+    } catch (error) {
+        console.error('Error activating license:', error);
+        showToast('Failed to activate license: ' + error.message, 'error');
+    }
+}
+
+async function removeLicense() {
+    if (!confirm('Are you sure you want to remove the license? This will revert to Community edition.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/license', {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast(data.message, 'success');
+            loadLicenseInfo();
+            // Reload page to apply changes
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showToast(data.error || 'Failed to remove license', 'error');
+        }
+
+    } catch (error) {
+        console.error('Error removing license:', error);
+        showToast('Failed to remove license: ' + error.message, 'error');
+    }
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
