@@ -83,6 +83,7 @@ def create_group_mapping():
         auto_deprovision=data.get('auto_deprovision', False),
         priority=data.get('priority', 0),
         sync_enabled=data.get('sync_enabled', True),
+        member_count=data.get('member_count', 0),
         created_by=current_user.id
     )
 

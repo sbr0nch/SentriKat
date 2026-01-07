@@ -2760,7 +2760,7 @@ async function loadGroupMappings() {
                         <td colspan="10" class="text-center py-4">
                             <i class="bi bi-inbox text-muted" style="font-size: 3rem;"></i>
                             <p class="text-muted mt-3">No LDAP group mappings configured.</p>
-                            <p class="text-muted">Click "Discover Groups" to find LDAP groups or "Create Mapping" to add one manually.</p>
+                            <p class="text-muted">Use "Discover LDAP Groups" above to find and map groups from your directory.</p>
                         </td>
                     </tr>
                 `;
@@ -2865,7 +2865,11 @@ async function showCreateMappingModal() {
     try {
         // Reset form
         const form = document.getElementById('groupMappingForm');
-        if (form) form.reset();
+        if (form) {
+            form.reset();
+            // Clear member count data attribute
+            delete form.dataset.memberCount;
+        }
 
         const mappingIdEl = document.getElementById('mappingId');
         if (mappingIdEl) mappingIdEl.value = '';
@@ -2937,6 +2941,7 @@ async function editGroupMapping(mappingId) {
  */
 async function saveGroupMapping() {
     const mappingId = document.getElementById('mappingId').value;
+    const form = document.getElementById('groupMappingForm');
     const data = {
         ldap_group_dn: document.getElementById('ldapGroupDn').value.trim(),
         ldap_group_cn: document.getElementById('ldapGroupCn').value.trim(),
@@ -2948,6 +2953,11 @@ async function saveGroupMapping() {
         auto_deprovision: document.getElementById('autoDeprovision').checked,
         sync_enabled: document.getElementById('syncEnabled').checked
     };
+
+    // Include member_count if creating a new mapping (from discovered groups)
+    if (!mappingId && form && form.dataset.memberCount) {
+        data.member_count = parseInt(form.dataset.memberCount) || 0;
+    }
 
     // Validation
     if (!data.ldap_group_dn || !data.ldap_group_cn || !data.role) {
@@ -3142,7 +3152,7 @@ async function performGroupDiscoveryInline() {
                 btn.addEventListener('click', function() {
                     const index = parseInt(this.dataset.groupIndex);
                     const group = container.discoveredGroups[index];
-                    createMappingFromDiscoveryInline(group.dn, group.cn, group.description || '');
+                    createMappingFromDiscoveryInline(group.dn, group.cn, group.description || '', group.member_count || 0);
                 });
             });
         } else {
@@ -3168,11 +3178,12 @@ async function performGroupDiscoveryInline() {
 /**
  * Create mapping from inline discovery results
  */
-async function createMappingFromDiscoveryInline(dn, cn, description) {
+async function createMappingFromDiscoveryInline(dn, cn, description, memberCount) {
     // Show the create mapping modal first
     await showCreateMappingModal();
 
     // Pre-fill the form with discovered group info
+    const form = document.getElementById('groupMappingForm');
     const dnField = document.getElementById('ldapGroupDn');
     const cnField = document.getElementById('ldapGroupCn');
     const descField = document.getElementById('ldapGroupDescription');
@@ -3180,6 +3191,9 @@ async function createMappingFromDiscoveryInline(dn, cn, description) {
     if (dnField) dnField.value = dn;
     if (cnField) cnField.value = cn;
     if (descField && description) descField.value = description;
+
+    // Store member count in data attribute for submission
+    if (form) form.dataset.memberCount = memberCount || 0;
 
     // Update modal title
     const titleEl = document.getElementById('groupMappingModalTitle');
@@ -3281,7 +3295,7 @@ async function performGroupDiscovery() {
                 btn.addEventListener('click', function() {
                     const index = parseInt(this.dataset.groupIndex);
                     const group = container.discoveredGroups[index];
-                    createMappingFromDiscovery(group.dn, group.cn, group.description || '');
+                    createMappingFromDiscovery(group.dn, group.cn, group.description || '', group.member_count || 0);
                 });
             });
         } else {
@@ -3307,7 +3321,7 @@ async function performGroupDiscovery() {
 /**
  * Create a mapping from discovered group
  */
-function createMappingFromDiscovery(dn, cn, description) {
+function createMappingFromDiscovery(dn, cn, description, memberCount) {
     // Close discovery modal
     const discoveryModal = bootstrap.Modal.getInstance(document.getElementById('ldapDiscoveryModal'));
     if (discoveryModal) {
@@ -3315,11 +3329,14 @@ function createMappingFromDiscovery(dn, cn, description) {
     }
 
     // Pre-fill mapping form
-    document.getElementById('groupMappingForm').reset();
+    const form = document.getElementById('groupMappingForm');
+    form.reset();
     document.getElementById('mappingId').value = '';
     document.getElementById('ldapGroupDn').value = dn;
     document.getElementById('ldapGroupCn').value = cn;
     document.getElementById('ldapGroupDescription').value = description;
+    // Store member count in data attribute for submission
+    form.dataset.memberCount = memberCount || 0;
     document.getElementById('groupMappingModalTitle').textContent = 'Create Group Mapping';
 
     // Load organizations
@@ -3426,13 +3443,14 @@ async function loadSyncStats() {
     try {
         const response = await fetch('/api/ldap/groups/sync/history?limit=1');
         if (response.ok) {
-            const history = await response.json();
-            const latestSync = history.length > 0 ? history[0] : null;
+            const result = await response.json();
+            const logs = result.logs || [];
+            const latestSync = logs.length > 0 ? logs[0] : null;
 
-            // Update stats displays
-            if (latestSync) {
+            // Update stats displays - use 'timestamp' field from backend
+            if (latestSync && latestSync.timestamp) {
                 document.getElementById('syncStatsLastSync').textContent =
-                    new Date(latestSync.started_at).toLocaleString();
+                    new Date(latestSync.timestamp).toLocaleString();
             }
 
             // Count total LDAP users
@@ -3444,11 +3462,12 @@ async function loadSyncStats() {
             }
 
             // Count successful syncs and errors from history
+            // Backend uses 'success' not 'completed' for status
             const historyResponse = await fetch('/api/ldap/groups/sync/history?limit=100');
             if (historyResponse.ok) {
-                const result = await historyResponse.json();
-                const allHistory = result.logs || [];
-                const successCount = allHistory.filter(s => s.status === 'completed').length;
+                const historyResult = await historyResponse.json();
+                const allHistory = historyResult.logs || [];
+                const successCount = allHistory.filter(s => s.status === 'success').length;
                 const errorCount = allHistory.filter(s => s.status === 'failed').length;
 
                 document.getElementById('syncStatsSuccess').textContent = successCount;
@@ -3485,14 +3504,22 @@ async function loadSyncHistory() {
             }
 
             tableBody.innerHTML = history.map(sync => {
-                const statusBadge = sync.status === 'completed' ?
-                    '<span class="badge bg-success">Completed</span>' :
-                    sync.status === 'failed' ?
-                    '<span class="badge bg-danger">Failed</span>' :
-                    '<span class="badge bg-warning">In Progress</span>';
+                // Map backend status values to display badges
+                let statusBadge;
+                if (sync.status === 'success') {
+                    statusBadge = '<span class="badge bg-success">Completed</span>';
+                } else if (sync.status === 'partial') {
+                    statusBadge = '<span class="badge bg-warning">Partial</span>';
+                } else if (sync.status === 'failed') {
+                    statusBadge = '<span class="badge bg-danger">Failed</span>';
+                } else {
+                    statusBadge = '<span class="badge bg-secondary">Unknown</span>';
+                }
 
-                const duration = sync.duration ? `${sync.duration.toFixed(2)}s` : '-';
-                const startedAt = new Date(sync.started_at).toLocaleString();
+                // Use correct field names from backend (duration_seconds, timestamp)
+                const duration = sync.duration_seconds ? `${sync.duration_seconds.toFixed(2)}s` : '-';
+                const startedAt = sync.timestamp ? new Date(sync.timestamp).toLocaleString() : '-';
+                const errorCount = Array.isArray(sync.errors) ? sync.errors.length : 0;
 
                 return `
                     <tr>
@@ -3504,7 +3531,7 @@ async function loadSyncHistory() {
                         <td data-column="added">${sync.users_added || 0}</td>
                         <td data-column="updated">${sync.users_updated || 0}</td>
                         <td data-column="deactivated">${sync.users_deactivated || 0}</td>
-                        <td data-column="errors">${sync.error_count || 0}</td>
+                        <td data-column="errors">${errorCount}</td>
                     </tr>
                 `;
             }).join('');
