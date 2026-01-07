@@ -417,7 +417,6 @@ license_bp = Blueprint('license', __name__)
 @license_bp.route('/api/license', methods=['GET'])
 def get_license_info():
     """Get current license information"""
-    from flask_login import current_user
     from app.auth import get_current_user
 
     user = get_current_user()
