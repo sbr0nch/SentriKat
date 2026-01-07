@@ -194,10 +194,11 @@ def delete_group_mapping(mapping_id):
 def discover_ldap_groups():
     """Discover available LDAP groups from directory"""
     data = request.get_json()
-    search_filter = data.get('search_filter', '*')
+    search_base = data.get('search_base', '')
+    search_filter = data.get('search_filter', '(objectClass=group)')
 
     try:
-        result = LDAPManager.search_groups(search_filter)
+        result = LDAPManager.search_groups(search_base=search_base, search_filter=search_filter)
         if not result['success']:
             return jsonify({'error': result.get('error', 'Search failed')}), 500
 
