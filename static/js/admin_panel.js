@@ -539,9 +539,14 @@ async function loadUsers() {
                 const role = roleMap[user.role] || roleMap['user'];
                 const roleBadge = `<span class="badge ${role.badge}">${role.text}</span>`;
 
-                const statusBadge = user.is_active
+                let statusBadge = user.is_active
                     ? '<span class="badge badge-status-active">Active</span>'
                     : '<span class="badge badge-status-inactive">Inactive</span>';
+
+                // Add locked indicator if user is locked
+                if (user.is_locked) {
+                    statusBadge += ' <span class="badge bg-danger" title="Account locked due to failed logins"><i class="bi bi-lock-fill"></i> Locked</span>';
+                }
 
                 const authBadge = user.auth_type === 'ldap'
                     ? '<span class="badge badge-auth-ldap">LDAP</span>'
@@ -578,6 +583,11 @@ async function loadUsers() {
                                 <button class="btn-action btn-action-edit" onclick="editUser(${user.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
+                                ${user.is_locked ? `
+                                <button class="btn-action btn-action-warning" onclick="unlockUser(${user.id}, '${escapeHtml(user.username)}')" title="Unlock Account">
+                                    <i class="bi bi-unlock-fill"></i>
+                                </button>
+                                ` : ''}
                                 <button class="btn-action ${user.is_active ? 'btn-action-block' : 'btn-action-success'}"
                                         onclick="toggleUserActive(${user.id}, '${escapeHtml(user.username)}', ${user.is_active})"
                                         title="${user.is_active ? 'Block' : 'Unblock'}">
@@ -1050,6 +1060,37 @@ async function toggleUserActive(userId, username, isCurrentlyActive) {
         }
     } catch (error) {
         showToast(`Error toggling user status: ${error.message}`, 'danger');
+    }
+}
+
+async function unlockUser(userId, username) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to unlock the account for "<strong>${username}</strong>"?<br><br>` +
+        'This will reset failed login attempts and allow the user to log in immediately.',
+        'Unlock User Account',
+        'Unlock',
+        'btn-warning'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/unlock`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast(result.message || `✓ User ${username} has been unlocked`, 'success');
+            loadUsers();
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error unlocking user: ${error.message}`, 'danger');
     }
 }
 
@@ -4061,3 +4102,123 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+// ============================================================================
+// AUDIT LOGS
+// ============================================================================
+
+async function loadAuditLogs() {
+    const tbody = document.getElementById('auditLogsTable');
+    if (!tbody) return;
+
+    const action = document.getElementById('auditActionFilter')?.value || '';
+    const resource = document.getElementById('auditResourceFilter')?.value || '';
+    const limit = document.getElementById('auditLimitFilter')?.value || '100';
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="6" class="text-center text-muted py-4">
+                <div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading audit logs...
+            </td>
+        </tr>
+    `;
+
+    try {
+        let url = `/api/audit-logs?limit=${limit}`;
+        if (action) url += `&action=${action}`;
+        if (resource) url += `&resource=${resource}`;
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            const error = await response.json();
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center text-danger py-4">
+                        <i class="bi bi-exclamation-triangle me-2"></i>${error.error || 'Failed to load audit logs'}
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        const data = await response.json();
+
+        if (!data.logs || data.logs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-4">
+                        <i class="bi bi-journal-text me-2"></i>No audit logs found
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = data.logs.map(log => {
+            const timestamp = log.timestamp ? new Date(log.timestamp).toLocaleString() : '-';
+            const actionBadge = getActionBadge(log.action);
+            const details = log.details ? (typeof log.details === 'string' ? log.details : JSON.stringify(log.details)) : '-';
+            const truncatedDetails = details.length > 80 ? details.substring(0, 80) + '...' : details;
+
+            return `
+                <tr>
+                    <td class="text-nowrap"><small>${timestamp}</small></td>
+                    <td>${actionBadge}</td>
+                    <td><small>${escapeHtml(log.resource || '-')}${log.resource_id ? ` #${log.resource_id}` : ''}</small></td>
+                    <td><small>${escapeHtml(log.username || '-')}</small></td>
+                    <td><small class="text-muted">${escapeHtml(log.ip_address || '-')}</small></td>
+                    <td><small class="text-muted" title="${escapeHtml(details)}">${escapeHtml(truncatedDetails)}</small></td>
+                </tr>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.error('Error loading audit logs:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center text-danger py-4">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading audit logs: ${error.message}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function getActionBadge(action) {
+    const badges = {
+        'CREATE': '<span class="badge bg-success">CREATE</span>',
+        'UPDATE': '<span class="badge bg-primary">UPDATE</span>',
+        'DELETE': '<span class="badge bg-danger">DELETE</span>',
+        'LOGIN': '<span class="badge bg-info">LOGIN</span>',
+        'LOGOUT': '<span class="badge bg-secondary">LOGOUT</span>',
+        'BLOCK': '<span class="badge bg-warning text-dark">BLOCK</span>',
+        'UNBLOCK': '<span class="badge bg-success">UNBLOCK</span>',
+        'UNLOCK': '<span class="badge bg-warning text-dark">UNLOCK</span>',
+        'SYNC': '<span class="badge bg-info">SYNC</span>'
+    };
+    return badges[action] || `<span class="badge bg-secondary">${escapeHtml(action || 'UNKNOWN')}</span>`;
+}
+
+function exportAuditLogs(format, days) {
+    const action = document.getElementById('auditActionFilter')?.value || '';
+    const resource = document.getElementById('auditResourceFilter')?.value || '';
+
+    let url = `/api/audit-logs/export?format=${format}&days=${days}`;
+    if (action) url += `&action=${action}`;
+    if (resource) url += `&resource=${resource}`;
+
+    // Trigger download
+    window.location.href = url;
+    showToast(`Downloading audit logs (${format.toUpperCase()}, last ${days} days)...`, 'info');
+}
+
+// Load audit logs when the tab is shown
+document.addEventListener('DOMContentLoaded', function() {
+    const auditLogsTab = document.getElementById('audit-logs-tab');
+    if (auditLogsTab) {
+        auditLogsTab.addEventListener('shown.bs.tab', function() {
+            loadAuditLogs();
+        });
+    }
+});

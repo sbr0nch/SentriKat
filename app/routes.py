@@ -1699,6 +1699,54 @@ def toggle_user_active(user_id):
         'email_sent': email_sent
     })
 
+@bp.route('/api/users/<int:user_id>/unlock', methods=['POST'])
+@org_admin_required
+def unlock_user(user_id):
+    """
+    Unlock a user account that was locked due to failed login attempts.
+
+    Permissions:
+    - Super Admin: Can unlock any user
+    - Org Admin: Can only unlock users in their organization
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions to unlock this user'}), 403
+
+    # Check if actually locked
+    if not user.is_locked():
+        return jsonify({'error': 'User account is not locked'}), 400
+
+    # Store old values for audit
+    old_attempts = user.failed_login_attempts
+    old_locked_until = user.locked_until.isoformat() if user.locked_until else None
+
+    # Reset lockout
+    user.reset_failed_login_attempts()
+
+    # Log the action
+    log_audit_event(
+        'UNLOCK',
+        'users',
+        user.id,
+        old_value={'failed_login_attempts': old_attempts, 'locked_until': old_locked_until},
+        new_value={'failed_login_attempts': 0, 'locked_until': None},
+        details=f"User {user.username} unlocked by {current_user.username}"
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'User {user.username} has been unlocked'
+    })
+
 # ============================================================================
 # USER ORGANIZATION ASSIGNMENTS (Multi-Org Support)
 # ============================================================================
@@ -2035,6 +2083,117 @@ def get_audit_logs():
         'total': len(logs),
         'limit': limit
     })
+
+@bp.route('/api/audit-logs/export', methods=['GET'])
+@admin_required
+def export_audit_logs():
+    """
+    Export audit logs as CSV or JSON file
+    Only accessible by super admins
+
+    Query params:
+    - format: 'csv' or 'json' (default: csv)
+    - days: Number of days to include (default: 30)
+    - action: Filter by action type
+    - resource: Filter by resource type
+    """
+    import os
+    import json
+    import io
+    import csv
+    from datetime import datetime, timedelta
+    from flask import Response
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Only super admins can export audit logs
+    if not current_user or not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can export audit logs'}), 403
+
+    # Get query parameters
+    export_format = request.args.get('format', 'csv').lower()
+    days = request.args.get('days', 30, type=int)
+    action_filter = request.args.get('action')
+    resource_filter = request.args.get('resource')
+
+    if export_format not in ['csv', 'json']:
+        return jsonify({'error': 'Invalid format. Use csv or json'}), 400
+
+    # Calculate date cutoff
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_str = cutoff_date.isoformat()
+
+    # Find the audit log file
+    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    if not os.path.exists(log_dir):
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+
+    audit_log_path = os.path.join(log_dir, 'audit.log')
+
+    if not os.path.exists(audit_log_path):
+        return jsonify({'error': 'No audit logs found'}), 404
+
+    logs = []
+    try:
+        with open(audit_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    log_entry = json.loads(line.strip())
+
+                    # Apply date filter
+                    log_time = log_entry.get('timestamp', '')
+                    if log_time < cutoff_str:
+                        continue
+
+                    # Apply filters
+                    if action_filter and log_entry.get('action') != action_filter:
+                        continue
+                    if resource_filter and not log_entry.get('resource', '').startswith(resource_filter):
+                        continue
+
+                    logs.append(log_entry)
+
+                except json.JSONDecodeError:
+                    continue
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
+
+    # Sort by timestamp descending (most recent first)
+    logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+
+    # Generate filename
+    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    filename = f'audit_logs_{timestamp}.{export_format}'
+
+    if export_format == 'json':
+        # Export as JSON
+        output = json.dumps(logs, indent=2)
+        mimetype = 'application/json'
+    else:
+        # Export as CSV
+        output = io.StringIO()
+        if logs:
+            # Determine all possible fields from logs
+            fieldnames = ['timestamp', 'action', 'resource', 'resource_id', 'user_id', 'username', 'ip_address', 'details']
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            for log in logs:
+                # Flatten any nested objects in details
+                if 'details' in log and isinstance(log['details'], dict):
+                    log['details'] = json.dumps(log['details'])
+                writer.writerow(log)
+        output = output.getvalue()
+        mimetype = 'text/csv'
+
+    return Response(
+        output,
+        mimetype=mimetype,
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
 
 # ============================================================================
 # CVE SERVICE STATUS CHECK

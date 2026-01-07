@@ -536,6 +536,11 @@
                         <i class="bi bi-archive me-2"></i>Data Retention
                     </button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="audit-logs-tab" data-bs-toggle="pill" data-bs-target="#auditLogs" type="button">
+                        <i class="bi bi-journal-text me-2"></i>Audit Logs
+                    </button>
+                </li>
                 {% endif %}
             </ul>
 
@@ -1192,6 +1197,99 @@
                                     </div>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Audit Logs -->
+                <div class="tab-pane fade" id="auditLogs" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-journal-text me-2"></i>Audit Logs</span>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
+                                    <i class="bi bi-download me-1"></i>Export
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" href="#" onclick="exportAuditLogs('csv', 30)"><i class="bi bi-filetype-csv me-2"></i>CSV (Last 30 days)</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="exportAuditLogs('csv', 90)"><i class="bi bi-filetype-csv me-2"></i>CSV (Last 90 days)</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="exportAuditLogs('csv', 365)"><i class="bi bi-filetype-csv me-2"></i>CSV (Last year)</a></li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li><a class="dropdown-item" href="#" onclick="exportAuditLogs('json', 30)"><i class="bi bi-filetype-json me-2"></i>JSON (Last 30 days)</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="exportAuditLogs('json', 90)"><i class="bi bi-filetype-json me-2"></i>JSON (Last 90 days)</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                View and export audit logs for compliance and security review. Logs include user actions, configuration changes, and security events.
+                            </div>
+
+                            <!-- Filters -->
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-3">
+                                    <label class="form-label fw-semibold">Action Type</label>
+                                    <select class="form-select" id="auditActionFilter" onchange="loadAuditLogs()">
+                                        <option value="">All Actions</option>
+                                        <option value="CREATE">Create</option>
+                                        <option value="UPDATE">Update</option>
+                                        <option value="DELETE">Delete</option>
+                                        <option value="LOGIN">Login</option>
+                                        <option value="LOGOUT">Logout</option>
+                                        <option value="BLOCK">Block</option>
+                                        <option value="UNBLOCK">Unblock</option>
+                                        <option value="UNLOCK">Unlock</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-semibold">Resource Type</label>
+                                    <select class="form-select" id="auditResourceFilter" onchange="loadAuditLogs()">
+                                        <option value="">All Resources</option>
+                                        <option value="users">Users</option>
+                                        <option value="products">Products</option>
+                                        <option value="organizations">Organizations</option>
+                                        <option value="settings">Settings</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-semibold">Limit</label>
+                                    <select class="form-select" id="auditLimitFilter" onchange="loadAuditLogs()">
+                                        <option value="50">50 entries</option>
+                                        <option value="100" selected>100 entries</option>
+                                        <option value="250">250 entries</option>
+                                        <option value="500">500 entries</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button type="button" class="btn btn-outline-secondary w-100" onclick="loadAuditLogs()">
+                                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Audit Logs Table -->
+                            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                                <table class="table table-hover table-sm">
+                                    <thead class="sticky-top bg-light">
+                                        <tr>
+                                            <th>Timestamp</th>
+                                            <th>Action</th>
+                                            <th>Resource</th>
+                                            <th>User</th>
+                                            <th>IP Address</th>
+                                            <th>Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="auditLogsTable">
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted py-4">
+                                                <i class="bi bi-arrow-repeat spin me-2"></i>Loading audit logs...
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>

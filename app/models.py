@@ -688,6 +688,10 @@ class User(db.Model):
             'can_view_all_orgs': self.can_view_all_orgs,
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            # Lockout info
+            'is_locked': self.is_locked(),
+            'failed_login_attempts': self.failed_login_attempts or 0,
+            'locked_until': self.locked_until.isoformat() if self.locked_until else None,
             # Multi-org data
             'org_memberships': org_memberships,
             'all_organizations': self.get_all_organizations()
