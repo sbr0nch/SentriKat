@@ -8,6 +8,7 @@ from app import db, csrf
 from app.models import SystemSettings, User, Vulnerability, SyncLog
 from app.auth import admin_required
 from app.encryption import encrypt_value, decrypt_value
+from app.licensing import requires_professional
 import json
 from datetime import datetime
 import logging
@@ -85,6 +86,7 @@ def set_setting(key, value, category, description=None, is_encrypted=False):
 
 @settings_bp.route('/ldap', methods=['GET'])
 @admin_required
+@requires_professional('LDAP')
 def get_ldap_settings():
     """Get LDAP configuration settings"""
     settings = {
@@ -102,6 +104,7 @@ def get_ldap_settings():
 
 @settings_bp.route('/ldap', methods=['POST'])
 @admin_required
+@requires_professional('LDAP')
 def save_ldap_settings():
     """Save LDAP configuration settings"""
     data = request.get_json()
@@ -128,6 +131,7 @@ def save_ldap_settings():
 
 @settings_bp.route('/ldap/test', methods=['POST'])
 @admin_required
+@requires_professional('LDAP')
 def test_ldap_connection():
     """Test LDAP connection"""
     try:
@@ -176,6 +180,7 @@ def test_ldap_connection():
 
 @settings_bp.route('/smtp', methods=['GET'])
 @admin_required
+@requires_professional('Email Alerts')
 def get_smtp_settings():
     """Get global SMTP settings"""
     settings = {
@@ -191,6 +196,7 @@ def get_smtp_settings():
 
 @settings_bp.route('/smtp', methods=['POST'])
 @admin_required
+@requires_professional('Email Alerts')
 def save_smtp_settings():
     """Save global SMTP settings"""
     data = request.get_json()
@@ -215,6 +221,7 @@ def save_smtp_settings():
 
 @settings_bp.route('/smtp/test', methods=['POST'])
 @admin_required
+@requires_professional('Email Alerts')
 def test_smtp_connection():
     """Test global SMTP connection by sending test email"""
     try:
@@ -705,6 +712,7 @@ def delete_logo():
 
 @settings_bp.route('/backup', methods=['GET'])
 @admin_required
+@requires_professional('Backup & Restore')
 def create_backup():
     """
     Create a backup of all settings and configuration.
@@ -842,6 +850,7 @@ def create_backup():
 
 @settings_bp.route('/restore', methods=['POST'])
 @admin_required
+@requires_professional('Backup & Restore')
 def restore_backup():
     """
     Restore settings from a backup file.

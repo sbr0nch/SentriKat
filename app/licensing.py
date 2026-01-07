@@ -410,8 +410,12 @@ def check_product_limit():
 # ============================================================================
 
 from flask import Blueprint
+from app import csrf
 
 license_bp = Blueprint('license', __name__)
+
+# Exempt license API from CSRF (uses JSON and session auth)
+csrf.exempt(license_bp)
 
 
 @license_bp.route('/api/license', methods=['GET'])

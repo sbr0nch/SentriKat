@@ -10,6 +10,7 @@ from app.ldap_models import LDAPGroupMapping, LDAPSyncLog, LDAPAuditLog
 from app.ldap_manager import LDAPManager
 from app.ldap_sync import LDAPSyncEngine
 from app.auth import admin_required, org_admin_required
+from app.licensing import requires_professional
 from datetime import datetime
 import json
 
@@ -25,6 +26,7 @@ csrf.exempt(ldap_group_bp)
 
 @ldap_group_bp.route('/mappings', methods=['GET'])
 @org_admin_required
+@requires_professional('LDAP')
 def get_group_mappings():
     """Get all LDAP group mappings (filtered by org for org_admins)"""
     current_user = User.query.get(session.get('user_id'))
@@ -46,6 +48,7 @@ def get_group_mappings():
 
 @ldap_group_bp.route('/mappings', methods=['POST'])
 @org_admin_required
+@requires_professional('LDAP')
 def create_group_mapping():
     """Create a new LDAP group mapping"""
     data = request.get_json()

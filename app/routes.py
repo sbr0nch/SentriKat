@@ -5,6 +5,7 @@ from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required, org_admin_required, manager_required
+from app.licensing import requires_professional, check_user_limit, check_org_limit, check_product_limit
 import json
 import re
 
@@ -232,6 +233,11 @@ def create_product():
     - Org Admin: Can create products for their org only
     - Manager: Can create products for their org only
     """
+    # Check license limit for products
+    allowed, limit, message = check_product_limit()
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
+
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
 
@@ -1081,6 +1087,11 @@ def get_organizations():
 @admin_required
 def create_organization():
     """Create a new organization"""
+    # Check license limit for organizations
+    allowed, limit, message = check_org_limit()
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
+
     data = request.get_json()
 
     if not data.get('name') or not data.get('display_name'):
@@ -1388,6 +1399,11 @@ def get_users():
 @org_admin_required
 def create_user():
     """Create a new user (local auth only - LDAP users must be discovered/invited)"""
+    # Check license limit for users
+    allowed, limit, message = check_user_limit()
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
+
     data = request.get_json()
 
     # Validate required fields
@@ -2274,6 +2290,7 @@ def get_audit_logs():
 
 @bp.route('/api/audit-logs/export', methods=['GET'])
 @admin_required
+@requires_professional('Audit Export')
 def export_audit_logs():
     """
     Export audit logs as CSV or JSON file

@@ -8,7 +8,7 @@ from app import db, csrf
 from app.models import User
 from app.auth import admin_required, org_admin_required
 from app.ldap_manager import LDAPManager
-from app.licensing import requires_professional
+from app.licensing import requires_professional, check_user_limit
 import logging
 
 logger = logging.getLogger(__name__)
@@ -166,6 +166,11 @@ def invite_ldap_user():
         "role": "user"
     }
     """
+    # Check license limit for users
+    allowed, limit, message = check_user_limit()
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
+
     current_user = get_current_user()
     if not can_manage_ldap_users(current_user):
         return jsonify({'error': 'Insufficient permissions'}), 403
