@@ -498,6 +498,12 @@ def get_notification_settings():
         'slack_enabled': get_setting('slack_enabled', 'false') == 'true',
         'teams_webhook_url': get_setting('teams_webhook_url', ''),
         'teams_enabled': get_setting('teams_enabled', 'false') == 'true',
+        # Generic webhook (RocketChat, Mattermost, Discord, etc.)
+        'generic_webhook_url': get_setting('generic_webhook_url', ''),
+        'generic_webhook_enabled': get_setting('generic_webhook_enabled', 'false') == 'true',
+        'generic_webhook_name': get_setting('generic_webhook_name', 'Custom Webhook'),
+        'generic_webhook_format': get_setting('generic_webhook_format', 'slack'),  # slack, discord, or custom
+        'generic_webhook_custom_template': get_setting('generic_webhook_custom_template', ''),
         'critical_email_enabled': get_setting('critical_email_enabled', 'true') == 'true',
         'critical_email_time': get_setting('critical_email_time', '09:00'),
         'critical_email_max_age_days': int(get_setting('critical_email_max_age_days', '30'))
@@ -518,6 +524,15 @@ def save_notification_settings():
         set_setting('teams_enabled', 'true' if data.get('teams_enabled') else 'false', 'notifications', 'Enable Teams notifications')
         if data.get('teams_webhook_url'):
             set_setting('teams_webhook_url', data['teams_webhook_url'], 'notifications', 'Microsoft Teams webhook URL', is_encrypted=True)
+
+        # Generic webhook settings (RocketChat, Mattermost, Discord, etc.)
+        set_setting('generic_webhook_enabled', 'true' if data.get('generic_webhook_enabled') else 'false', 'notifications', 'Enable generic webhook notifications')
+        if data.get('generic_webhook_url'):
+            set_setting('generic_webhook_url', data['generic_webhook_url'], 'notifications', 'Generic webhook URL', is_encrypted=True)
+        set_setting('generic_webhook_name', data.get('generic_webhook_name', 'Custom Webhook'), 'notifications', 'Generic webhook display name')
+        set_setting('generic_webhook_format', data.get('generic_webhook_format', 'slack'), 'notifications', 'Generic webhook payload format')
+        if data.get('generic_webhook_custom_template'):
+            set_setting('generic_webhook_custom_template', data['generic_webhook_custom_template'], 'notifications', 'Custom JSON template for webhook')
 
         set_setting('critical_email_enabled', 'true' if data.get('critical_email_enabled') else 'false', 'notifications', 'Enable critical CVE reminder emails')
         set_setting('critical_email_time', data.get('critical_email_time', '09:00'), 'notifications', 'Critical CVE email time (UTC)')
@@ -573,13 +588,51 @@ def test_notification():
             }
             response = requests.post(webhook_url, json=payload, timeout=10)
 
+        elif webhook_type == 'generic':
+            webhook_url = get_setting('generic_webhook_url')
+            if not webhook_url:
+                return jsonify({'success': False, 'error': 'Generic webhook URL not configured'})
+
+            webhook_format = get_setting('generic_webhook_format', 'slack')
+            webhook_name = get_setting('generic_webhook_name', 'Custom Webhook')
+            custom_template = get_setting('generic_webhook_custom_template', '')
+
+            # Build payload based on format
+            if webhook_format == 'slack' or webhook_format == 'rocketchat':
+                # Slack-compatible format (works with RocketChat, Mattermost)
+                payload = {
+                    "text": f"🔒 SentriKat Test Notification\n✓ Your {webhook_name} integration is working correctly!"
+                }
+            elif webhook_format == 'discord':
+                # Discord webhook format
+                payload = {
+                    "content": f"🔒 **SentriKat Test Notification**\n✓ Your {webhook_name} integration is working correctly!"
+                }
+            elif webhook_format == 'custom' and custom_template:
+                # Custom JSON template - replace placeholders
+                import json as json_module
+                try:
+                    template_str = custom_template.replace('{{message}}', f'SentriKat Test Notification - Your {webhook_name} integration is working correctly!')
+                    template_str = template_str.replace('{{title}}', 'SentriKat Webhook Test')
+                    payload = json_module.loads(template_str)
+                except json_module.JSONDecodeError as e:
+                    return jsonify({'success': False, 'error': f'Invalid custom template JSON: {e}'})
+            else:
+                # Default simple format
+                payload = {
+                    "text": f"🔒 SentriKat Test Notification\n✓ Your {webhook_name} integration is working correctly!"
+                }
+
+            response = requests.post(webhook_url, json=payload, timeout=10)
+            webhook_type = webhook_name  # Use custom name for message
+
         else:
             return jsonify({'success': False, 'error': f'Unknown webhook type: {webhook_type}'})
 
         if response.status_code in [200, 204]:
-            return jsonify({'success': True, 'message': f'Test notification sent to {webhook_type.title()}'})
+            return jsonify({'success': True, 'message': f'Test notification sent to {webhook_type.title() if isinstance(webhook_type, str) and webhook_type.islower() else webhook_type}'})
         else:
-            return jsonify({'success': False, 'error': f'Webhook returned status {response.status_code}'})
+            return jsonify({'success': False, 'error': f'Webhook returned status {response.status_code}: {response.text[:200]}'})
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

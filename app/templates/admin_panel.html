@@ -1121,6 +1121,44 @@
                                     </div>
 
                                     <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-webhook me-2"></i>Generic Webhook (RocketChat, Mattermost, Discord, etc.)</h6>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch mb-2">
+                                            <input type="checkbox" class="form-check-input" id="genericWebhookEnabled">
+                                            <label class="form-check-label fw-semibold" for="genericWebhookEnabled">Enable Generic Webhook Notifications</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="genericWebhookName" class="form-label">Webhook Name</label>
+                                        <input type="text" class="form-control" id="genericWebhookName" placeholder="RocketChat" value="Custom Webhook">
+                                        <small class="form-text text-muted">Display name for this integration</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="genericWebhookFormat" class="form-label">Payload Format</label>
+                                        <select class="form-select" id="genericWebhookFormat">
+                                            <option value="slack">Slack-compatible (RocketChat, Mattermost)</option>
+                                            <option value="discord">Discord</option>
+                                            <option value="custom">Custom JSON Template</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-8">
+                                        <label for="genericWebhookUrl" class="form-label">Webhook URL</label>
+                                        <input type="text" class="form-control" id="genericWebhookUrl" placeholder="https://your-server.com/hooks/...">
+                                        <small class="form-text text-muted">Incoming webhook URL from your chat platform</small>
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button type="button" class="btn btn-outline-secondary w-100" onclick="testWebhook('generic')">
+                                            <i class="bi bi-send me-1"></i>Test
+                                        </button>
+                                    </div>
+                                    <div class="col-md-12" id="customTemplateContainer" style="display: none;">
+                                        <label for="genericWebhookTemplate" class="form-label">Custom JSON Template</label>
+                                        <textarea class="form-control font-monospace" id="genericWebhookTemplate" rows="4" placeholder='{"text": "{{message}}", "title": "{{title}}"}'></textarea>
+                                        <small class="form-text text-muted">Use <code>{{message}}</code> and <code>{{title}}</code> as placeholders</small>
+                                    </div>
+
+                                    <div class="col-12 mt-4">
                                         <h6 class="text-muted border-bottom pb-2"><i class="bi bi-envelope-exclamation me-2"></i>Critical CVE Email Reminders</h6>
                                     </div>
                                     <div class="col-md-12">

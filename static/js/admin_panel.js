@@ -2202,6 +2202,13 @@ async function saveNotificationSettings() {
         slack_webhook_url: document.getElementById('slackWebhookUrl').value || '',
         teams_enabled: document.getElementById('teamsEnabled').checked,
         teams_webhook_url: document.getElementById('teamsWebhookUrl').value || '',
+        // Generic webhook settings
+        generic_webhook_enabled: document.getElementById('genericWebhookEnabled').checked,
+        generic_webhook_url: document.getElementById('genericWebhookUrl').value || '',
+        generic_webhook_name: document.getElementById('genericWebhookName').value || 'Custom Webhook',
+        generic_webhook_format: document.getElementById('genericWebhookFormat').value || 'slack',
+        generic_webhook_custom_template: document.getElementById('genericWebhookTemplate').value || '',
+        // Email settings
         critical_email_enabled: document.getElementById('criticalEmailEnabled').checked,
         critical_email_time: document.getElementById('criticalEmailTime').value || '09:00',
         critical_email_max_age_days: parseInt(document.getElementById('criticalEmailMaxAge').value) || 30
@@ -2234,6 +2241,12 @@ async function loadNotificationSettings() {
             const slackWebhookUrl = document.getElementById('slackWebhookUrl');
             const teamsEnabled = document.getElementById('teamsEnabled');
             const teamsWebhookUrl = document.getElementById('teamsWebhookUrl');
+            const genericWebhookEnabled = document.getElementById('genericWebhookEnabled');
+            const genericWebhookUrl = document.getElementById('genericWebhookUrl');
+            const genericWebhookName = document.getElementById('genericWebhookName');
+            const genericWebhookFormat = document.getElementById('genericWebhookFormat');
+            const genericWebhookTemplate = document.getElementById('genericWebhookTemplate');
+            const customTemplateContainer = document.getElementById('customTemplateContainer');
             const criticalEmailEnabled = document.getElementById('criticalEmailEnabled');
             const criticalEmailTime = document.getElementById('criticalEmailTime');
             const criticalEmailMaxAge = document.getElementById('criticalEmailMaxAge');
@@ -2242,9 +2255,32 @@ async function loadNotificationSettings() {
             if (slackWebhookUrl) slackWebhookUrl.value = settings.slack_webhook_url || '';
             if (teamsEnabled) teamsEnabled.checked = settings.teams_enabled === true;
             if (teamsWebhookUrl) teamsWebhookUrl.value = settings.teams_webhook_url || '';
+
+            // Generic webhook settings
+            if (genericWebhookEnabled) genericWebhookEnabled.checked = settings.generic_webhook_enabled === true;
+            if (genericWebhookUrl) genericWebhookUrl.value = settings.generic_webhook_url || '';
+            if (genericWebhookName) genericWebhookName.value = settings.generic_webhook_name || 'Custom Webhook';
+            if (genericWebhookFormat) {
+                genericWebhookFormat.value = settings.generic_webhook_format || 'slack';
+                // Show/hide custom template field
+                if (customTemplateContainer) {
+                    customTemplateContainer.style.display = genericWebhookFormat.value === 'custom' ? 'block' : 'none';
+                }
+            }
+            if (genericWebhookTemplate) genericWebhookTemplate.value = settings.generic_webhook_custom_template || '';
+
             if (criticalEmailEnabled) criticalEmailEnabled.checked = settings.critical_email_enabled !== false;
             if (criticalEmailTime) criticalEmailTime.value = settings.critical_email_time || '09:00';
             if (criticalEmailMaxAge) criticalEmailMaxAge.value = settings.critical_email_max_age_days || 30;
+
+            // Setup event listener for format change
+            if (genericWebhookFormat) {
+                genericWebhookFormat.addEventListener('change', function() {
+                    if (customTemplateContainer) {
+                        customTemplateContainer.style.display = this.value === 'custom' ? 'block' : 'none';
+                    }
+                });
+            }
         }
     } catch (error) {
         console.error('Error loading notification settings:', error);
@@ -4720,3 +4756,50 @@ function formatDate(dateStr) {
     const date = new Date(dateStr);
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
+
+// ============================================================================
+// URL HASH HANDLING - Switch to tab based on URL hash
+// ============================================================================
+
+/**
+ * Handle URL hash to switch to the correct tab on page load
+ * Supports: #users, #organizations, #settings, #ldapUsers, #ldapGroups, #license
+ */
+function handleUrlHash() {
+    const hash = window.location.hash.substring(1); // Remove the '#'
+    if (!hash) return;
+
+    console.log('URL hash detected:', hash);
+
+    // Map of hash values to tab button IDs
+    const tabMap = {
+        'users': 'users-tab',
+        'organizations': 'organizations-tab',
+        'settings': 'settings-tab',
+        'ldapUsers': 'ldap-users-tab',
+        'ldapGroups': 'ldap-groups-tab',
+        'license': 'license-tab'
+    };
+
+    const tabButtonId = tabMap[hash];
+    if (tabButtonId) {
+        const tabButton = document.getElementById(tabButtonId);
+        if (tabButton) {
+            console.log('Switching to tab:', tabButtonId);
+            // Use Bootstrap's Tab API to switch tabs
+            const tab = new bootstrap.Tab(tabButton);
+            tab.show();
+        } else {
+            console.warn('Tab button not found:', tabButtonId);
+        }
+    }
+}
+
+// Initialize hash handling when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle URL hash on page load
+    handleUrlHash();
+
+    // Also handle hash changes (e.g., if user clicks back button)
+    window.addEventListener('hashchange', handleUrlHash);
+});
