@@ -1643,6 +1643,28 @@
         </div>
     </div>
 
+    <!-- Alert Modal (replacement for native alert()) -->
+    <div class="modal fade" id="alertModal" tabindex="-1" aria-labelledby="alertModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="alertModalLabel">
+                        <i class="bi bi-info-circle me-2"></i>Notice
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="alertModalBody">
+                    Message goes here
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                        <i class="bi bi-check me-1"></i>OK
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Prompt Modal -->
     <div class="modal fade" id="promptModal" tabindex="-1" aria-labelledby="promptModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
@@ -1842,6 +1864,44 @@
                 confirmBtn.addEventListener('click', handleConfirm);
                 modal.addEventListener('hidden.bs.modal', handleCancel, { once: true });
 
+                bsModal.show();
+            });
+        }
+
+        /**
+         * Shows an alert modal dialog (replacement for alert())
+         * @param {string} message - The message to display
+         * @param {string} title - Optional title (default: "Notice")
+         * @param {string} type - Optional type: 'info', 'success', 'warning', 'error' (default: 'info')
+         * @returns {Promise<void>} - Resolves when user closes the modal
+         */
+        function showAlert(message, title = 'Notice', type = 'info') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('alertModal');
+                const modalTitle = document.getElementById('alertModalLabel');
+                const modalBody = document.getElementById('alertModalBody');
+
+                // Icon based on type
+                const icons = {
+                    'info': 'bi-info-circle text-primary',
+                    'success': 'bi-check-circle text-success',
+                    'warning': 'bi-exclamation-triangle text-warning',
+                    'error': 'bi-x-circle text-danger'
+                };
+                const icon = icons[type] || icons['info'];
+
+                // Set content
+                modalTitle.innerHTML = `<i class="bi ${icon} me-2"></i>${title}`;
+                modalBody.innerHTML = message.replace(/\n/g, '<br>');
+
+                const bsModal = new bootstrap.Modal(modal);
+
+                const handleClose = () => {
+                    modal.removeEventListener('hidden.bs.modal', handleClose);
+                    resolve();
+                };
+
+                modal.addEventListener('hidden.bs.modal', handleClose, { once: true });
                 bsModal.show();
             });
         }
@@ -2934,10 +2994,10 @@
 
                     document.getElementById('verify2FACode').focus();
                 } else {
-                    alert('Error: ' + (data.error || 'Failed to setup 2FA'));
+                    await showAlert(data.error || 'Failed to setup 2FA', 'Error', 'error');
                 }
             } catch (error) {
-                alert('Error setting up 2FA: ' + error.message);
+                await showAlert('Error setting up 2FA: ' + error.message, 'Error', 'error');
             }
         }
 
@@ -2945,7 +3005,7 @@
             const code = document.getElementById('verify2FACode').value;
 
             if (!code || code.length !== 6) {
-                alert('Please enter a valid 6-digit code');
+                await showAlert('Please enter a valid 6-digit code', 'Invalid Code', 'warning');
                 return;
             }
 
@@ -2959,15 +3019,15 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    alert('Two-factor authentication has been enabled successfully!');
+                    await showAlert('Two-factor authentication has been enabled successfully!', 'Success', 'success');
                     load2FAStatus();
                 } else {
-                    alert('Error: ' + (data.error || 'Invalid verification code'));
+                    await showAlert(data.error || 'Invalid verification code', 'Error', 'error');
                     document.getElementById('verify2FACode').value = '';
                     document.getElementById('verify2FACode').focus();
                 }
             } catch (error) {
-                alert('Error verifying code: ' + error.message);
+                await showAlert('Error verifying code: ' + error.message, 'Error', 'error');
             }
         }
 
@@ -2978,7 +3038,7 @@
         }
 
         async function disable2FA() {
-            const password = prompt('Enter your password to disable 2FA:');
+            const password = await showPrompt('Enter your password to disable 2FA:', '', 'Disable 2FA');
             if (!password) return;
 
             try {
@@ -2991,13 +3051,13 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    alert('Two-factor authentication has been disabled.');
+                    await showAlert('Two-factor authentication has been disabled.', 'Success', 'success');
                     load2FAStatus();
                 } else {
-                    alert('Error: ' + (data.error || 'Failed to disable 2FA'));
+                    await showAlert(data.error || 'Failed to disable 2FA', 'Error', 'error');
                 }
             } catch (error) {
-                alert('Error disabling 2FA: ' + error.message);
+                await showAlert('Error disabling 2FA: ' + error.message, 'Error', 'error');
             }
         }
 
@@ -3010,7 +3070,7 @@
             const confirmPassword = document.getElementById('secConfirmPassword').value;
 
             if (newPassword !== confirmPassword) {
-                alert('New passwords do not match');
+                await showAlert('New passwords do not match', 'Validation Error', 'warning');
                 return;
             }
 
@@ -3027,15 +3087,15 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    alert('Password changed successfully!');
+                    await showAlert('Password changed successfully!', 'Success', 'success');
                     document.getElementById('secCurrentPassword').value = '';
                     document.getElementById('secNewPassword').value = '';
                     document.getElementById('secConfirmPassword').value = '';
                 } else {
-                    alert('Error: ' + (data.error || 'Failed to change password'));
+                    await showAlert(data.error || 'Failed to change password', 'Error', 'error');
                 }
             } catch (error) {
-                alert('Error changing password: ' + error.message);
+                await showAlert('Error changing password: ' + error.message, 'Error', 'error');
             }
         });
 

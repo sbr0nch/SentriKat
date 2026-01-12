@@ -75,7 +75,8 @@ async function bulkActivateUsers() {
         return;
     }
 
-    if (!confirm(`Activate ${toActivate.length} user(s)?`)) return;
+    const confirmed = await showConfirm(`Activate ${toActivate.length} user(s)?`, 'Activate Users', 'Activate', 'btn-success');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -105,7 +106,8 @@ async function bulkDeactivateUsers() {
         return;
     }
 
-    if (!confirm(`Deactivate ${toDeactivate.length} user(s)?`)) return;
+    const confirmed = await showConfirm(`Deactivate ${toDeactivate.length} user(s)?`, 'Deactivate Users', 'Deactivate', 'btn-warning');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -132,7 +134,8 @@ async function bulkDeleteUsers() {
     const userList = Array.from(selectedUsers.values()).map(u => u.username).slice(0, 5).join(', ');
     const more = selectedUsers.size > 5 ? ` and ${selectedUsers.size - 5} more` : '';
 
-    if (!confirm(`DELETE ${selectedUsers.size} user(s)?\n\n${userList}${more}\n\nThis cannot be undone!`)) return;
+    const confirmed = await showConfirm(`<strong>DELETE ${selectedUsers.size} user(s)?</strong><br><br>${userList}${more}<br><br><span class="text-danger">This cannot be undone!</span>`, 'Delete Users', 'Delete', 'btn-danger');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -212,7 +215,8 @@ async function bulkActivateOrgs() {
         return;
     }
 
-    if (!confirm(`Activate ${toActivate.length} organization(s)?`)) return;
+    const confirmed = await showConfirm(`Activate ${toActivate.length} organization(s)?`, 'Activate Organizations', 'Activate', 'btn-success');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -242,7 +246,8 @@ async function bulkDeactivateOrgs() {
         return;
     }
 
-    if (!confirm(`Deactivate ${toDeactivate.length} organization(s)?`)) return;
+    const confirmed = await showConfirm(`Deactivate ${toDeactivate.length} organization(s)?<br><br><span class="text-warning">Users in these organizations will be blocked from logging in.</span>`, 'Deactivate Organizations', 'Deactivate', 'btn-warning');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -269,7 +274,8 @@ async function bulkDeleteOrgs() {
     const orgList = Array.from(selectedOrgs.values()).map(o => o.name).slice(0, 5).join(', ');
     const more = selectedOrgs.size > 5 ? ` and ${selectedOrgs.size - 5} more` : '';
 
-    if (!confirm(`DELETE ${selectedOrgs.size} organization(s)?\n\n${orgList}${more}\n\nThis will also affect users and products!\nThis cannot be undone!`)) return;
+    const confirmed = await showConfirm(`<strong>DELETE ${selectedOrgs.size} organization(s)?</strong><br><br>${orgList}${more}<br><br><span class="text-warning">This will also affect users and products!</span><br><span class="text-danger">This cannot be undone!</span>`, 'Delete Organizations', 'Delete', 'btn-danger');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -885,7 +891,8 @@ async function updateOrgMembershipRole(userId, orgId, newRole, isPrimary) {
 }
 
 async function removeOrgMembership(userId, orgId, orgName) {
-    if (!confirm(`Remove user from "${orgName}"?`)) return;
+    const confirmed = await showConfirm(`Remove user from "${orgName}"?`, 'Remove Membership', 'Remove', 'btn-warning');
+    if (!confirmed) return;
 
     try {
         const response = await fetch(`/api/users/${userId}/organizations/${orgId}`, {
@@ -2044,9 +2051,8 @@ async function downloadBackup() {
 }
 
 async function restoreBackup(file) {
-    if (!confirm('Are you sure you want to restore from this backup? This will overwrite current settings.')) {
-        return;
-    }
+    const confirmed = await showConfirm('Are you sure you want to restore from this backup?<br><br>This will overwrite current settings.', 'Restore Backup', 'Restore', 'btn-warning');
+    if (!confirmed) return;
 
     try {
         const formData = new FormData();
@@ -2100,10 +2106,18 @@ async function restoreFullBackup(file) {
 }
 
 // Confirm and trigger full restore
-function confirmFullRestore() {
-    if (!confirm('⚠️ FULL RESTORE WARNING ⚠️\n\nThis will import all organizations, users, and products from the backup.\n\nExisting data with the same names will be skipped.\nLocal users will need to reset their passwords.\n\nContinue?')) {
-        return;
-    }
+async function confirmFullRestore() {
+    const confirmed = await showConfirm(
+        '<strong class="text-danger">⚠️ FULL RESTORE WARNING</strong><br><br>' +
+        'This will import all organizations, users, and products from the backup.<br><br>' +
+        '• Existing data with the same names will be skipped<br>' +
+        '• Local users will need to reset their passwords<br><br>' +
+        'Continue?',
+        'Full Restore',
+        'Restore All Data',
+        'btn-danger'
+    );
+    if (!confirmed) return;
     document.getElementById('restoreFullFile').click();
 }
 
@@ -2230,7 +2244,8 @@ async function uploadLogo() {
 }
 
 async function deleteLogo() {
-    if (!confirm('Remove custom logo and revert to default?')) return;
+    const confirmed = await showConfirm('Remove custom logo and revert to default?', 'Remove Logo', 'Remove', 'btn-warning');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -4793,9 +4808,8 @@ async function activateLicense() {
 }
 
 async function removeLicense() {
-    if (!confirm('Are you sure you want to remove the license? This will revert to Community edition.')) {
-        return;
-    }
+    const confirmed = await showConfirm('Are you sure you want to remove the license?<br><br>This will revert to <strong>Community edition</strong>.', 'Remove License', 'Remove', 'btn-danger');
+    if (!confirmed) return;
 
     try {
         const response = await fetch('/api/license', {
