@@ -98,7 +98,9 @@ def get_ldap_settings():
         'ldap_search_filter': get_setting('ldap_search_filter', '(sAMAccountName={username})'),
         'ldap_username_attr': get_setting('ldap_username_attr', 'sAMAccountName'),
         'ldap_email_attr': get_setting('ldap_email_attr', 'mail'),
-        'ldap_use_tls': get_setting('ldap_use_tls', 'false') == 'true'
+        'ldap_use_tls': get_setting('ldap_use_tls', 'false') == 'true',
+        'ldap_sync_enabled': get_setting('ldap_sync_enabled', 'false') == 'true',
+        'ldap_sync_interval_hours': int(get_setting('ldap_sync_interval_hours', '24'))
     }
     return jsonify(settings)
 
@@ -124,6 +126,8 @@ def save_ldap_settings():
         set_setting('ldap_username_attr', data.get('ldap_username_attr', 'sAMAccountName'), 'ldap', 'LDAP username attribute')
         set_setting('ldap_email_attr', data.get('ldap_email_attr', 'mail'), 'ldap', 'LDAP email attribute')
         set_setting('ldap_use_tls', 'true' if data.get('ldap_use_tls') else 'false', 'ldap', 'Use TLS/STARTTLS')
+        set_setting('ldap_sync_enabled', 'true' if data.get('ldap_sync_enabled') else 'false', 'ldap', 'Enable scheduled LDAP sync')
+        set_setting('ldap_sync_interval_hours', str(data.get('ldap_sync_interval_hours', 24)), 'ldap', 'LDAP sync interval (hours)')
 
         return jsonify({'success': True, 'message': 'LDAP settings saved successfully'})
     except Exception as e:
@@ -386,8 +390,7 @@ def get_general_settings():
         'verify_ssl': get_setting('verify_ssl', 'true') == 'true',
         'http_proxy': get_setting('http_proxy', ''),
         'https_proxy': get_setting('https_proxy', ''),
-        'no_proxy': get_setting('no_proxy', ''),
-        'session_timeout': int(get_setting('session_timeout', '480'))
+        'no_proxy': get_setting('no_proxy', '')
     }
     return jsonify(settings)
 
@@ -402,7 +405,7 @@ def save_general_settings():
         set_setting('http_proxy', data.get('http_proxy', ''), 'general', 'HTTP proxy URL')
         set_setting('https_proxy', data.get('https_proxy', ''), 'general', 'HTTPS proxy URL')
         set_setting('no_proxy', data.get('no_proxy', ''), 'general', 'No proxy bypass list')
-        set_setting('session_timeout', str(data.get('session_timeout', 480)), 'general', 'Session timeout (minutes)')
+        # Note: session_timeout is handled in security settings endpoint only
 
         return jsonify({'success': True, 'message': 'General settings saved successfully'})
     except Exception as e:
