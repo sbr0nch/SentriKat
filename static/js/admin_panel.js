@@ -1522,24 +1522,31 @@ function showToast(message, type = 'info') {
 
     const toastClass = typeClasses[type] || typeClasses['info'];
 
-    // Create toast element
+    // Truncate very long messages to prevent layout issues
+    let displayMessage = message;
+    if (message.length > 300) {
+        displayMessage = message.substring(0, 300) + '...';
+    }
+
+    // Create toast element with proper styling for long messages
     const toastId = `toast-${Date.now()}`;
     const toastHtml = `
-        <div id="${toastId}" class="toast ${toastClass}" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="toast-body d-flex justify-content-between align-items-center">
-                <span>${message}</span>
-                <button type="button" class="btn-close btn-close-white ms-2" data-bs-dismiss="toast" aria-label="Close"></button>
+        <div id="${toastId}" class="toast ${toastClass}" role="alert" aria-live="assertive" aria-atomic="true" style="max-width: 450px;">
+            <div class="toast-body d-flex justify-content-between align-items-start">
+                <span style="word-break: break-word; overflow-wrap: break-word;">${displayMessage}</span>
+                <button type="button" class="btn-close btn-close-white ms-2 flex-shrink-0" data-bs-dismiss="toast" aria-label="Close"></button>
             </div>
         </div>
     `;
 
     toastContainer.insertAdjacentHTML('beforeend', toastHtml);
 
-    // Show the toast
+    // Show the toast with longer delay for errors
     const toastElement = document.getElementById(toastId);
+    const delay = (type === 'danger' || type === 'warning') ? 8000 : 3000;
     const toast = new bootstrap.Toast(toastElement, {
         autohide: true,
-        delay: 3000
+        delay: delay
     });
 
     toast.show();
