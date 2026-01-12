@@ -33,6 +33,23 @@ def login_required(f):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
+        # Verify user still exists and is active
+        user = User.query.get(session['user_id'])
+        if not user or not user.is_active:
+            session.clear()
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Account disabled'}), 401
+            return redirect(url_for('auth.login'))
+
+        # Check if user's organization is still active (skip for super_admins)
+        if user.role != 'super_admin' and not user.is_admin:
+            if user.organization and not user.organization.active:
+                session.clear()
+                if request.is_json or request.path.startswith('/api/'):
+                    return jsonify({'error': 'Organization disabled. Contact administrator.'}), 401
+                flash('Your organization has been disabled. Contact administrator.', 'danger')
+                return redirect(url_for('auth.login'))
+
         return f(*args, **kwargs)
     return decorated_function
 
@@ -322,6 +339,12 @@ def api_login():
         return jsonify({
             'error': f'Account is temporarily locked. Try again in {remaining} minutes.'
         }), 401
+
+    # Check if user's organization is active (skip for super_admins)
+    if user.role != 'super_admin' and not user.is_admin:
+        if user.organization and not user.organization.active:
+            logger.warning(f"Login blocked: user {username}'s organization '{user.organization.name}' is disabled")
+            return jsonify({'error': 'Your organization has been disabled. Contact administrator.'}), 401
 
     # Check authentication type
     if user.auth_type == 'local':
