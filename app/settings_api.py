@@ -553,6 +553,17 @@ def test_notification():
     data = request.get_json()
     webhook_type = data.get('type', 'slack')
 
+    # Get proxy and SSL settings
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+    http_proxy = get_setting('http_proxy', '')
+    https_proxy = get_setting('https_proxy', '')
+
+    proxies = {}
+    if http_proxy:
+        proxies['http'] = http_proxy
+    if https_proxy:
+        proxies['https'] = https_proxy
+
     try:
         if webhook_type == 'slack':
             webhook_url = get_setting('slack_webhook_url')
@@ -571,7 +582,7 @@ def test_notification():
                     }
                 ]
             }
-            response = requests.post(webhook_url, json=payload, timeout=10)
+            response = requests.post(webhook_url, json=payload, timeout=30, proxies=proxies, verify=verify_ssl)
 
         elif webhook_type == 'teams':
             webhook_url = get_setting('teams_webhook_url')
@@ -589,12 +600,12 @@ def test_notification():
                     "markdown": True
                 }]
             }
-            response = requests.post(webhook_url, json=payload, timeout=10)
+            response = requests.post(webhook_url, json=payload, timeout=30, proxies=proxies, verify=verify_ssl)
 
         elif webhook_type == 'generic':
             webhook_url = get_setting('generic_webhook_url')
             if not webhook_url:
-                return jsonify({'success': False, 'error': 'Generic webhook URL not configured'})
+                return jsonify({'success': False, 'error': 'Generic webhook URL not configured. Please save settings first.'})
 
             webhook_format = get_setting('generic_webhook_format', 'slack')
             webhook_name = get_setting('generic_webhook_name', 'Custom Webhook')
@@ -626,7 +637,7 @@ def test_notification():
                     "text": f"🔒 SentriKat Test Notification\n✓ Your {webhook_name} integration is working correctly!"
                 }
 
-            response = requests.post(webhook_url, json=payload, timeout=10)
+            response = requests.post(webhook_url, json=payload, timeout=30, proxies=proxies, verify=verify_ssl)
             webhook_type = webhook_name  # Use custom name for message
 
         else:
@@ -637,6 +648,12 @@ def test_notification():
         else:
             return jsonify({'success': False, 'error': f'Webhook returned status {response.status_code}: {response.text[:200]}'})
 
+    except requests.exceptions.Timeout:
+        return jsonify({'success': False, 'error': 'Connection timed out after 30 seconds. Check your proxy settings and network connectivity.'})
+    except requests.exceptions.ProxyError as e:
+        return jsonify({'success': False, 'error': f'Proxy error: {str(e)}'})
+    except requests.exceptions.SSLError as e:
+        return jsonify({'success': False, 'error': f'SSL error: {str(e)}. Try disabling SSL verification in General Settings if using self-signed certificates.'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
