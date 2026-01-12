@@ -2049,18 +2049,16 @@ async function restoreBackup(file) {
     }
 
     try {
-        const text = await file.text();
-        const data = JSON.parse(text);
+        const formData = new FormData();
+        formData.append('backup', file);
 
         const response = await fetch('/api/settings/restore', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
+            body: formData
         });
 
         if (response.ok) {
             showToast('Backup restored successfully. Reloading settings...', 'success');
-            // Reload all settings
             setTimeout(() => location.reload(), 1500);
         } else {
             const error = await response.json();
@@ -2071,14 +2069,62 @@ async function restoreBackup(file) {
     }
 }
 
-// Setup restore file input listener
+// Full restore function - restores everything including orgs, users, products
+async function restoreFullBackup(file) {
+    try {
+        const formData = new FormData();
+        formData.append('backup', file);
+
+        showToast('Performing full restore...', 'info');
+
+        const response = await fetch('/api/settings/restore-full', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            const stats = result.stats || {};
+            showToast(
+                `Full restore complete: ${stats.organizations || 0} orgs, ${stats.users || 0} users, ${stats.products || 0} products, ${stats.settings || 0} settings`,
+                'success'
+            );
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            showToast(`Error: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error restoring backup: ${error.message}`, 'danger');
+    }
+}
+
+// Confirm and trigger full restore
+function confirmFullRestore() {
+    if (!confirm('⚠️ FULL RESTORE WARNING ⚠️\n\nThis will import all organizations, users, and products from the backup.\n\nExisting data with the same names will be skipped.\nLocal users will need to reset their passwords.\n\nContinue?')) {
+        return;
+    }
+    document.getElementById('restoreFullFile').click();
+}
+
+// Setup restore file input listeners
 document.addEventListener('DOMContentLoaded', function() {
     const restoreFile = document.getElementById('restoreFile');
     if (restoreFile) {
         restoreFile.addEventListener('change', function(e) {
             if (e.target.files.length > 0) {
                 restoreBackup(e.target.files[0]);
-                e.target.value = ''; // Reset file input
+                e.target.value = '';
+            }
+        });
+    }
+
+    const restoreFullFile = document.getElementById('restoreFullFile');
+    if (restoreFullFile) {
+        restoreFullFile.addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                restoreFullBackup(e.target.files[0]);
+                e.target.value = '';
             }
         });
     }

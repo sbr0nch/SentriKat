@@ -1055,9 +1055,16 @@
                                             <h5>Restore Backup</h5>
                                             <p class="text-muted small">Restore settings from a previously exported backup file</p>
                                             <input type="file" class="form-control mb-2" id="restoreFile" accept=".json" style="display: none;">
-                                            <button type="button" class="btn btn-warning" onclick="document.getElementById('restoreFile').click()">
-                                                <i class="bi bi-cloud-upload me-1"></i>Select Backup File
-                                            </button>
+                                            <input type="file" class="form-control mb-2" id="restoreFullFile" accept=".json" style="display: none;">
+                                            <div class="btn-group-vertical w-100">
+                                                <button type="button" class="btn btn-warning mb-2" onclick="document.getElementById('restoreFile').click()">
+                                                    <i class="bi bi-gear me-1"></i>Restore Settings Only
+                                                </button>
+                                                <button type="button" class="btn btn-danger" onclick="confirmFullRestore()">
+                                                    <i class="bi bi-arrow-repeat me-1"></i>Full Restore (All Data)
+                                                </button>
+                                            </div>
+                                            <p class="text-muted small mt-2 mb-0"><i class="bi bi-exclamation-triangle"></i> Full restore imports orgs, users, products</p>
                                         </div>
                                     </div>
                                 </div>

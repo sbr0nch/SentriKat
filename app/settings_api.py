@@ -1027,3 +1027,211 @@ def restore_backup():
         db.session.rollback()
         logger.error(f"Restore failed: {e}")
         return jsonify({'error': f'Restore failed: {str(e)}'}), 500
+
+
+@settings_bp.route('/restore-full', methods=['POST'])
+@admin_required
+@requires_professional('Backup & Restore')
+def restore_full_backup():
+    """
+    Full restore from a backup file - restores everything including orgs, users, products.
+    Only works on fresh installations (when only the setup admin exists).
+
+    WARNING: This will replace all data except the current admin user!
+    """
+    import json
+    from app.auth import get_current_user
+    from app.models import Organization, Product, User, ServiceCatalog
+
+    current_user = get_current_user()
+
+    if not current_user or not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can perform full restore'}), 403
+
+    if 'backup' not in request.files:
+        return jsonify({'error': 'No backup file provided'}), 400
+
+    file = request.files['backup']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    try:
+        backup_data = json.load(file)
+
+        # Validate backup format
+        if 'backup_info' not in backup_data:
+            return jsonify({'error': 'Invalid backup file format'}), 400
+
+        stats = {
+            'settings': 0,
+            'organizations': 0,
+            'users': 0,
+            'products': 0,
+            'service_catalog': 0,
+            'skipped': 0
+        }
+
+        # Store current user info to preserve
+        current_user_id = current_user.id
+        current_user_username = current_user.username
+
+        # Map old IDs to new IDs for relationships
+        org_id_map = {}
+        user_id_map = {}
+
+        # 1. Restore organizations first (needed for user relationships)
+        if 'organizations' in backup_data:
+            for org_data in backup_data['organizations']:
+                # Check if org with same name exists
+                existing = Organization.query.filter_by(name=org_data['name']).first()
+                if existing:
+                    org_id_map[org_data['id']] = existing.id
+                    stats['skipped'] += 1
+                    continue
+
+                org = Organization(
+                    name=org_data['name'],
+                    display_name=org_data.get('display_name', org_data['name']),
+                    description=org_data.get('description', ''),
+                    notification_emails=org_data.get('notification_emails', ''),
+                    alert_on_critical=org_data.get('alert_on_critical', True),
+                    alert_on_high=org_data.get('alert_on_high', False),
+                    alert_on_new_cve=org_data.get('alert_on_new_cve', True),
+                    alert_on_ransomware=org_data.get('alert_on_ransomware', True),
+                    active=org_data.get('active', True)
+                )
+                db.session.add(org)
+                db.session.flush()  # Get the new ID
+                org_id_map[org_data['id']] = org.id
+                stats['organizations'] += 1
+
+        # 2. Restore users (without passwords - they'll need to reset or use LDAP)
+        if 'users' in backup_data:
+            for user_data in backup_data['users']:
+                # Skip the current admin user and users that already exist
+                if user_data['username'] == current_user_username:
+                    user_id_map[user_data['id']] = current_user_id
+                    continue
+
+                existing = User.query.filter_by(username=user_data['username']).first()
+                if existing:
+                    user_id_map[user_data['id']] = existing.id
+                    stats['skipped'] += 1
+                    continue
+
+                # Map old org ID to new org ID
+                org_id = org_id_map.get(user_data.get('organization_id'))
+
+                user = User(
+                    username=user_data['username'],
+                    email=user_data.get('email', ''),
+                    full_name=user_data.get('full_name', user_data['username']),
+                    organization_id=org_id,
+                    auth_type=user_data.get('auth_type', 'local'),
+                    role=user_data.get('role', 'user'),
+                    is_admin=user_data.get('is_admin', False),
+                    is_active=user_data.get('is_active', True),
+                    can_manage_products=user_data.get('can_manage_products', True),
+                    can_view_all_orgs=user_data.get('can_view_all_orgs', False)
+                )
+                # Set a temporary password for local users (they'll need to reset)
+                if user.auth_type == 'local':
+                    import secrets
+                    user.set_password(secrets.token_urlsafe(32))
+                    user.password_change_required = True
+
+                db.session.add(user)
+                db.session.flush()
+                user_id_map[user_data['id']] = user.id
+                stats['users'] += 1
+
+        # 3. Restore products
+        if 'products' in backup_data:
+            for product_data in backup_data['products']:
+                # Map old org ID to new org ID
+                org_id = org_id_map.get(product_data.get('organization_id'))
+                if not org_id:
+                    stats['skipped'] += 1
+                    continue
+
+                # Check if product already exists
+                existing = Product.query.filter_by(
+                    organization_id=org_id,
+                    vendor=product_data.get('vendor', ''),
+                    product_name=product_data.get('product_name', '')
+                ).first()
+                if existing:
+                    stats['skipped'] += 1
+                    continue
+
+                product = Product(
+                    organization_id=org_id,
+                    vendor=product_data.get('vendor', ''),
+                    product_name=product_data.get('product_name', ''),
+                    version=product_data.get('version', ''),
+                    keywords=product_data.get('keywords', ''),
+                    description=product_data.get('description', ''),
+                    active=product_data.get('active', True),
+                    criticality=product_data.get('criticality', 'medium')
+                )
+                db.session.add(product)
+                stats['products'] += 1
+
+        # 4. Restore service catalog
+        if 'service_catalog' in backup_data:
+            for catalog_data in backup_data['service_catalog']:
+                # Check if entry already exists
+                existing = ServiceCatalog.query.filter_by(
+                    vendor=catalog_data.get('vendor', ''),
+                    product_name=catalog_data.get('product_name', '')
+                ).first()
+                if existing:
+                    stats['skipped'] += 1
+                    continue
+
+                catalog = ServiceCatalog(
+                    vendor=catalog_data.get('vendor', ''),
+                    product_name=catalog_data.get('product_name', ''),
+                    category=catalog_data.get('category', ''),
+                    subcategory=catalog_data.get('subcategory', ''),
+                    common_names=catalog_data.get('common_names', ''),
+                    description=catalog_data.get('description', ''),
+                    is_popular=catalog_data.get('is_popular', False)
+                )
+                db.session.add(catalog)
+                stats['service_catalog'] += 1
+
+        # 5. Restore settings (excluding encrypted ones)
+        if 'settings' in backup_data:
+            for key, value in backup_data['settings'].items():
+                if value == '***ENCRYPTED***':
+                    stats['skipped'] += 1
+                    continue
+
+                if isinstance(value, dict):
+                    set_setting(
+                        key,
+                        value.get('value', ''),
+                        value.get('category', 'general'),
+                        value.get('description', '')
+                    )
+                    stats['settings'] += 1
+
+        db.session.commit()
+
+        logger.info(f"Full backup restored by {current_user.username}: {stats}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Full restore complete',
+            'stats': stats,
+            'backup_info': backup_data.get('backup_info', {}),
+            'note': 'Local users will need to reset their passwords'
+        })
+
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid JSON file'}), 400
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Full restore failed: {e}")
+        return jsonify({'error': f'Full restore failed: {str(e)}'}), 500
