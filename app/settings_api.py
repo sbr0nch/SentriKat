@@ -1113,7 +1113,11 @@ def restore_full_backup():
                     user_id_map[user_data['id']] = current_user_id
                     continue
 
+                # Check for existing user by username OR email (both are unique)
                 existing = User.query.filter_by(username=user_data['username']).first()
+                if not existing and user_data.get('email'):
+                    existing = User.query.filter_by(email=user_data['email']).first()
+
                 if existing:
                     user_id_map[user_data['id']] = existing.id
                     stats['skipped'] += 1
