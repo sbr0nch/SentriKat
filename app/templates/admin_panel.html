@@ -1142,10 +1142,15 @@
                                             <option value="custom">Custom JSON Template</option>
                                         </select>
                                     </div>
-                                    <div class="col-md-8">
+                                    <div class="col-md-6">
                                         <label for="genericWebhookUrl" class="form-label">Webhook URL</label>
                                         <input type="text" class="form-control" id="genericWebhookUrl" placeholder="https://your-server.com/hooks/...">
                                         <small class="form-text text-muted">Incoming webhook URL from your chat platform</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="genericWebhookToken" class="form-label">Auth Token <span class="text-muted">(optional)</span></label>
+                                        <input type="password" class="form-control" id="genericWebhookToken" placeholder="Leave empty if not needed">
+                                        <small class="form-text text-muted">For webhooks requiring authentication</small>
                                     </div>
                                     <div class="col-md-2 d-flex align-items-end">
                                         <button type="button" class="btn btn-outline-secondary w-100" onclick="testWebhook('generic')">

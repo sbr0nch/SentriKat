@@ -507,6 +507,7 @@ def get_notification_settings():
         'generic_webhook_name': get_setting('generic_webhook_name', 'Custom Webhook'),
         'generic_webhook_format': get_setting('generic_webhook_format', 'slack'),  # slack, discord, or custom
         'generic_webhook_custom_template': get_setting('generic_webhook_custom_template', ''),
+        'generic_webhook_token': get_setting('generic_webhook_token', ''),  # Optional auth token
         'critical_email_enabled': get_setting('critical_email_enabled', 'true') == 'true',
         'critical_email_time': get_setting('critical_email_time', '09:00'),
         'critical_email_max_age_days': int(get_setting('critical_email_max_age_days', '30'))
@@ -536,6 +537,12 @@ def save_notification_settings():
         set_setting('generic_webhook_format', data.get('generic_webhook_format', 'slack'), 'notifications', 'Generic webhook payload format')
         if data.get('generic_webhook_custom_template'):
             set_setting('generic_webhook_custom_template', data['generic_webhook_custom_template'], 'notifications', 'Custom JSON template for webhook')
+        # Optional auth token for webhooks that require it
+        if data.get('generic_webhook_token'):
+            set_setting('generic_webhook_token', data['generic_webhook_token'], 'notifications', 'Webhook auth token', is_encrypted=True)
+        elif 'generic_webhook_token' in data and not data.get('generic_webhook_token'):
+            # Clear token if explicitly set to empty
+            set_setting('generic_webhook_token', '', 'notifications', 'Webhook auth token')
 
         set_setting('critical_email_enabled', 'true' if data.get('critical_email_enabled') else 'false', 'notifications', 'Enable critical CVE reminder emails')
         set_setting('critical_email_time', data.get('critical_email_time', '09:00'), 'notifications', 'Critical CVE email time (UTC)')
@@ -610,6 +617,15 @@ def test_notification():
             webhook_format = get_setting('generic_webhook_format', 'slack')
             webhook_name = get_setting('generic_webhook_name', 'Custom Webhook')
             custom_template = get_setting('generic_webhook_custom_template', '')
+            webhook_token = get_setting('generic_webhook_token', '')
+
+            # Build headers - add auth token if configured
+            headers = {'Content-Type': 'application/json'}
+            if webhook_token:
+                # Support multiple auth header formats
+                headers['X-Webhook-Token'] = webhook_token
+                headers['Authorization'] = f'Bearer {webhook_token}'
+                headers['X-Auth-Token'] = webhook_token
 
             # Build payload based on format
             if webhook_format == 'slack' or webhook_format == 'rocketchat':
@@ -637,7 +653,7 @@ def test_notification():
                     "text": f"🔒 SentriKat Test Notification\n✓ Your {webhook_name} integration is working correctly!"
                 }
 
-            response = requests.post(webhook_url, json=payload, timeout=30, proxies=proxies, verify=verify_ssl)
+            response = requests.post(webhook_url, json=payload, headers=headers, timeout=30, proxies=proxies, verify=verify_ssl)
             webhook_type = webhook_name  # Use custom name for message
 
         else:

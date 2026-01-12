@@ -2220,6 +2220,7 @@ async function saveNotificationSettings() {
         generic_webhook_name: document.getElementById('genericWebhookName').value || 'Custom Webhook',
         generic_webhook_format: document.getElementById('genericWebhookFormat').value || 'slack',
         generic_webhook_custom_template: document.getElementById('genericWebhookTemplate').value || '',
+        generic_webhook_token: document.getElementById('genericWebhookToken').value || '',
         // Email settings
         critical_email_enabled: document.getElementById('criticalEmailEnabled').checked,
         critical_email_time: document.getElementById('criticalEmailTime').value || '09:00',
@@ -2258,6 +2259,7 @@ async function loadNotificationSettings() {
             const genericWebhookName = document.getElementById('genericWebhookName');
             const genericWebhookFormat = document.getElementById('genericWebhookFormat');
             const genericWebhookTemplate = document.getElementById('genericWebhookTemplate');
+            const genericWebhookToken = document.getElementById('genericWebhookToken');
             const customTemplateContainer = document.getElementById('customTemplateContainer');
             const criticalEmailEnabled = document.getElementById('criticalEmailEnabled');
             const criticalEmailTime = document.getElementById('criticalEmailTime');
@@ -2280,6 +2282,7 @@ async function loadNotificationSettings() {
                 }
             }
             if (genericWebhookTemplate) genericWebhookTemplate.value = settings.generic_webhook_custom_template || '';
+            if (genericWebhookToken) genericWebhookToken.value = settings.generic_webhook_token || '';
 
             if (criticalEmailEnabled) criticalEmailEnabled.checked = settings.critical_email_enabled !== false;
             if (criticalEmailTime) criticalEmailTime.value = settings.critical_email_time || '09:00';
