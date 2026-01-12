@@ -671,20 +671,18 @@ def test_notification():
         if response.status_code in [200, 204]:
             return jsonify({'success': True, 'message': f'Test notification sent to {webhook_type.title() if isinstance(webhook_type, str) and webhook_type.islower() else webhook_type}'})
         else:
-            # Provide helpful error messages based on status code
-            error_detail = response.text[:500] if response.text else 'No response body'
+            # Log full details for debugging
+            logger.warning(f"Webhook test failed: status={response.status_code}, body={response.text[:500]}")
+
+            # Return brief user-friendly message
             if response.status_code == 403:
-                error_msg = (
-                    f'Access Forbidden (403). The webhook endpoint rejected the request. '
-                    f'For RocketChat: ensure the webhook URL includes the token (e.g., /hooks/YOUR_TOKEN). '
-                    f'Response: {error_detail}'
-                )
+                error_msg = 'Forbidden (403). Check webhook URL has token.'
             elif response.status_code == 401:
-                error_msg = f'Unauthorized (401). Check your webhook URL and auth token. Response: {error_detail}'
+                error_msg = 'Unauthorized (401). Check auth token.'
             elif response.status_code == 404:
-                error_msg = f'Not Found (404). The webhook URL may be incorrect. Response: {error_detail}'
+                error_msg = 'Not Found (404). Check webhook URL.'
             else:
-                error_msg = f'Webhook returned status {response.status_code}: {error_detail}'
+                error_msg = f'Error {response.status_code}. Check server logs.'
             return jsonify({'success': False, 'error': error_msg})
 
     except requests.exceptions.Timeout:
