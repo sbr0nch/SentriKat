@@ -345,8 +345,56 @@
             color: #fcd34d !important;
         }
 
+        [data-theme="dark"] .alert-secondary {
+            background-color: rgba(100, 116, 139, 0.2) !important;
+            border-color: rgba(100, 116, 139, 0.4) !important;
+            color: #cbd5e1 !important;
+        }
+
+        [data-theme="dark"] .alert-secondary .alert-heading,
+        [data-theme="dark"] .alert-secondary h6,
+        [data-theme="dark"] .alert-secondary strong {
+            color: #e2e8f0 !important;
+        }
+
+        [data-theme="dark"] .alert-secondary p,
+        [data-theme="dark"] .alert-secondary small {
+            color: #94a3b8 !important;
+        }
+
+        [data-theme="dark"] .alert-light {
+            background-color: rgba(148, 163, 184, 0.15) !important;
+            border-color: rgba(148, 163, 184, 0.3) !important;
+            color: #cbd5e1 !important;
+        }
+
         [data-theme="dark"] .alert hr {
             border-color: var(--border-color);
+        }
+
+        /* Dark mode bg-light - used in license cards, LDAP sync, etc. */
+        [data-theme="dark"] .bg-light {
+            background-color: #334155 !important;
+            color: #e2e8f0 !important;
+        }
+
+        [data-theme="dark"] .bg-light .card-title,
+        [data-theme="dark"] .bg-light h5,
+        [data-theme="dark"] .bg-light h6 {
+            color: #f1f5f9 !important;
+        }
+
+        [data-theme="dark"] .bg-light p,
+        [data-theme="dark"] .bg-light span,
+        [data-theme="dark"] .bg-light .text-muted {
+            color: #94a3b8 !important;
+        }
+
+        /* Dark mode for read-only form controls used as display fields */
+        [data-theme="dark"] .form-control.bg-light {
+            background-color: #334155 !important;
+            border-color: #475569 !important;
+            color: #e2e8f0 !important;
         }
 
         /* Dark mode table text */

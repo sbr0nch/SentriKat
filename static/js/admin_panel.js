@@ -1790,7 +1790,19 @@ async function loadSyncStatus() {
         const response = await fetch('/api/settings/sync/status');
         const status = await response.json();
 
-        document.getElementById('lastSyncTime').textContent = status.last_sync || 'Never';
+        // Build last sync text with status icon
+        let lastSyncHtml = 'Never';
+        if (status.last_sync) {
+            const statusIcon = status.last_sync_status === 'success'
+                ? '<i class="bi bi-check-circle-fill text-success me-1"></i>'
+                : '<i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>';
+            const statsText = (status.last_sync_added > 0 || status.last_sync_updated > 0)
+                ? ` (+${status.last_sync_added} new, ${status.last_sync_updated} updated)`
+                : '';
+            lastSyncHtml = `${statusIcon}${status.last_sync}${statsText}`;
+        }
+
+        document.getElementById('lastSyncTime').innerHTML = lastSyncHtml;
         document.getElementById('nextSyncTime').textContent = status.next_sync || 'Not scheduled';
         document.getElementById('totalVulns').textContent = status.total_vulnerabilities || '0';
     } catch (error) {
