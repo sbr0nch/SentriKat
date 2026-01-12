@@ -614,6 +614,10 @@ def test_notification():
             if not webhook_url:
                 return jsonify({'success': False, 'error': 'Generic webhook URL not configured. Please save settings first.'})
 
+            # Log the request for debugging (mask sensitive parts of URL)
+            masked_url = webhook_url[:50] + '...' if len(webhook_url) > 50 else webhook_url
+            logger.info(f"Testing generic webhook to: {masked_url}, verify_ssl={verify_ssl}, using_proxy={bool(proxies)}")
+
             webhook_format = get_setting('generic_webhook_format', 'slack')
             webhook_name = get_setting('generic_webhook_name', 'Custom Webhook')
             custom_template = get_setting('generic_webhook_custom_template', '')
@@ -653,7 +657,9 @@ def test_notification():
                     "text": f"🔒 SentriKat Test Notification\n✓ Your {webhook_name} integration is working correctly!"
                 }
 
+            logger.info(f"Sending webhook request with headers: {list(headers.keys())}, payload keys: {list(payload.keys())}")
             response = requests.post(webhook_url, json=payload, headers=headers, timeout=30, proxies=proxies, verify=verify_ssl)
+            logger.info(f"Webhook response: status={response.status_code}, body_length={len(response.text)}")
             webhook_type = webhook_name  # Use custom name for message
 
         else:
@@ -662,7 +668,21 @@ def test_notification():
         if response.status_code in [200, 204]:
             return jsonify({'success': True, 'message': f'Test notification sent to {webhook_type.title() if isinstance(webhook_type, str) and webhook_type.islower() else webhook_type}'})
         else:
-            return jsonify({'success': False, 'error': f'Webhook returned status {response.status_code}: {response.text[:200]}'})
+            # Provide helpful error messages based on status code
+            error_detail = response.text[:500] if response.text else 'No response body'
+            if response.status_code == 403:
+                error_msg = (
+                    f'Access Forbidden (403). The webhook endpoint rejected the request. '
+                    f'For RocketChat: ensure the webhook URL includes the token (e.g., /hooks/YOUR_TOKEN). '
+                    f'Response: {error_detail}'
+                )
+            elif response.status_code == 401:
+                error_msg = f'Unauthorized (401). Check your webhook URL and auth token. Response: {error_detail}'
+            elif response.status_code == 404:
+                error_msg = f'Not Found (404). The webhook URL may be incorrect. Response: {error_detail}'
+            else:
+                error_msg = f'Webhook returned status {response.status_code}: {error_detail}'
+            return jsonify({'success': False, 'error': error_msg})
 
     except requests.exceptions.Timeout:
         return jsonify({'success': False, 'error': 'Connection timed out after 30 seconds. Check your proxy settings and network connectivity.'})
