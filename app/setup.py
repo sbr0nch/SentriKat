@@ -354,10 +354,12 @@ def seed_service_catalog():
         for svc in services:
             service = ServiceCatalog(
                 vendor=svc['vendor'],
-                product=svc['product'],
-                version=svc.get('version'),
+                product_name=svc['product'],
                 category=svc.get('category', 'Other'),
-                description=f"{svc['vendor']} {svc['product']}"
+                typical_versions=svc.get('version'),
+                description=f"{svc['vendor']} {svc['product']}",
+                is_popular=True,
+                is_active=True
             )
             db.session.add(service)
             added += 1
