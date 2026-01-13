@@ -72,5 +72,5 @@ For licensing inquiries: **[sentrikat.com](https://sentrikat.com)** *(Coming Soo
 ---
 
 <p align="center">
-  <sub>© 2024-2025 Denis Sota. All Rights Reserved.</sub>
+  <sub>© 2024-2026 Denis Sota. All Rights Reserved.</sub>
 </p>
