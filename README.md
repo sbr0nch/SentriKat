@@ -31,7 +31,7 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/SentriKat.git
+git clone https://github.com/sbr0nch/SentriKat.git
 cd SentriKat
 
 # Create environment file
