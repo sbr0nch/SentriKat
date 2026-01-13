@@ -352,8 +352,11 @@
                         // Pre-fill current password
                         document.getElementById('currentPassword').value = password;
                     } else {
-                        // Success - redirect
-                        window.location.href = nextUrl;
+                        // Success - show message and redirect
+                        showSuccess('Login successful! Redirecting...');
+                        setTimeout(() => {
+                            window.location.href = nextUrl;
+                        }, 500);
                     }
                 } else {
                     showError(data.error || 'Login failed');
