@@ -1,0 +1,54 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Development files
+tests/
+*.test.py
+pytest.ini
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Documentation
+*.md
+!README.md
+
+# Backup and temp files
+*.bak
+*.tmp
+*.temp
+*.log
+logs/
+backups/
+
+# Confidential tools
+tools/
+.license_keys/
+
+# OS files
+.DS_Store
+Thumbs.db
