@@ -33,6 +33,7 @@ services:
       - DATABASE_URL=postgresql://sentrikat:${DB_PASSWORD:-sentrikat}@db:5432/sentrikat
       - SENTRIKAT_URL=${SENTRIKAT_URL:-http://localhost:5001}
       - FLASK_ENV=production
+      - FORCE_HTTPS=${FORCE_HTTPS:-false}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}

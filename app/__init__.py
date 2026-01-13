@@ -23,13 +23,15 @@ def create_app(config_class=Config):
     csrf.init_app(app)
     limiter.init_app(app)
 
-    # Security headers via Talisman (only in production with HTTPS)
+    # Security headers via Talisman (only in production)
+    # Set FORCE_HTTPS=false in .env if not using HTTPS (e.g., behind reverse proxy)
     if os.environ.get('FLASK_ENV') == 'production':
         from flask_talisman import Talisman
+        force_https = os.environ.get('FORCE_HTTPS', 'true').lower() == 'true'
         Talisman(app,
-            force_https=True,
-            strict_transport_security=True,
-            strict_transport_security_max_age=31536000,
+            force_https=force_https,
+            strict_transport_security=force_https,  # Only enable HSTS with HTTPS
+            strict_transport_security_max_age=31536000 if force_https else 0,
             content_security_policy={
                 'default-src': "'self'",
                 'script-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
