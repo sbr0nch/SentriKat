@@ -13,23 +13,22 @@ logger = logging.getLogger(__name__)
 
 def send_org_webhook(org, new_cves_count, critical_count, matches_count):
     """Send webhook notification for a specific organization using org settings or global fallback"""
-    from app.encryption import decrypt_value
-
     proxies = Config.get_proxies()
     verify_ssl = Config.get_verify_ssl()
 
     # Check if org has its own webhook configured
     if org.webhook_enabled and org.webhook_url:
         try:
-            webhook_url = decrypt_value(org.webhook_url) if org.webhook_url.startswith('gAAAA') else org.webhook_url
-            webhook_format = org.webhook_format or 'slack'
-            webhook_token = org.webhook_token
+            # Use the centralized get_webhook_config() method for decryption
+            webhook_config = org.get_webhook_config()
+            webhook_url = webhook_config['url']
+            webhook_format = webhook_config['format'] or 'slack'
+            webhook_token = webhook_config['token']
 
             headers = {'Content-Type': 'application/json'}
             if webhook_token:
-                token = decrypt_value(webhook_token) if webhook_token.startswith('gAAAA') else webhook_token
-                headers['Authorization'] = f'Bearer {token}'
-                headers['X-Auth-Token'] = token
+                headers['Authorization'] = f'Bearer {webhook_token}'
+                headers['X-Auth-Token'] = webhook_token
 
             # Build payload based on format
             if webhook_format in ('slack', 'rocketchat'):

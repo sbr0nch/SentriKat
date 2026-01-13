@@ -1211,14 +1211,20 @@ def update_organization(org_id):
     if 'webhook_enabled' in data:
         org.webhook_enabled = data['webhook_enabled']
     if 'webhook_url' in data:
-        org.webhook_url = data['webhook_url'] if data['webhook_url'] else None
+        from app.encryption import encrypt_value
+        # Encrypt webhook URL (may contain credentials)
+        org.webhook_url = encrypt_value(data['webhook_url']) if data['webhook_url'] else None
     if 'webhook_name' in data:
         org.webhook_name = data['webhook_name'] if data['webhook_name'] else 'Organization Webhook'
     if 'webhook_format' in data:
         org.webhook_format = data['webhook_format'] if data['webhook_format'] else 'slack'
-    if 'webhook_token' in data and data['webhook_token']:
+    # Allow clearing webhook_token by sending empty/null value
+    if 'webhook_token' in data:
         from app.encryption import encrypt_value
-        org.webhook_token = encrypt_value(data['webhook_token'])
+        if data['webhook_token']:
+            org.webhook_token = encrypt_value(data['webhook_token'])
+        else:
+            org.webhook_token = None  # Clear the token
 
     db.session.commit()
 

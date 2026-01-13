@@ -123,9 +123,9 @@ class Organization(db.Model):
             'alert_on_high': self.alert_on_high,
             'alert_on_new_cve': self.alert_on_new_cve,
             'alert_on_ransomware': self.alert_on_ransomware,
-            # Webhook settings
+            # Webhook settings (decrypt URL for editing)
             'webhook_enabled': self.webhook_enabled,
-            'webhook_url': self.webhook_url,
+            'webhook_url': self._decrypt_webhook_url(),
             'webhook_name': self.webhook_name,
             'webhook_format': self.webhook_format,
             'webhook_token': '********' if self.webhook_token else '',  # Mask token
@@ -133,6 +133,41 @@ class Organization(db.Model):
             'user_count': user_count,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+    def _decrypt_webhook_url(self):
+        """Decrypt webhook URL for display/editing"""
+        if not self.webhook_url:
+            return None
+        try:
+            from app.encryption import decrypt_value, is_encrypted
+            if is_encrypted(self.webhook_url):
+                return decrypt_value(self.webhook_url)
+            return self.webhook_url
+        except Exception:
+            return self.webhook_url
+
+    def get_webhook_config(self):
+        """Return webhook configuration dictionary with decrypted values"""
+        webhook_url = self.webhook_url
+        webhook_token = self.webhook_token
+
+        # Decrypt values if encrypted
+        try:
+            from app.encryption import decrypt_value, is_encrypted
+            if webhook_url and is_encrypted(webhook_url):
+                webhook_url = decrypt_value(webhook_url)
+            if webhook_token and is_encrypted(webhook_token):
+                webhook_token = decrypt_value(webhook_token)
+        except Exception:
+            pass
+
+        return {
+            'enabled': self.webhook_enabled,
+            'url': webhook_url,
+            'name': self.webhook_name,
+            'format': self.webhook_format,
+            'token': webhook_token
         }
 
     def get_smtp_config(self):
