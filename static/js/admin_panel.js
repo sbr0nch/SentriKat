@@ -4783,14 +4783,46 @@ function applyLicenseRestrictions() {
     }
 
     // ========================================
-    // Email Alerts - requires 'email_alerts' license
+    // Email Alerts / Webhooks - requires 'email_alerts' license
     // ========================================
     if (!hasFeature('email_alerts')) {
         const notificationsPane = document.getElementById('notificationsSettings');
         if (notificationsPane) {
-            // Find the webhook section and add upgrade notice above SMTP
-            const smtpSection = notificationsPane.querySelector('h6.bi-envelope');
-            // Keep webhook functionality but disable SMTP for community
+            // Replace notifications settings with upgrade notice
+            notificationsPane.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-bell me-2"></i>Notification Integrations
+                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
+                    </div>
+                    ${createPremiumUpgradeNotice('Email Alerts & Webhooks', 'email_alerts')}
+                </div>
+            `;
+        }
+
+        // Also hide the org webhook tab in organization modal
+        const orgWebhookTab = document.getElementById('webhook-tab');
+        if (orgWebhookTab) {
+            orgWebhookTab.closest('li')?.style.setProperty('display', 'none');
+        }
+    }
+
+    // ========================================
+    // White Label / Branding - requires 'white_label' license
+    // ========================================
+    if (!hasFeature('white_label')) {
+        const brandingPane = document.getElementById('brandingSettings');
+        if (brandingPane) {
+            // Replace branding settings with upgrade notice
+            brandingPane.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-palette me-2"></i>Branding & White Label
+                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
+                    </div>
+                    ${createPremiumUpgradeNotice('Branding & White Label', 'white_label')}
+                </div>
+            `;
         }
     }
 
@@ -4798,7 +4830,9 @@ function applyLicenseRestrictions() {
         isProfessional,
         features,
         ldapEnabled: hasFeature('ldap'),
-        backupEnabled: hasFeature('backup_restore')
+        backupEnabled: hasFeature('backup_restore'),
+        emailAlertsEnabled: hasFeature('email_alerts'),
+        whiteLabelEnabled: hasFeature('white_label')
     });
 }
 

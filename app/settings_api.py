@@ -463,8 +463,9 @@ def save_security_settings():
 
 @settings_bp.route('/branding', methods=['GET'])
 @admin_required
+@requires_professional('White Label')
 def get_branding_settings():
-    """Get branding/UI settings"""
+    """Get branding/UI settings (Professional license required)"""
     settings = {
         'app_name': get_setting('app_name', 'SentriKat'),
         'login_message': get_setting('login_message', ''),
@@ -476,8 +477,9 @@ def get_branding_settings():
 
 @settings_bp.route('/branding', methods=['POST'])
 @admin_required
+@requires_professional('White Label')
 def save_branding_settings():
-    """Save branding/UI settings"""
+    """Save branding/UI settings (Professional license required)"""
     data = request.get_json()
 
     try:
@@ -497,8 +499,9 @@ def save_branding_settings():
 
 @settings_bp.route('/notifications', methods=['GET'])
 @admin_required
+@requires_professional('Email Alerts')
 def get_notification_settings():
-    """Get notification/webhook settings"""
+    """Get notification/webhook settings (Professional license required)"""
     settings = {
         'slack_webhook_url': get_setting('slack_webhook_url', ''),
         'slack_enabled': get_setting('slack_enabled', 'false') == 'true',
@@ -519,8 +522,9 @@ def get_notification_settings():
 
 @settings_bp.route('/notifications', methods=['POST'])
 @admin_required
+@requires_professional('Email Alerts')
 def save_notification_settings():
-    """Save notification/webhook settings"""
+    """Save notification/webhook settings (Professional license required)"""
     data = request.get_json()
 
     try:
@@ -557,8 +561,9 @@ def save_notification_settings():
 
 @settings_bp.route('/notifications/test', methods=['POST'])
 @admin_required
+@requires_professional('Email Alerts')
 def test_notification():
-    """Test webhook notification"""
+    """Test webhook notification (Professional license required)"""
     import requests
     data = request.get_json()
     webhook_type = data.get('type', 'slack')

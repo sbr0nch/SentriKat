@@ -1207,7 +1207,17 @@ def update_organization(org_id):
     if 'smtp_from_name' in data:
         org.smtp_from_name = data['smtp_from_name']
 
-    # Webhook settings
+    # Webhook settings (requires Professional license for Email Alerts feature)
+    webhook_fields = ['webhook_enabled', 'webhook_url', 'webhook_name', 'webhook_format', 'webhook_token']
+    if any(field in data for field in webhook_fields):
+        from app.licensing import get_license
+        license_info = get_license()
+        if not license_info.is_professional():
+            return jsonify({
+                'error': 'Organization webhooks require a Professional license',
+                'license_required': True
+            }), 403
+
     if 'webhook_enabled' in data:
         org.webhook_enabled = data['webhook_enabled']
     if 'webhook_url' in data:
