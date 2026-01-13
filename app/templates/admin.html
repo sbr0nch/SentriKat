@@ -145,59 +145,17 @@
     </div>
 </div>
 
-<!-- Product Modal -->
+<!-- Product Modal - Redesigned with cleaner UX -->
 <div class="modal fade" id="productModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <div class="modal-header">
+            <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title" id="productModalTitle">
                     <i class="bi bi-plus-circle me-2"></i>Add Product
                 </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <!-- PRIMARY: NVD CPE Search -->
-                <div class="card border-primary mb-3" id="nvdSearchCard">
-                    <div class="card-header bg-primary text-white">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span>
-                                <i class="bi bi-cloud-arrow-down me-2"></i>
-                                <strong>Search NVD Database</strong>
-                                <span class="badge bg-light text-primary ms-2">Recommended</span>
-                            </span>
-                            <small>800,000+ products from NIST National Vulnerability Database</small>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div class="input-group mb-2">
-                            <span class="input-group-text"><i class="bi bi-search"></i></span>
-                            <input type="text" class="form-control form-control-lg" id="nvdSearchInput"
-                                   placeholder="Search for software (e.g., 'apache tomcat', 'microsoft windows', 'nginx')..."
-                                   oninput="debounceNVDSearch()" autofocus>
-                            <button class="btn btn-primary" type="button" onclick="performNVDSearchNow()">
-                                <i class="bi bi-search me-1"></i>Search
-                            </button>
-                        </div>
-                        <div id="nvdSearchStatus" class="small text-muted mb-2" style="display: none;"></div>
-                        <div id="nvdResultsList" class="border rounded" style="max-height: 300px; overflow-y: auto; display: none;">
-                            <!-- NVD Results will be populated here -->
-                        </div>
-                        <div id="nvdSelectedProduct" class="alert alert-success mt-2" style="display: none;">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <i class="bi bi-check-circle-fill me-2"></i>
-                                    <strong>Selected:</strong> <span id="nvdSelectedName"></span>
-                                    <br>
-                                    <small class="text-muted">CPE: <code id="nvdSelectedCpe"></code></small>
-                                </div>
-                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearNVDSelection()">
-                                    <i class="bi bi-x-circle me-1"></i>Clear
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <form id="productForm">
                     <input type="hidden" id="productId">
                     <input type="hidden" id="serviceCatalogId">
@@ -205,164 +163,202 @@
                     <input type="hidden" id="cpeProduct">
                     <input type="hidden" id="cpeUri">
 
-                    <!-- Product Details Section -->
-                    <div class="card mb-3">
-                        <div class="card-header">
-                            <i class="bi bi-box-seam me-2"></i>Product Details
+                    <!-- Step 1: Find Product -->
+                    <div class="mb-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 16px;">1</span>
+                            <h6 class="mb-0 fw-bold">Find Your Product</h6>
+                            <span class="badge bg-success ms-2">Recommended</span>
                         </div>
-                        <div class="card-body">
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <label for="vendor" class="form-label fw-semibold">Vendor *</label>
-                                    <input type="text" class="form-control" id="vendor" required
-                                           placeholder="e.g., Microsoft, Cisco, Apache">
-                                    <small class="form-text text-muted">Auto-filled from NVD search or enter manually</small>
-                                </div>
 
-                                <div class="col-md-6">
-                                    <label for="productName" class="form-label fw-semibold">Product Name *</label>
-                                    <input type="text" class="form-control" id="productName" required
-                                           placeholder="e.g., Windows Server, IOS, Tomcat">
-                                    <small class="form-text text-muted">Auto-filled from NVD search or enter manually</small>
-                                </div>
+                        <!-- NVD Search -->
+                        <div class="input-group mb-2">
+                            <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control" id="nvdSearchInput"
+                                   placeholder="Search NVD database (e.g., 'apache tomcat', 'microsoft windows')..."
+                                   oninput="debounceNVDSearch()">
+                            <button class="btn btn-outline-primary" type="button" onclick="performNVDSearchNow()">
+                                Search
+                            </button>
+                        </div>
+                        <small class="text-muted">
+                            <i class="bi bi-database me-1"></i>Search 800,000+ products from NIST National Vulnerability Database for accurate CPE matching
+                        </small>
 
-                                <div class="col-md-6">
-                                    <label for="version" class="form-label fw-semibold">
-                                        Version
-                                        <span class="badge bg-secondary ms-1">Optional</span>
+                        <div id="nvdSearchStatus" class="small text-muted mt-2" style="display: none;"></div>
+
+                        <!-- Search Results -->
+                        <div id="nvdResultsList" class="border rounded mt-2" style="max-height: 250px; overflow-y: auto; display: none;">
+                            <!-- NVD Results populated here -->
+                        </div>
+
+                        <!-- Selected Product Display -->
+                        <div id="nvdSelectedProduct" class="alert alert-success mt-3 mb-0" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <div class="fw-bold mb-1">
+                                        <i class="bi bi-check-circle-fill me-1"></i>
+                                        <span id="nvdSelectedName"></span>
+                                    </div>
+                                    <small class="text-muted d-block">
+                                        CPE Identifier: <code id="nvdSelectedCpe" class="user-select-all"></code>
+                                    </small>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearNVDSelection()">
+                                    <i class="bi bi-x"></i> Clear
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Or Manual Entry Toggle -->
+                        <div class="text-center my-3" id="manualEntryToggle">
+                            <span class="text-muted">- or -</span>
+                            <button type="button" class="btn btn-link btn-sm" onclick="toggleManualEntry()">
+                                Enter product details manually
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Product Details -->
+                    <div class="mb-4" id="productDetailsSection">
+                        <div class="d-flex align-items-center mb-3">
+                            <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 16px;">2</span>
+                            <h6 class="mb-0 fw-bold">Product Details</h6>
+                        </div>
+
+                        <div class="row g-3">
+                            <!-- Vendor - Required -->
+                            <div class="col-md-6">
+                                <label for="vendor" class="form-label">
+                                    Vendor <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="vendor" required
+                                       placeholder="e.g., Microsoft, Cisco, Apache">
+                            </div>
+
+                            <!-- Product Name - Required -->
+                            <div class="col-md-6">
+                                <label for="productName" class="form-label">
+                                    Product Name <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="productName" required
+                                       placeholder="e.g., Windows Server, IOS, Tomcat">
+                            </div>
+
+                            <!-- Version - Optional with explanation -->
+                            <div class="col-md-6">
+                                <label for="version" class="form-label">
+                                    Version <span class="text-muted small">(optional)</span>
+                                </label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="version"
+                                           placeholder="Leave empty for ALL versions"
+                                           list="versionSuggestions">
+                                    <datalist id="versionSuggestions"></datalist>
+                                    <button class="btn btn-outline-secondary" type="button" id="loadVersionsBtn"
+                                            onclick="loadVersionsFromNVD()" title="Load versions from NVD" style="display: none;">
+                                        <i class="bi bi-arrow-repeat"></i>
+                                    </button>
+                                </div>
+                                <small class="form-text text-muted">
+                                    Empty = matches ALL versions | Specific = matches only that version
+                                </small>
+                            </div>
+
+                            <!-- Organization - Optional -->
+                            <div class="col-md-6">
+                                <label for="productOrganization" class="form-label">
+                                    Organization <span class="text-muted small">(optional)</span>
+                                </label>
+                                <select class="form-select" id="productOrganization">
+                                    <option value="">Loading organizations...</option>
+                                </select>
+                            </div>
+
+                            <!-- Criticality - Required -->
+                            <div class="col-md-6">
+                                <label for="criticality" class="form-label">
+                                    Criticality <span class="text-danger">*</span>
+                                </label>
+                                <select class="form-select" id="criticality" required>
+                                    <option value="critical">Critical - Mission Critical</option>
+                                    <option value="high">High - Important Systems</option>
+                                    <option value="medium" selected>Medium - Standard</option>
+                                    <option value="low">Low - Non-Critical</option>
+                                </select>
+                            </div>
+
+                            <!-- Active Toggle -->
+                            <div class="col-md-6">
+                                <label class="form-label">Status</label>
+                                <div class="form-check form-switch">
+                                    <input type="checkbox" class="form-check-input" id="active" checked>
+                                    <label class="form-check-label" for="active">
+                                        Active - track vulnerabilities
                                     </label>
-                                    <div class="input-group">
-                                        <input type="text" class="form-control" id="version"
-                                               placeholder="e.g., 2022, 15.2, 10.1.18"
-                                               list="versionSuggestions">
-                                        <datalist id="versionSuggestions"></datalist>
-                                        <button class="btn btn-outline-secondary" type="button" id="loadVersionsBtn"
-                                                onclick="loadVersionsFromNVD()" title="Load versions from NVD" style="display: none;">
-                                            <i class="bi bi-arrow-repeat"></i>
-                                        </button>
-                                    </div>
-                                    <div class="form-text">
-                                        <i class="bi bi-info-circle me-1"></i>
-                                        <strong>Empty = All versions:</strong> Matches vulnerabilities for ANY version.
-                                        <br>
-                                        <strong>Specific version:</strong> Only matches vulnerabilities affecting this exact version.
-                                    </div>
-                                </div>
-
-                                <div class="col-md-6">
-                                    <label for="criticality" class="form-label fw-semibold">Criticality Level *</label>
-                                    <select class="form-select" id="criticality" required>
-                                        <option value="critical">Critical - Mission Critical Systems</option>
-                                        <option value="high">High - Important Production Systems</option>
-                                        <option value="medium" selected>Medium - Standard Systems</option>
-                                        <option value="low">Low - Non-Critical Systems</option>
-                                    </select>
-                                    <small class="form-text text-muted">How critical is this product to your organization?</small>
-                                </div>
-
-                                <div class="col-md-6">
-                                    <label for="productOrganization" class="form-label fw-semibold">Organization</label>
-                                    <select class="form-select" id="productOrganization">
-                                        <option value="">Loading organizations...</option>
-                                    </select>
-                                    <small class="form-text text-muted">Assign this product to an organization</small>
-                                </div>
-
-                                <div class="col-md-6">
-                                    <div class="form-check form-switch mt-4">
-                                        <input type="checkbox" class="form-check-input" id="active" checked>
-                                        <label class="form-check-label fw-semibold" for="active">
-                                            Active (track vulnerabilities for this product)
-                                        </label>
-                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Advanced Options (Collapsed) -->
-                    <div class="accordion" id="advancedOptionsAccordion">
-                        <div class="accordion-item">
-                            <h2 class="accordion-header">
-                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                                        data-bs-target="#advancedOptionsCollapse">
-                                    <i class="bi bi-sliders me-2"></i>Advanced Options
-                                </button>
-                            </h2>
-                            <div id="advancedOptionsCollapse" class="accordion-collapse collapse">
-                                <div class="accordion-body">
-                                    <div class="row g-3">
-                                        <div class="col-md-6">
-                                            <label for="matchType" class="form-label fw-semibold">Matching Strategy</label>
-                                            <select class="form-select" id="matchType">
-                                                <option value="auto">Auto - Use CPE if available, fallback to keywords</option>
-                                                <option value="cpe">CPE Only - Only match using CPE identifiers</option>
-                                                <option value="keyword">Keyword Only - Only match using vendor/product keywords</option>
-                                                <option value="both">Both - Match using CPE AND keywords</option>
-                                            </select>
-                                            <small class="form-text text-muted">How to match this product against vulnerabilities</small>
-                                        </div>
+                    <!-- Advanced Options (Collapsed by Default) -->
+                    <div class="border-top pt-3">
+                        <button class="btn btn-link text-decoration-none p-0 text-muted" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#advancedOptionsCollapse">
+                            <i class="bi bi-gear me-1"></i>Advanced Options
+                            <i class="bi bi-chevron-down ms-1 small"></i>
+                        </button>
 
-                                        <div class="col-md-6">
-                                            <label for="keywords" class="form-label fw-semibold">Additional Keywords</label>
-                                            <input type="text" class="form-control" id="keywords"
-                                                   placeholder="e.g., Exchange, Webex, Struts">
-                                            <small class="form-text text-muted">Comma-separated keywords for better matching</small>
-                                        </div>
+                        <div id="advancedOptionsCollapse" class="collapse mt-3">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="matchType" class="form-label">Matching Strategy</label>
+                                    <select class="form-select form-select-sm" id="matchType">
+                                        <option value="auto">Auto (CPE if available, else keywords)</option>
+                                        <option value="cpe">CPE Only</option>
+                                        <option value="keyword">Keywords Only</option>
+                                        <option value="both">Both CPE and Keywords</option>
+                                    </select>
+                                </div>
 
-                                        <div class="col-md-12">
-                                            <label for="description" class="form-label fw-semibold">Description</label>
-                                            <textarea class="form-control" id="description" rows="2"
-                                                      placeholder="Optional notes about this product"></textarea>
-                                        </div>
+                                <div class="col-md-6">
+                                    <label for="keywords" class="form-label">Additional Keywords</label>
+                                    <input type="text" class="form-control form-control-sm" id="keywords"
+                                           placeholder="Comma-separated (e.g., httpd, apache2)">
+                                </div>
 
-                                        <!-- CPE Status Display -->
-                                        <div class="col-md-12" id="cpeStatusSection">
-                                            <div class="card bg-light">
-                                                <div class="card-body py-2">
-                                                    <div class="d-flex justify-content-between align-items-center">
-                                                        <div>
-                                                            <span class="fw-semibold">
-                                                                <i class="bi bi-link-45deg me-1"></i>CPE Identification
-                                                            </span>
-                                                            <div id="cpeSelectedInfo" style="display: none;">
-                                                                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Linked</span>
-                                                                <code id="cpeDisplayUri" class="small ms-2"></code>
-                                                            </div>
-                                                            <div id="cpeNotLinkedInfo">
-                                                                <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Not Linked</span>
-                                                                <small class="text-muted ms-2">Use NVD search above for accurate matching</small>
-                                                            </div>
-                                                        </div>
-                                                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearCPE()" id="clearCpeBtn" style="display: none;">
-                                                            <i class="bi bi-x"></i> Clear CPE
-                                                        </button>
-                                                    </div>
-                                                </div>
+                                <div class="col-12">
+                                    <label for="description" class="form-label">Notes</label>
+                                    <textarea class="form-control form-control-sm" id="description" rows="2"
+                                              placeholder="Optional notes about this product"></textarea>
+                                </div>
+
+                                <!-- CPE Status -->
+                                <div class="col-12" id="cpeStatusSection">
+                                    <div class="alert alert-light py-2 mb-0 small">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <strong><i class="bi bi-link-45deg me-1"></i>CPE Status:</strong>
+                                                <span id="cpeSelectedInfo" style="display: none;">
+                                                    <span class="badge bg-success">Linked</span>
+                                                    <code id="cpeDisplayUri" class="ms-1"></code>
+                                                </span>
+                                                <span id="cpeNotLinkedInfo">
+                                                    <span class="badge bg-secondary">Not linked</span>
+                                                    <span class="text-muted ms-1">Use NVD search for better accuracy</span>
+                                                </span>
                                             </div>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary py-0" onclick="clearCPE()" id="clearCpeBtn" style="display: none;">
+                                                Clear
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
 
-                        <!-- Static Catalog (Secondary Option) -->
-                        <div class="accordion-item">
-                            <h2 class="accordion-header">
-                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                                        data-bs-target="#staticCatalogCollapse">
-                                    <i class="bi bi-archive me-2"></i>Browse Static Catalog
-                                    <span class="badge bg-secondary ms-2">Legacy</span>
-                                </button>
-                            </h2>
-                            <div id="staticCatalogCollapse" class="accordion-collapse collapse">
-                                <div class="accordion-body">
-                                    <p class="text-muted small mb-2">
-                                        <i class="bi bi-info-circle me-1"></i>
-                                        Pre-configured services catalog. For best vulnerability matching accuracy, use NVD search instead.
-                                    </p>
-                                    <button type="button" class="btn btn-outline-secondary" onclick="showServiceCatalog()">
-                                        <i class="bi bi-search me-1"></i>Browse 80+ Pre-configured Services
+                                <!-- Legacy Static Catalog -->
+                                <div class="col-12">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showServiceCatalog()">
+                                        <i class="bi bi-archive me-1"></i>Browse Static Catalog (Legacy)
                                     </button>
                                 </div>
                             </div>
@@ -370,10 +366,9 @@
                     </div>
                 </form>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                    <i class="bi bi-x-circle me-1"></i>Cancel
-                </button>
+            <div class="modal-footer bg-light">
+                <small class="text-muted me-auto"><span class="text-danger">*</span> Required fields</small>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="saveProduct()">
                     <i class="bi bi-check-circle me-1"></i>Save Product
                 </button>
@@ -776,17 +771,24 @@
         // Reset legacy CPE form
         resetCPEForm();
 
-        // Collapse accordion panels
+        // Collapse advanced options
         const advancedCollapse = document.getElementById('advancedOptionsCollapse');
-        const staticCatalogCollapse = document.getElementById('staticCatalogCollapse');
         if (advancedCollapse) advancedCollapse.classList.remove('show');
-        if (staticCatalogCollapse) staticCatalogCollapse.classList.remove('show');
+
+        // Show manual entry toggle
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'block';
 
         // Load organizations into dropdown
         await loadOrganizationsIntoProductForm();
 
-        // Show the modal
-        new bootstrap.Modal(document.getElementById('productModal')).show();
+        // Show the modal - reuse or create instance
+        const modalEl = document.getElementById('productModal');
+        let modal = bootstrap.Modal.getInstance(modalEl);
+        if (!modal) {
+            modal = new bootstrap.Modal(modalEl);
+        }
+        modal.show();
     }
 
     async function editProduct(productId) {
@@ -815,13 +817,21 @@
             // Load CPE data and update NVD selection display
             loadCPEIntoForm(product);
 
-            // Collapse accordion panels by default
-            const advancedCollapse = document.getElementById('advancedOptionsCollapse');
-            const staticCatalogCollapse = document.getElementById('staticCatalogCollapse');
-            if (advancedCollapse) advancedCollapse.classList.remove('show');
-            if (staticCatalogCollapse) staticCatalogCollapse.classList.remove('show');
+            // Hide manual entry toggle when editing (data is already filled)
+            const toggle = document.getElementById('manualEntryToggle');
+            if (toggle) toggle.style.display = 'none';
 
-            new bootstrap.Modal(document.getElementById('productModal')).show();
+            // Collapse advanced options by default
+            const advancedCollapse = document.getElementById('advancedOptionsCollapse');
+            if (advancedCollapse) advancedCollapse.classList.remove('show');
+
+            // Show the modal - reuse or create instance
+            const modalEl = document.getElementById('productModal');
+            let modal = bootstrap.Modal.getInstance(modalEl);
+            if (!modal) {
+                modal = new bootstrap.Modal(modalEl);
+            }
+            modal.show();
         } catch (error) {
             showToast(`Error loading product: ${error.message}`, 'danger');
         }
@@ -880,15 +890,30 @@
                     currentProductId ? '✓ Product updated successfully' : '✓ Product added successfully',
                     'success'
                 );
-                bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+                // Safely close modal
+                const modalEl = document.getElementById('productModal');
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                if (modal) {
+                    modal.hide();
+                }
                 loadProducts();
             } else {
-                const error = await response.json();
+                // Safely parse error response - handle non-JSON responses
+                let errorMessage = 'Unknown error occurred';
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || errorData.message || 'Request failed';
+                } catch (parseError) {
+                    // Response was not JSON (could be HTML error page or empty)
+                    console.error('Failed to parse error response:', parseError);
+                    errorMessage = `Server error (${response.status}: ${response.statusText})`;
+                }
                 // Show warning for duplicates, danger for other errors
                 const toastType = response.status === 409 ? 'warning' : 'danger';
-                showToast(`⚠ ${error.error}`, toastType);
+                showToast(`${errorMessage}`, toastType);
             }
         } catch (error) {
+            console.error('Error saving product:', error);
             showToast(`Error saving product: ${error.message}`, 'danger');
         } finally {
             hideLoading();
@@ -928,24 +953,51 @@
 
     async function loadOrganizationsIntoProductForm() {
         const select = document.getElementById('productOrganization');
+        if (!select) {
+            console.error('Organization select element not found');
+            return;
+        }
+
+        // Show loading state
+        select.innerHTML = '<option value="">Loading...</option>';
+        select.disabled = true;
+
         try {
-            const response = await fetch('/api/organizations');
+            console.log('Fetching organizations...');
+            const response = await fetch('/api/organizations', {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+
+            console.log('Organizations response status:', response.status);
+
             if (response.ok) {
                 const orgs = await response.json();
+                console.log('Organizations loaded:', orgs.length, 'organizations');
+
                 if (Array.isArray(orgs) && orgs.length > 0) {
-                    select.innerHTML = '<option value="">Select organization...</option>' +
-                        orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+                    select.innerHTML = '<option value="">Select organization (optional)...</option>' +
+                        orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
                 } else {
                     select.innerHTML = '<option value="">No organizations available</option>';
                 }
             } else {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('Failed to load organizations:', response.status, errorData);
-                select.innerHTML = '<option value="">Failed to load organizations</option>';
+                let errorMsg = 'Failed to load';
+                try {
+                    const errorData = await response.json();
+                    errorMsg = errorData.error || errorMsg;
+                } catch (e) {}
+                console.error('Failed to load organizations:', response.status, errorMsg);
+                select.innerHTML = `<option value="">Error: ${response.status}</option>`;
             }
         } catch (error) {
             console.error('Error loading organizations for product form:', error);
-            select.innerHTML = '<option value="">Error loading organizations</option>';
+            select.innerHTML = '<option value="">Network error</option>';
+        } finally {
+            select.disabled = false;
         }
     }
 
@@ -1941,7 +1993,7 @@
                 return;
             }
 
-            statusEl.textContent = `Found ${totalProducts} product(s) from ${vendorKeys.length} vendor(s)`;
+            statusEl.textContent = `Found ${totalProducts} product(s) from ${vendorKeys.length} vendor(s) - Click to select`;
             statusEl.className = 'small text-success mb-2';
 
             let html = '';
@@ -1949,26 +2001,24 @@
                 const vendorData = vendors[vendorKey];
                 const products = vendorData.products || {};
 
+                // Format vendor name for display
+                const formattedVendor = vendorKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
                 for (const [productKey, productData] of Object.entries(products)) {
                     const versions = productData.versions || [];
-                    const displayName = productData.display_name || productData.title || `${vendorKey}/${productKey}`;
+                    const displayName = productData.display_name || productData.title || productKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     const versionCount = versions.length;
-                    const versionPreview = versions.slice(0, 3).join(', ');
 
                     html += `
                         <div class="p-2 border-bottom nvd-result-item" style="cursor: pointer;"
-                             onclick="selectNVDProduct('${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(displayName)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})">
-                            <div class="d-flex justify-content-between align-items-start">
+                             onclick="selectNVDProduct('${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(formattedVendor)} - ${escapeHtml(displayName)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})">
+                            <div class="d-flex justify-content-between align-items-center">
                                 <div>
+                                    <span class="badge bg-secondary me-2">${escapeHtml(formattedVendor)}</span>
                                     <strong>${escapeHtml(displayName)}</strong>
-                                    <br>
-                                    <small class="text-muted">
-                                        CPE: <code>cpe:2.3:a:${escapeHtml(vendorKey)}:${escapeHtml(productKey)}:*</code>
-                                    </small>
                                 </div>
-                                <span class="badge bg-info">${versionCount} ver.</span>
+                                <span class="badge bg-light text-dark">${versionCount} versions</span>
                             </div>
-                            ${versionPreview ? `<small class="text-muted">e.g., ${escapeHtml(versionPreview)}${versionCount > 3 ? '...' : ''}</small>` : ''}
                         </div>
                     `;
                 }
@@ -2004,9 +2054,11 @@
         document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${vendor}:${product}:*`;
         document.getElementById('nvdSelectedProduct').style.display = 'block';
 
-        // Hide search results
+        // Hide search results and manual entry toggle
         document.getElementById('nvdResultsList').style.display = 'none';
         document.getElementById('nvdSearchStatus').style.display = 'none';
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'none';
 
         // Auto-fill vendor and product name fields
         const vendorInput = document.getElementById('vendor');
@@ -2065,6 +2117,22 @@
         document.getElementById('nvdSearchInput').value = '';
         document.getElementById('nvdSearchStatus').style.display = 'none';
         document.getElementById('nvdResultsList').style.display = 'none';
+
+        // Show manual entry toggle again
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'block';
+    }
+
+    function toggleManualEntry() {
+        // Hide the toggle button and focus on vendor field
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'none';
+
+        // Focus on the vendor field for manual entry
+        const vendorInput = document.getElementById('vendor');
+        if (vendorInput) {
+            vendorInput.focus();
+        }
     }
 
     async function loadVersionsFromNVD() {
@@ -2112,6 +2180,10 @@
         document.getElementById('cpeSelectedInfo').style.display = 'none';
         document.getElementById('cpeNotLinkedInfo').style.display = 'block';
         document.getElementById('clearCpeBtn').style.display = 'none';
+
+        // Show manual entry toggle
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'block';
     }
 
     // =========================================================================
