@@ -275,90 +275,84 @@ def seed_service_catalog():
             })
 
         # Common enterprise services organized by category
+        # Note: versions is an array since (vendor, product_name) must be unique
         services = [
             # Microsoft Products
-            {"vendor": "Microsoft", "product": "Windows Server", "version": "2019", "category": "Operating System"},
-            {"vendor": "Microsoft", "product": "Windows Server", "version": "2022", "category": "Operating System"},
-            {"vendor": "Microsoft", "product": "Windows 10", "version": "Enterprise", "category": "Operating System"},
-            {"vendor": "Microsoft", "product": "Windows 11", "version": "Enterprise", "category": "Operating System"},
-            {"vendor": "Microsoft", "product": "Exchange Server", "version": "2019", "category": "Email Server"},
-            {"vendor": "Microsoft", "product": "SQL Server", "version": "2019", "category": "Database"},
-            {"vendor": "Microsoft", "product": "SQL Server", "version": "2022", "category": "Database"},
-            {"vendor": "Microsoft", "product": "SharePoint Server", "version": "2019", "category": "Collaboration"},
-            {"vendor": "Microsoft", "product": "Active Directory", "version": "2019", "category": "Identity"},
-            {"vendor": "Microsoft", "product": ".NET Framework", "version": "4.8", "category": "Runtime"},
-            {"vendor": "Microsoft", "product": "IIS", "version": "10.0", "category": "Web Server"},
-            {"vendor": "Microsoft", "product": "Office", "version": "365", "category": "Productivity"},
+            {"vendor": "Microsoft", "product": "Windows Server", "versions": ["2019", "2022", "2016"], "category": "Operating System"},
+            {"vendor": "Microsoft", "product": "Windows 10", "versions": ["Enterprise", "Pro"], "category": "Operating System"},
+            {"vendor": "Microsoft", "product": "Windows 11", "versions": ["Enterprise", "Pro"], "category": "Operating System"},
+            {"vendor": "Microsoft", "product": "Exchange Server", "versions": ["2019", "2016"], "category": "Email Server"},
+            {"vendor": "Microsoft", "product": "SQL Server", "versions": ["2022", "2019", "2017"], "category": "Database"},
+            {"vendor": "Microsoft", "product": "SharePoint Server", "versions": ["2019", "2016"], "category": "Collaboration"},
+            {"vendor": "Microsoft", "product": "Active Directory", "versions": ["2019", "2016"], "category": "Identity"},
+            {"vendor": "Microsoft", "product": ".NET Framework", "versions": ["4.8", "4.7"], "category": "Runtime"},
+            {"vendor": "Microsoft", "product": "IIS", "versions": ["10.0", "8.5"], "category": "Web Server"},
+            {"vendor": "Microsoft", "product": "Office", "versions": ["365", "2021", "2019"], "category": "Productivity"},
+            {"vendor": "Microsoft", "product": "Defender for Endpoint", "versions": ["Latest"], "category": "EDR"},
 
             # Database Systems
-            {"vendor": "Oracle", "product": "Database", "version": "19c", "category": "Database"},
-            {"vendor": "Oracle", "product": "Database", "version": "21c", "category": "Database"},
-            {"vendor": "MySQL", "product": "MySQL", "version": "8.0", "category": "Database"},
-            {"vendor": "PostgreSQL", "product": "PostgreSQL", "version": "15", "category": "Database"},
-            {"vendor": "PostgreSQL", "product": "PostgreSQL", "version": "16", "category": "Database"},
-            {"vendor": "MongoDB", "product": "MongoDB", "version": "7.0", "category": "Database"},
-            {"vendor": "Redis", "product": "Redis", "version": "7.0", "category": "Database"},
-            {"vendor": "Elastic", "product": "Elasticsearch", "version": "8.x", "category": "Database"},
+            {"vendor": "Oracle", "product": "Database", "versions": ["21c", "19c", "18c"], "category": "Database"},
+            {"vendor": "MySQL", "product": "MySQL", "versions": ["8.0", "5.7"], "category": "Database"},
+            {"vendor": "PostgreSQL", "product": "PostgreSQL", "versions": ["16", "15", "14"], "category": "Database"},
+            {"vendor": "MongoDB", "product": "MongoDB", "versions": ["7.0", "6.0"], "category": "Database"},
+            {"vendor": "Redis", "product": "Redis", "versions": ["7.0", "6.2"], "category": "Database"},
+            {"vendor": "Elastic", "product": "Elasticsearch", "versions": ["8.x", "7.x"], "category": "Database"},
 
             # Web Servers & Frameworks
-            {"vendor": "Apache", "product": "HTTP Server", "version": "2.4", "category": "Web Server"},
-            {"vendor": "Nginx", "product": "Nginx", "version": "1.24", "category": "Web Server"},
-            {"vendor": "Apache", "product": "Tomcat", "version": "10", "category": "Application Server"},
-            {"vendor": "Node.js", "product": "Node.js", "version": "20 LTS", "category": "Runtime"},
-            {"vendor": "PHP", "product": "PHP", "version": "8.2", "category": "Runtime"},
-            {"vendor": "Python", "product": "Python", "version": "3.11", "category": "Runtime"},
-            {"vendor": "Java", "product": "OpenJDK", "version": "17", "category": "Runtime"},
-            {"vendor": "Java", "product": "OpenJDK", "version": "21", "category": "Runtime"},
+            {"vendor": "Apache", "product": "HTTP Server", "versions": ["2.4"], "category": "Web Server"},
+            {"vendor": "Nginx", "product": "Nginx", "versions": ["1.24", "1.22"], "category": "Web Server"},
+            {"vendor": "Apache", "product": "Tomcat", "versions": ["10", "9"], "category": "Application Server"},
+            {"vendor": "Node.js", "product": "Node.js", "versions": ["20 LTS", "18 LTS"], "category": "Runtime"},
+            {"vendor": "PHP", "product": "PHP", "versions": ["8.2", "8.1", "7.4"], "category": "Runtime"},
+            {"vendor": "Python", "product": "Python", "versions": ["3.12", "3.11", "3.10"], "category": "Runtime"},
+            {"vendor": "Java", "product": "OpenJDK", "versions": ["21", "17", "11"], "category": "Runtime"},
 
             # Network Equipment
-            {"vendor": "Cisco", "product": "IOS", "version": "17.x", "category": "Network"},
-            {"vendor": "Cisco", "product": "ASA", "version": "9.x", "category": "Firewall"},
-            {"vendor": "Cisco", "product": "Firepower", "version": "7.x", "category": "Firewall"},
-            {"vendor": "Palo Alto", "product": "PAN-OS", "version": "11.x", "category": "Firewall"},
-            {"vendor": "Fortinet", "product": "FortiOS", "version": "7.x", "category": "Firewall"},
-            {"vendor": "Juniper", "product": "Junos OS", "version": "23.x", "category": "Network"},
-            {"vendor": "F5", "product": "BIG-IP", "version": "17.x", "category": "Load Balancer"},
+            {"vendor": "Cisco", "product": "IOS", "versions": ["17.x", "16.x"], "category": "Network"},
+            {"vendor": "Cisco", "product": "ASA", "versions": ["9.x"], "category": "Firewall"},
+            {"vendor": "Cisco", "product": "Firepower", "versions": ["7.x", "6.x"], "category": "Firewall"},
+            {"vendor": "Palo Alto", "product": "PAN-OS", "versions": ["11.x", "10.x"], "category": "Firewall"},
+            {"vendor": "Fortinet", "product": "FortiOS", "versions": ["7.x", "6.x"], "category": "Firewall"},
+            {"vendor": "Juniper", "product": "Junos OS", "versions": ["23.x", "22.x"], "category": "Network"},
+            {"vendor": "F5", "product": "BIG-IP", "versions": ["17.x", "16.x"], "category": "Load Balancer"},
 
             # Virtualization & Cloud
-            {"vendor": "VMware", "product": "vSphere", "version": "8.0", "category": "Virtualization"},
-            {"vendor": "VMware", "product": "ESXi", "version": "8.0", "category": "Hypervisor"},
-            {"vendor": "VMware", "product": "vCenter", "version": "8.0", "category": "Management"},
-            {"vendor": "Citrix", "product": "XenServer", "version": "8.x", "category": "Hypervisor"},
-            {"vendor": "Docker", "product": "Docker Engine", "version": "24.x", "category": "Container"},
-            {"vendor": "Kubernetes", "product": "Kubernetes", "version": "1.28", "category": "Container Orchestration"},
+            {"vendor": "VMware", "product": "vSphere", "versions": ["8.0", "7.0"], "category": "Virtualization"},
+            {"vendor": "VMware", "product": "ESXi", "versions": ["8.0", "7.0"], "category": "Hypervisor"},
+            {"vendor": "VMware", "product": "vCenter", "versions": ["8.0", "7.0"], "category": "Management"},
+            {"vendor": "Citrix", "product": "XenServer", "versions": ["8.x"], "category": "Hypervisor"},
+            {"vendor": "Docker", "product": "Docker Engine", "versions": ["24.x", "23.x"], "category": "Container"},
+            {"vendor": "Kubernetes", "product": "Kubernetes", "versions": ["1.29", "1.28", "1.27"], "category": "Container Orchestration"},
 
             # Security Products
-            {"vendor": "CrowdStrike", "product": "Falcon", "version": "Latest", "category": "EDR"},
-            {"vendor": "Microsoft", "product": "Defender for Endpoint", "version": "Latest", "category": "EDR"},
-            {"vendor": "Splunk", "product": "Enterprise", "version": "9.x", "category": "SIEM"},
-            {"vendor": "Elastic", "product": "Security", "version": "8.x", "category": "SIEM"},
-            {"vendor": "Tenable", "product": "Nessus", "version": "Latest", "category": "Vulnerability Scanner"},
-            {"vendor": "Qualys", "product": "VMDR", "version": "Latest", "category": "Vulnerability Scanner"},
+            {"vendor": "CrowdStrike", "product": "Falcon", "versions": ["Latest"], "category": "EDR"},
+            {"vendor": "Splunk", "product": "Enterprise", "versions": ["9.x", "8.x"], "category": "SIEM"},
+            {"vendor": "Elastic", "product": "Security", "versions": ["8.x", "7.x"], "category": "SIEM"},
+            {"vendor": "Tenable", "product": "Nessus", "versions": ["Latest"], "category": "Vulnerability Scanner"},
+            {"vendor": "Qualys", "product": "VMDR", "versions": ["Latest"], "category": "Vulnerability Scanner"},
 
             # Linux Distributions
-            {"vendor": "Red Hat", "product": "Enterprise Linux", "version": "9", "category": "Operating System"},
-            {"vendor": "Red Hat", "product": "Enterprise Linux", "version": "8", "category": "Operating System"},
-            {"vendor": "Canonical", "product": "Ubuntu", "version": "22.04 LTS", "category": "Operating System"},
-            {"vendor": "Canonical", "product": "Ubuntu", "version": "24.04 LTS", "category": "Operating System"},
-            {"vendor": "SUSE", "product": "Linux Enterprise Server", "version": "15", "category": "Operating System"},
-            {"vendor": "Debian", "product": "Debian", "version": "12", "category": "Operating System"},
+            {"vendor": "Red Hat", "product": "Enterprise Linux", "versions": ["9", "8", "7"], "category": "Operating System"},
+            {"vendor": "Canonical", "product": "Ubuntu", "versions": ["24.04 LTS", "22.04 LTS", "20.04 LTS"], "category": "Operating System"},
+            {"vendor": "SUSE", "product": "Linux Enterprise Server", "versions": ["15", "12"], "category": "Operating System"},
+            {"vendor": "Debian", "product": "Debian", "versions": ["12", "11"], "category": "Operating System"},
 
             # Backup & Storage
-            {"vendor": "Veeam", "product": "Backup & Replication", "version": "12", "category": "Backup"},
-            {"vendor": "Commvault", "product": "Complete Backup", "version": "Latest", "category": "Backup"},
-            {"vendor": "NetApp", "product": "ONTAP", "version": "9.x", "category": "Storage"},
-            {"vendor": "Dell EMC", "product": "PowerStore", "version": "Latest", "category": "Storage"},
+            {"vendor": "Veeam", "product": "Backup & Replication", "versions": ["12", "11"], "category": "Backup"},
+            {"vendor": "Commvault", "product": "Complete Backup", "versions": ["Latest"], "category": "Backup"},
+            {"vendor": "NetApp", "product": "ONTAP", "versions": ["9.x"], "category": "Storage"},
+            {"vendor": "Dell EMC", "product": "PowerStore", "versions": ["Latest"], "category": "Storage"},
         ]
 
         # Insert services
         added = 0
         for svc in services:
-            version = svc.get('version')
+            versions = svc.get('versions', [])
             service = ServiceCatalog(
                 vendor=svc['vendor'],
                 product_name=svc['product'],
                 category=svc.get('category', 'Other'),
-                typical_versions=json.dumps([version]) if version else None,
+                typical_versions=json.dumps(versions) if versions else None,
                 description=f"{svc['vendor']} {svc['product']}",
                 is_popular=True,
                 is_active=True
