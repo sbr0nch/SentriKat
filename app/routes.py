@@ -746,7 +746,20 @@ def get_vulnerability_stats():
 @login_required
 def acknowledge_match(match_id):
     """Acknowledge a vulnerability match"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     match = VulnerabilityMatch.query.get_or_404(match_id)
+
+    # Authorization: verify user can manage this product's matches
+    if not current_user.is_super_admin():
+        # Get all org IDs the product belongs to
+        product_org_ids = [org.id for org in match.product.organizations.all()]
+        if match.product.organization_id:
+            product_org_ids.append(match.product.organization_id)
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if not any(org_id in user_org_ids for org_id in product_org_ids):
+            return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
+
     match.acknowledged = True
     db.session.commit()
     return jsonify(match.to_dict())
@@ -755,7 +768,20 @@ def acknowledge_match(match_id):
 @login_required
 def unacknowledge_match(match_id):
     """Unacknowledge a vulnerability match"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     match = VulnerabilityMatch.query.get_or_404(match_id)
+
+    # Authorization: verify user can manage this product's matches
+    if not current_user.is_super_admin():
+        # Get all org IDs the product belongs to
+        product_org_ids = [org.id for org in match.product.organizations.all()]
+        if match.product.organization_id:
+            product_org_ids.append(match.product.organization_id)
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if not any(org_id in user_org_ids for org_id in product_org_ids):
+            return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
+
     match.acknowledged = False
     db.session.commit()
     return jsonify(match.to_dict())
@@ -1345,6 +1371,16 @@ def test_smtp(org_id):
 @login_required
 def get_alert_logs(org_id):
     """Get alert logs for an organization"""
+    # Authorization: verify user can access this organization
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user.is_super_admin():
+        # Check if user belongs to this organization
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if org_id not in user_org_ids:
+            return jsonify({'error': 'Insufficient permissions to view this organization\'s alert logs'}), 403
+
     limit = request.args.get('limit', 50, type=int)
     logs = AlertLog.query.filter_by(organization_id=org_id)\
         .order_by(AlertLog.sent_at.desc()).limit(limit).all()
@@ -1474,11 +1510,27 @@ def create_user():
     if role not in valid_roles:
         return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
 
+    # Authorization: org_admins can only create users in their own organization
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_org_id = data.get('organization_id')
+
+    if not current_user.is_super_admin():
+        # Org admins cannot create super_admin or org_admin users
+        if role in ['super_admin', 'org_admin']:
+            return jsonify({'error': 'Only super admins can create admin users'}), 403
+
+        # Org admins can only create users in their own organization
+        if target_org_id:
+            user_org_ids = [org.id for org in current_user.get_all_organizations()]
+            if target_org_id not in user_org_ids:
+                return jsonify({'error': 'Cannot create users in other organizations'}), 403
+
     user = User(
         username=data['username'],
         email=data['email'],
         full_name=data.get('full_name', '')[:100],  # Limit length
-        organization_id=data.get('organization_id'),
+        organization_id=target_org_id,
         auth_type='local',  # Force local auth for created users
         role=role,
         is_admin=data.get('is_admin', False),
@@ -1499,7 +1551,14 @@ def create_user():
 @org_admin_required
 def get_user(user_id):
     """Get a specific user"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
+
+    # Permission check: can this user view this user's details?
+    if not current_user.can_manage_user(user) and user_id != current_user_id:
+        return jsonify({'error': 'Insufficient permissions to view this user'}), 403
+
     return jsonify(user.to_dict())
 
 @bp.route('/api/users/<int:user_id>', methods=['PUT'])
@@ -1538,7 +1597,14 @@ def update_user(user_id):
             return jsonify({'error': 'Username already exists'}), 400
         user.username = data['username']
 
-    if 'email' in data:
+    if 'email' in data and data['email'] != user.email:
+        # Validate email format
+        if not validate_email(data['email']):
+            return jsonify({'error': 'Invalid email format'}), 400
+        # Check for duplicate email
+        existing = User.query.filter_by(email=data['email']).first()
+        if existing and existing.id != user_id:
+            return jsonify({'error': 'Email already exists'}), 400
         user.email = data['email']
     if 'full_name' in data:
         user.full_name = data['full_name']

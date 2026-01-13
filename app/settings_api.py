@@ -1181,7 +1181,7 @@ def restore_full_backup():
                 if user.auth_type == 'local':
                     import secrets
                     user.set_password(secrets.token_urlsafe(32))
-                    user.password_change_required = True
+                    user.must_change_password = True
 
                 db.session.add(user)
                 db.session.flush()
