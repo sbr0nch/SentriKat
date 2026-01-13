@@ -8,6 +8,7 @@ from app import db, csrf
 from app.models import Organization, User, ServiceCatalog
 from app.cisa_sync import sync_cisa_kev
 import os
+import json
 
 setup_bp = Blueprint('setup', __name__)
 
@@ -352,11 +353,12 @@ def seed_service_catalog():
         # Insert services
         added = 0
         for svc in services:
+            version = svc.get('version')
             service = ServiceCatalog(
                 vendor=svc['vendor'],
                 product_name=svc['product'],
                 category=svc.get('category', 'Other'),
-                typical_versions=svc.get('version'),
+                typical_versions=json.dumps([version]) if version else None,
                 description=f"{svc['vendor']} {svc['product']}",
                 is_popular=True,
                 is_active=True

@@ -194,7 +194,7 @@ def critical_cve_reminder_job(app):
                         .filter(
                             Product.organization_id == org.id,
                             VulnerabilityMatch.acknowledged == False,
-                            VulnerabilityMatch.matched_at >= cutoff_date
+                            VulnerabilityMatch.created_at >= cutoff_date
                         )
                         .all()
                     )

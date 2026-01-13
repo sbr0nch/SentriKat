@@ -1153,7 +1153,7 @@ def restore_full_backup():
                     name=org_data['name'],
                     display_name=org_data.get('display_name', org_data['name']),
                     description=org_data.get('description', ''),
-                    notification_emails=org_data.get('notification_emails', ''),
+                    notification_emails=org_data.get('notification_emails', '[]'),
                     alert_on_critical=org_data.get('alert_on_critical', True),
                     alert_on_high=org_data.get('alert_on_high', False),
                     alert_on_new_cve=org_data.get('alert_on_new_cve', True),
@@ -1258,7 +1258,7 @@ def restore_full_backup():
                     product_name=catalog_data.get('product_name', ''),
                     category=catalog_data.get('category', ''),
                     subcategory=catalog_data.get('subcategory', ''),
-                    common_names=catalog_data.get('common_names', ''),
+                    common_names=catalog_data.get('common_names') or None,
                     description=catalog_data.get('description', ''),
                     is_popular=catalog_data.get('is_popular', False)
                 )
