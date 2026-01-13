@@ -927,16 +927,25 @@
     }
 
     async function loadOrganizationsIntoProductForm() {
+        const select = document.getElementById('productOrganization');
         try {
             const response = await fetch('/api/organizations');
             if (response.ok) {
                 const orgs = await response.json();
-                const select = document.getElementById('productOrganization');
-                select.innerHTML = '<option value="">No organization (use default)</option>' +
-                    orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+                if (Array.isArray(orgs) && orgs.length > 0) {
+                    select.innerHTML = '<option value="">Select organization...</option>' +
+                        orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+                } else {
+                    select.innerHTML = '<option value="">No organizations available</option>';
+                }
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                console.error('Failed to load organizations:', response.status, errorData);
+                select.innerHTML = '<option value="">Failed to load organizations</option>';
             }
         } catch (error) {
             console.error('Error loading organizations for product form:', error);
+            select.innerHTML = '<option value="">Error loading organizations</option>';
         }
     }
 
