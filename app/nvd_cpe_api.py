@@ -213,9 +213,8 @@ def search_cpe(
         # Use CPE match string for exact matching
         params['cpeMatchString'] = f"cpe:2.3:*:*{keyword}*"
     else:
-        # Keyword search
+        # Keyword search (NVD API doesn't accept keywordExactMatch parameter)
         params['keywordSearch'] = keyword
-        params['keywordExactMatch'] = 'false'
 
     # Get API key if available
     api_key = _get_api_key()
