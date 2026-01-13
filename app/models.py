@@ -98,12 +98,18 @@ class Organization(db.Model):
         # Count active users in this organization
         user_count = User.query.filter_by(organization_id=self.id, is_active=True).count()
 
+        # Safely parse notification_emails JSON
+        try:
+            notification_emails = json.loads(self.notification_emails) if self.notification_emails else []
+        except (json.JSONDecodeError, TypeError):
+            notification_emails = []
+
         return {
             'id': self.id,
             'name': self.name,
             'display_name': self.display_name,
             'description': self.description,
-            'notification_emails': json.loads(self.notification_emails) if self.notification_emails else [],
+            'notification_emails': notification_emails,
             'alert_settings': {
                 'critical': self.alert_on_critical,
                 'high': self.alert_on_high,

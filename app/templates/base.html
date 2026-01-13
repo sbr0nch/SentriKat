@@ -2059,7 +2059,18 @@
                 // Get current organization
                 const currentResponse = await fetch('/api/session/organization');
                 if (!currentResponse.ok) {
+                    // Check if session expired (redirect to login)
+                    if (currentResponse.status === 401) {
+                        window.location.href = '/login';
+                        return;
+                    }
                     throw new Error(`Failed to load current organization: ${currentResponse.status}`);
+                }
+
+                // Check content type before parsing JSON
+                const currentContentType = currentResponse.headers.get('content-type');
+                if (!currentContentType || !currentContentType.includes('application/json')) {
+                    throw new Error('Invalid response from server');
                 }
                 const currentOrg = await currentResponse.json();
 
@@ -2072,7 +2083,18 @@
                 // Get all organizations
                 const orgsResponse = await fetch('/api/organizations');
                 if (!orgsResponse.ok) {
+                    // Check if session expired (redirect to login)
+                    if (orgsResponse.status === 401) {
+                        window.location.href = '/login';
+                        return;
+                    }
                     throw new Error(`Failed to load organizations: ${orgsResponse.status}`);
+                }
+
+                // Check content type before parsing JSON
+                const orgsContentType = orgsResponse.headers.get('content-type');
+                if (!orgsContentType || !orgsContentType.includes('application/json')) {
+                    throw new Error('Invalid response from server');
                 }
                 const organizations = await orgsResponse.json();
 
@@ -2115,9 +2137,22 @@
                     // Reload page to refresh data
                     setTimeout(() => location.reload(), 500);
                 } else {
-                    showToast('Failed to switch organization', 'danger');
+                    // Check if session expired
+                    if (response.status === 401) {
+                        window.location.href = '/login';
+                        return;
+                    }
+                    // Try to parse error message from JSON response
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const errorData = await response.json();
+                        showToast(`Error: ${errorData.error || 'Failed to switch organization'}`, 'danger');
+                    } else {
+                        showToast('Failed to switch organization', 'danger');
+                    }
                 }
             } catch (error) {
+                console.error('Error switching organization:', error);
                 showToast(`Error: ${error.message}`, 'danger');
             }
         }

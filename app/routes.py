@@ -1091,36 +1091,41 @@ def increment_catalog_usage(catalog_id):
 @login_required
 def get_organizations():
     """Get organizations based on user permissions"""
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
+    try:
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
 
-    if not current_user:
-        return jsonify({'error': 'User not found'}), 404
+        if not current_user:
+            return jsonify({'error': 'User not found'}), 404
 
-    # Super admins and users with can_view_all_orgs see all organizations
-    if current_user.is_super_admin() or current_user.can_view_all_orgs:
-        orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
-    else:
-        # Regular users see all organizations they have access to (primary + multi-org memberships)
-        org_ids = set()
-
-        # Add primary organization
-        if current_user.organization_id:
-            org_ids.add(current_user.organization_id)
-
-        # Add multi-org memberships
-        for membership in current_user.org_memberships.all():
-            org_ids.add(membership.organization_id)
-
-        if org_ids:
-            orgs = Organization.query.filter(
-                Organization.id.in_(org_ids),
-                Organization.active == True
-            ).order_by(Organization.display_name).all()
+        # Super admins and users with can_view_all_orgs see all organizations
+        if current_user.is_super_admin() or current_user.can_view_all_orgs:
+            orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
         else:
-            orgs = []
+            # Regular users see all organizations they have access to (primary + multi-org memberships)
+            org_ids = set()
 
-    return jsonify([o.to_dict() for o in orgs])
+            # Add primary organization
+            if current_user.organization_id:
+                org_ids.add(current_user.organization_id)
+
+            # Add multi-org memberships
+            for membership in current_user.org_memberships.all():
+                org_ids.add(membership.organization_id)
+
+            if org_ids:
+                orgs = Organization.query.filter(
+                    Organization.id.in_(org_ids),
+                    Organization.active == True
+                ).order_by(Organization.display_name).all()
+            else:
+                orgs = []
+
+        return jsonify([o.to_dict() for o in orgs])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in get_organizations: {str(e)}")
+        return jsonify({'error': 'Failed to load organizations'}), 500
 
 @bp.route('/api/organizations', methods=['POST'])
 @admin_required
@@ -2769,43 +2774,55 @@ def export_selected_matches():
 @login_required
 def get_current_organization():
     """Get current organization from session"""
-    org_id = session.get('organization_id')
-    if org_id:
-        org = Organization.query.get(org_id)
-        if org:
-            return jsonify(org.to_dict())
+    try:
+        org_id = session.get('organization_id')
+        if org_id:
+            org = Organization.query.get(org_id)
+            if org:
+                return jsonify(org.to_dict())
 
-    # Return default organization
-    default_org = Organization.query.filter_by(name='default').first()
-    if default_org:
-        return jsonify(default_org.to_dict())
+        # Return default organization
+        default_org = Organization.query.filter_by(name='default').first()
+        if default_org:
+            return jsonify(default_org.to_dict())
 
-    return jsonify({'error': 'No organization found'}), 404
+        return jsonify({'error': 'No organization found'}), 404
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in get_current_organization: {str(e)}")
+        return jsonify({'error': 'Failed to load organization'}), 500
 
 @bp.route('/api/session/organization/<int:org_id>', methods=['POST'])
 @login_required
 def switch_organization(org_id):
     """Switch to a different organization (with permission check)"""
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
+    try:
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
 
-    if not current_user:
-        return jsonify({'error': 'User not found'}), 404
+        if not current_user:
+            return jsonify({'error': 'User not found'}), 404
 
-    org = Organization.query.get_or_404(org_id)
+        org = Organization.query.get(org_id)
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
 
-    # Check if user has permission to switch to this organization
-    # This checks: super_admin, can_view_all_orgs, primary org, and multi-org memberships
-    if not current_user.has_access_to_org(org_id):
-        return jsonify({'error': 'You do not have permission to access this organization'}), 403
+        # Check if user has permission to switch to this organization
+        # This checks: super_admin, can_view_all_orgs, primary org, and multi-org memberships
+        if not current_user.has_access_to_org(org_id):
+            return jsonify({'error': 'You do not have permission to access this organization'}), 403
 
-    session['organization_id'] = org_id
+        session['organization_id'] = org_id
 
-    # Also get the user's role for this organization for proper permissions
-    user_role = current_user.get_role_for_org(org_id)
+        # Also get the user's role for this organization for proper permissions
+        user_role = current_user.get_role_for_org(org_id)
 
-    return jsonify({
-        'success': True,
-        'organization': org.to_dict(),
-        'role_in_org': user_role
-    })
+        return jsonify({
+            'success': True,
+            'organization': org.to_dict(),
+            'role_in_org': user_role
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in switch_organization: {str(e)}")
+        return jsonify({'error': 'Failed to switch organization'}), 500
