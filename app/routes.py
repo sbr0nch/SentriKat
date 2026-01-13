@@ -9,13 +9,92 @@ from app.licensing import requires_professional, check_user_limit, check_org_lim
 import json
 import re
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Application version
+APP_VERSION = "1.0.0"
+APP_NAME = "SentriKat"
 
 bp = Blueprint('main', __name__)
 
 # Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
 csrf.exempt(bp)
+
+
+# =============================================================================
+# Health & Status Endpoints (No authentication required)
+# =============================================================================
+
+@bp.route('/api/health', methods=['GET'])
+def health_check():
+    """
+    Health check endpoint for load balancers and monitoring.
+    Returns 200 if application is healthy, 503 if database is down.
+    """
+    health = {
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'version': APP_VERSION,
+        'checks': {}
+    }
+
+    # Check database connectivity
+    try:
+        db.session.execute(db.text('SELECT 1'))
+        health['checks']['database'] = 'ok'
+    except Exception as e:
+        health['status'] = 'unhealthy'
+        health['checks']['database'] = 'error'
+        logger.error(f"Health check - database error: {str(e)}")
+        return jsonify(health), 503
+
+    return jsonify(health), 200
+
+
+@bp.route('/api/version', methods=['GET'])
+def get_version():
+    """
+    Get application version information.
+    Useful for update checking and support.
+    """
+    from app.licensing import get_license
+
+    license_info = get_license()
+
+    return jsonify({
+        'name': APP_NAME,
+        'version': APP_VERSION,
+        'edition': license_info.edition if license_info else 'community',
+        'python': '3.11+',
+        'database': 'PostgreSQL'
+    })
+
+
+@bp.route('/api/status', methods=['GET'])
+def get_status():
+    """
+    Get system status including last sync time.
+    No authentication required - basic status only.
+    """
+    try:
+        last_sync = SyncLog.query.order_by(SyncLog.started_at.desc()).first()
+        vuln_count = Vulnerability.query.count()
+
+        return jsonify({
+            'status': 'online',
+            'version': APP_VERSION,
+            'vulnerabilities_tracked': vuln_count,
+            'last_sync': last_sync.started_at.isoformat() + 'Z' if last_sync else None,
+            'last_sync_status': last_sync.status if last_sync else None
+        })
+    except Exception as e:
+        logger.error(f"Status check error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'version': APP_VERSION
+        }), 500
 
 
 def validate_email(email):
