@@ -1210,6 +1210,14 @@ def update_organization(org_id):
         org.alert_time_end = data['alert_time_end']
     if 'alert_days' in data:
         org.alert_days = data['alert_days']
+    # Alert mode settings (null = use global default)
+    if 'alert_mode' in data:
+        mode = data['alert_mode']
+        if mode in ['new_only', 'daily_reminder', 'escalation', None, '']:
+            org.alert_mode = mode if mode else None  # Empty string becomes null (use default)
+    if 'escalation_days' in data:
+        days = data['escalation_days']
+        org.escalation_days = int(days) if days else None  # Empty becomes null (use default)
     if 'active' in data:
         org.active = data['active']
 

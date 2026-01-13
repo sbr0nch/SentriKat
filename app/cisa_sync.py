@@ -375,28 +375,69 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
         organizations = Organization.query.filter_by(active=True).all()
 
         for org in organizations:
-            # Get new unacknowledged matches for this organization from this sync
-            new_matches = VulnerabilityMatch.query\
-                .join(Vulnerability).join(Product)\
-                .filter(
-                    Product.organization_id == org.id,
-                    VulnerabilityMatch.acknowledged == False,
-                    VulnerabilityMatch.created_at >= start_time
-                ).all()
+            # Get the organization's effective alert mode
+            alert_config = org.get_effective_alert_mode()
+            alert_mode = alert_config['mode']
+            escalation_days = alert_config['escalation_days']
 
-            if new_matches:
+            # Build query based on alert mode
+            if alert_mode == 'new_only':
+                # Only alert on NEW matches from this sync
+                matches_to_alert = VulnerabilityMatch.query\
+                    .join(Vulnerability).join(Product)\
+                    .filter(
+                        Product.organization_id == org.id,
+                        VulnerabilityMatch.acknowledged == False,
+                        VulnerabilityMatch.created_at >= start_time
+                    ).all()
+            elif alert_mode == 'daily_reminder':
+                # Alert on ALL unacknowledged critical CVEs due within 7 days
+                from datetime import date, timedelta
+                cutoff_date = date.today() + timedelta(days=7)
+                matches_to_alert = VulnerabilityMatch.query\
+                    .join(Vulnerability).join(Product)\
+                    .filter(
+                        Product.organization_id == org.id,
+                        VulnerabilityMatch.acknowledged == False,
+                        Vulnerability.due_date <= cutoff_date,
+                        Vulnerability.due_date >= date.today()  # Not overdue
+                    ).all()
+            elif alert_mode == 'escalation':
+                # Alert on CVEs approaching due date (within escalation_days)
+                from datetime import date, timedelta
+                cutoff_date = date.today() + timedelta(days=escalation_days)
+                matches_to_alert = VulnerabilityMatch.query\
+                    .join(Vulnerability).join(Product)\
+                    .filter(
+                        Product.organization_id == org.id,
+                        VulnerabilityMatch.acknowledged == False,
+                        Vulnerability.due_date <= cutoff_date,
+                        Vulnerability.due_date >= date.today()  # Not overdue
+                    ).all()
+            else:
+                # Fallback to new_only behavior
+                matches_to_alert = VulnerabilityMatch.query\
+                    .join(Vulnerability).join(Product)\
+                    .filter(
+                        Product.organization_id == org.id,
+                        VulnerabilityMatch.acknowledged == False,
+                        VulnerabilityMatch.created_at >= start_time
+                    ).all()
+
+            if matches_to_alert:
                 # Send email alert
-                result = EmailAlertManager.send_critical_cve_alert(org, new_matches)
+                result = EmailAlertManager.send_critical_cve_alert(org, matches_to_alert)
                 alert_results.append({
                     'organization': org.name,
+                    'alert_mode': alert_mode,
                     'result': result
                 })
 
                 # Count critical for this org
-                org_critical = sum(1 for m in new_matches if m.vulnerability.known_ransomware or (m.vulnerability.cvss_score and m.vulnerability.cvss_score >= 9.0))
+                org_critical = sum(1 for m in matches_to_alert if m.vulnerability.known_ransomware or (m.vulnerability.cvss_score and m.vulnerability.cvss_score >= 9.0))
 
                 # Send org-specific webhook if configured (takes priority)
-                org_webhook_result = send_org_webhook(org, stored, org_critical, len(new_matches), matches=new_matches)
+                org_webhook_result = send_org_webhook(org, stored, org_critical, len(matches_to_alert), matches=matches_to_alert)
                 if org_webhook_result:
                     webhook_results.append(org_webhook_result)
                     orgs_with_own_webhook.add(org.id)

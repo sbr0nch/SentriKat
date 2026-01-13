@@ -1205,6 +1205,29 @@
                                         <small class="form-text text-muted">Only include CVEs discovered within this many days</small>
                                     </div>
 
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-gear me-2"></i>Default Alert Mode</h6>
+                                        <small class="text-muted">These defaults can be overridden per-organization</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="defaultAlertMode" class="form-label">Alert Mode</label>
+                                        <select class="form-select" id="defaultAlertMode">
+                                            <option value="new_only">New Only - Only alert on new CVEs from each sync</option>
+                                            <option value="daily_reminder" selected>Daily Reminder - All unacknowledged CVEs due within 7 days</option>
+                                            <option value="escalation">Escalation - Re-alert as CVEs approach due date</option>
+                                        </select>
+                                        <small class="form-text text-muted">
+                                            <strong>New Only:</strong> Alert only when new vulnerabilities are discovered<br>
+                                            <strong>Daily Reminder:</strong> Daily reminder of ALL unacknowledged critical CVEs due within 7 days<br>
+                                            <strong>Escalation:</strong> Re-alert when CVE is within X days of due date
+                                        </small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="defaultEscalationDays" class="form-label">Escalation Days</label>
+                                        <input type="number" class="form-control" id="defaultEscalationDays" value="3" min="1" max="14">
+                                        <small class="form-text text-muted">For Escalation mode: Days before due date to re-alert</small>
+                                    </div>
+
                                     <div class="col-md-12">
                                         <hr>
                                         <button type="button" class="btn btn-primary" onclick="saveNotificationSettings()">
@@ -2013,6 +2036,28 @@
                                             <strong>Alert on Ransomware</strong> (known to be used in ransomware)
                                         </label>
                                     </div>
+                                </div>
+
+                                <div class="col-12 mt-3">
+                                    <hr>
+                                    <h6 class="text-muted"><i class="bi bi-gear me-1"></i>Alert Mode Override</h6>
+                                    <small class="text-muted">Leave blank to use global default settings</small>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="orgAlertMode" class="form-label">Alert Mode</label>
+                                    <select class="form-select" id="orgAlertMode">
+                                        <option value="">Use Global Default</option>
+                                        <option value="new_only">New Only - Only new CVEs from each sync</option>
+                                        <option value="daily_reminder">Daily Reminder - All unack'd due within 7 days</option>
+                                        <option value="escalation">Escalation - Re-alert as CVEs approach due</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="orgEscalationDays" class="form-label">Escalation Days</label>
+                                    <input type="number" class="form-control" id="orgEscalationDays" placeholder="Use global default" min="1" max="14">
+                                    <small class="form-text text-muted">Days before due date to re-alert (for escalation mode)</small>
                                 </div>
                             </div>
                         </div>

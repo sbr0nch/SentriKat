@@ -77,6 +77,11 @@ class Organization(db.Model):
     alert_time_end = db.Column(db.String(5), default='18:00')    # HH:MM format
     alert_days = db.Column(db.String(50), default='mon,tue,wed,thu,fri')  # Comma-separated days
 
+    # Alert Mode Settings (null = use global default)
+    # Modes: 'new_only' (only new CVEs), 'daily_reminder' (all unack'd due <=7d), 'escalation' (re-alert at X days)
+    alert_mode = db.Column(db.String(20), nullable=True)  # null = use global default
+    escalation_days = db.Column(db.Integer, nullable=True)  # Days before due to escalate (null = use global, default 3)
+
     # Webhook Settings (per organization - takes priority over global)
     webhook_enabled = db.Column(db.Boolean, default=False)
     webhook_url = db.Column(db.String(500), nullable=True)
@@ -106,7 +111,9 @@ class Organization(db.Model):
                 'ransomware': self.alert_on_ransomware,
                 'time_start': self.alert_time_start,
                 'time_end': self.alert_time_end,
-                'days': self.alert_days
+                'days': self.alert_days,
+                'mode': self.alert_mode,  # null = use global default
+                'escalation_days': self.escalation_days
             },
             # SMTP Settings (return all except password for security)
             'smtp_host': self.smtp_host,
@@ -194,6 +201,32 @@ class Organization(db.Model):
             'from_email': self.smtp_from_email,
             'from_name': self.smtp_from_name
         }
+
+    def get_effective_alert_mode(self):
+        """
+        Get the effective alert mode for this organization.
+        Uses org-specific setting if set, otherwise falls back to global default.
+
+        Returns dict with:
+            - mode: 'new_only', 'daily_reminder', or 'escalation'
+            - escalation_days: int (only relevant for escalation mode)
+        """
+        from app.settings_api import get_setting
+
+        # Get org-specific or global default
+        mode = self.alert_mode
+        if not mode:
+            mode = get_setting('default_alert_mode', 'daily_reminder')
+
+        escalation_days = self.escalation_days
+        if escalation_days is None:
+            escalation_days = int(get_setting('default_escalation_days', '3') or '3')
+
+        return {
+            'mode': mode,
+            'escalation_days': escalation_days
+        }
+
 
 class Product(db.Model):
     """Software/service inventory managed by admins"""

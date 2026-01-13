@@ -522,7 +522,13 @@ def get_notification_settings():
         'generic_webhook_token': get_setting('generic_webhook_token', ''),  # Optional auth token
         'critical_email_enabled': get_setting('critical_email_enabled', 'true') == 'true',
         'critical_email_time': get_setting('critical_email_time', '09:00'),
-        'critical_email_max_age_days': int(get_setting('critical_email_max_age_days', '30'))
+        'critical_email_max_age_days': int(get_setting('critical_email_max_age_days', '30')),
+        # Alert mode defaults (can be overridden per-org)
+        # new_only: Only alert on new CVEs from this sync
+        # daily_reminder: Alert on ALL unacknowledged critical CVEs due within 7 days
+        # escalation: Re-alert when CVE is within X days of due date
+        'default_alert_mode': get_setting('default_alert_mode', 'daily_reminder'),
+        'default_escalation_days': int(get_setting('default_escalation_days', '3') or '3')
     }
     return jsonify(settings)
 
@@ -560,6 +566,15 @@ def save_notification_settings():
         set_setting('critical_email_enabled', 'true' if data.get('critical_email_enabled') else 'false', 'notifications', 'Enable critical CVE reminder emails')
         set_setting('critical_email_time', data.get('critical_email_time', '09:00'), 'notifications', 'Critical CVE email time (UTC)')
         set_setting('critical_email_max_age_days', str(data.get('critical_email_max_age_days', 30)), 'notifications', 'Max age for CVEs in reminder (days)')
+
+        # Alert mode defaults
+        if 'default_alert_mode' in data:
+            mode = data['default_alert_mode']
+            if mode in ['new_only', 'daily_reminder', 'escalation']:
+                set_setting('default_alert_mode', mode, 'notifications', 'Default alert mode for organizations')
+        if 'default_escalation_days' in data:
+            days = int(data.get('default_escalation_days', 3))
+            set_setting('default_escalation_days', str(days), 'notifications', 'Default escalation days before due date')
 
         return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
     except Exception as e:

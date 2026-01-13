@@ -1385,6 +1385,12 @@ async function editOrganization(orgId) {
         document.getElementById('alertNewCVE').checked = org.alert_on_new_cve;
         document.getElementById('alertRansomware').checked = org.alert_on_ransomware;
 
+        // Alert mode settings (org.alert_settings contains nested values)
+        const alertMode = org.alert_settings?.mode || '';
+        const escalationDays = org.alert_settings?.escalation_days || '';
+        document.getElementById('orgAlertMode').value = alertMode;
+        document.getElementById('orgEscalationDays').value = escalationDays;
+
         // Webhook settings
         document.getElementById('orgWebhookEnabled').checked = org.webhook_enabled || false;
         document.getElementById('orgWebhookUrl').value = org.webhook_url || '';
@@ -1437,6 +1443,10 @@ async function saveOrganization() {
         alert_on_high: document.getElementById('alertHigh').checked,
         alert_on_new_cve: document.getElementById('alertNewCVE').checked,
         alert_on_ransomware: document.getElementById('alertRansomware').checked,
+
+        // Alert mode settings (empty = use global default)
+        alert_mode: document.getElementById('orgAlertMode').value || null,
+        escalation_days: document.getElementById('orgEscalationDays').value ? parseInt(document.getElementById('orgEscalationDays').value) : null,
 
         // Webhook settings
         webhook_enabled: document.getElementById('orgWebhookEnabled').checked,
@@ -2361,7 +2371,10 @@ async function saveNotificationSettings() {
         // Email settings
         critical_email_enabled: document.getElementById('criticalEmailEnabled').checked,
         critical_email_time: document.getElementById('criticalEmailTime').value || '09:00',
-        critical_email_max_age_days: parseInt(document.getElementById('criticalEmailMaxAge').value) || 30
+        critical_email_max_age_days: parseInt(document.getElementById('criticalEmailMaxAge').value) || 30,
+        // Alert mode defaults
+        default_alert_mode: document.getElementById('defaultAlertMode').value || 'daily_reminder',
+        default_escalation_days: parseInt(document.getElementById('defaultEscalationDays').value) || 3
     };
 
     try {
@@ -2424,6 +2437,12 @@ async function loadNotificationSettings() {
             if (criticalEmailEnabled) criticalEmailEnabled.checked = settings.critical_email_enabled !== false;
             if (criticalEmailTime) criticalEmailTime.value = settings.critical_email_time || '09:00';
             if (criticalEmailMaxAge) criticalEmailMaxAge.value = settings.critical_email_max_age_days || 30;
+
+            // Alert mode defaults
+            const defaultAlertMode = document.getElementById('defaultAlertMode');
+            const defaultEscalationDays = document.getElementById('defaultEscalationDays');
+            if (defaultAlertMode) defaultAlertMode.value = settings.default_alert_mode || 'daily_reminder';
+            if (defaultEscalationDays) defaultEscalationDays.value = settings.default_escalation_days || 3;
 
             // Setup event listener for format change
             if (genericWebhookFormat) {
