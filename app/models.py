@@ -123,6 +123,13 @@ class Organization(db.Model):
             'alert_on_high': self.alert_on_high,
             'alert_on_new_cve': self.alert_on_new_cve,
             'alert_on_ransomware': self.alert_on_ransomware,
+            # Webhook settings
+            'webhook_enabled': self.webhook_enabled,
+            'webhook_url': self.webhook_url,
+            'webhook_name': self.webhook_name,
+            'webhook_format': self.webhook_format,
+            'webhook_token': '********' if self.webhook_token else '',  # Mask token
+            'webhook_configured': bool(self.webhook_enabled and self.webhook_url),
             'user_count': user_count,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None

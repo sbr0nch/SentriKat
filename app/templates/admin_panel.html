@@ -1840,6 +1840,11 @@
                                 <i class="bi bi-bell me-1"></i>Alert Settings
                             </button>
                         </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="webhook-tab" data-bs-toggle="tab" data-bs-target="#webhookSettings" type="button">
+                                <i class="bi bi-broadcast me-1"></i>Webhook
+                            </button>
+                        </li>
                     </ul>
 
                     <div class="tab-content">
@@ -1981,6 +1986,60 @@
                                             <strong>Alert on Ransomware</strong> (known to be used in ransomware)
                                         </label>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Webhook Settings Tab -->
+                        <div class="tab-pane fade" id="webhookSettings">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure a webhook for this organization. Takes priority over global webhook settings.
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-md-12">
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" id="orgWebhookEnabled">
+                                        <label class="form-check-label fw-semibold" for="orgWebhookEnabled">
+                                            Enable Organization Webhook
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-8">
+                                    <label for="orgWebhookUrl" class="form-label fw-semibold">Webhook URL</label>
+                                    <input type="url" class="form-control" id="orgWebhookUrl" placeholder="https://hooks.slack.com/services/...">
+                                    <small class="form-text text-muted">Incoming webhook URL from your chat platform</small>
+                                </div>
+
+                                <div class="col-md-4">
+                                    <label for="orgWebhookFormat" class="form-label fw-semibold">Platform Format</label>
+                                    <select class="form-select" id="orgWebhookFormat">
+                                        <option value="slack">Slack</option>
+                                        <option value="rocketchat">RocketChat</option>
+                                        <option value="discord">Discord</option>
+                                        <option value="teams">Microsoft Teams</option>
+                                        <option value="custom">Custom JSON</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="orgWebhookName" class="form-label fw-semibold">Webhook Name</label>
+                                    <input type="text" class="form-control" id="orgWebhookName" placeholder="Org Alerts">
+                                    <small class="form-text text-muted">Display name for this webhook</small>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="orgWebhookToken" class="form-label fw-semibold">Auth Token <span class="text-muted">(optional)</span></label>
+                                    <input type="password" class="form-control" id="orgWebhookToken" placeholder="Leave empty if not needed">
+                                    <small class="form-text text-muted">For webhooks requiring authentication</small>
+                                </div>
+
+                                <div class="col-md-12">
+                                    <button type="button" class="btn btn-outline-primary" onclick="testOrgWebhook()">
+                                        <i class="bi bi-send me-1"></i>Test Webhook
+                                    </button>
                                 </div>
                             </div>
                         </div>

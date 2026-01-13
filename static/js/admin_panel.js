@@ -1368,6 +1368,14 @@ async function editOrganization(orgId) {
         document.getElementById('alertNewCVE').checked = org.alert_on_new_cve;
         document.getElementById('alertRansomware').checked = org.alert_on_ransomware;
 
+        // Webhook settings
+        document.getElementById('orgWebhookEnabled').checked = org.webhook_enabled || false;
+        document.getElementById('orgWebhookUrl').value = org.webhook_url || '';
+        document.getElementById('orgWebhookFormat').value = org.webhook_format || 'slack';
+        document.getElementById('orgWebhookName').value = org.webhook_name || '';
+        document.getElementById('orgWebhookToken').value = '';
+        document.getElementById('orgWebhookToken').placeholder = org.webhook_token ? '(token saved - leave blank to keep)' : 'Leave empty if not needed';
+
         // Disable name field for existing orgs
         document.getElementById('orgName').readOnly = true;
 
@@ -1410,7 +1418,14 @@ async function saveOrganization() {
         alert_on_critical: document.getElementById('alertCritical').checked,
         alert_on_high: document.getElementById('alertHigh').checked,
         alert_on_new_cve: document.getElementById('alertNewCVE').checked,
-        alert_on_ransomware: document.getElementById('alertRansomware').checked
+        alert_on_ransomware: document.getElementById('alertRansomware').checked,
+
+        // Webhook settings
+        webhook_enabled: document.getElementById('orgWebhookEnabled').checked,
+        webhook_url: document.getElementById('orgWebhookUrl').value.trim() || null,
+        webhook_format: document.getElementById('orgWebhookFormat').value,
+        webhook_name: document.getElementById('orgWebhookName').value.trim() || null,
+        webhook_token: document.getElementById('orgWebhookToken').value.trim() || null
     };
 
     try {
@@ -1466,6 +1481,41 @@ async function testSMTP() {
         }
     } catch (error) {
         showToast(`Error testing SMTP: ${error.message}`, 'danger');
+    }
+}
+
+async function testOrgWebhook() {
+    const webhookUrl = document.getElementById('orgWebhookUrl').value.trim();
+
+    if (!webhookUrl) {
+        showToast('Please enter a webhook URL first', 'warning');
+        return;
+    }
+
+    showToast('Testing webhook...', 'info');
+
+    try {
+        const response = await fetch('/api/settings/test-webhook', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: 'org',
+                webhook_url: webhookUrl,
+                webhook_format: document.getElementById('orgWebhookFormat').value,
+                webhook_name: document.getElementById('orgWebhookName').value || 'Organization Webhook',
+                webhook_token: document.getElementById('orgWebhookToken').value || null
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message || '✓ Webhook test successful!', 'success');
+        } else {
+            showToast(`✗ Webhook test failed: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error testing webhook: ${error.message}`, 'danger');
     }
 }
 

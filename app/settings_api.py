@@ -665,6 +665,40 @@ def test_notification():
             logger.info(f"Webhook response: status={response.status_code}, body_length={len(response.text)}")
             webhook_type = webhook_name  # Use custom name for message
 
+        elif webhook_type == 'org':
+            # Test org-specific webhook (URL provided in request)
+            webhook_url = data.get('webhook_url')
+            if not webhook_url:
+                return jsonify({'success': False, 'error': 'Webhook URL not provided'})
+
+            webhook_format = data.get('webhook_format', 'slack')
+            webhook_name = data.get('webhook_name', 'Organization Webhook')
+            webhook_token = data.get('webhook_token', '')
+
+            # Build headers
+            headers = {'Content-Type': 'application/json'}
+            if webhook_token:
+                headers['Authorization'] = f'Bearer {webhook_token}'
+                headers['X-Auth-Token'] = webhook_token
+
+            # Build payload based on format
+            if webhook_format in ('slack', 'rocketchat'):
+                payload = {"text": f"🔒 SentriKat Test\n✓ {webhook_name} is working correctly!"}
+            elif webhook_format == 'discord':
+                payload = {"content": f"🔒 **SentriKat Test**\n✓ {webhook_name} is working correctly!"}
+            elif webhook_format == 'teams':
+                payload = {
+                    "@type": "MessageCard",
+                    "themeColor": "1e40af",
+                    "summary": "SentriKat Test",
+                    "sections": [{"activityTitle": f"🔒 SentriKat Test - {webhook_name} is working!"}]
+                }
+            else:
+                payload = {"text": f"SentriKat Test - {webhook_name} is working correctly!"}
+
+            response = requests.post(webhook_url, json=payload, headers=headers, timeout=30, proxies=proxies, verify=verify_ssl)
+            webhook_type = webhook_name
+
         else:
             return jsonify({'success': False, 'error': f'Unknown webhook type: {webhook_type}'})
 

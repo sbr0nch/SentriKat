@@ -1207,6 +1207,19 @@ def update_organization(org_id):
     if 'smtp_from_name' in data:
         org.smtp_from_name = data['smtp_from_name']
 
+    # Webhook settings
+    if 'webhook_enabled' in data:
+        org.webhook_enabled = data['webhook_enabled']
+    if 'webhook_url' in data:
+        org.webhook_url = data['webhook_url'] if data['webhook_url'] else None
+    if 'webhook_name' in data:
+        org.webhook_name = data['webhook_name'] if data['webhook_name'] else 'Organization Webhook'
+    if 'webhook_format' in data:
+        org.webhook_format = data['webhook_format'] if data['webhook_format'] else 'slack'
+    if 'webhook_token' in data and data['webhook_token']:
+        from app.encryption import encrypt_value
+        org.webhook_token = encrypt_value(data['webhook_token'])
+
     db.session.commit()
 
     return jsonify(org.to_dict())
