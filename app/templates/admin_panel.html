@@ -747,13 +747,23 @@
                                         <input type="text" class="form-control" id="globalSmtpFromName" value="SentriKat Alerts">
                                     </div>
 
-                                    <div class="col-md-12">
+                                    <div class="col-md-6">
                                         <div class="form-check form-switch">
                                             <input type="checkbox" class="form-check-input" id="globalSmtpUseTLS" checked>
                                             <label class="form-check-label fw-semibold" for="globalSmtpUseTLS">
                                                 Use TLS/STARTTLS
                                             </label>
                                         </div>
+                                        <small class="text-muted">For port 587 (recommended)</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="globalSmtpUseSSL">
+                                            <label class="form-check-label fw-semibold" for="globalSmtpUseSSL">
+                                                Use SSL
+                                            </label>
+                                        </div>
+                                        <small class="text-muted">For port 465 (implicit SSL)</small>
                                     </div>
 
                                     <div class="col-md-12">
@@ -1934,13 +1944,23 @@
                                     <input type="text" class="form-control" id="smtpFromName" value="SentriKat Alerts">
                                 </div>
 
-                                <div class="col-md-12">
+                                <div class="col-md-6">
                                     <div class="form-check form-switch">
                                         <input type="checkbox" class="form-check-input" id="smtpUseTls" checked>
                                         <label class="form-check-label fw-semibold" for="smtpUseTls">
                                             Use TLS/STARTTLS
                                         </label>
                                     </div>
+                                    <small class="text-muted">For port 587</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" id="smtpUseSsl">
+                                        <label class="form-check-label fw-semibold" for="smtpUseSsl">
+                                            Use SSL
+                                        </label>
+                                    </div>
+                                    <small class="text-muted">For port 465</small>
                                 </div>
 
                                 <div class="col-md-12">

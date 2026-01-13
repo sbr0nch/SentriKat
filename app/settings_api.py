@@ -323,11 +323,17 @@ def test_smtp_connection():
 @admin_required
 def get_sync_settings():
     """Get sync schedule settings"""
+    # Check if NVD API key is configured (return masked indicator)
+    nvd_key = get_setting('nvd_api_key', '')
+    nvd_api_key_configured = bool(nvd_key and nvd_key != '***ENCRYPTED***')
+
     settings = {
         'auto_sync_enabled': get_setting('auto_sync_enabled', 'false') == 'true',
         'sync_interval': get_setting('sync_interval', 'daily'),
         'sync_time': get_setting('sync_time', '02:00'),
-        'cisa_kev_url': get_setting('cisa_kev_url', 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json')
+        'cisa_kev_url': get_setting('cisa_kev_url', 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'),
+        'nvd_api_key': '********' if nvd_api_key_configured else '',  # Masked for security
+        'nvd_api_key_configured': nvd_api_key_configured
     }
     return jsonify(settings)
 

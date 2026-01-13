@@ -957,9 +957,19 @@ async function saveUser() {
             showToast('Password is required for local users', 'warning');
             return;
         }
+        // Basic client-side validation - server will enforce full policy
         if (password.length < 8) {
-            showToast('Password must be at least 8 characters', 'warning');
+            showToast('Password must be at least 8 characters. Additional requirements may apply based on security policy.', 'warning');
             return;
+        }
+        // Check for basic complexity (hint to user about requirements)
+        const hasUpper = /[A-Z]/.test(password);
+        const hasLower = /[a-z]/.test(password);
+        const hasNumber = /[0-9]/.test(password);
+        const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+        if (!hasUpper || !hasLower || !hasNumber) {
+            showToast('Password should contain uppercase, lowercase, and numbers. Check your organization\'s password policy.', 'info');
+            // Don't block - let server validate against actual policy
         }
         if (password !== passwordConfirm) {
             showToast('Passwords do not match', 'warning');
@@ -1367,6 +1377,7 @@ async function editOrganization(orgId) {
         document.getElementById('smtpFromEmail').value = org.smtp_from_email || '';
         document.getElementById('smtpFromName').value = org.smtp_from_name || 'SentriKat Alerts';
         document.getElementById('smtpUseTls').checked = org.smtp_use_tls !== false;
+        document.getElementById('smtpUseSsl').checked = org.smtp_use_ssl === true;
 
         // Alert settings
         document.getElementById('alertCritical').checked = org.alert_on_critical;
@@ -1419,6 +1430,7 @@ async function saveOrganization() {
         smtp_from_email: document.getElementById('smtpFromEmail').value.trim() || null,
         smtp_from_name: document.getElementById('smtpFromName').value.trim() || 'SentriKat Alerts',
         smtp_use_tls: document.getElementById('smtpUseTls').checked,
+        smtp_use_ssl: document.getElementById('smtpUseSsl').checked,
 
         // Alert settings
         alert_on_critical: document.getElementById('alertCritical').checked,
@@ -1768,7 +1780,8 @@ async function saveGlobalSMTPSettings() {
         smtp_password: document.getElementById('globalSmtpPassword').value,
         smtp_from_email: document.getElementById('globalSmtpFromEmail').value,
         smtp_from_name: document.getElementById('globalSmtpFromName').value,
-        smtp_use_tls: document.getElementById('globalSmtpUseTLS').checked
+        smtp_use_tls: document.getElementById('globalSmtpUseTLS').checked,
+        smtp_use_ssl: document.getElementById('globalSmtpUseSSL').checked
     };
 
     try {
@@ -2660,6 +2673,7 @@ async function loadAllSettings() {
             document.getElementById('globalSmtpFromEmail').value = smtp.smtp_from_email || '';
             document.getElementById('globalSmtpFromName').value = smtp.smtp_from_name || 'SentriKat Alerts';
             document.getElementById('globalSmtpUseTLS').checked = smtp.smtp_use_tls !== false;
+            document.getElementById('globalSmtpUseSSL').checked = smtp.smtp_use_ssl === true;
         }
 
         // Load Sync settings
@@ -2670,6 +2684,14 @@ async function loadAllSettings() {
             document.getElementById('syncInterval').value = sync.sync_interval || 'daily';
             document.getElementById('syncTime').value = sync.sync_time || '02:00';
             document.getElementById('cisaKevUrl').value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+            // NVD API Key - show placeholder if configured
+            const nvdKeyInput = document.getElementById('nvdApiKey');
+            if (nvdKeyInput) {
+                nvdKeyInput.value = '';
+                nvdKeyInput.placeholder = sync.nvd_api_key_configured
+                    ? '(API key saved - leave blank to keep)'
+                    : 'Enter your NVD API key (optional)';
+            }
         }
         loadSyncStatus();
 
