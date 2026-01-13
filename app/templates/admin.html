@@ -185,6 +185,13 @@
                             <i class="bi bi-database me-1"></i>Search 800,000+ products from NIST National Vulnerability Database for accurate CPE matching
                         </small>
 
+                        <!-- Rate Limit Warning (shown when no NVD API key configured) -->
+                        <div id="nvdRateLimitWarning" class="alert alert-warning alert-sm py-1 px-2 mt-2 mb-0 small" style="display: none;">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            <strong>Rate limited:</strong> Searches are slower without NVD API key.
+                            <a href="/admin_panel#sync-settings" class="alert-link">Configure API key</a> for faster searches (free).
+                        </div>
+
                         <div id="nvdSearchStatus" class="small text-muted mt-2" style="display: none;"></div>
 
                         <!-- Search Results -->
@@ -779,6 +786,9 @@
         const toggle = document.getElementById('manualEntryToggle');
         if (toggle) toggle.style.display = 'block';
 
+        // Check NVD API key status and show rate limit warning if needed
+        checkNvdApiKeyStatus();
+
         // Load organizations into dropdown
         await loadOrganizationsIntoProductForm();
 
@@ -789,6 +799,26 @@
             modal = new bootstrap.Modal(modalEl);
         }
         modal.show();
+    }
+
+    async function checkNvdApiKeyStatus() {
+        const warningEl = document.getElementById('nvdRateLimitWarning');
+        if (!warningEl) return;
+
+        try {
+            const response = await fetch('/api/cpe/stats');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.api && !data.api.nvd_api_key_configured) {
+                    warningEl.style.display = 'block';
+                } else {
+                    warningEl.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            // Silently fail - don't block the modal
+            console.log('Could not check NVD API key status:', error);
+        }
     }
 
     async function editProduct(productId) {

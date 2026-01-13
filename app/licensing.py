@@ -225,21 +225,40 @@ def reload_license():
 
 
 def load_license():
-    """Load and validate license from database"""
+    """
+    Load and validate license from database or environment.
+
+    Priority: Database > Environment Variable (SENTRIKAT_LICENSE)
+    This allows containerized deployments to set license via env.
+    """
+    import os
     from app.models import SystemSettings
 
     license_info = LicenseInfo()
+    license_key = None
+    source = None
 
     try:
-        # Get license key from database
+        # First, check database
         setting = SystemSettings.query.filter_by(key='license_key').first()
+        if setting and setting.value:
+            license_key = setting.value
+            source = 'database'
+        else:
+            # Fallback to environment variable
+            env_key = os.environ.get('SENTRIKAT_LICENSE')
+            if env_key:
+                license_key = env_key
+                source = 'environment'
+                logger.info("License loaded from SENTRIKAT_LICENSE environment variable")
 
-        if not setting or not setting.value:
+        if not license_key:
             logger.info("No license key found, using Community edition")
             return license_info
 
         # Validate the license
-        license_info = validate_license(setting.value)
+        license_info = validate_license(license_key)
+        license_info.source = source  # Track where license came from
 
     except Exception as e:
         logger.error(f"Error loading license: {e}")

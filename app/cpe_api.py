@@ -459,6 +459,10 @@ def get_cpe_stats():
         ).count()
         match_type_counts[match_type] = count
 
+    # Check if NVD API key is configured (for rate limit info)
+    from app.nvd_cpe_api import _get_api_key
+    api_key_configured = bool(_get_api_key())
+
     return jsonify({
         'cache': cache_stats,
         'products': {
@@ -466,6 +470,10 @@ def get_cpe_stats():
             'with_cpe': products_with_cpe,
             'without_cpe': total_products - products_with_cpe,
             'by_match_type': match_type_counts
+        },
+        'api': {
+            'nvd_api_key_configured': api_key_configured,
+            'rate_limit': '50 req/30s' if api_key_configured else '5 req/30s'
         }
     })
 

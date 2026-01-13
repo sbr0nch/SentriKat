@@ -1,6 +1,12 @@
 """
 Settings API Endpoints
 Handles LDAP, SMTP, Sync, and General system settings
+
+Enterprise Configuration Pattern:
+- Priority: Database > Environment Variable > Default
+- Environment variables provide initial/fallback values
+- UI shows effective value with source indicator
+- Changes via UI are persisted to database
 """
 
 from flask import Blueprint, request, jsonify, session
@@ -9,6 +15,7 @@ from app.models import SystemSettings, User, Vulnerability, SyncLog
 from app.auth import admin_required
 from app.encryption import encrypt_value, decrypt_value
 from app.licensing import requires_professional
+import os
 import json
 from datetime import datetime
 import logging
@@ -21,28 +28,120 @@ settings_bp = Blueprint('settings', __name__, url_prefix='/api/settings')
 csrf.exempt(settings_bp)
 
 # ============================================================================
+# Environment Variable Mapping
+# Maps database setting keys to environment variable names
+# ============================================================================
+ENV_MAPPING = {
+    # Sync settings
+    'nvd_api_key': 'NVD_API_KEY',
+    'cisa_kev_url': 'CISA_KEV_URL',
+    'sync_time': 'SYNC_TIME',
+    'auto_sync_enabled': 'AUTO_SYNC_ENABLED',
+
+    # Network settings
+    'http_proxy': ['HTTP_PROXY', 'http_proxy'],
+    'https_proxy': ['HTTPS_PROXY', 'https_proxy'],
+    'no_proxy': ['NO_PROXY', 'no_proxy'],
+    'verify_ssl': 'VERIFY_SSL',
+
+    # License
+    'license_key': 'SENTRIKAT_LICENSE',
+
+    # SMTP settings (can be set via env for containerized deployments)
+    'smtp_host': 'SMTP_HOST',
+    'smtp_port': 'SMTP_PORT',
+    'smtp_username': 'SMTP_USERNAME',
+    'smtp_password': 'SMTP_PASSWORD',
+    'smtp_from_email': 'SMTP_FROM_EMAIL',
+    'smtp_from_name': 'SMTP_FROM_NAME',
+    'smtp_use_tls': 'SMTP_USE_TLS',
+    'smtp_use_ssl': 'SMTP_USE_SSL',
+
+    # LDAP settings (can be set via env)
+    'ldap_enabled': 'LDAP_ENABLED',
+    'ldap_server': 'LDAP_SERVER',
+    'ldap_port': 'LDAP_PORT',
+    'ldap_base_dn': 'LDAP_BASE_DN',
+    'ldap_bind_dn': 'LDAP_BIND_DN',
+    'ldap_bind_password': 'LDAP_BIND_PASSWORD',
+}
+
+
+def _get_env_value(key):
+    """
+    Get value from environment variable for a setting key.
+    Returns None if not found in environment.
+    """
+    env_var = ENV_MAPPING.get(key)
+    if not env_var:
+        return None
+
+    # Support multiple possible env var names (e.g., HTTP_PROXY or http_proxy)
+    if isinstance(env_var, list):
+        for var in env_var:
+            value = os.environ.get(var)
+            if value:
+                return value
+        return None
+
+    return os.environ.get(env_var)
+
+
+# ============================================================================
 # Helper Functions
 # ============================================================================
 
-def get_setting(key, default=None):
+def get_setting(key, default=None, include_source=False):
     """
-    Get a setting value from database.
-    Automatically decrypts values marked as encrypted.
+    Get a setting value with priority: Database > Environment > Default.
+
+    Args:
+        key: Setting key name
+        default: Default value if not found anywhere
+        include_source: If True, returns tuple (value, source) where source is 'database', 'environment', or 'default'
+
+    Returns:
+        Value (or tuple of value, source if include_source=True)
     """
+    source = 'default'
+    value = default
+
+    # First, check database
     setting = SystemSettings.query.filter_by(key=key).first()
-    if not setting:
-        return default
+    if setting and setting.value:
+        # Decrypt if the setting is marked as encrypted
+        if setting.is_encrypted:
+            try:
+                value = decrypt_value(setting.value)
+            except Exception as e:
+                logger.error(f"Failed to decrypt setting '{key}': {type(e).__name__}")
+                value = setting.value  # Return raw value - might be legacy plaintext
+        else:
+            value = setting.value
+        source = 'database'
+    else:
+        # Fallback to environment variable
+        env_value = _get_env_value(key)
+        if env_value is not None:
+            value = env_value
+            source = 'environment'
 
-    # Decrypt if the setting is marked as encrypted
-    if setting.is_encrypted and setting.value:
-        try:
-            return decrypt_value(setting.value)
-        except Exception as e:
-            logger.error(f"Failed to decrypt setting '{key}': {type(e).__name__}")
-            # Return the raw value - might be legacy plaintext
-            return setting.value
+    if include_source:
+        return value, source
+    return value
 
-    return setting.value
+
+def get_setting_with_source(key, default=None):
+    """
+    Get a setting value and its source.
+    Returns dict with 'value' and 'source' keys.
+    """
+    value, source = get_setting(key, default, include_source=True)
+    return {
+        'value': value,
+        'source': source,
+        'from_env': source == 'environment'
+    }
 
 def set_setting(key, value, category, description=None, is_encrypted=False):
     """

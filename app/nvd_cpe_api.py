@@ -35,13 +35,33 @@ MIN_REQUEST_DELAY = 0.6  # Default (no API key)
 
 
 def _get_api_key() -> Optional[str]:
-    """Get NVD API key from settings if configured."""
+    """
+    Get NVD API key with priority: Database > Environment Variable.
+
+    This allows containerized deployments to set the API key via
+    the NVD_API_KEY environment variable.
+    """
+    import os
+
     try:
+        # First, check database (UI-configured)
         from app.models import SystemSettings
+        from app.encryption import decrypt_value
+
         setting = SystemSettings.query.filter_by(key='nvd_api_key').first()
-        return setting.value if setting and setting.value else None
+        if setting and setting.value:
+            # Decrypt if encrypted
+            if setting.is_encrypted:
+                try:
+                    return decrypt_value(setting.value)
+                except Exception:
+                    return setting.value  # Return raw if decrypt fails
+            return setting.value
     except Exception:
-        return None
+        pass
+
+    # Fallback to environment variable
+    return os.environ.get('NVD_API_KEY')
 
 
 def _get_request_delay() -> float:
