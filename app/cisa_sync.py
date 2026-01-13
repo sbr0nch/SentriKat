@@ -322,11 +322,11 @@ def enrich_with_cvss_data(limit=50):
     ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
 
     if not vulns_to_enrich:
-        print("All vulnerabilities already have CVSS data")
+        logger.info("All vulnerabilities already have CVSS data")
         return 0
 
     enriched_count = 0
-    print(f"Enriching {len(vulns_to_enrich)} vulnerabilities with CVSS data from NVD...")
+    logger.info(f"Enriching {len(vulns_to_enrich)} vulnerabilities with CVSS data from NVD")
 
     for vuln in vulns_to_enrich:
         cvss_score, severity = fetch_cvss_data(vuln.cve_id)
@@ -335,14 +335,12 @@ def enrich_with_cvss_data(limit=50):
             vuln.cvss_score = cvss_score
             vuln.severity = severity
             enriched_count += 1
-            print(f"  ✓ {vuln.cve_id}: CVSS {cvss_score} ({severity})")
         else:
-            # Mark as checked even if not found
-            vuln.cvss_score = 0.0  # 0.0 means "checked but not found"
-            print(f"  - {vuln.cve_id}: No CVSS data available")
+            # Mark as checked even if not found (0.0 = "checked but not found")
+            vuln.cvss_score = 0.0
 
     db.session.commit()
-    print(f"Enriched {enriched_count} vulnerabilities with CVSS data")
+    logger.info(f"Enriched {enriched_count} vulnerabilities with CVSS data")
     return enriched_count
 
 def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):

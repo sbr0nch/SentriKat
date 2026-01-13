@@ -1,10 +1,14 @@
 """
-NVD API integration for fetching CVE severity and CVSS scores
+NVD API integration for fetching CVE severity and CVSS scores.
 """
 import requests
 import time
+import logging
 from config import Config
 import urllib3
+
+logger = logging.getLogger(__name__)
+
 
 def fetch_cvss_data(cve_id):
     """
@@ -80,23 +84,30 @@ def fetch_cvss_data(cve_id):
             # CVE not found in NVD yet
             return None, None
         else:
-            print(f"NVD API error for {cve_id}: {response.status_code}")
+            logger.warning(f"NVD API error for {cve_id}: {response.status_code}")
             return None, None
 
     except Exception as e:
-        print(f"Error fetching CVSS for {cve_id}: {str(e)}")
+        logger.error(f"Error fetching CVSS for {cve_id}: {str(e)}")
         return None, None
 
 def fetch_cvss_batch(cve_ids, max_retries=3):
     """
-    Fetch CVSS data for multiple CVEs with progress tracking
-    Returns: dict of {cve_id: (cvss_score, severity)}
+    Fetch CVSS data for multiple CVEs.
+
+    Args:
+        cve_ids: List of CVE IDs to fetch
+        max_retries: Number of retry attempts per CVE
+
+    Returns:
+        dict of {cve_id: (cvss_score, severity)}
     """
     results = {}
     total = len(cve_ids)
 
     for idx, cve_id in enumerate(cve_ids, 1):
-        print(f"Fetching CVSS data: {idx}/{total} ({cve_id})")
+        if idx % 10 == 0 or idx == total:
+            logger.info(f"Fetching CVSS data: {idx}/{total}")
 
         retries = 0
         while retries < max_retries:

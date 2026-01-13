@@ -8,6 +8,9 @@ from app.auth import admin_required, login_required, org_admin_required, manager
 from app.licensing import requires_professional, check_user_limit, check_org_limit, check_product_limit
 import json
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('main', __name__)
 
@@ -580,7 +583,7 @@ def assign_product_organizations(product_id):
                 send_product_assignment_notification(product, org, 'assigned')
             except Exception as e:
                 # Log but don't fail the request
-                print(f"Failed to send notification to {org.name}: {str(e)}")
+                logger.warning(f"Failed to send notification to {org.name}: {str(e)}")
 
         return jsonify({
             'success': True,
@@ -646,7 +649,7 @@ def remove_product_organization(product_id, org_id):
         try:
             send_product_assignment_notification(product, org, 'removed')
         except Exception as e:
-            print(f"Failed to send notification to {org.name}: {str(e)}")
+            logger.warning(f"Failed to send notification to {org.name}: {str(e)}")
 
         # Check if product has any organizations left after removal
         remaining_orgs = product.organizations.count()

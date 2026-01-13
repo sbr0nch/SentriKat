@@ -1723,31 +1723,17 @@
          * Used by the admin dropdown menu
          */
         function switchToAdminTab(tabId) {
-            console.log('switchToAdminTab called with:', tabId);
-            console.log('Current pathname:', window.location.pathname);
-
-            // Check if we're on the admin panel page
+            // Navigate to admin panel if not already there
             if (window.location.pathname !== '/admin-panel') {
-                console.log('Not on admin panel, navigating to:', '/admin-panel#' + tabId);
-                // Navigate to admin panel with hash
                 window.location.href = '/admin-panel#' + tabId;
                 return;
             }
 
-            // We're already on the page, just switch the tab
-            console.log('On admin panel, switching tab...');
-            const tabButtonId = tabId + '-tab';
-            console.log('Looking for tab button:', tabButtonId);
-            const tabButton = document.getElementById(tabButtonId);
-            console.log('Tab button found:', !!tabButton);
-
+            // Switch tab on current page
+            const tabButton = document.getElementById(tabId + '-tab');
             if (tabButton) {
-                console.log('Activating tab...');
                 const tab = new bootstrap.Tab(tabButton);
                 tab.show();
-                console.log('Tab shown');
-            } else {
-                console.error('Tab button not found:', tabButtonId);
             }
         }
 

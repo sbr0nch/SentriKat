@@ -12,12 +12,15 @@ import requests
 import time
 import re
 import json
+import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
 from threading import Lock
 from typing import Optional, Dict, List, Tuple, Any
 from config import Config
 import urllib3
+
+logger = logging.getLogger(__name__)
 
 
 # In-memory cache for CPE searches (15-minute TTL)
@@ -303,17 +306,17 @@ def search_cpe(
         elif response.status_code == 404:
             return []
         elif response.status_code == 403:
-            print(f"NVD CPE API rate limit exceeded")
+            logger.warning("NVD CPE API rate limit exceeded")
             return []
         else:
-            print(f"NVD CPE API error: {response.status_code}")
+            logger.error(f"NVD CPE API error: {response.status_code}")
             return []
 
     except requests.exceptions.Timeout:
-        print("NVD CPE API timeout")
+        logger.warning("NVD CPE API timeout")
         return []
     except Exception as e:
-        print(f"NVD CPE API error: {str(e)}")
+        logger.error(f"NVD CPE API error: {str(e)}")
         return []
 
 
@@ -483,7 +486,7 @@ def get_cpe_versions(vendor: str, product: str, limit: int = 50) -> List[str]:
         return []
 
     except Exception as e:
-        print(f"Error fetching CPE versions: {str(e)}")
+        logger.error(f"Error fetching CPE versions: {str(e)}")
         return []
 
 
@@ -566,7 +569,7 @@ def match_cve_to_cpe(cve_id: str) -> List[Dict]:
         return []
 
     except Exception as e:
-        print(f"Error fetching CVE CPE data: {str(e)}")
+        logger.error(f"Error fetching CVE CPE data: {str(e)}")
         return []
 
 
