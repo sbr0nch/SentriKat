@@ -7,6 +7,9 @@ let currentUserId = null;
 let currentOrgId = null;
 let organizations = [];
 
+// Global license info - loaded at page init
+window.licenseInfo = null;
+
 // Selection state for bulk actions
 let selectedUsers = new Map(); // Map of userId -> { id, username, is_active }
 let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
@@ -422,7 +425,7 @@ async function bulkDeleteMappings() {
 // Initialization
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     console.log('Admin Panel: DOMContentLoaded fired');
 
     // Check if Bootstrap is loaded
@@ -433,10 +436,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
+        // Load license info first and apply UI restrictions (await to ensure restrictions apply before showing tabs)
+        await loadLicenseAndApplyRestrictions();
+
         loadUsers();
         loadOrganizations();
         loadOrganizationsDropdown();
-        checkLdapPermissions();  // Check if user can access LDAP features
+        checkLdapPermissions();  // Check if user can access LDAP features (also checks license)
 
         // Tab change handlers
         const orgTab = document.getElementById('organizations-tab');
@@ -2856,6 +2862,13 @@ async function checkLdapPermissions() {
         if (response.ok) {
             const user = await response.json();
 
+            // First check if LDAP feature is licensed
+            const ldapLicensed = isFeatureLicensed('ldap');
+            if (!ldapLicensed) {
+                // LDAP not licensed - tabs stay hidden (handled by applyLicenseRestrictions)
+                return;
+            }
+
             // LDAP Users tab: visible to org_admin, super_admin, or legacy is_admin
             const canAccessLdapUsers = user.role === 'org_admin' ||
                                        user.role === 'super_admin' ||
@@ -4698,6 +4711,128 @@ document.addEventListener('DOMContentLoaded', function() {
 // ============================================================================
 // LICENSE MANAGEMENT
 // ============================================================================
+
+/**
+ * Load license info and apply UI restrictions for premium features
+ * This is called early during page initialization
+ */
+async function loadLicenseAndApplyRestrictions() {
+    try {
+        const response = await fetch('/api/license');
+        if (!response.ok) {
+            console.warn('Failed to load license info');
+            window.licenseInfo = { is_professional: false, features: [] };
+            return;
+        }
+
+        window.licenseInfo = await response.json();
+        applyLicenseRestrictions();
+
+    } catch (error) {
+        console.error('Error loading license for restrictions:', error);
+        window.licenseInfo = { is_professional: false, features: [] };
+    }
+}
+
+/**
+ * Apply UI restrictions based on license status
+ * Hides premium features and shows upgrade notices for Community users
+ */
+function applyLicenseRestrictions() {
+    const license = window.licenseInfo;
+    if (!license) return;
+
+    const isProfessional = license.is_professional;
+    const features = license.features || [];
+
+    // Helper to check if a feature is licensed
+    const hasFeature = (feature) => isProfessional || features.includes(feature);
+
+    // ========================================
+    // LDAP Features - requires 'ldap' license
+    // ========================================
+    if (!hasFeature('ldap')) {
+        // Hide LDAP tabs completely for Community
+        const ldapUsersTab = document.getElementById('ldap-users-tab-item');
+        const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+        if (ldapUsersTab) ldapUsersTab.style.display = 'none';
+        if (ldapGroupsTab) ldapGroupsTab.style.display = 'none';
+
+        // Add upgrade notice to LDAP settings section
+        const ldapSettingsPane = document.getElementById('ldapSettings');
+        if (ldapSettingsPane) {
+            ldapSettingsPane.innerHTML = createPremiumUpgradeNotice('LDAP Authentication', 'ldap');
+        }
+    }
+
+    // ========================================
+    // Backup & Restore - requires 'backup_restore' license
+    // ========================================
+    if (!hasFeature('backup_restore')) {
+        // Find and replace the Backup & Restore card content
+        const backupCard = document.getElementById('backupRestoreCard');
+        if (backupCard) {
+            backupCard.innerHTML = `
+                <div class="card-header">
+                    <i class="bi bi-cloud-download me-2"></i>Backup & Restore
+                    <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
+                </div>
+                ${createPremiumUpgradeNotice('Backup & Restore', 'backup_restore')}
+            `;
+        }
+    }
+
+    // ========================================
+    // Email Alerts - requires 'email_alerts' license
+    // ========================================
+    if (!hasFeature('email_alerts')) {
+        const notificationsPane = document.getElementById('notificationsSettings');
+        if (notificationsPane) {
+            // Find the webhook section and add upgrade notice above SMTP
+            const smtpSection = notificationsPane.querySelector('h6.bi-envelope');
+            // Keep webhook functionality but disable SMTP for community
+        }
+    }
+
+    console.log('License restrictions applied:', {
+        isProfessional,
+        features,
+        ldapEnabled: hasFeature('ldap'),
+        backupEnabled: hasFeature('backup_restore')
+    });
+}
+
+/**
+ * Create a premium upgrade notice HTML for a locked feature
+ */
+function createPremiumUpgradeNotice(featureName, featureKey) {
+    return `
+        <div class="card-body">
+            <div class="text-center py-4">
+                <i class="bi bi-lock-fill display-3 text-muted mb-3"></i>
+                <h5 class="text-muted">${featureName}</h5>
+                <p class="text-muted mb-3">
+                    This feature requires a <strong>Professional license</strong>.
+                </p>
+                <div class="alert alert-light border d-inline-block">
+                    <i class="bi bi-stars me-2 text-warning"></i>
+                    Upgrade to Professional to unlock ${featureName.toLowerCase()} and more advanced features.
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Check if a specific feature is licensed
+ * Can be called from anywhere after license is loaded
+ */
+function isFeatureLicensed(feature) {
+    const license = window.licenseInfo;
+    if (!license) return false;
+    if (license.is_professional) return true;
+    return (license.features || []).includes(feature);
+}
 
 async function loadLicenseInfo() {
     try {

@@ -23,11 +23,13 @@
         <li class="nav-item" role="presentation" id="ldap-users-tab-item" style="display: none;">
             <button class="nav-link" id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button">
                 <i class="bi bi-diagram-3 me-2"></i>LDAP Users
+                <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
             </button>
         </li>
         <li class="nav-item" role="presentation" id="ldap-groups-tab-item" style="display: none;">
             <button class="nav-link" id="ldap-groups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button">
                 <i class="bi bi-diagram-2 me-2"></i>LDAP Groups
+                <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -491,6 +493,7 @@
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="ldap-settings-tab" data-bs-toggle="pill" data-bs-target="#ldapSettings" type="button">
                         <i class="bi bi-diagram-3 me-2"></i>LDAP / Active Directory
+                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -1025,9 +1028,10 @@
                     </div>
 
                     <!-- Backup & Restore Card -->
-                    <div class="card mt-4">
+                    <div class="card mt-4" id="backupRestoreCard">
                         <div class="card-header">
                             <i class="bi bi-cloud-download me-2"></i>Backup & Restore
+                            <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
                         </div>
                         <div class="card-body">
                             <div class="alert alert-warning">
