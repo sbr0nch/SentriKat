@@ -299,16 +299,10 @@ def api_setup():
 def api_login():
     """Handle login via API"""
     import logging
-    from flask import current_app
     logger = logging.getLogger('security')
 
     if not AUTH_ENABLED:
         return jsonify({'error': 'Authentication is disabled'}), 400
-
-    # Debug: Log session cookie configuration
-    logger.info(f"Session config: SECURE={current_app.config.get('SESSION_COOKIE_SECURE')}, "
-                f"SAMESITE={current_app.config.get('SESSION_COOKIE_SAMESITE')}, "
-                f"HTTPONLY={current_app.config.get('SESSION_COOKIE_HTTPONLY')}")
 
     data = request.get_json()
     username = data.get('username')
@@ -448,9 +442,6 @@ def api_login():
         if default_org:
             session['organization_id'] = default_org.id
 
-    logger.info(f"Session created for {username}: user_id={session.get('user_id')}, "
-                f"session_modified={session.modified}")
-
     return jsonify({
         'success': True,
         'password_expired': password_expired,
@@ -479,30 +470,6 @@ def auth_status():
         'user': get_current_user().to_dict() if get_current_user() else None
     })
 
-@auth_bp.route('/api/auth/debug', methods=['GET'])
-def auth_debug():
-    """Debug endpoint to check session and cookie configuration"""
-    from flask import current_app
-    return jsonify({
-        'session': {
-            'has_user_id': 'user_id' in session,
-            'user_id': session.get('user_id'),
-            'username': session.get('username'),
-            'keys': list(session.keys())
-        },
-        'cookie_config': {
-            'SESSION_COOKIE_SECURE': current_app.config.get('SESSION_COOKIE_SECURE'),
-            'SESSION_COOKIE_SAMESITE': current_app.config.get('SESSION_COOKIE_SAMESITE'),
-            'SESSION_COOKIE_HTTPONLY': current_app.config.get('SESSION_COOKIE_HTTPONLY'),
-            'SESSION_COOKIE_NAME': current_app.config.get('SESSION_COOKIE_NAME', 'session'),
-        },
-        'request_info': {
-            'is_secure': request.is_secure,
-            'scheme': request.scheme,
-            'host': request.host,
-            'cookies_received': list(request.cookies.keys())
-        }
-    })
 
 # ============================================================================
 # PASSWORD CHANGE

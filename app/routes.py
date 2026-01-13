@@ -1409,6 +1409,18 @@ def get_current_user():
         return jsonify({'error': 'User not found'}), 404
 
     user_dict = current_user.to_dict()
+
+    # Add session-specific info (active organization may differ from primary)
+    active_org_id = session.get('organization_id')
+    active_org = Organization.query.get(active_org_id) if active_org_id else None
+    user_dict['active_organization'] = {
+        'id': active_org.id if active_org else None,
+        'name': active_org.name if active_org else None,
+        'display_name': active_org.display_name if active_org else None
+    }
+    user_dict['active_organization_id'] = active_org_id
+    user_dict['role_in_active_org'] = current_user.get_role_for_org(active_org_id) if active_org_id else None
+
     # Add debug info to help troubleshoot permissions
     user_dict['debug'] = {
         'is_admin': current_user.is_admin,
@@ -2770,10 +2782,17 @@ def switch_organization(org_id):
     org = Organization.query.get_or_404(org_id)
 
     # Check if user has permission to switch to this organization
-    if not current_user.is_super_admin() and not current_user.can_view_all_orgs:
-        # Regular users can only access their own organization
-        if current_user.organization_id != org_id:
-            return jsonify({'error': 'You do not have permission to access this organization'}), 403
+    # This checks: super_admin, can_view_all_orgs, primary org, and multi-org memberships
+    if not current_user.has_access_to_org(org_id):
+        return jsonify({'error': 'You do not have permission to access this organization'}), 403
 
     session['organization_id'] = org_id
-    return jsonify({'success': True, 'organization': org.to_dict()})
+
+    # Also get the user's role for this organization for proper permissions
+    user_role = current_user.get_role_for_org(org_id)
+
+    return jsonify({
+        'success': True,
+        'organization': org.to_dict(),
+        'role_in_org': user_role
+    })
