@@ -982,18 +982,23 @@
     }
 
     async function loadOrganizationsIntoProductForm() {
+        console.log('loadOrganizationsIntoProductForm called');
+
+        // Find the select element
         const select = document.getElementById('productOrganization');
+        console.log('productOrganization element:', select);
+
         if (!select) {
-            console.error('Organization select element not found');
+            console.error('Organization select element not found in DOM');
             return;
         }
 
-        // Show loading state
+        // Immediately update to show we're loading (visual feedback)
         select.innerHTML = '<option value="">Loading...</option>';
         select.disabled = true;
 
         try {
-            console.log('Fetching organizations...');
+            console.log('Fetching /api/organizations...');
             const response = await fetch('/api/organizations', {
                 method: 'GET',
                 credentials: 'same-origin',
@@ -1002,32 +1007,37 @@
                 }
             });
 
-            console.log('Organizations response status:', response.status);
+            console.log('Organizations API response:', response.status, response.statusText);
 
             if (response.ok) {
                 const orgs = await response.json();
-                console.log('Organizations loaded:', orgs.length, 'organizations');
+                console.log('Organizations loaded:', orgs);
 
                 if (Array.isArray(orgs) && orgs.length > 0) {
                     select.innerHTML = '<option value="">Select organization (optional)...</option>' +
                         orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
+                    console.log('Dropdown populated with', orgs.length, 'organizations');
                 } else {
                     select.innerHTML = '<option value="">No organizations available</option>';
+                    console.log('No organizations returned from API');
                 }
             } else {
                 let errorMsg = 'Failed to load';
                 try {
                     const errorData = await response.json();
                     errorMsg = errorData.error || errorMsg;
-                } catch (e) {}
-                console.error('Failed to load organizations:', response.status, errorMsg);
+                } catch (e) {
+                    console.error('Could not parse error response');
+                }
+                console.error('Organizations API error:', response.status, errorMsg);
                 select.innerHTML = `<option value="">Error: ${response.status}</option>`;
             }
         } catch (error) {
-            console.error('Error loading organizations for product form:', error);
-            select.innerHTML = '<option value="">Network error</option>';
+            console.error('Network error loading organizations:', error);
+            select.innerHTML = '<option value="">Network error - check console</option>';
         } finally {
             select.disabled = false;
+            console.log('loadOrganizationsIntoProductForm completed');
         }
     }
 
@@ -2413,6 +2423,20 @@
         loadFilterOrganizations(); // Load org filter dropdown (super admin only)
         loadProducts();
         // TableEnhancements auto-initializes via data-enhanced="true"
+
+        // Load organizations when product modal is shown (backup trigger)
+        const productModal = document.getElementById('productModal');
+        if (productModal) {
+            productModal.addEventListener('shown.bs.modal', function() {
+                console.log('Product modal shown event fired');
+                // Check if organizations are still showing "Loading" - if so, reload
+                const select = document.getElementById('productOrganization');
+                if (select && select.innerHTML.includes('Loading')) {
+                    console.log('Organizations still loading, triggering reload');
+                    loadOrganizationsIntoProductForm();
+                }
+            });
+        }
     });
 </script>
 {% endblock %}
