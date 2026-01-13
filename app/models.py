@@ -77,6 +77,13 @@ class Organization(db.Model):
     alert_time_end = db.Column(db.String(5), default='18:00')    # HH:MM format
     alert_days = db.Column(db.String(50), default='mon,tue,wed,thu,fri')  # Comma-separated days
 
+    # Webhook Settings (per organization - takes priority over global)
+    webhook_enabled = db.Column(db.Boolean, default=False)
+    webhook_url = db.Column(db.String(500), nullable=True)
+    webhook_name = db.Column(db.String(100), default='Organization Webhook')
+    webhook_format = db.Column(db.String(50), default='slack')  # slack, discord, teams, rocketchat, custom
+    webhook_token = db.Column(db.String(500), nullable=True)  # Optional auth token
+
     # Metadata
     active = db.Column(db.Boolean, default=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

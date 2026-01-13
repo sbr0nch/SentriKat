@@ -2,13 +2,76 @@ import requests
 import json
 from datetime import datetime, timedelta
 from app import db
-from app.models import Vulnerability, SyncLog, Product, SystemSettings
+from app.models import Vulnerability, SyncLog, Product, SystemSettings, Organization
 from app.nvd_api import fetch_cvss_data
 from config import Config
 import urllib3
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def send_org_webhook(org, new_cves_count, critical_count, matches_count):
+    """Send webhook notification for a specific organization using org settings or global fallback"""
+    from app.encryption import decrypt_value
+
+    proxies = Config.get_proxies()
+    verify_ssl = Config.get_verify_ssl()
+
+    # Check if org has its own webhook configured
+    if org.webhook_enabled and org.webhook_url:
+        try:
+            webhook_url = decrypt_value(org.webhook_url) if org.webhook_url.startswith('gAAAA') else org.webhook_url
+            webhook_format = org.webhook_format or 'slack'
+            webhook_token = org.webhook_token
+
+            headers = {'Content-Type': 'application/json'}
+            if webhook_token:
+                token = decrypt_value(webhook_token) if webhook_token.startswith('gAAAA') else webhook_token
+                headers['Authorization'] = f'Bearer {token}'
+                headers['X-Auth-Token'] = token
+
+            # Build payload based on format
+            if webhook_format in ('slack', 'rocketchat'):
+                payload = {
+                    "text": f"🔒 *SentriKat Alert for {org.display_name}*\n"
+                            f"• New CVEs: {new_cves_count}\n"
+                            f"• Critical: {critical_count}\n"
+                            f"• Product Matches: {matches_count}"
+                }
+                if critical_count > 0:
+                    payload["text"] += f"\n⚠️ *{critical_count} critical vulnerabilities require attention!*"
+            elif webhook_format == 'discord':
+                payload = {
+                    "content": f"🔒 **SentriKat Alert for {org.display_name}**\n"
+                               f"• New CVEs: {new_cves_count}\n"
+                               f"• Critical: {critical_count}\n"
+                               f"• Product Matches: {matches_count}"
+                }
+            elif webhook_format == 'teams':
+                payload = {
+                    "@type": "MessageCard",
+                    "themeColor": "dc2626" if critical_count > 0 else "1e40af",
+                    "summary": f"SentriKat Alert for {org.display_name}",
+                    "sections": [{
+                        "activityTitle": f"🔒 SentriKat Alert for {org.display_name}",
+                        "facts": [
+                            {"name": "New CVEs", "value": str(new_cves_count)},
+                            {"name": "Critical", "value": str(critical_count)},
+                            {"name": "Matches", "value": str(matches_count)}
+                        ]
+                    }]
+                }
+            else:  # custom or fallback
+                payload = {"text": f"SentriKat Alert: {new_cves_count} CVEs, {critical_count} critical, {matches_count} matches for {org.display_name}"}
+
+            response = requests.post(webhook_url, json=payload, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)
+            return {'org': org.name, 'success': response.status_code in [200, 204]}
+        except Exception as e:
+            logger.error(f"Org webhook failed for {org.name}: {e}")
+            return {'org': org.name, 'success': False, 'error': str(e)}
+
+    return None  # No org-specific webhook, will use global
 
 
 def send_webhook_notification(new_cves_count, critical_count, total_matches):
@@ -101,26 +164,51 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches):
         logger.error(f"Webhook notification failed: {e}")
         return []
 
-def download_cisa_kev():
-    """Download CISA KEV JSON feed"""
-    try:
-        proxies = Config.get_proxies()
-        verify_ssl = Config.get_verify_ssl()  # GUI settings > .env settings
+def download_cisa_kev(max_retries=3, retry_delay=5):
+    """Download CISA KEV JSON feed with retry logic"""
+    import time
 
-        # Suppress SSL warnings if verification is disabled
-        if not verify_ssl:
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    proxies = Config.get_proxies()
+    verify_ssl = Config.get_verify_ssl()
 
-        response = requests.get(
-            Config.CISA_KEV_URL,
-            timeout=30,
-            proxies=proxies,
-            verify=verify_ssl  # Use configured SSL verification setting
-        )
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        raise Exception(f"Failed to download CISA KEV: {str(e)}")
+    # Suppress SSL warnings if verification is disabled
+    if not verify_ssl:
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(
+                Config.CISA_KEV_URL,
+                timeout=30,
+                proxies=proxies,
+                verify=verify_ssl
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.Timeout as e:
+            last_error = f"Timeout connecting to CISA KEV feed (attempt {attempt + 1}/{max_retries})"
+            logger.warning(last_error)
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"Connection error to CISA KEV feed (attempt {attempt + 1}/{max_retries}): {str(e)}"
+            logger.warning(last_error)
+        except requests.exceptions.HTTPError as e:
+            last_error = f"HTTP error from CISA KEV feed: {e.response.status_code}"
+            logger.error(last_error)
+            # Don't retry on client errors (4xx)
+            if e.response.status_code < 500:
+                break
+        except Exception as e:
+            last_error = f"Error downloading CISA KEV: {str(e)}"
+            logger.error(last_error)
+
+        # Wait before retrying (exponential backoff)
+        if attempt < max_retries - 1:
+            wait_time = retry_delay * (2 ** attempt)
+            logger.info(f"Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+
+    raise Exception(f"Failed to download CISA KEV after {max_retries} attempts: {last_error}")
 
 def parse_and_store_vulnerabilities(kev_data):
     """Parse CISA KEV JSON and store in database"""
@@ -241,6 +329,8 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
         from app.email_alerts import EmailAlertManager
 
         alert_results = []
+        webhook_results = []
+        orgs_with_own_webhook = set()
         organizations = Organization.query.filter_by(active=True).all()
 
         for org in organizations:
@@ -254,33 +344,38 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
                 ).all()
 
             if new_matches:
-                # Send alert
+                # Send email alert
                 result = EmailAlertManager.send_critical_cve_alert(org, new_matches)
                 alert_results.append({
                     'organization': org.name,
                     'result': result
                 })
 
-        # Send webhook notifications if new CVEs found
+                # Count critical for this org
+                org_critical = sum(1 for m in new_matches if m.vulnerability.known_ransomware or (m.vulnerability.cvss_score and m.vulnerability.cvss_score >= 9.0))
+
+                # Send org-specific webhook if configured (takes priority)
+                org_webhook_result = send_org_webhook(org, stored, org_critical, len(new_matches))
+                if org_webhook_result:
+                    webhook_results.append(org_webhook_result)
+                    orgs_with_own_webhook.add(org.id)
+
+        # Send global webhook notifications for orgs without their own webhook
         if stored > 0 or matches_count > 0:
-            # Count critical matches
-            from app.models import VulnerabilityMatch
-            critical_count = VulnerabilityMatch.query\
-                .join(Vulnerability)\
+            # Count total critical matches (for orgs without their own webhook)
+            total_critical = VulnerabilityMatch.query\
+                .join(Vulnerability).join(Product)\
                 .filter(
                     VulnerabilityMatch.created_at >= start_time,
-                    Vulnerability.known_ransomware == True
+                    ~Product.organization_id.in_(orgs_with_own_webhook) if orgs_with_own_webhook else True,
+                    db.or_(Vulnerability.known_ransomware == True, Vulnerability.cvss_score >= 9.0)
                 ).count()
 
-            # Also count high CVSS as critical
-            critical_count += VulnerabilityMatch.query\
-                .join(Vulnerability)\
-                .filter(
-                    VulnerabilityMatch.created_at >= start_time,
-                    Vulnerability.cvss_score >= 9.0
-                ).count()
+            # Only send global webhook if there are orgs without their own webhook
+            global_webhook_results = send_webhook_notification(stored, total_critical, matches_count)
+            webhook_results.extend(global_webhook_results)
 
-            webhook_results = send_webhook_notification(stored, critical_count, matches_count)
+        if webhook_results:
             logger.info(f"Webhook notifications sent: {webhook_results}")
 
         # Log success
