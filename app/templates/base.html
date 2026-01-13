@@ -2125,7 +2125,10 @@
         async function switchOrganization(orgId, orgName) {
             try {
                 const response = await fetch(`/api/session/organization/${orgId}`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: {
+                        'Cache-Control': 'no-cache'
+                    }
                 });
 
                 if (response.ok) {
@@ -2134,8 +2137,14 @@
                     localStorage.setItem('currentOrgName', orgName);
                     showToast(`Switched to ${orgName}`, 'success');
 
-                    // Reload page to refresh data
-                    setTimeout(() => location.reload(), 500);
+                    // Reload page immediately with cache-bust to ensure fresh data
+                    // The short delay is just for the toast to be visible
+                    setTimeout(() => {
+                        // Add cache-bust parameter to force fresh load
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('_t', Date.now());
+                        window.location.href = url.toString();
+                    }, 300);
                 } else {
                     // Check if session expired
                     if (response.status === 401) {
