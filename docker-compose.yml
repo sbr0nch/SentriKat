@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   db:
@@ -20,17 +18,25 @@ services:
 
   # SentriKat Application
   sentrikat:
-    build: .
+    build:
+      context: .
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
     container_name: sentrikat
     ports:
-      - "5000:5000"
+      - "5001:5000"
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - DATABASE_URL=postgresql://sentrikat:${DB_PASSWORD:-sentrikat}@db:5432/sentrikat
-      - SENTRIKAT_URL=${SENTRIKAT_URL:-http://localhost:5000}
+      - SENTRIKAT_URL=${SENTRIKAT_URL:-http://localhost:5001}
       - FLASK_ENV=production
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,db}
     volumes:
       - sentrikat_data:/app/data
     depends_on:

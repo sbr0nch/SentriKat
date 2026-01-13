@@ -155,6 +155,70 @@ See [Configuration Guide](docs/CONFIGURATION.md) for complete reference.
 
 ---
 
+## Troubleshooting
+
+### Docker Build Fails with Connection Timeout
+
+**Symptom**: `Unable to connect to deb.debian.org` during `docker-compose build`
+
+**Cause**: Corporate firewall blocks direct internet access
+
+**Solution**: Add proxy settings to `.env`:
+```bash
+HTTP_PROXY=http://your-proxy:3128
+HTTPS_PROXY=http://your-proxy:3128
+NO_PROXY=localhost,127.0.0.1,db
+```
+
+### SSL Certificate Verification Failed
+
+**Symptom**: `SSL: CERTIFICATE_VERIFY_FAILED` during pip install in Docker build
+
+**Cause**: Corporate proxy performs SSL inspection (MITM)
+
+**Solution**: This is handled automatically in the Dockerfile. If issues persist, ensure your proxy settings are in `.env`.
+
+### Cannot Connect to Database
+
+**Symptom**: Application cannot reach PostgreSQL container
+
+**Cause**: Proxy trying to route internal Docker traffic externally
+
+**Solution**: Add `db` to `NO_PROXY` in `.env`:
+```bash
+NO_PROXY=localhost,127.0.0.1,db
+```
+
+### CISA KEV Sync Fails
+
+**Symptom**: Sync fails with connection errors
+
+**Cause**: Cannot reach external CISA website
+
+**Solution**:
+1. Configure proxy in Admin Panel > System Settings > Proxy
+2. Or set in `.env`: `HTTP_PROXY` and `HTTPS_PROXY`
+3. If behind SSL inspection proxy, enable "Skip SSL Verification" in proxy settings
+
+### Fresh Deployment Steps
+
+For a completely fresh deployment:
+```bash
+# Stop and remove existing containers and volumes
+docker-compose down -v
+
+# Remove cached images (optional)
+docker system prune -f
+
+# Rebuild and start
+docker-compose up -d --build
+
+# Check logs
+docker-compose logs -f
+```
+
+---
+
 ## Support
 
 ### Bug Reports & Feature Requests
