@@ -1101,9 +1101,22 @@ def get_organizations():
     if current_user.is_super_admin() or current_user.can_view_all_orgs:
         orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
     else:
-        # Regular users only see their own organization
+        # Regular users see all organizations they have access to (primary + multi-org memberships)
+        org_ids = set()
+
+        # Add primary organization
         if current_user.organization_id:
-            orgs = Organization.query.filter_by(id=current_user.organization_id, active=True).all()
+            org_ids.add(current_user.organization_id)
+
+        # Add multi-org memberships
+        for membership in current_user.org_memberships.all():
+            org_ids.add(membership.organization_id)
+
+        if org_ids:
+            orgs = Organization.query.filter(
+                Organization.id.in_(org_ids),
+                Organization.active == True
+            ).order_by(Organization.display_name).all()
         else:
             orgs = []
 

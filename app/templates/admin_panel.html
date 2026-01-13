@@ -23,13 +23,13 @@
         <li class="nav-item" role="presentation" id="ldap-users-tab-item" style="display: none;">
             <button class="nav-link" id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button">
                 <i class="bi bi-diagram-3 me-2"></i>LDAP Users
-                <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
+                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
             </button>
         </li>
         <li class="nav-item" role="presentation" id="ldap-groups-tab-item" style="display: none;">
             <button class="nav-link" id="ldap-groups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button">
                 <i class="bi bi-diagram-2 me-2"></i>LDAP Groups
-                <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
+                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -493,7 +493,7 @@
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="ldap-settings-tab" data-bs-toggle="pill" data-bs-target="#ldapSettings" type="button">
                         <i class="bi bi-diagram-3 me-2"></i>LDAP / Active Directory
-                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
+                        {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -527,13 +527,13 @@
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="notifications-settings-tab" data-bs-toggle="pill" data-bs-target="#notificationsSettings" type="button">
                         <i class="bi bi-bell me-2"></i>Notifications
-                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
+                        {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="branding-settings-tab" data-bs-toggle="pill" data-bs-target="#brandingSettings" type="button">
                         <i class="bi bi-palette me-2"></i>Branding
-                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
+                        {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
