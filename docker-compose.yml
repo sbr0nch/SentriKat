@@ -1,22 +1,49 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: sentrikat-db
+    environment:
+      POSTGRES_USER: sentrikat
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sentrikat}
+      POSTGRES_DB: sentrikat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentrikat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # SentriKat Application
   sentrikat:
     build: .
     container_name: sentrikat
     ports:
       - "5000:5000"
-    volumes:
-      - ./data:/app/data
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
-      - DATABASE_URL=sqlite:////app/data/sentrikat.db
+      - DATABASE_URL=postgresql://sentrikat:${DB_PASSWORD:-sentrikat}@db:5432/sentrikat
+      - SENTRIKAT_URL=${SENTRIKAT_URL:-http://localhost:5000}
       - FLASK_ENV=production
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+    volumes:
+      - sentrikat_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/sync/status"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
+
+volumes:
+  postgres_data:
+  sentrikat_data:

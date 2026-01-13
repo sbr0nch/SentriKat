@@ -66,7 +66,7 @@
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
+### Docker Deployment (Recommended)
 
 ```bash
 # Clone repository
@@ -76,33 +76,19 @@ cd SentriKat
 # Create environment file
 cp .env.example .env
 
-# Generate required keys
+# Generate required security keys
 python3 -c "import secrets; print(f'SECRET_KEY={secrets.token_hex(32)}')" >> .env
 python3 -c "from cryptography.fernet import Fernet; print(f'ENCRYPTION_KEY={Fernet.generate_key().decode()}')" >> .env
 
-# Start with Docker
+# Start SentriKat with PostgreSQL
 docker-compose up -d
 
 # Access at http://localhost:5000
 ```
 
-### Option 2: Manual Installation
-
-```bash
-# Install Python 3.11+
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# Run application
-python run.py
-```
+This starts:
+- **PostgreSQL 15** database container
+- **SentriKat** application container
 
 **First-time Setup**: Visit http://localhost:5000 and complete the setup wizard.
 
@@ -133,7 +119,7 @@ python run.py
 │  ├── Background Scheduler (APScheduler)                     │
 │  └── Email Service                                          │
 ├─────────────────────────────────────────────────────────────┤
-│  Database: SQLite / PostgreSQL                              │
+│  Database: PostgreSQL 15                                    │
 ├─────────────────────────────────────────────────────────────┤
 │  External: CISA KEV Feed, LDAP Server, SMTP Server          │
 └─────────────────────────────────────────────────────────────┘
@@ -143,10 +129,11 @@ python run.py
 
 ## Requirements
 
-- **Python**: 3.11 or higher
-- **Database**: SQLite (included) or PostgreSQL
-- **Memory**: 512MB minimum, 1GB recommended
-- **Disk**: 100MB for application, additional for database
+- **Docker**: 20.10+ with Docker Compose (recommended)
+- **Python**: 3.11 or higher (for manual installation)
+- **Database**: PostgreSQL 15+
+- **Memory**: 1GB minimum, 2GB recommended
+- **Disk**: 500MB for application + database growth
 
 ### Optional
 - LDAP/Active Directory server for enterprise authentication
