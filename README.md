@@ -30,7 +30,8 @@
 ### Why SentriKat?
 
 - **Automated Threat Intelligence**: Automatically syncs with CISA KEV feed daily
-- **Smart Matching**: Intelligent CVE-to-product matching with custom keywords
+- **NVD CPE Integration**: Search 800,000+ products from NIST NVD for accurate vulnerability matching
+- **Smart Matching**: Intelligent CVE-to-product matching with CPE identifiers and custom keywords
 - **Multi-Tenant**: Separate organizations with their own products, users, and settings
 - **Enterprise Authentication**: LDAP/Active Directory integration
 - **Secure by Design**: Encrypted credentials, rate limiting, CSRF protection
@@ -42,8 +43,10 @@
 
 ### Core Functionality
 - **CISA KEV Integration** - Automatic daily sync of Known Exploited Vulnerabilities
+- **NVD CPE Search** - Real-time search of NIST NVD database with 800,000+ products
 - **Product Inventory** - Manage software/service inventory per organization
-- **Intelligent Matching** - CVE matching by vendor, product, version, and keywords
+- **Intelligent Matching** - CVE matching via CPE identifiers, vendor/product names, and keywords
+- **Match Confidence** - High/Medium/Low confidence indicators for vulnerability matches
 - **Dashboard** - Interactive vulnerability overview with statistics
 - **Acknowledgement Workflow** - Track reviewed vulnerabilities
 

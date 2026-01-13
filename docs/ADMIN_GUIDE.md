@@ -657,6 +657,13 @@ curl -X POST http://localhost:5000/api/auth/login \
 - `GET /api/sync/status` - Get status
 - `GET /api/sync/history` - Get history
 
+**CPE (NVD Integration):**
+- `GET /api/cpe/search?q={query}` - Search NVD CPE database
+- `GET /api/cpe/versions?vendor={v}&product={p}` - Get versions for a product
+- `POST /api/cpe/link-product/{id}` - Link CPE to existing product
+- `GET /api/cpe/suggest?vendor={v}&product={p}` - Get CPE suggestions
+- `GET /api/cpe/stats` - Get CPE cache statistics
+
 **Users (Admin):**
 - `GET /api/users` - List users
 - `POST /api/users` - Create user
