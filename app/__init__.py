@@ -28,8 +28,11 @@ def create_app(config_class=Config):
     if os.environ.get('FLASK_ENV') == 'production':
         from flask_talisman import Talisman
         force_https = os.environ.get('FORCE_HTTPS', 'true').lower() == 'true'
+        # For HTTP deployments, session_cookie_secure must be False
+        session_cookie_secure = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
         Talisman(app,
             force_https=force_https,
+            session_cookie_secure=session_cookie_secure,  # Must be False for HTTP
             strict_transport_security=force_https,  # Only enable HSTS with HTTPS
             strict_transport_security_max_age=31536000 if force_https else 0,
             content_security_policy={
