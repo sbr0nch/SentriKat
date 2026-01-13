@@ -220,6 +220,60 @@
                             <small class="form-text text-muted">Assign this product to an organization</small>
                         </div>
 
+                        <!-- CPE Search Section -->
+                        <div class="col-md-12">
+                            <div class="card bg-light border">
+                                <div class="card-body py-2">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="fw-semibold">
+                                            <i class="bi bi-search me-1"></i>CPE Identification (NVD)
+                                        </span>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="searchCPE()">
+                                            <i class="bi bi-cloud-download me-1"></i>Search NVD
+                                        </button>
+                                    </div>
+                                    <div id="cpeSearchResults" style="display: none;">
+                                        <div class="input-group input-group-sm mb-2">
+                                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                            <input type="text" class="form-control" id="cpeSearchInput"
+                                                   placeholder="Search for products in NVD database..."
+                                                   oninput="debounceCPESearch()">
+                                            <button class="btn btn-outline-secondary" type="button" onclick="closeCPESearch()">
+                                                <i class="bi bi-x"></i>
+                                            </button>
+                                        </div>
+                                        <div id="cpeResultsList" class="border rounded bg-white" style="max-height: 200px; overflow-y: auto;">
+                                            <!-- Results will be populated here -->
+                                        </div>
+                                    </div>
+                                    <div id="cpeSelectedInfo" class="mt-2" style="display: none;">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>CPE Linked</span>
+                                            <code id="cpeDisplayUri" class="small"></code>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearCPE()">
+                                                <i class="bi bi-x"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <input type="hidden" id="cpeVendor">
+                                    <input type="hidden" id="cpeProduct">
+                                    <input type="hidden" id="cpeUri">
+                                    <small class="form-text text-muted">Link to NVD CPE for accurate vulnerability matching (recommended)</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-12">
+                            <label for="matchType" class="form-label fw-semibold">Matching Strategy</label>
+                            <select class="form-select" id="matchType">
+                                <option value="auto">Auto - Use CPE if available, fallback to keywords</option>
+                                <option value="cpe">CPE Only - Only match using CPE identifiers</option>
+                                <option value="keyword">Keyword Only - Only match using vendor/product keywords</option>
+                                <option value="both">Both - Match using CPE AND keywords</option>
+                            </select>
+                            <small class="form-text text-muted">How to match this product against vulnerabilities</small>
+                        </div>
+
                         <div class="col-md-12">
                             <label for="keywords" class="form-label fw-semibold">Additional Keywords</label>
                             <input type="text" class="form-control" id="keywords"
@@ -642,6 +696,10 @@
         document.getElementById('productForm').reset();
         document.getElementById('active').checked = true;
         document.getElementById('criticality').value = 'medium';
+        document.getElementById('matchType').value = 'auto';
+
+        // Reset CPE form
+        resetCPEForm();
 
         // Load organizations into dropdown
         await loadOrganizationsIntoProductForm();
@@ -666,6 +724,9 @@
             document.getElementById('description').value = product.description || '';
             document.getElementById('active').checked = product.active;
             document.getElementById('productOrganization').value = product.organization_id || '';
+
+            // Load CPE data
+            loadCPEIntoForm(product);
 
             new bootstrap.Modal(document.getElementById('productModal')).show();
         } catch (error) {
@@ -692,7 +753,12 @@
             criticality: criticality,
             keywords: document.getElementById('keywords').value.trim(),
             description: document.getElementById('description').value.trim(),
-            active: document.getElementById('active').checked
+            active: document.getElementById('active').checked,
+            // CPE fields
+            cpe_vendor: document.getElementById('cpeVendor').value.trim() || null,
+            cpe_product: document.getElementById('cpeProduct').value.trim() || null,
+            cpe_uri: document.getElementById('cpeUri').value.trim() || null,
+            match_type: document.getElementById('matchType').value || 'auto'
         };
 
         if (orgId) {
@@ -1700,6 +1766,170 @@
                 </div>
             </div>
         `;
+    }
+
+    // =========================================================================
+    // CPE (Common Platform Enumeration) Search Functions
+    // =========================================================================
+
+    let cpeSearchTimeout = null;
+
+    function searchCPE() {
+        // Pre-populate search with vendor + product name
+        const vendor = document.getElementById('vendor').value.trim();
+        const productName = document.getElementById('productName').value.trim();
+        const searchInput = document.getElementById('cpeSearchInput');
+
+        searchInput.value = `${vendor} ${productName}`.trim();
+
+        document.getElementById('cpeSearchResults').style.display = 'block';
+        document.getElementById('cpeResultsList').innerHTML = `
+            <div class="text-center py-3">
+                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                <span class="ms-2 small">Searching NVD database...</span>
+            </div>
+        `;
+
+        if (searchInput.value.length >= 2) {
+            performCPESearch(searchInput.value);
+        }
+    }
+
+    function closeCPESearch() {
+        document.getElementById('cpeSearchResults').style.display = 'none';
+    }
+
+    function debounceCPESearch() {
+        if (cpeSearchTimeout) clearTimeout(cpeSearchTimeout);
+        cpeSearchTimeout = setTimeout(() => {
+            const query = document.getElementById('cpeSearchInput').value.trim();
+            if (query.length >= 2) {
+                performCPESearch(query);
+            }
+        }, 400);
+    }
+
+    async function performCPESearch(query) {
+        const resultsList = document.getElementById('cpeResultsList');
+
+        try {
+            const response = await fetch(`/api/cpe/search?q=${encodeURIComponent(query)}&grouped=true&limit=50`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                resultsList.innerHTML = `<div class="p-3 text-danger small">${data.error || 'Search failed'}</div>`;
+                return;
+            }
+
+            const vendors = data.vendors || {};
+            const vendorKeys = Object.keys(vendors);
+
+            if (vendorKeys.length === 0) {
+                resultsList.innerHTML = `
+                    <div class="p-3 text-muted small text-center">
+                        <i class="bi bi-search me-1"></i>No products found in NVD database.
+                        <br><small>Try a different search term or use keyword matching.</small>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '<div class="list-group list-group-flush">';
+
+            for (const vendorKey of vendorKeys) {
+                const vendorData = vendors[vendorKey];
+                const products = vendorData.products || {};
+
+                for (const [productKey, productData] of Object.entries(products)) {
+                    const versions = productData.versions || [];
+                    const displayName = productData.display_name || productData.title || `${vendorKey}/${productKey}`;
+                    const versionPreview = versions.slice(0, 5).join(', ');
+
+                    html += `
+                        <div class="list-group-item list-group-item-action py-2" style="cursor: pointer;"
+                             onclick="selectCPE('${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(displayName)}')">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <div class="fw-semibold">${escapeHtml(displayName)}</div>
+                                    <small class="text-muted">
+                                        <code>cpe:2.3:a:${escapeHtml(vendorKey)}:${escapeHtml(productKey)}:*</code>
+                                    </small>
+                                </div>
+                                <span class="badge bg-secondary">${versions.length} versions</span>
+                            </div>
+                            ${versionPreview ? `<small class="text-muted">Versions: ${escapeHtml(versionPreview)}${versions.length > 5 ? '...' : ''}</small>` : ''}
+                        </div>
+                    `;
+                }
+            }
+
+            html += '</div>';
+            resultsList.innerHTML = html;
+
+        } catch (error) {
+            resultsList.innerHTML = `<div class="p-3 text-danger small">Error: ${error.message}</div>`;
+        }
+    }
+
+    function selectCPE(vendor, product, displayName) {
+        // Set hidden fields
+        document.getElementById('cpeVendor').value = vendor;
+        document.getElementById('cpeProduct').value = product;
+        document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:*:*:*:*:*:*:*:*`;
+
+        // Show selected info
+        document.getElementById('cpeSelectedInfo').style.display = 'block';
+        document.getElementById('cpeDisplayUri').textContent = `${vendor}:${product}`;
+
+        // Hide search results
+        document.getElementById('cpeSearchResults').style.display = 'none';
+
+        // If vendor/product fields are empty, populate them
+        const vendorInput = document.getElementById('vendor');
+        const productInput = document.getElementById('productName');
+
+        if (!vendorInput.value.trim()) {
+            vendorInput.value = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+        if (!productInput.value.trim()) {
+            productInput.value = product.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        showToast('CPE linked: ' + displayName, 'success');
+    }
+
+    function clearCPE() {
+        document.getElementById('cpeVendor').value = '';
+        document.getElementById('cpeProduct').value = '';
+        document.getElementById('cpeUri').value = '';
+        document.getElementById('cpeSelectedInfo').style.display = 'none';
+        document.getElementById('matchType').value = 'auto';
+    }
+
+    function resetCPEForm() {
+        clearCPE();
+        document.getElementById('cpeSearchResults').style.display = 'none';
+        document.getElementById('cpeSearchInput').value = '';
+        document.getElementById('cpeResultsList').innerHTML = '';
+    }
+
+    function loadCPEIntoForm(product) {
+        // Load CPE data when editing a product
+        if (product.cpe_vendor && product.cpe_product) {
+            document.getElementById('cpeVendor').value = product.cpe_vendor;
+            document.getElementById('cpeProduct').value = product.cpe_product;
+            document.getElementById('cpeUri').value = product.cpe_uri || '';
+            document.getElementById('cpeSelectedInfo').style.display = 'block';
+            document.getElementById('cpeDisplayUri').textContent = `${product.cpe_vendor}:${product.cpe_product}`;
+        } else if (product.effective_cpe_vendor && product.effective_cpe_product) {
+            // Show effective CPE from catalog
+            document.getElementById('cpeSelectedInfo').style.display = 'block';
+            document.getElementById('cpeDisplayUri').textContent = `${product.effective_cpe_vendor}:${product.effective_cpe_product} (from catalog)`;
+        } else {
+            resetCPEForm();
+        }
+
+        document.getElementById('matchType').value = product.match_type || 'auto';
     }
 
     document.addEventListener('DOMContentLoaded', function() {

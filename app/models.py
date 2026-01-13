@@ -251,10 +251,40 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # CPE (Common Platform Enumeration) fields for precise vulnerability matching
+    cpe_vendor = db.Column(db.String(200), nullable=True, index=True)  # NVD CPE vendor identifier
+    cpe_product = db.Column(db.String(200), nullable=True, index=True)  # NVD CPE product identifier
+    cpe_uri = db.Column(db.String(500), nullable=True)  # Full CPE 2.3 URI (optional)
+    match_type = db.Column(db.String(20), default='auto')  # auto, cpe, keyword, both
+
     # Relationships
     organization = db.relationship('Organization', backref='products')  # Legacy single org (deprecated)
     organizations = db.relationship('Organization', secondary=product_organizations, backref='assigned_products', lazy='dynamic')  # Multi-org support
     catalog_entry = db.relationship('ServiceCatalog', backref='deployed_instances')
+
+    def get_effective_cpe(self):
+        """
+        Get effective CPE identifiers, checking product fields first, then catalog entry.
+        Returns: (cpe_vendor, cpe_product, cpe_uri) tuple
+        """
+        # Product-level CPE takes precedence
+        if self.cpe_vendor and self.cpe_product:
+            return self.cpe_vendor, self.cpe_product, self.cpe_uri
+
+        # Fall back to catalog entry CPE
+        if self.catalog_entry:
+            return (
+                self.catalog_entry.cpe_vendor,
+                self.catalog_entry.cpe_product,
+                None  # Catalog entries don't have full URI
+            )
+
+        return None, None, None
+
+    def has_cpe(self):
+        """Check if this product has CPE identifiers configured."""
+        cpe_vendor, cpe_product, _ = self.get_effective_cpe()
+        return bool(cpe_vendor and cpe_product)
 
     def to_dict(self):
         # Get assigned organizations
@@ -266,6 +296,9 @@ class Product(db.Model):
             # If using legacy single org, add it to the list
             if self.organization:
                 assigned_orgs = [{'id': self.organization.id, 'name': self.organization.name, 'display_name': self.organization.display_name}]
+
+        # Get effective CPE (product-level or from catalog)
+        eff_cpe_vendor, eff_cpe_product, eff_cpe_uri = self.get_effective_cpe()
 
         return {
             'id': self.id,
@@ -280,7 +313,17 @@ class Product(db.Model):
             'active': self.active,
             'criticality': self.criticality,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            # CPE fields
+            'cpe_vendor': self.cpe_vendor,
+            'cpe_product': self.cpe_product,
+            'cpe_uri': self.cpe_uri,
+            'match_type': self.match_type or 'auto',
+            # Effective CPE (resolved from product or catalog)
+            'effective_cpe_vendor': eff_cpe_vendor,
+            'effective_cpe_product': eff_cpe_product,
+            'effective_cpe_uri': eff_cpe_uri,
+            'has_cpe': self.has_cpe()
         }
 
 class Vulnerability(db.Model):
@@ -301,6 +344,10 @@ class Vulnerability(db.Model):
     cvss_score = db.Column(db.Float, nullable=True, index=True)  # CVSS score from NVD
     severity = db.Column(db.String(20), nullable=True, index=True)  # CRITICAL, HIGH, MEDIUM, LOW
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # CPE data from NVD (cached for better matching)
+    cpe_data = db.Column(db.Text, nullable=True)  # JSON array of affected CPE entries
+    cpe_fetched_at = db.Column(db.DateTime, nullable=True)  # When CPE data was last fetched
 
     def calculate_priority(self):
         """
@@ -347,6 +394,28 @@ class Vulnerability(db.Model):
 
         return 'medium'
 
+    def get_cpe_entries(self):
+        """Get parsed CPE data if available."""
+        if not self.cpe_data:
+            return []
+        try:
+            return json.loads(self.cpe_data)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def set_cpe_entries(self, entries):
+        """Set CPE data from a list of CPE entries."""
+        if entries:
+            self.cpe_data = json.dumps(entries)
+            self.cpe_fetched_at = datetime.utcnow()
+        else:
+            self.cpe_data = None
+            self.cpe_fetched_at = None
+
+    def has_cpe_data(self):
+        """Check if CPE data is available."""
+        return bool(self.cpe_data)
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -363,7 +432,9 @@ class Vulnerability(db.Model):
             'cvss_score': self.cvss_score,
             'severity': self.severity,
             'priority': self.calculate_priority(),
-            'days_old': (date.today() - self.date_added).days if self.date_added else None
+            'days_old': (date.today() - self.date_added).days if self.date_added else None,
+            'has_cpe_data': self.has_cpe_data(),
+            'cpe_fetched_at': self.cpe_fetched_at.isoformat() if self.cpe_fetched_at else None
         }
 
 class VulnerabilityMatch(db.Model):
@@ -376,6 +447,10 @@ class VulnerabilityMatch(db.Model):
     match_reason = db.Column(db.String(200), nullable=True)  # Why it matched (vendor, product, keyword)
     acknowledged = db.Column(db.Boolean, default=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Match method and confidence
+    match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
+    match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
 
     product = db.relationship('Product', backref='matches')
     vulnerability = db.relationship('Vulnerability', backref='matches')
@@ -413,6 +488,8 @@ class VulnerabilityMatch(db.Model):
             'product': product_dict,
             'vulnerability': vuln_dict,
             'match_reason': self.match_reason,
+            'match_method': self.match_method or 'keyword',
+            'match_confidence': self.match_confidence or 'medium',
             'acknowledged': self.acknowledged,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'effective_priority': self.calculate_effective_priority(),

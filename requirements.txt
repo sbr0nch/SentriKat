@@ -16,3 +16,7 @@ cryptography==41.0.7
 
 # Database
 psycopg2-binary==2.9.9
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0

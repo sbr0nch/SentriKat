@@ -291,7 +291,12 @@ def create_product():
         keywords=data.get('keywords'),
         description=data.get('description'),
         active=data.get('active', True),
-        criticality=data.get('criticality', 'medium')
+        criticality=data.get('criticality', 'medium'),
+        # CPE fields for NVD matching
+        cpe_vendor=data.get('cpe_vendor'),
+        cpe_product=data.get('cpe_product'),
+        cpe_uri=data.get('cpe_uri'),
+        match_type=data.get('match_type', 'auto')
     )
 
     # If service catalog entry was used, increment its usage
@@ -391,6 +396,15 @@ def update_product(product_id):
         product.active = data['active']
     if 'criticality' in data:
         product.criticality = data['criticality']
+    # CPE fields for NVD matching
+    if 'cpe_vendor' in data:
+        product.cpe_vendor = data['cpe_vendor']
+    if 'cpe_product' in data:
+        product.cpe_product = data['cpe_product']
+    if 'cpe_uri' in data:
+        product.cpe_uri = data['cpe_uri']
+    if 'match_type' in data:
+        product.match_type = data['match_type']
     if 'organization_id' in data:
         # Allow setting to None or a valid organization ID
         org_id = data['organization_id']
