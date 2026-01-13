@@ -52,3 +52,26 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# License Generation Tools (CONFIDENTIAL - Do not publish)
+tools/
+.license_keys/
+
+# Test/Development files
+tests/
+*.test.py
+pytest.ini
+.pytest_cache/
+
+# Temporary and backup files
+*.bak
+*.tmp
+*.temp
+
+# Build artifacts
+htmlcov/
+.coverage
+coverage.xml
+
+# Static file uploads (user-generated)
+static/uploads/
