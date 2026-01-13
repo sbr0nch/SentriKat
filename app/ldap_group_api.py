@@ -10,6 +10,7 @@ from app.ldap_models import LDAPGroupMapping, LDAPSyncLog, LDAPAuditLog
 from app.ldap_manager import LDAPManager
 from app.ldap_sync import LDAPSyncEngine
 from app.auth import admin_required, org_admin_required
+from app.licensing import requires_professional
 from datetime import datetime
 import json
 
@@ -25,6 +26,7 @@ csrf.exempt(ldap_group_bp)
 
 @ldap_group_bp.route('/mappings', methods=['GET'])
 @org_admin_required
+@requires_professional('LDAP')
 def get_group_mappings():
     """Get all LDAP group mappings (filtered by org for org_admins)"""
     current_user = User.query.get(session.get('user_id'))
@@ -46,6 +48,7 @@ def get_group_mappings():
 
 @ldap_group_bp.route('/mappings', methods=['POST'])
 @org_admin_required
+@requires_professional('LDAP')
 def create_group_mapping():
     """Create a new LDAP group mapping"""
     data = request.get_json()
@@ -62,7 +65,7 @@ def create_group_mapping():
             return jsonify({'error': 'Org admins can only create mappings for their own organization'}), 403
         organization_id = current_user.organization_id
 
-    # Check if mapping already exists
+    # Check if mapping already exists (including soft-deleted)
     existing = LDAPGroupMapping.query.filter_by(
         ldap_group_dn=data['ldap_group_dn'],
         organization_id=organization_id,
@@ -70,7 +73,35 @@ def create_group_mapping():
     ).first()
 
     if existing:
-        return jsonify({'error': 'Mapping already exists'}), 409
+        if existing.is_active:
+            return jsonify({'error': 'Mapping already exists'}), 409
+        else:
+            # Reactivate soft-deleted mapping instead of creating new one
+            existing.is_active = True
+            existing.ldap_group_cn = data.get('ldap_group_cn', existing.ldap_group_cn)
+            existing.ldap_group_description = data.get('ldap_group_description', existing.ldap_group_description)
+            existing.auto_provision = data.get('auto_provision', True)
+            existing.auto_deprovision = data.get('auto_deprovision', False)
+            existing.priority = data.get('priority', 0)
+            existing.sync_enabled = data.get('sync_enabled', True)
+            existing.member_count = data.get('member_count', existing.member_count)
+            existing.updated_by = current_user.id
+            existing.updated_at = datetime.utcnow()
+
+            # Log audit event for reactivation
+            audit_log = LDAPAuditLog(
+                event_type='group_mapping_reactivated',
+                user_id=current_user.id,
+                organization_id=organization_id,
+                ldap_dn=data['ldap_group_dn'],
+                description=f"Reactivated LDAP group mapping: {existing.ldap_group_cn} → {data['role']}",
+                success=True,
+                ip_address=request.remote_addr
+            )
+            db.session.add(audit_log)
+            db.session.commit()
+
+            return jsonify(existing.to_dict()), 200
 
     # Create mapping
     mapping = LDAPGroupMapping(
@@ -83,6 +114,7 @@ def create_group_mapping():
         auto_deprovision=data.get('auto_deprovision', False),
         priority=data.get('priority', 0),
         sync_enabled=data.get('sync_enabled', True),
+        member_count=data.get('member_count', 0),
         created_by=current_user.id
     )
 

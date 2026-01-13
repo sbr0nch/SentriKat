@@ -1,5 +1,7 @@
 from app import db
 from app.models import Product, Vulnerability, VulnerabilityMatch
+import re
+import json
 
 def normalize_string(s):
     """Normalize string for matching (lowercase, strip spaces)"""
@@ -7,15 +9,120 @@ def normalize_string(s):
         return ''
     return s.lower().strip()
 
-def check_match(vulnerability, product):
+
+def check_cpe_match(vulnerability, product):
     """
-    Check if a vulnerability matches a product.
+    Check if a vulnerability matches a product using CPE identifiers.
+
+    Uses the vulnerability's cached CPE data to check against product's CPE identifiers.
+
+    Returns:
+        tuple: (match_reasons: list, match_method: str, match_confidence: str)
+               - match_reasons: List of reasons for the match
+               - match_method: 'cpe' if matched via CPE
+               - match_confidence: 'high' for CPE matches
+    """
+    # Get product's effective CPE
+    cpe_vendor, cpe_product, cpe_uri = product.get_effective_cpe()
+
+    if not cpe_vendor or not cpe_product:
+        return [], None, None
+
+    # Try to get cached CPE data from vulnerability
+    cpe_entries = vulnerability.get_cpe_entries()
+
+    if cpe_entries:
+        # Check against cached CPE data
+        for entry in cpe_entries:
+            entry_vendor = entry.get('vendor', '').lower()
+            entry_product = entry.get('product', '').lower()
+
+            if entry_vendor == cpe_vendor.lower() and entry_product == cpe_product.lower():
+                # Check version range if available
+                version = product.version
+                if version and (entry.get('version_start') or entry.get('version_end')):
+                    if _version_in_range(version,
+                                         entry.get('version_start'),
+                                         entry.get('version_end'),
+                                         entry.get('version_start_type'),
+                                         entry.get('version_end_type')):
+                        return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (version in range)"], 'cpe', 'high'
+                else:
+                    # No version constraint or no product version
+                    return [f"CPE match: {cpe_vendor}:{cpe_product}"], 'cpe', 'high'
+    else:
+        # No cached CPE data - try to match against CISA KEV vendor/product
+        # Normalize for comparison
+        vuln_vendor = normalize_string(vulnerability.vendor_project)
+        vuln_product = normalize_string(vulnerability.product)
+
+        # CPE names are typically lowercase with underscores instead of spaces
+        normalized_cpe_vendor = cpe_vendor.lower().replace('_', ' ')
+        normalized_cpe_product = cpe_product.lower().replace('_', ' ')
+
+        # Check if CPE vendor/product matches vulnerability vendor/product
+        vendor_match = (normalized_cpe_vendor in vuln_vendor or
+                        vuln_vendor in normalized_cpe_vendor)
+        product_match = (normalized_cpe_product in vuln_product or
+                         vuln_product in normalized_cpe_product)
+
+        if vendor_match and product_match:
+            return [f"CPE inference: {cpe_vendor}:{cpe_product}"], 'cpe', 'medium'
+
+    return [], None, None
+
+
+def _version_in_range(version, start, end, start_type, end_type):
+    """Check if a version falls within a specified range."""
+    if not version:
+        return True  # No version specified, assume match
+
+    version_key = _version_sort_key(version)
+
+    if start:
+        start_key = _version_sort_key(start)
+        if start_type == 'including':
+            if version_key < start_key:
+                return False
+        else:  # excluding
+            if version_key <= start_key:
+                return False
+
+    if end:
+        end_key = _version_sort_key(end)
+        if end_type == 'including':
+            if version_key > end_key:
+                return False
+        else:  # excluding
+            if version_key >= end_key:
+                return False
+
+    return True
+
+
+def _version_sort_key(version):
+    """Generate a sortable key for version strings."""
+    parts = []
+    for part in re.split(r'[.\-_]', str(version)):
+        try:
+            parts.append((0, int(part)))
+        except ValueError:
+            parts.append((1, part.lower()))
+    return tuple(parts)
+
+
+def check_keyword_match(vulnerability, product):
+    """
+    Check if a vulnerability matches a product using keyword/vendor/product matching.
 
     Matching logic (strict by default):
     - If BOTH vendor AND product_name are specified: BOTH must match
     - If only vendor is specified: vendor must match (use with caution)
     - If only product_name is specified: product_name must match
     - Keywords provide additional matches but should be specific
+
+    Returns:
+        tuple: (match_reasons: list, match_method: str, match_confidence: str)
     """
     vuln_vendor = normalize_string(vulnerability.vendor_project)
     vuln_product = normalize_string(vulnerability.product)
@@ -52,7 +159,6 @@ def check_match(vulnerability, product):
 
     # Keywords provide additional matching (should be specific like "http server")
     # Keywords must match as whole words, not substrings (e.g., "httpd" should NOT match "nhttpd")
-    import re
     for keyword in keywords:
         if keyword and len(keyword) >= 3:  # Minimum 3 chars to avoid too broad matches
             # Use word boundary matching: keyword must be a complete word
@@ -61,7 +167,74 @@ def check_match(vulnerability, product):
             if re.search(pattern, vuln_product):
                 match_reasons.append(f"Keyword match: {keyword}")
 
-    return match_reasons
+    if match_reasons:
+        # Determine confidence based on match type
+        if any('Vendor+Product' in r for r in match_reasons):
+            return match_reasons, 'vendor_product', 'medium'
+        else:
+            return match_reasons, 'keyword', 'low'
+
+    return [], None, None
+
+
+def check_match(vulnerability, product):
+    """
+    Check if a vulnerability matches a product.
+
+    Respects the product's match_type setting:
+    - auto: Use CPE if available, fallback to keyword
+    - cpe: Only use CPE matching
+    - keyword: Only use keyword matching
+    - both: Use both CPE and keyword matching
+
+    Returns:
+        tuple: (match_reasons: list, match_method: str, match_confidence: str)
+    """
+    match_type = product.match_type or 'auto'
+
+    # Determine which matching methods to use
+    use_cpe = match_type in ('auto', 'cpe', 'both')
+    use_keyword = match_type in ('auto', 'keyword', 'both')
+
+    cpe_reasons = []
+    cpe_method = None
+    cpe_confidence = None
+
+    keyword_reasons = []
+    keyword_method = None
+    keyword_confidence = None
+
+    # Try CPE matching first
+    if use_cpe:
+        cpe_reasons, cpe_method, cpe_confidence = check_cpe_match(vulnerability, product)
+
+    # Try keyword matching
+    if use_keyword:
+        # For 'auto' mode, only use keyword if CPE didn't match
+        if match_type == 'auto' and cpe_reasons:
+            pass  # Skip keyword matching, CPE matched
+        else:
+            keyword_reasons, keyword_method, keyword_confidence = check_keyword_match(vulnerability, product)
+
+    # Combine results based on match_type
+    if match_type == 'both':
+        # Return CPE if matched, or keyword if matched, prefer CPE
+        if cpe_reasons:
+            return cpe_reasons, cpe_method, cpe_confidence
+        elif keyword_reasons:
+            return keyword_reasons, keyword_method, keyword_confidence
+    elif match_type == 'cpe':
+        return cpe_reasons, cpe_method, cpe_confidence
+    elif match_type == 'keyword':
+        return keyword_reasons, keyword_method, keyword_confidence
+    else:  # auto
+        # Prefer CPE matches (higher confidence)
+        if cpe_reasons:
+            return cpe_reasons, cpe_method, cpe_confidence
+        elif keyword_reasons:
+            return keyword_reasons, keyword_method, keyword_confidence
+
+    return [], None, None
 
 def match_vulnerabilities_to_products():
     """Match all active vulnerabilities against active products"""
@@ -75,7 +248,7 @@ def match_vulnerabilities_to_products():
 
     for product in products:
         for vulnerability in vulnerabilities:
-            match_reasons = check_match(vulnerability, product)
+            match_reasons, match_method, match_confidence = check_match(vulnerability, product)
 
             if match_reasons:
                 # Check if match already exists
@@ -89,10 +262,18 @@ def match_vulnerabilities_to_products():
                     match = VulnerabilityMatch(
                         product_id=product.id,
                         vulnerability_id=vulnerability.id,
-                        match_reason='; '.join(match_reasons)
+                        match_reason='; '.join(match_reasons),
+                        match_method=match_method or 'keyword',
+                        match_confidence=match_confidence or 'medium'
                     )
                     db.session.add(match)
                     matches_count += 1
+                else:
+                    # Update existing match with new method/confidence if different
+                    if existing_match.match_method != match_method or existing_match.match_confidence != match_confidence:
+                        existing_match.match_reason = '; '.join(match_reasons)
+                        existing_match.match_method = match_method or 'keyword'
+                        existing_match.match_confidence = match_confidence or 'medium'
 
     db.session.commit()
     return matches_count
@@ -118,7 +299,7 @@ def cleanup_invalid_matches():
             continue
 
         # Re-check if this match is still valid with current logic
-        match_reasons = check_match(vulnerability, product)
+        match_reasons, _, _ = check_match(vulnerability, product)
 
         if not match_reasons:
             # Match no longer valid - remove it

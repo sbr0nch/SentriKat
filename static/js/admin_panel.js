@@ -7,6 +7,9 @@ let currentUserId = null;
 let currentOrgId = null;
 let organizations = [];
 
+// Global license info - loaded at page init
+window.licenseInfo = null;
+
 // Selection state for bulk actions
 let selectedUsers = new Map(); // Map of userId -> { id, username, is_active }
 let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
@@ -75,7 +78,8 @@ async function bulkActivateUsers() {
         return;
     }
 
-    if (!confirm(`Activate ${toActivate.length} user(s)?`)) return;
+    const confirmed = await showConfirm(`Activate ${toActivate.length} user(s)?`, 'Activate Users', 'Activate', 'btn-success');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -105,7 +109,8 @@ async function bulkDeactivateUsers() {
         return;
     }
 
-    if (!confirm(`Deactivate ${toDeactivate.length} user(s)?`)) return;
+    const confirmed = await showConfirm(`Deactivate ${toDeactivate.length} user(s)?`, 'Deactivate Users', 'Deactivate', 'btn-warning');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -132,7 +137,8 @@ async function bulkDeleteUsers() {
     const userList = Array.from(selectedUsers.values()).map(u => u.username).slice(0, 5).join(', ');
     const more = selectedUsers.size > 5 ? ` and ${selectedUsers.size - 5} more` : '';
 
-    if (!confirm(`DELETE ${selectedUsers.size} user(s)?\n\n${userList}${more}\n\nThis cannot be undone!`)) return;
+    const confirmed = await showConfirm(`<strong>DELETE ${selectedUsers.size} user(s)?</strong><br><br>${userList}${more}<br><br><span class="text-danger">This cannot be undone!</span>`, 'Delete Users', 'Delete', 'btn-danger');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -212,7 +218,8 @@ async function bulkActivateOrgs() {
         return;
     }
 
-    if (!confirm(`Activate ${toActivate.length} organization(s)?`)) return;
+    const confirmed = await showConfirm(`Activate ${toActivate.length} organization(s)?`, 'Activate Organizations', 'Activate', 'btn-success');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -242,7 +249,8 @@ async function bulkDeactivateOrgs() {
         return;
     }
 
-    if (!confirm(`Deactivate ${toDeactivate.length} organization(s)?`)) return;
+    const confirmed = await showConfirm(`Deactivate ${toDeactivate.length} organization(s)?<br><br><span class="text-warning">Users in these organizations will be blocked from logging in.</span>`, 'Deactivate Organizations', 'Deactivate', 'btn-warning');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -269,7 +277,8 @@ async function bulkDeleteOrgs() {
     const orgList = Array.from(selectedOrgs.values()).map(o => o.name).slice(0, 5).join(', ');
     const more = selectedOrgs.size > 5 ? ` and ${selectedOrgs.size - 5} more` : '';
 
-    if (!confirm(`DELETE ${selectedOrgs.size} organization(s)?\n\n${orgList}${more}\n\nThis will also affect users and products!\nThis cannot be undone!`)) return;
+    const confirmed = await showConfirm(`<strong>DELETE ${selectedOrgs.size} organization(s)?</strong><br><br>${orgList}${more}<br><br><span class="text-warning">This will also affect users and products!</span><br><span class="text-danger">This cannot be undone!</span>`, 'Delete Organizations', 'Delete', 'btn-danger');
+    if (!confirmed) return;
 
     showLoading();
     try {
@@ -416,7 +425,7 @@ async function bulkDeleteMappings() {
 // Initialization
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     console.log('Admin Panel: DOMContentLoaded fired');
 
     // Check if Bootstrap is loaded
@@ -427,10 +436,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
+        // Load license info first and apply UI restrictions (await to ensure restrictions apply before showing tabs)
+        await loadLicenseAndApplyRestrictions();
+
         loadUsers();
         loadOrganizations();
         loadOrganizationsDropdown();
-        checkLdapPermissions();  // Check if user can access LDAP features
+        checkLdapPermissions();  // Check if user can access LDAP features (also checks license)
 
         // Tab change handlers
         const orgTab = document.getElementById('organizations-tab');
@@ -539,9 +551,14 @@ async function loadUsers() {
                 const role = roleMap[user.role] || roleMap['user'];
                 const roleBadge = `<span class="badge ${role.badge}">${role.text}</span>`;
 
-                const statusBadge = user.is_active
+                let statusBadge = user.is_active
                     ? '<span class="badge badge-status-active">Active</span>'
                     : '<span class="badge badge-status-inactive">Inactive</span>';
+
+                // Add locked indicator if user is locked
+                if (user.is_locked) {
+                    statusBadge += ' <span class="badge bg-danger" title="Account locked due to failed logins"><i class="bi bi-lock-fill"></i> Locked</span>';
+                }
 
                 const authBadge = user.auth_type === 'ldap'
                     ? '<span class="badge badge-auth-ldap">LDAP</span>'
@@ -578,6 +595,21 @@ async function loadUsers() {
                                 <button class="btn-action btn-action-edit" onclick="editUser(${user.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
+                                ${user.is_locked ? `
+                                <button class="btn-action btn-action-warning" onclick="unlockUser(${user.id}, '${escapeHtml(user.username)}')" title="Unlock Account">
+                                    <i class="bi bi-unlock-fill"></i>
+                                </button>
+                                ` : ''}
+                                ${user.totp_enabled ? `
+                                <button class="btn-action btn-action-warning" onclick="reset2FA(${user.id}, '${escapeHtml(user.username)}')" title="Reset 2FA">
+                                    <i class="bi bi-phone-flip"></i>
+                                </button>
+                                ` : ''}
+                                ${user.auth_type === 'local' ? `
+                                <button class="btn-action" onclick="forcePasswordChange(${user.id}, '${escapeHtml(user.username)}')" title="Force Password Change" style="color: #7c3aed;">
+                                    <i class="bi bi-key-fill"></i>
+                                </button>
+                                ` : ''}
                                 <button class="btn-action ${user.is_active ? 'btn-action-block' : 'btn-action-success'}"
                                         onclick="toggleUserActive(${user.id}, '${escapeHtml(user.username)}', ${user.is_active})"
                                         title="${user.is_active ? 'Block' : 'Unblock'}">
@@ -865,7 +897,8 @@ async function updateOrgMembershipRole(userId, orgId, newRole, isPrimary) {
 }
 
 async function removeOrgMembership(userId, orgId, orgName) {
-    if (!confirm(`Remove user from "${orgName}"?`)) return;
+    const confirmed = await showConfirm(`Remove user from "${orgName}"?`, 'Remove Membership', 'Remove', 'btn-warning');
+    if (!confirmed) return;
 
     try {
         const response = await fetch(`/api/users/${userId}/organizations/${orgId}`, {
@@ -924,9 +957,19 @@ async function saveUser() {
             showToast('Password is required for local users', 'warning');
             return;
         }
+        // Basic client-side validation - server will enforce full policy
         if (password.length < 8) {
-            showToast('Password must be at least 8 characters', 'warning');
+            showToast('Password must be at least 8 characters. Additional requirements may apply based on security policy.', 'warning');
             return;
+        }
+        // Check for basic complexity (hint to user about requirements)
+        const hasUpper = /[A-Z]/.test(password);
+        const hasLower = /[a-z]/.test(password);
+        const hasNumber = /[0-9]/.test(password);
+        const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+        if (!hasUpper || !hasLower || !hasNumber) {
+            showToast('Password should contain uppercase, lowercase, and numbers. Check your organization\'s password policy.', 'info');
+            // Don't block - let server validate against actual policy
         }
         if (password !== passwordConfirm) {
             showToast('Passwords do not match', 'warning');
@@ -1050,6 +1093,98 @@ async function toggleUserActive(userId, username, isCurrentlyActive) {
         }
     } catch (error) {
         showToast(`Error toggling user status: ${error.message}`, 'danger');
+    }
+}
+
+async function unlockUser(userId, username) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to unlock the account for "<strong>${username}</strong>"?<br><br>` +
+        'This will reset failed login attempts and allow the user to log in immediately.',
+        'Unlock User Account',
+        'Unlock',
+        'btn-warning'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/unlock`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast(result.message || `✓ User ${username} has been unlocked`, 'success');
+            loadUsers();
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error unlocking user: ${error.message}`, 'danger');
+    }
+}
+
+async function reset2FA(userId, username) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to reset 2FA for "<strong>${username}</strong>"?<br><br>` +
+        'This will disable their two-factor authentication. They will need to set it up again.',
+        'Reset Two-Factor Authentication',
+        'Reset 2FA',
+        'btn-warning'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/reset-2fa`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast(result.message || `✓ 2FA has been reset for ${username}`, 'success');
+            loadUsers();
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error resetting 2FA: ${error.message}`, 'danger');
+    }
+}
+
+async function forcePasswordChange(userId, username) {
+    const confirmed = await showConfirm(
+        `Force "<strong>${username}</strong>" to change their password on next login?`,
+        'Force Password Change',
+        'Force Change',
+        'btn-primary'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/force-password-change`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showToast(result.message || `✓ ${username} will be required to change password`, 'success');
+            loadUsers();
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error forcing password change: ${error.message}`, 'danger');
     }
 }
 
@@ -1242,12 +1377,27 @@ async function editOrganization(orgId) {
         document.getElementById('smtpFromEmail').value = org.smtp_from_email || '';
         document.getElementById('smtpFromName').value = org.smtp_from_name || 'SentriKat Alerts';
         document.getElementById('smtpUseTls').checked = org.smtp_use_tls !== false;
+        document.getElementById('smtpUseSsl').checked = org.smtp_use_ssl === true;
 
         // Alert settings
         document.getElementById('alertCritical').checked = org.alert_on_critical;
         document.getElementById('alertHigh').checked = org.alert_on_high;
         document.getElementById('alertNewCVE').checked = org.alert_on_new_cve;
         document.getElementById('alertRansomware').checked = org.alert_on_ransomware;
+
+        // Alert mode settings (org.alert_settings contains nested values)
+        const alertMode = org.alert_settings?.mode || '';
+        const escalationDays = org.alert_settings?.escalation_days || '';
+        document.getElementById('orgAlertMode').value = alertMode;
+        document.getElementById('orgEscalationDays').value = escalationDays;
+
+        // Webhook settings
+        document.getElementById('orgWebhookEnabled').checked = org.webhook_enabled || false;
+        document.getElementById('orgWebhookUrl').value = org.webhook_url || '';
+        document.getElementById('orgWebhookFormat').value = org.webhook_format || 'slack';
+        document.getElementById('orgWebhookName').value = org.webhook_name || '';
+        document.getElementById('orgWebhookToken').value = '';
+        document.getElementById('orgWebhookToken').placeholder = org.webhook_token ? '(token saved - leave blank to keep)' : 'Leave empty if not needed';
 
         // Disable name field for existing orgs
         document.getElementById('orgName').readOnly = true;
@@ -1286,12 +1436,24 @@ async function saveOrganization() {
         smtp_from_email: document.getElementById('smtpFromEmail').value.trim() || null,
         smtp_from_name: document.getElementById('smtpFromName').value.trim() || 'SentriKat Alerts',
         smtp_use_tls: document.getElementById('smtpUseTls').checked,
+        smtp_use_ssl: document.getElementById('smtpUseSsl').checked,
 
         // Alert settings
         alert_on_critical: document.getElementById('alertCritical').checked,
         alert_on_high: document.getElementById('alertHigh').checked,
         alert_on_new_cve: document.getElementById('alertNewCVE').checked,
-        alert_on_ransomware: document.getElementById('alertRansomware').checked
+        alert_on_ransomware: document.getElementById('alertRansomware').checked,
+
+        // Alert mode settings (empty = use global default)
+        alert_mode: document.getElementById('orgAlertMode').value || null,
+        escalation_days: document.getElementById('orgEscalationDays').value ? parseInt(document.getElementById('orgEscalationDays').value) : null,
+
+        // Webhook settings
+        webhook_enabled: document.getElementById('orgWebhookEnabled').checked,
+        webhook_url: document.getElementById('orgWebhookUrl').value.trim() || null,
+        webhook_format: document.getElementById('orgWebhookFormat').value,
+        webhook_name: document.getElementById('orgWebhookName').value.trim() || null,
+        webhook_token: document.getElementById('orgWebhookToken').value.trim() || null
     };
 
     try {
@@ -1347,6 +1509,41 @@ async function testSMTP() {
         }
     } catch (error) {
         showToast(`Error testing SMTP: ${error.message}`, 'danger');
+    }
+}
+
+async function testOrgWebhook() {
+    const webhookUrl = document.getElementById('orgWebhookUrl').value.trim();
+
+    if (!webhookUrl) {
+        showToast('Please enter a webhook URL first', 'warning');
+        return;
+    }
+
+    showToast('Testing webhook...', 'info');
+
+    try {
+        const response = await fetch('/api/settings/test-webhook', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: 'org',
+                webhook_url: webhookUrl,
+                webhook_format: document.getElementById('orgWebhookFormat').value,
+                webhook_name: document.getElementById('orgWebhookName').value || 'Organization Webhook',
+                webhook_token: document.getElementById('orgWebhookToken').value || null
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message || '✓ Webhook test successful!', 'success');
+        } else {
+            showToast(`✗ Webhook test failed: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error testing webhook: ${error.message}`, 'danger');
     }
 }
 
@@ -1410,24 +1607,31 @@ function showToast(message, type = 'info') {
 
     const toastClass = typeClasses[type] || typeClasses['info'];
 
-    // Create toast element
+    // Truncate very long messages to prevent layout issues
+    let displayMessage = message;
+    if (message.length > 300) {
+        displayMessage = message.substring(0, 300) + '...';
+    }
+
+    // Create toast element with proper styling for long messages
     const toastId = `toast-${Date.now()}`;
     const toastHtml = `
-        <div id="${toastId}" class="toast ${toastClass}" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="toast-body d-flex justify-content-between align-items-center">
-                <span>${message}</span>
-                <button type="button" class="btn-close btn-close-white ms-2" data-bs-dismiss="toast" aria-label="Close"></button>
+        <div id="${toastId}" class="toast ${toastClass}" role="alert" aria-live="assertive" aria-atomic="true" style="max-width: 450px;">
+            <div class="toast-body d-flex justify-content-between align-items-start">
+                <span style="word-break: break-word; overflow-wrap: break-word;">${displayMessage}</span>
+                <button type="button" class="btn-close btn-close-white ms-2 flex-shrink-0" data-bs-dismiss="toast" aria-label="Close"></button>
             </div>
         </div>
     `;
 
     toastContainer.insertAdjacentHTML('beforeend', toastHtml);
 
-    // Show the toast
+    // Show the toast with longer delay for errors
     const toastElement = document.getElementById(toastId);
+    const delay = (type === 'danger' || type === 'warning') ? 8000 : 3000;
     const toast = new bootstrap.Toast(toastElement, {
         autohide: true,
-        delay: 3000
+        delay: delay
     });
 
     toast.show();
@@ -1586,7 +1790,8 @@ async function saveGlobalSMTPSettings() {
         smtp_password: document.getElementById('globalSmtpPassword').value,
         smtp_from_email: document.getElementById('globalSmtpFromEmail').value,
         smtp_from_name: document.getElementById('globalSmtpFromName').value,
-        smtp_use_tls: document.getElementById('globalSmtpUseTLS').checked
+        smtp_use_tls: document.getElementById('globalSmtpUseTLS').checked,
+        smtp_use_ssl: document.getElementById('globalSmtpUseSSL').checked
     };
 
     try {
@@ -1678,7 +1883,19 @@ async function loadSyncStatus() {
         const response = await fetch('/api/settings/sync/status');
         const status = await response.json();
 
-        document.getElementById('lastSyncTime').textContent = status.last_sync || 'Never';
+        // Build last sync text with status icon
+        let lastSyncHtml = 'Never';
+        if (status.last_sync) {
+            const statusIcon = status.last_sync_status === 'success'
+                ? '<i class="bi bi-check-circle-fill text-success me-1"></i>'
+                : '<i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>';
+            const statsText = (status.last_sync_added > 0 || status.last_sync_updated > 0)
+                ? ` (+${status.last_sync_added} new, ${status.last_sync_updated} updated)`
+                : '';
+            lastSyncHtml = `${statusIcon}${status.last_sync}${statsText}`;
+        }
+
+        document.getElementById('lastSyncTime').innerHTML = lastSyncHtml;
         document.getElementById('nextSyncTime').textContent = status.next_sync || 'Not scheduled';
         document.getElementById('totalVulns').textContent = status.total_vulnerabilities || '0';
     } catch (error) {
@@ -1811,6 +2028,503 @@ async function testProxyConnection() {
         showToast(`Connection test failed: ${error.message}`, 'danger');
     } finally {
         hideLoading();
+    }
+}
+
+// ============================================================================
+// Security Settings
+// ============================================================================
+
+async function saveSecuritySettings() {
+    const settings = {
+        session_timeout: parseInt(document.getElementById('sessionTimeout').value) || 480,
+        max_failed_logins: parseInt(document.getElementById('maxFailedLogins').value) || 5,
+        lockout_duration: parseInt(document.getElementById('lockoutDuration').value) || 30,
+        password_min_length: parseInt(document.getElementById('passwordMinLength').value) || 8,
+        password_require_uppercase: document.getElementById('passwordRequireUppercase').checked,
+        password_require_lowercase: document.getElementById('passwordRequireLowercase').checked,
+        password_require_numbers: document.getElementById('passwordRequireNumbers').checked,
+        password_require_special: document.getElementById('passwordRequireSpecial').checked,
+        password_expiry_days: parseInt(document.getElementById('passwordExpiryDays').value) || 0,
+        require_2fa: document.getElementById('require2FA').checked
+    };
+
+    try {
+        const response = await fetch('/api/settings/security', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('Security settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving security settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadSecuritySettings() {
+    try {
+        const response = await fetch('/api/settings/security');
+        if (response.ok) {
+            const settings = await response.json();
+            const sessionTimeout = document.getElementById('sessionTimeout');
+            const maxFailedLogins = document.getElementById('maxFailedLogins');
+            const lockoutDuration = document.getElementById('lockoutDuration');
+            const passwordMinLength = document.getElementById('passwordMinLength');
+            const passwordRequireUppercase = document.getElementById('passwordRequireUppercase');
+            const passwordRequireLowercase = document.getElementById('passwordRequireLowercase');
+            const passwordRequireNumbers = document.getElementById('passwordRequireNumbers');
+            const passwordRequireSpecial = document.getElementById('passwordRequireSpecial');
+
+            if (sessionTimeout) sessionTimeout.value = settings.session_timeout || 480;
+            if (maxFailedLogins) maxFailedLogins.value = settings.max_failed_logins || 5;
+            if (lockoutDuration) lockoutDuration.value = settings.lockout_duration || 30;
+            if (passwordMinLength) passwordMinLength.value = settings.password_min_length || 8;
+            if (passwordRequireUppercase) passwordRequireUppercase.checked = settings.password_require_uppercase !== false;
+            if (passwordRequireLowercase) passwordRequireLowercase.checked = settings.password_require_lowercase !== false;
+            if (passwordRequireNumbers) passwordRequireNumbers.checked = settings.password_require_numbers !== false;
+            if (passwordRequireSpecial) passwordRequireSpecial.checked = settings.password_require_special === true;
+
+            // Password expiration and 2FA settings
+            const passwordExpiryDays = document.getElementById('passwordExpiryDays');
+            const require2FA = document.getElementById('require2FA');
+            if (passwordExpiryDays) passwordExpiryDays.value = settings.password_expiry_days || 0;
+            if (require2FA) require2FA.checked = settings.require_2fa === true;
+        }
+    } catch (error) {
+        console.error('Error loading security settings:', error);
+    }
+}
+
+// ============================================================================
+// Backup & Restore
+// ============================================================================
+
+async function downloadBackup() {
+    try {
+        const response = await fetch('/api/settings/backup');
+        if (response.ok) {
+            const data = await response.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sentrikat-backup-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast('Backup downloaded successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error downloading backup: ${error.message}`, 'danger');
+    }
+}
+
+async function restoreBackup(file) {
+    const confirmed = await showConfirm('Are you sure you want to restore from this backup?<br><br>This will overwrite current settings.', 'Restore Backup', 'Restore', 'btn-warning');
+    if (!confirmed) return;
+
+    try {
+        const formData = new FormData();
+        formData.append('backup', file);
+
+        const response = await fetch('/api/settings/restore', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (response.ok) {
+            showToast('Backup restored successfully. Reloading settings...', 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error restoring backup: ${error.message}`, 'danger');
+    }
+}
+
+// Full restore function - restores everything including orgs, users, products
+async function restoreFullBackup(file) {
+    try {
+        const formData = new FormData();
+        formData.append('backup', file);
+
+        showToast('Performing full restore...', 'info');
+
+        const response = await fetch('/api/settings/restore-full', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            const stats = result.stats || {};
+            showToast(
+                `Full restore complete: ${stats.organizations || 0} orgs, ${stats.users || 0} users, ${stats.products || 0} products, ${stats.settings || 0} settings`,
+                'success'
+            );
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            showToast(`Error: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error restoring backup: ${error.message}`, 'danger');
+    }
+}
+
+// Confirm and trigger full restore
+async function confirmFullRestore() {
+    const confirmed = await showConfirm(
+        '<strong class="text-danger">⚠️ FULL RESTORE WARNING</strong><br><br>' +
+        'This will import all organizations, users, and products from the backup.<br><br>' +
+        '• Existing data with the same names will be skipped<br>' +
+        '• Local users will need to reset their passwords<br><br>' +
+        'Continue?',
+        'Full Restore',
+        'Restore All Data',
+        'btn-danger'
+    );
+    if (!confirmed) return;
+    document.getElementById('restoreFullFile').click();
+}
+
+// Setup restore file input listeners
+document.addEventListener('DOMContentLoaded', function() {
+    const restoreFile = document.getElementById('restoreFile');
+    if (restoreFile) {
+        restoreFile.addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                restoreBackup(e.target.files[0]);
+                e.target.value = '';
+            }
+        });
+    }
+
+    const restoreFullFile = document.getElementById('restoreFullFile');
+    if (restoreFullFile) {
+        restoreFullFile.addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                restoreFullBackup(e.target.files[0]);
+                e.target.value = '';
+            }
+        });
+    }
+});
+
+// ============================================================================
+// Branding Settings
+// ============================================================================
+
+async function saveBrandingSettings() {
+    const settings = {
+        app_name: document.getElementById('appName').value || 'SentriKat',
+        login_message: document.getElementById('loginMessage').value || '',
+        support_email: document.getElementById('supportEmail').value || '',
+        show_version: document.getElementById('showVersion').checked
+    };
+
+    try {
+        const response = await fetch('/api/settings/branding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('Branding settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving branding settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadBrandingSettings() {
+    try {
+        const response = await fetch('/api/settings/branding');
+        if (response.ok) {
+            const settings = await response.json();
+            const appName = document.getElementById('appName');
+            const loginMessage = document.getElementById('loginMessage');
+            const supportEmail = document.getElementById('supportEmail');
+            const showVersion = document.getElementById('showVersion');
+            const logoPreview = document.getElementById('currentLogoPreview');
+            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
+
+            if (appName) appName.value = settings.app_name || 'SentriKat';
+            if (loginMessage) loginMessage.value = settings.login_message || '';
+            if (supportEmail) supportEmail.value = settings.support_email || '';
+            if (showVersion) showVersion.checked = settings.show_version !== false;
+
+            // Show custom logo if set
+            if (settings.logo_url && logoPreview) {
+                logoPreview.src = settings.logo_url;
+                if (deleteLogoBtn && settings.logo_url.includes('/uploads/')) {
+                    deleteLogoBtn.style.display = 'inline-block';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading branding settings:', error);
+    }
+}
+
+async function uploadLogo() {
+    const fileInput = document.getElementById('logoUpload');
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showToast('Please select a file to upload', 'warning');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('logo', file);
+
+    showLoading();
+    try {
+        const response = await fetch('/api/settings/branding/logo', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast('Logo uploaded successfully', 'success');
+            // Update preview
+            const logoPreview = document.getElementById('currentLogoPreview');
+            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
+            if (logoPreview) logoPreview.src = data.logo_url + '?t=' + Date.now();
+            if (deleteLogoBtn) deleteLogoBtn.style.display = 'inline-block';
+            // Clear input
+            fileInput.value = '';
+        } else {
+            showToast(`Error: ${data.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Upload failed: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function deleteLogo() {
+    const confirmed = await showConfirm('Remove custom logo and revert to default?', 'Remove Logo', 'Remove', 'btn-warning');
+    if (!confirmed) return;
+
+    showLoading();
+    try {
+        const response = await fetch('/api/settings/branding/logo', {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast('Logo removed, reverted to default', 'success');
+            // Reset preview
+            const logoPreview = document.getElementById('currentLogoPreview');
+            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
+            if (logoPreview) logoPreview.src = '/static/images/favicon-128x128.png';
+            if (deleteLogoBtn) deleteLogoBtn.style.display = 'none';
+        } else {
+            showToast(`Error: ${data.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Failed: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ============================================================================
+// Notification Settings
+// ============================================================================
+
+async function saveNotificationSettings() {
+    const settings = {
+        slack_enabled: document.getElementById('slackEnabled').checked,
+        slack_webhook_url: document.getElementById('slackWebhookUrl').value || '',
+        teams_enabled: document.getElementById('teamsEnabled').checked,
+        teams_webhook_url: document.getElementById('teamsWebhookUrl').value || '',
+        // Generic webhook settings
+        generic_webhook_enabled: document.getElementById('genericWebhookEnabled').checked,
+        generic_webhook_url: document.getElementById('genericWebhookUrl').value || '',
+        generic_webhook_name: document.getElementById('genericWebhookName').value || 'Custom Webhook',
+        generic_webhook_format: document.getElementById('genericWebhookFormat').value || 'slack',
+        generic_webhook_custom_template: document.getElementById('genericWebhookTemplate').value || '',
+        generic_webhook_token: document.getElementById('genericWebhookToken').value || '',
+        // Email settings
+        critical_email_enabled: document.getElementById('criticalEmailEnabled').checked,
+        critical_email_time: document.getElementById('criticalEmailTime').value || '09:00',
+        critical_email_max_age_days: parseInt(document.getElementById('criticalEmailMaxAge').value) || 30,
+        // Alert mode defaults
+        default_alert_mode: document.getElementById('defaultAlertMode').value || 'daily_reminder',
+        default_escalation_days: parseInt(document.getElementById('defaultEscalationDays').value) || 3
+    };
+
+    try {
+        const response = await fetch('/api/settings/notifications', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('Notification settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving notification settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadNotificationSettings() {
+    try {
+        const response = await fetch('/api/settings/notifications');
+        if (response.ok) {
+            const settings = await response.json();
+            const slackEnabled = document.getElementById('slackEnabled');
+            const slackWebhookUrl = document.getElementById('slackWebhookUrl');
+            const teamsEnabled = document.getElementById('teamsEnabled');
+            const teamsWebhookUrl = document.getElementById('teamsWebhookUrl');
+            const genericWebhookEnabled = document.getElementById('genericWebhookEnabled');
+            const genericWebhookUrl = document.getElementById('genericWebhookUrl');
+            const genericWebhookName = document.getElementById('genericWebhookName');
+            const genericWebhookFormat = document.getElementById('genericWebhookFormat');
+            const genericWebhookTemplate = document.getElementById('genericWebhookTemplate');
+            const genericWebhookToken = document.getElementById('genericWebhookToken');
+            const customTemplateContainer = document.getElementById('customTemplateContainer');
+            const criticalEmailEnabled = document.getElementById('criticalEmailEnabled');
+            const criticalEmailTime = document.getElementById('criticalEmailTime');
+            const criticalEmailMaxAge = document.getElementById('criticalEmailMaxAge');
+
+            if (slackEnabled) slackEnabled.checked = settings.slack_enabled === true;
+            if (slackWebhookUrl) slackWebhookUrl.value = settings.slack_webhook_url || '';
+            if (teamsEnabled) teamsEnabled.checked = settings.teams_enabled === true;
+            if (teamsWebhookUrl) teamsWebhookUrl.value = settings.teams_webhook_url || '';
+
+            // Generic webhook settings
+            if (genericWebhookEnabled) genericWebhookEnabled.checked = settings.generic_webhook_enabled === true;
+            if (genericWebhookUrl) genericWebhookUrl.value = settings.generic_webhook_url || '';
+            if (genericWebhookName) genericWebhookName.value = settings.generic_webhook_name || 'Custom Webhook';
+            if (genericWebhookFormat) {
+                genericWebhookFormat.value = settings.generic_webhook_format || 'slack';
+                // Show/hide custom template field
+                if (customTemplateContainer) {
+                    customTemplateContainer.style.display = genericWebhookFormat.value === 'custom' ? 'block' : 'none';
+                }
+            }
+            if (genericWebhookTemplate) genericWebhookTemplate.value = settings.generic_webhook_custom_template || '';
+            if (genericWebhookToken) genericWebhookToken.value = settings.generic_webhook_token || '';
+
+            if (criticalEmailEnabled) criticalEmailEnabled.checked = settings.critical_email_enabled !== false;
+            if (criticalEmailTime) criticalEmailTime.value = settings.critical_email_time || '09:00';
+            if (criticalEmailMaxAge) criticalEmailMaxAge.value = settings.critical_email_max_age_days || 30;
+
+            // Alert mode defaults
+            const defaultAlertMode = document.getElementById('defaultAlertMode');
+            const defaultEscalationDays = document.getElementById('defaultEscalationDays');
+            if (defaultAlertMode) defaultAlertMode.value = settings.default_alert_mode || 'daily_reminder';
+            if (defaultEscalationDays) defaultEscalationDays.value = settings.default_escalation_days || 3;
+
+            // Setup event listener for format change
+            if (genericWebhookFormat) {
+                genericWebhookFormat.addEventListener('change', function() {
+                    if (customTemplateContainer) {
+                        customTemplateContainer.style.display = this.value === 'custom' ? 'block' : 'none';
+                    }
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error loading notification settings:', error);
+    }
+}
+
+async function testWebhook(type) {
+    showLoading();
+    try {
+        const response = await fetch('/api/settings/notifications/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: type })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            showToast(`Test failed: ${data.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Test failed: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ============================================================================
+// Data Retention Settings
+// ============================================================================
+
+async function saveRetentionSettings() {
+    const settings = {
+        audit_log_retention_days: parseInt(document.getElementById('auditLogRetention').value) || 365,
+        sync_history_retention_days: parseInt(document.getElementById('syncHistoryRetention').value) || 90,
+        session_log_retention_days: parseInt(document.getElementById('sessionLogRetention').value) || 30
+    };
+
+    try {
+        const response = await fetch('/api/settings/retention', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response.ok) {
+            showToast('Retention settings saved successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving retention settings: ${error.message}`, 'danger');
+    }
+}
+
+async function loadRetentionSettings() {
+    try {
+        const response = await fetch('/api/settings/retention');
+        if (response.ok) {
+            const settings = await response.json();
+            const auditLogRetention = document.getElementById('auditLogRetention');
+            const syncHistoryRetention = document.getElementById('syncHistoryRetention');
+            const sessionLogRetention = document.getElementById('sessionLogRetention');
+
+            if (auditLogRetention) auditLogRetention.value = settings.audit_log_retention_days || 365;
+            if (syncHistoryRetention) syncHistoryRetention.value = settings.sync_history_retention_days || 90;
+            if (sessionLogRetention) sessionLogRetention.value = settings.session_log_retention_days || 30;
+        }
+    } catch (error) {
+        console.error('Error loading retention settings:', error);
     }
 }
 
@@ -1978,6 +2692,7 @@ async function loadAllSettings() {
             document.getElementById('globalSmtpFromEmail').value = smtp.smtp_from_email || '';
             document.getElementById('globalSmtpFromName').value = smtp.smtp_from_name || 'SentriKat Alerts';
             document.getElementById('globalSmtpUseTLS').checked = smtp.smtp_use_tls !== false;
+            document.getElementById('globalSmtpUseSSL').checked = smtp.smtp_use_ssl === true;
         }
 
         // Load Sync settings
@@ -1988,6 +2703,14 @@ async function loadAllSettings() {
             document.getElementById('syncInterval').value = sync.sync_interval || 'daily';
             document.getElementById('syncTime').value = sync.sync_time || '02:00';
             document.getElementById('cisaKevUrl').value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+            // NVD API Key - show placeholder if configured
+            const nvdKeyInput = document.getElementById('nvdApiKey');
+            if (nvdKeyInput) {
+                nvdKeyInput.value = '';
+                nvdKeyInput.placeholder = sync.nvd_api_key_configured
+                    ? '(API key saved - leave blank to keep)'
+                    : 'Enter your NVD API key (optional)';
+            }
         }
         loadSyncStatus();
 
@@ -2004,6 +2727,12 @@ async function loadAllSettings() {
             if (httpsProxy) httpsProxy.value = general.https_proxy || '';
             if (noProxy) noProxy.value = general.no_proxy || '';
         }
+
+        // Load additional settings (security, branding, notifications, retention)
+        loadSecuritySettings();
+        loadBrandingSettings();
+        loadNotificationSettings();
+        loadRetentionSettings();
     } catch (error) {
         console.error('Error loading settings:', error);
     }
@@ -2173,6 +2902,13 @@ async function checkLdapPermissions() {
         const response = await fetch('/api/current-user');
         if (response.ok) {
             const user = await response.json();
+
+            // First check if LDAP feature is licensed
+            const ldapLicensed = isFeatureLicensed('ldap');
+            if (!ldapLicensed) {
+                // LDAP not licensed - tabs stay hidden (handled by applyLicenseRestrictions)
+                return;
+            }
 
             // LDAP Users tab: visible to org_admin, super_admin, or legacy is_admin
             const canAccessLdapUsers = user.role === 'org_admin' ||
@@ -2760,7 +3496,7 @@ async function loadGroupMappings() {
                         <td colspan="10" class="text-center py-4">
                             <i class="bi bi-inbox text-muted" style="font-size: 3rem;"></i>
                             <p class="text-muted mt-3">No LDAP group mappings configured.</p>
-                            <p class="text-muted">Click "Discover Groups" to find LDAP groups or "Create Mapping" to add one manually.</p>
+                            <p class="text-muted">Use "Discover LDAP Groups" above to find and map groups from your directory.</p>
                         </td>
                     </tr>
                 `;
@@ -2865,7 +3601,11 @@ async function showCreateMappingModal() {
     try {
         // Reset form
         const form = document.getElementById('groupMappingForm');
-        if (form) form.reset();
+        if (form) {
+            form.reset();
+            // Clear member count data attribute
+            delete form.dataset.memberCount;
+        }
 
         const mappingIdEl = document.getElementById('mappingId');
         if (mappingIdEl) mappingIdEl.value = '';
@@ -2937,6 +3677,7 @@ async function editGroupMapping(mappingId) {
  */
 async function saveGroupMapping() {
     const mappingId = document.getElementById('mappingId').value;
+    const form = document.getElementById('groupMappingForm');
     const data = {
         ldap_group_dn: document.getElementById('ldapGroupDn').value.trim(),
         ldap_group_cn: document.getElementById('ldapGroupCn').value.trim(),
@@ -2948,6 +3689,11 @@ async function saveGroupMapping() {
         auto_deprovision: document.getElementById('autoDeprovision').checked,
         sync_enabled: document.getElementById('syncEnabled').checked
     };
+
+    // Include member_count if creating a new mapping (from discovered groups)
+    if (!mappingId && form && form.dataset.memberCount) {
+        data.member_count = parseInt(form.dataset.memberCount) || 0;
+    }
 
     // Validation
     if (!data.ldap_group_dn || !data.ldap_group_cn || !data.role) {
@@ -3142,7 +3888,7 @@ async function performGroupDiscoveryInline() {
                 btn.addEventListener('click', function() {
                     const index = parseInt(this.dataset.groupIndex);
                     const group = container.discoveredGroups[index];
-                    createMappingFromDiscoveryInline(group.dn, group.cn, group.description || '');
+                    createMappingFromDiscoveryInline(group.dn, group.cn, group.description || '', group.member_count || 0);
                 });
             });
         } else {
@@ -3168,11 +3914,12 @@ async function performGroupDiscoveryInline() {
 /**
  * Create mapping from inline discovery results
  */
-async function createMappingFromDiscoveryInline(dn, cn, description) {
+async function createMappingFromDiscoveryInline(dn, cn, description, memberCount) {
     // Show the create mapping modal first
     await showCreateMappingModal();
 
     // Pre-fill the form with discovered group info
+    const form = document.getElementById('groupMappingForm');
     const dnField = document.getElementById('ldapGroupDn');
     const cnField = document.getElementById('ldapGroupCn');
     const descField = document.getElementById('ldapGroupDescription');
@@ -3180,6 +3927,9 @@ async function createMappingFromDiscoveryInline(dn, cn, description) {
     if (dnField) dnField.value = dn;
     if (cnField) cnField.value = cn;
     if (descField && description) descField.value = description;
+
+    // Store member count in data attribute for submission
+    if (form) form.dataset.memberCount = memberCount || 0;
 
     // Update modal title
     const titleEl = document.getElementById('groupMappingModalTitle');
@@ -3281,7 +4031,7 @@ async function performGroupDiscovery() {
                 btn.addEventListener('click', function() {
                     const index = parseInt(this.dataset.groupIndex);
                     const group = container.discoveredGroups[index];
-                    createMappingFromDiscovery(group.dn, group.cn, group.description || '');
+                    createMappingFromDiscovery(group.dn, group.cn, group.description || '', group.member_count || 0);
                 });
             });
         } else {
@@ -3307,7 +4057,7 @@ async function performGroupDiscovery() {
 /**
  * Create a mapping from discovered group
  */
-function createMappingFromDiscovery(dn, cn, description) {
+function createMappingFromDiscovery(dn, cn, description, memberCount) {
     // Close discovery modal
     const discoveryModal = bootstrap.Modal.getInstance(document.getElementById('ldapDiscoveryModal'));
     if (discoveryModal) {
@@ -3315,11 +4065,14 @@ function createMappingFromDiscovery(dn, cn, description) {
     }
 
     // Pre-fill mapping form
-    document.getElementById('groupMappingForm').reset();
+    const form = document.getElementById('groupMappingForm');
+    form.reset();
     document.getElementById('mappingId').value = '';
     document.getElementById('ldapGroupDn').value = dn;
     document.getElementById('ldapGroupCn').value = cn;
     document.getElementById('ldapGroupDescription').value = description;
+    // Store member count in data attribute for submission
+    form.dataset.memberCount = memberCount || 0;
     document.getElementById('groupMappingModalTitle').textContent = 'Create Group Mapping';
 
     // Load organizations
@@ -3426,13 +4179,14 @@ async function loadSyncStats() {
     try {
         const response = await fetch('/api/ldap/groups/sync/history?limit=1');
         if (response.ok) {
-            const history = await response.json();
-            const latestSync = history.length > 0 ? history[0] : null;
+            const result = await response.json();
+            const logs = result.logs || [];
+            const latestSync = logs.length > 0 ? logs[0] : null;
 
-            // Update stats displays
-            if (latestSync) {
+            // Update stats displays - use 'timestamp' field from backend
+            if (latestSync && latestSync.timestamp) {
                 document.getElementById('syncStatsLastSync').textContent =
-                    new Date(latestSync.started_at).toLocaleString();
+                    new Date(latestSync.timestamp).toLocaleString();
             }
 
             // Count total LDAP users
@@ -3444,11 +4198,12 @@ async function loadSyncStats() {
             }
 
             // Count successful syncs and errors from history
+            // Backend uses 'success' not 'completed' for status
             const historyResponse = await fetch('/api/ldap/groups/sync/history?limit=100');
             if (historyResponse.ok) {
-                const result = await historyResponse.json();
-                const allHistory = result.logs || [];
-                const successCount = allHistory.filter(s => s.status === 'completed').length;
+                const historyResult = await historyResponse.json();
+                const allHistory = historyResult.logs || [];
+                const successCount = allHistory.filter(s => s.status === 'success').length;
                 const errorCount = allHistory.filter(s => s.status === 'failed').length;
 
                 document.getElementById('syncStatsSuccess').textContent = successCount;
@@ -3485,14 +4240,22 @@ async function loadSyncHistory() {
             }
 
             tableBody.innerHTML = history.map(sync => {
-                const statusBadge = sync.status === 'completed' ?
-                    '<span class="badge bg-success">Completed</span>' :
-                    sync.status === 'failed' ?
-                    '<span class="badge bg-danger">Failed</span>' :
-                    '<span class="badge bg-warning">In Progress</span>';
+                // Map backend status values to display badges
+                let statusBadge;
+                if (sync.status === 'success') {
+                    statusBadge = '<span class="badge bg-success">Completed</span>';
+                } else if (sync.status === 'partial') {
+                    statusBadge = '<span class="badge bg-warning">Partial</span>';
+                } else if (sync.status === 'failed') {
+                    statusBadge = '<span class="badge bg-danger">Failed</span>';
+                } else {
+                    statusBadge = '<span class="badge bg-secondary">Unknown</span>';
+                }
 
-                const duration = sync.duration ? `${sync.duration.toFixed(2)}s` : '-';
-                const startedAt = new Date(sync.started_at).toLocaleString();
+                // Use correct field names from backend (duration_seconds, timestamp)
+                const duration = sync.duration_seconds ? `${sync.duration_seconds.toFixed(2)}s` : '-';
+                const startedAt = sync.timestamp ? new Date(sync.timestamp).toLocaleString() : '-';
+                const errorCount = Array.isArray(sync.errors) ? sync.errors.length : 0;
 
                 return `
                     <tr>
@@ -3504,7 +4267,7 @@ async function loadSyncHistory() {
                         <td data-column="added">${sync.users_added || 0}</td>
                         <td data-column="updated">${sync.users_updated || 0}</td>
                         <td data-column="deactivated">${sync.users_deactivated || 0}</td>
-                        <td data-column="errors">${sync.error_count || 0}</td>
+                        <td data-column="errors">${errorCount}</td>
                     </tr>
                 `;
             }).join('');
@@ -3710,3 +4473,675 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+// ============================================================================
+// AUDIT LOGS
+// ============================================================================
+
+let currentAuditPage = 1;
+
+async function loadAuditLogs(page = 1) {
+    const tbody = document.getElementById('auditLogsTable');
+    if (!tbody) return;
+
+    currentAuditPage = page;
+
+    // Get filter values
+    const action = document.getElementById('auditActionFilter')?.value || '';
+    const resource = document.getElementById('auditResourceFilter')?.value || '';
+    const search = document.getElementById('auditSearchInput')?.value || '';
+    const startDate = document.getElementById('auditStartDate')?.value || '';
+    const endDate = document.getElementById('auditEndDate')?.value || '';
+    const perPage = document.getElementById('auditPerPage')?.value || '50';
+    const sortField = document.getElementById('auditSortField')?.value || 'timestamp';
+    const sortOrder = document.getElementById('auditSortOrder')?.value || 'desc';
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="6" class="text-center text-muted py-4">
+                <div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading audit logs...
+            </td>
+        </tr>
+    `;
+
+    try {
+        // Build URL with all parameters
+        const params = new URLSearchParams({
+            page: page,
+            per_page: perPage,
+            sort: sortField,
+            order: sortOrder
+        });
+        if (action) params.append('action', action);
+        if (resource) params.append('resource', resource);
+        if (search) params.append('search', search);
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+
+        const response = await fetch(`/api/audit-logs?${params}`);
+
+        if (!response.ok) {
+            const error = await response.json();
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center text-danger py-4">
+                        <i class="bi bi-exclamation-triangle me-2"></i>${error.error || 'Failed to load audit logs'}
+                    </td>
+                </tr>
+            `;
+            updateAuditPagination(0, 0, 0);
+            return;
+        }
+
+        const data = await response.json();
+
+        // Update info display
+        const infoEl = document.getElementById('auditPaginationInfo');
+        if (infoEl) {
+            const start = (data.page - 1) * data.per_page + 1;
+            const end = Math.min(data.page * data.per_page, data.total);
+            infoEl.textContent = data.total > 0
+                ? `Showing ${start}-${end} of ${data.total} entries`
+                : 'No entries';
+        }
+
+        if (!data.logs || data.logs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-4">
+                        <i class="bi bi-journal-text me-2"></i>No audit logs found matching your criteria
+                    </td>
+                </tr>
+            `;
+            updateAuditPagination(0, 0, 0);
+            return;
+        }
+
+        tbody.innerHTML = data.logs.map(log => {
+            const timestamp = log.timestamp ? new Date(log.timestamp).toLocaleString() : '-';
+            const actionBadge = getActionBadge(log.action);
+
+            // Build details from message and/or structured data
+            let details = '';
+            if (log.message) {
+                details = log.message;
+            }
+            if (log.old_value || log.new_value) {
+                const changes = [];
+                if (log.old_value) changes.push(`From: ${JSON.stringify(log.old_value)}`);
+                if (log.new_value) changes.push(`To: ${JSON.stringify(log.new_value)}`);
+                if (details) details += ' | ';
+                details += changes.join(' ');
+            }
+            if (!details) details = '-';
+
+            const truncatedDetails = details.length > 100 ? details.substring(0, 100) + '...' : details;
+
+            // Parse resource to get type and ID
+            const resourceParts = (log.resource || '').split(':');
+            const resourceType = resourceParts[0] || '-';
+            const resourceId = resourceParts[1] || '';
+
+            return `
+                <tr>
+                    <td class="text-nowrap"><small>${timestamp}</small></td>
+                    <td>${actionBadge}</td>
+                    <td><small>${escapeHtml(resourceType)}${resourceId ? `:<strong>${resourceId}</strong>` : ''}</small></td>
+                    <td><small>${escapeHtml(log.user_id || '-')}</small></td>
+                    <td><small class="text-muted">${escapeHtml(log.ip_address || '-')}</small></td>
+                    <td><small class="text-muted" title="${escapeHtml(details)}" style="cursor: help;">${escapeHtml(truncatedDetails)}</small></td>
+                </tr>
+            `;
+        }).join('');
+
+        // Update pagination
+        updateAuditPagination(data.page, data.total_pages, data.total);
+
+    } catch (error) {
+        console.error('Error loading audit logs:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center text-danger py-4">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading audit logs: ${error.message}
+                </td>
+            </tr>
+        `;
+        updateAuditPagination(0, 0, 0);
+    }
+}
+
+function updateAuditPagination(currentPage, totalPages, total) {
+    const pagination = document.getElementById('auditPagination');
+    if (!pagination) return;
+
+    if (totalPages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+
+    // Previous button
+    html += `
+        <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="loadAuditLogs(${currentPage - 1}); return false;">&laquo;</a>
+        </li>
+    `;
+
+    // Page numbers (show max 7 pages)
+    const maxPages = 7;
+    let startPage = Math.max(1, currentPage - Math.floor(maxPages / 2));
+    let endPage = Math.min(totalPages, startPage + maxPages - 1);
+
+    if (endPage - startPage < maxPages - 1) {
+        startPage = Math.max(1, endPage - maxPages + 1);
+    }
+
+    if (startPage > 1) {
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="loadAuditLogs(1); return false;">1</a></li>`;
+        if (startPage > 2) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        html += `
+            <li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" onclick="loadAuditLogs(${i}); return false;">${i}</a>
+            </li>
+        `;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="loadAuditLogs(${totalPages}); return false;">${totalPages}</a></li>`;
+    }
+
+    // Next button
+    html += `
+        <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="loadAuditLogs(${currentPage + 1}); return false;">&raquo;</a>
+        </li>
+    `;
+
+    pagination.innerHTML = html;
+}
+
+function sortAuditLogs(field) {
+    const sortFieldEl = document.getElementById('auditSortField');
+    const sortOrderEl = document.getElementById('auditSortOrder');
+
+    if (sortFieldEl.value === field) {
+        // Toggle order if same field
+        sortOrderEl.value = sortOrderEl.value === 'desc' ? 'asc' : 'desc';
+    } else {
+        sortFieldEl.value = field;
+        sortOrderEl.value = 'desc';
+    }
+
+    loadAuditLogs(1);
+}
+
+function clearAuditFilters() {
+    document.getElementById('auditSearchInput').value = '';
+    document.getElementById('auditActionFilter').value = '';
+    document.getElementById('auditResourceFilter').value = '';
+    document.getElementById('auditStartDate').value = '';
+    document.getElementById('auditEndDate').value = '';
+    document.getElementById('auditPerPage').value = '50';
+    document.getElementById('auditSortField').value = 'timestamp';
+    document.getElementById('auditSortOrder').value = 'desc';
+    loadAuditLogs(1);
+}
+
+function getActionBadge(action) {
+    const badges = {
+        'CREATE': '<span class="badge bg-success">CREATE</span>',
+        'UPDATE': '<span class="badge bg-primary">UPDATE</span>',
+        'DELETE': '<span class="badge bg-danger">DELETE</span>',
+        'LOGIN': '<span class="badge bg-info">LOGIN</span>',
+        'LOGOUT': '<span class="badge bg-secondary">LOGOUT</span>',
+        'LOGIN_FAILED': '<span class="badge bg-danger">LOGIN FAILED</span>',
+        'BLOCK': '<span class="badge bg-warning text-dark">BLOCK</span>',
+        'UNBLOCK': '<span class="badge bg-success">UNBLOCK</span>',
+        'UNLOCK': '<span class="badge bg-warning text-dark">UNLOCK</span>',
+        'RESET_2FA': '<span class="badge bg-purple text-white" style="background-color: #7c3aed;">RESET 2FA</span>',
+        'FORCE_PASSWORD_CHANGE': '<span class="badge bg-purple text-white" style="background-color: #7c3aed;">FORCE PWD</span>',
+        'SYNC': '<span class="badge bg-info">SYNC</span>',
+        'BACKUP': '<span class="badge bg-secondary">BACKUP</span>',
+        'RESTORE': '<span class="badge bg-warning text-dark">RESTORE</span>'
+    };
+    return badges[action] || `<span class="badge bg-secondary">${escapeHtml(action || 'UNKNOWN')}</span>`;
+}
+
+function exportAuditLogs(format, days) {
+    const action = document.getElementById('auditActionFilter')?.value || '';
+    const resource = document.getElementById('auditResourceFilter')?.value || '';
+    const search = document.getElementById('auditSearchInput')?.value || '';
+
+    let url = `/api/audit-logs/export?format=${format}&days=${days}`;
+    if (action) url += `&action=${encodeURIComponent(action)}`;
+    if (resource) url += `&resource=${encodeURIComponent(resource)}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+
+    // Trigger download
+    window.location.href = url;
+    showToast(`Downloading audit logs (${format.toUpperCase()}, last ${days} days)...`, 'info');
+}
+
+// Load audit logs when the tab is shown
+document.addEventListener('DOMContentLoaded', function() {
+    const auditLogsTab = document.getElementById('audit-logs-tab');
+    if (auditLogsTab) {
+        auditLogsTab.addEventListener('shown.bs.tab', function() {
+            loadAuditLogs(1);
+        });
+    }
+
+    // Load license info when tab is shown
+    const licenseTab = document.getElementById('license-tab');
+    if (licenseTab) {
+        licenseTab.addEventListener('shown.bs.tab', function() {
+            loadLicenseInfo();
+        });
+    }
+});
+
+// ============================================================================
+// LICENSE MANAGEMENT
+// ============================================================================
+
+/**
+ * Load license info and apply UI restrictions for premium features
+ * This is called early during page initialization
+ */
+async function loadLicenseAndApplyRestrictions() {
+    try {
+        const response = await fetch('/api/license');
+        if (!response.ok) {
+            console.warn('Failed to load license info');
+            window.licenseInfo = { is_professional: false, features: [] };
+            return;
+        }
+
+        window.licenseInfo = await response.json();
+        applyLicenseRestrictions();
+
+    } catch (error) {
+        console.error('Error loading license for restrictions:', error);
+        window.licenseInfo = { is_professional: false, features: [] };
+    }
+}
+
+/**
+ * Apply UI restrictions based on license status
+ * Hides premium features and shows upgrade notices for Community users
+ */
+function applyLicenseRestrictions() {
+    const license = window.licenseInfo;
+    if (!license) return;
+
+    const isProfessional = license.is_professional;
+    const features = license.features || [];
+
+    // Helper to check if a feature is licensed
+    const hasFeature = (feature) => isProfessional || features.includes(feature);
+
+    // ========================================
+    // LDAP Features - requires 'ldap' license
+    // ========================================
+    if (!hasFeature('ldap')) {
+        // Hide LDAP tabs completely for Community
+        const ldapUsersTab = document.getElementById('ldap-users-tab-item');
+        const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+        if (ldapUsersTab) ldapUsersTab.style.display = 'none';
+        if (ldapGroupsTab) ldapGroupsTab.style.display = 'none';
+
+        // Add upgrade notice to LDAP settings section
+        const ldapSettingsPane = document.getElementById('ldapSettings');
+        if (ldapSettingsPane) {
+            ldapSettingsPane.innerHTML = createPremiumUpgradeNotice('LDAP Authentication', 'ldap');
+        }
+    }
+
+    // ========================================
+    // Backup & Restore - requires 'backup_restore' license
+    // ========================================
+    if (!hasFeature('backup_restore')) {
+        // Find and replace the Backup & Restore card content
+        const backupCard = document.getElementById('backupRestoreCard');
+        if (backupCard) {
+            backupCard.innerHTML = `
+                <div class="card-header">
+                    <i class="bi bi-cloud-download me-2"></i>Backup & Restore
+                    <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
+                </div>
+                ${createPremiumUpgradeNotice('Backup & Restore', 'backup_restore')}
+            `;
+        }
+    }
+
+    // ========================================
+    // Email Alerts / Webhooks - requires 'email_alerts' license
+    // ========================================
+    if (!hasFeature('email_alerts')) {
+        const notificationsPane = document.getElementById('notificationsSettings');
+        if (notificationsPane) {
+            // Replace notifications settings with upgrade notice
+            notificationsPane.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-bell me-2"></i>Notification Integrations
+                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
+                    </div>
+                    ${createPremiumUpgradeNotice('Email Alerts & Webhooks', 'email_alerts')}
+                </div>
+            `;
+        }
+
+        // Also hide the org webhook tab in organization modal
+        const orgWebhookTab = document.getElementById('webhook-tab');
+        if (orgWebhookTab) {
+            orgWebhookTab.closest('li')?.style.setProperty('display', 'none');
+        }
+    }
+
+    // ========================================
+    // White Label / Branding - requires 'white_label' license
+    // ========================================
+    if (!hasFeature('white_label')) {
+        const brandingPane = document.getElementById('brandingSettings');
+        if (brandingPane) {
+            // Replace branding settings with upgrade notice
+            brandingPane.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-palette me-2"></i>Branding & White Label
+                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
+                    </div>
+                    ${createPremiumUpgradeNotice('Branding & White Label', 'white_label')}
+                </div>
+            `;
+        }
+    }
+
+    console.log('License restrictions applied:', {
+        isProfessional,
+        features,
+        ldapEnabled: hasFeature('ldap'),
+        backupEnabled: hasFeature('backup_restore'),
+        emailAlertsEnabled: hasFeature('email_alerts'),
+        whiteLabelEnabled: hasFeature('white_label')
+    });
+}
+
+/**
+ * Create a premium upgrade notice HTML for a locked feature
+ */
+function createPremiumUpgradeNotice(featureName, featureKey) {
+    return `
+        <div class="card-body">
+            <div class="text-center py-4">
+                <i class="bi bi-lock-fill display-3 text-muted mb-3"></i>
+                <h5 class="text-muted">${featureName}</h5>
+                <p class="text-muted mb-3">
+                    This feature requires a <strong>Professional license</strong>.
+                </p>
+                <div class="alert alert-light border d-inline-block">
+                    <i class="bi bi-stars me-2 text-warning"></i>
+                    Upgrade to Professional to unlock ${featureName.toLowerCase()} and more advanced features.
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Check if a specific feature is licensed
+ * Can be called from anywhere after license is loaded
+ */
+function isFeatureLicensed(feature) {
+    const license = window.licenseInfo;
+    if (!license) return false;
+    if (license.is_professional) return true;
+    return (license.features || []).includes(feature);
+}
+
+async function loadLicenseInfo() {
+    try {
+        const response = await fetch('/api/license');
+        if (!response.ok) {
+            throw new Error('Failed to load license info');
+        }
+
+        const data = await response.json();
+        displayLicenseInfo(data);
+
+    } catch (error) {
+        console.error('Error loading license:', error);
+        document.getElementById('licenseDetails').innerHTML = `
+            <div class="alert alert-danger mb-0">
+                <i class="bi bi-exclamation-triangle me-2"></i>Failed to load license info
+            </div>
+        `;
+    }
+}
+
+function displayLicenseInfo(data) {
+    const detailsEl = document.getElementById('licenseDetails');
+    const usageEl = document.getElementById('licenseUsage');
+    const badgeEl = document.getElementById('licenseEditionBadge');
+    const removeBtn = document.getElementById('removeLicenseBtn');
+
+    // Update edition badge
+    if (data.is_professional) {
+        badgeEl.className = 'badge bg-success';
+        badgeEl.textContent = 'Professional';
+        removeBtn.style.display = 'inline-block';
+    } else {
+        badgeEl.className = 'badge bg-secondary';
+        badgeEl.textContent = 'Community';
+        removeBtn.style.display = 'none';
+    }
+
+    // License details
+    let statusHtml = '';
+    if (data.is_professional) {
+        statusHtml = `
+            <div class="mb-2">
+                <span class="badge bg-success mb-2"><i class="bi bi-patch-check me-1"></i>Professional License</span>
+            </div>
+            <table class="table table-sm table-borderless mb-0">
+                <tr>
+                    <td class="text-muted" style="width: 100px;">Customer</td>
+                    <td><strong>${escapeHtml(data.customer || '-')}</strong></td>
+                </tr>
+                <tr>
+                    <td class="text-muted">License ID</td>
+                    <td><code>${escapeHtml(data.license_id || '-')}</code></td>
+                </tr>
+                <tr>
+                    <td class="text-muted">Expires</td>
+                    <td>${data.expires_at ? formatDate(data.expires_at) : '<span class="text-success">Never (Perpetual)</span>'}</td>
+                </tr>
+                ${data.days_until_expiry !== null ? `
+                <tr>
+                    <td class="text-muted">Status</td>
+                    <td>${data.is_expired
+                        ? '<span class="badge bg-danger">Expired</span>'
+                        : data.days_until_expiry <= 30
+                            ? `<span class="badge bg-warning text-dark">${data.days_until_expiry} days remaining</span>`
+                            : `<span class="badge bg-success">${data.days_until_expiry} days remaining</span>`
+                    }</td>
+                </tr>
+                ` : ''}
+            </table>
+        `;
+    } else {
+        statusHtml = `
+            <div class="mb-2">
+                <span class="badge bg-secondary mb-2"><i class="bi bi-box me-1"></i>Community Edition</span>
+            </div>
+            <p class="text-muted small mb-2">Free for personal and small team use.</p>
+            <p class="mb-0">
+                <a href="#" class="text-primary" onclick="document.getElementById('licenseKeyInput').focus(); return false;">
+                    <i class="bi bi-arrow-up-circle me-1"></i>Upgrade to Professional
+                </a>
+            </p>
+        `;
+    }
+    detailsEl.innerHTML = statusHtml;
+
+    // Usage info
+    const limits = data.limits || {};
+    const usage = data.usage || {};
+
+    const formatLimit = (current, max) => {
+        if (max === -1) return `${current} <span class="text-success">(unlimited)</span>`;
+        const percent = (current / max) * 100;
+        const colorClass = percent >= 100 ? 'text-danger' : percent >= 80 ? 'text-warning' : 'text-success';
+        return `<span class="${colorClass}">${current}</span> / ${max}`;
+    };
+
+    usageEl.innerHTML = `
+        <table class="table table-sm table-borderless mb-0">
+            <tr>
+                <td class="text-muted" style="width: 100px;">Users</td>
+                <td>${formatLimit(usage.users || 0, limits.max_users)}</td>
+            </tr>
+            <tr>
+                <td class="text-muted">Organizations</td>
+                <td>${formatLimit(usage.organizations || 0, limits.max_organizations)}</td>
+            </tr>
+            <tr>
+                <td class="text-muted">Products</td>
+                <td>${formatLimit(usage.products || 0, limits.max_products)}</td>
+            </tr>
+        </table>
+        ${!data.is_professional && (
+            (usage.users >= limits.max_users) ||
+            (usage.organizations >= limits.max_organizations) ||
+            (usage.products >= limits.max_products)
+        ) ? `
+            <div class="alert alert-warning mt-3 mb-0 py-2">
+                <small><i class="bi bi-exclamation-triangle me-1"></i>You've reached Community limits. Upgrade to Professional for unlimited usage.</small>
+            </div>
+        ` : ''}
+    `;
+}
+
+async function activateLicense() {
+    const licenseKey = document.getElementById('licenseKeyInput').value.trim();
+
+    if (!licenseKey) {
+        showToast('Please enter a license key', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/license', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ license_key: licenseKey })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast(data.message, 'success');
+            document.getElementById('licenseKeyInput').value = '';
+            loadLicenseInfo();
+            // Reload page to apply license changes (like removing "Powered by")
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showToast(data.error || 'Failed to activate license', 'error');
+        }
+
+    } catch (error) {
+        console.error('Error activating license:', error);
+        showToast('Failed to activate license: ' + error.message, 'error');
+    }
+}
+
+async function removeLicense() {
+    const confirmed = await showConfirm('Are you sure you want to remove the license?<br><br>This will revert to <strong>Community edition</strong>.', 'Remove License', 'Remove', 'btn-danger');
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/api/license', {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast(data.message, 'success');
+            loadLicenseInfo();
+            // Reload page to apply changes
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showToast(data.error || 'Failed to remove license', 'error');
+        }
+
+    } catch (error) {
+        console.error('Error removing license:', error);
+        showToast('Failed to remove license: ' + error.message, 'error');
+    }
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// ============================================================================
+// URL HASH HANDLING - Switch to tab based on URL hash
+// ============================================================================
+
+/**
+ * Handle URL hash to switch to the correct tab on page load
+ * Supports: #users, #organizations, #settings, #ldapUsers, #ldapGroups, #license
+ */
+function handleUrlHash() {
+    const hash = window.location.hash.substring(1); // Remove the '#'
+    if (!hash) return;
+
+    console.log('URL hash detected:', hash);
+
+    // Map of hash values to tab button IDs
+    const tabMap = {
+        'users': 'users-tab',
+        'organizations': 'organizations-tab',
+        'settings': 'settings-tab',
+        'ldapUsers': 'ldap-users-tab',
+        'ldapGroups': 'ldap-groups-tab',
+        'license': 'license-tab'
+    };
+
+    const tabButtonId = tabMap[hash];
+    if (tabButtonId) {
+        const tabButton = document.getElementById(tabButtonId);
+        if (tabButton) {
+            console.log('Switching to tab:', tabButtonId);
+            // Use Bootstrap's Tab API to switch tabs
+            const tab = new bootstrap.Tab(tabButton);
+            tab.show();
+        } else {
+            console.warn('Tab button not found:', tabButtonId);
+        }
+    }
+}
+
+// Initialize hash handling when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle URL hash on page load
+    handleUrlHash();
+
+    // Also handle hash changes (e.g., if user clicks back button)
+    window.addEventListener('hashchange', handleUrlHash);
+});

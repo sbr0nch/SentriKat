@@ -23,13 +23,18 @@ def create_app(config_class=Config):
     csrf.init_app(app)
     limiter.init_app(app)
 
-    # Security headers via Talisman (only in production with HTTPS)
+    # Security headers via Talisman (only in production)
+    # Set FORCE_HTTPS=false in .env if not using HTTPS (e.g., behind reverse proxy)
     if os.environ.get('FLASK_ENV') == 'production':
         from flask_talisman import Talisman
+        force_https = os.environ.get('FORCE_HTTPS', 'true').lower() == 'true'
+        # For HTTP deployments, session_cookie_secure must be False
+        session_cookie_secure = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
         Talisman(app,
-            force_https=True,
-            strict_transport_security=True,
-            strict_transport_security_max_age=31536000,
+            force_https=force_https,
+            session_cookie_secure=session_cookie_secure,  # Must be False for HTTP
+            strict_transport_security=force_https,  # Only enable HSTS with HTTPS
+            strict_transport_security_max_age=31536000 if force_https else 0,
             content_security_policy={
                 'default-src': "'self'",
                 'script-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
@@ -47,7 +52,7 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
@@ -55,19 +60,70 @@ def create_app(config_class=Config):
     app.register_blueprint(ldap_api.ldap_bp)
     app.register_blueprint(ldap_group_api.ldap_group_bp)
     app.register_blueprint(shared_views_api.shared_views_bp)
+    app.register_blueprint(licensing.license_bp)
+    app.register_blueprint(cpe_api.bp)
 
-    # Make current user available in all templates
+    # Make current user and branding available in all templates
     @app.context_processor
-    def inject_user():
+    def inject_globals():
         from flask import session
-        from app.models import User
+        from app.models import User, SystemSettings
         import os
+
         current_user = None
         if 'user_id' in session:
             current_user = User.query.get(session['user_id'])
+
         # Match auth.py: AUTH_ENABLED = DISABLE_AUTH != 'true'
         auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
-        return dict(current_user=current_user, auth_enabled=auth_enabled)
+
+        # Load branding settings
+        branding = {
+            'app_name': 'SentriKat',
+            'login_message': '',
+            'support_email': '',
+            'show_version': True,
+            'logo_url': '/static/images/favicon-128x128.png'  # Default logo
+        }
+        try:
+            app_name = SystemSettings.query.filter_by(key='app_name').first()
+            login_message = SystemSettings.query.filter_by(key='login_message').first()
+            support_email = SystemSettings.query.filter_by(key='support_email').first()
+            show_version = SystemSettings.query.filter_by(key='show_version').first()
+            logo_url = SystemSettings.query.filter_by(key='logo_url').first()
+
+            if app_name and app_name.value:
+                branding['app_name'] = app_name.value
+            if login_message and login_message.value:
+                branding['login_message'] = login_message.value
+            if support_email and support_email.value:
+                branding['support_email'] = support_email.value
+            if show_version:
+                branding['show_version'] = show_version.value != 'false'
+            if logo_url and logo_url.value:
+                branding['logo_url'] = logo_url.value
+        except:
+            pass  # Use defaults if DB not ready
+
+        # Load license info
+        license_info = None
+        try:
+            from app.licensing import get_license
+            license_info = get_license()
+            # Update branding based on license
+            if license_info and license_info.is_professional():
+                branding['show_powered_by'] = False
+            else:
+                branding['show_powered_by'] = True
+        except:
+            branding['show_powered_by'] = True
+
+        return dict(
+            current_user=current_user,
+            auth_enabled=auth_enabled,
+            branding=branding,
+            license=license_info
+        )
 
     # Setup wizard redirect
     @app.before_request

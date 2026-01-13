@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}SentriKat - Enterprise Vulnerability Management{% endblock %}</title>
+    <title>{% block title %}{{ branding.app_name }} - Enterprise Vulnerability Management{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -345,8 +345,56 @@
             color: #fcd34d !important;
         }
 
+        [data-theme="dark"] .alert-secondary {
+            background-color: rgba(100, 116, 139, 0.2) !important;
+            border-color: rgba(100, 116, 139, 0.4) !important;
+            color: #cbd5e1 !important;
+        }
+
+        [data-theme="dark"] .alert-secondary .alert-heading,
+        [data-theme="dark"] .alert-secondary h6,
+        [data-theme="dark"] .alert-secondary strong {
+            color: #e2e8f0 !important;
+        }
+
+        [data-theme="dark"] .alert-secondary p,
+        [data-theme="dark"] .alert-secondary small {
+            color: #94a3b8 !important;
+        }
+
+        [data-theme="dark"] .alert-light {
+            background-color: rgba(148, 163, 184, 0.15) !important;
+            border-color: rgba(148, 163, 184, 0.3) !important;
+            color: #cbd5e1 !important;
+        }
+
         [data-theme="dark"] .alert hr {
             border-color: var(--border-color);
+        }
+
+        /* Dark mode bg-light - used in license cards, LDAP sync, etc. */
+        [data-theme="dark"] .bg-light {
+            background-color: #334155 !important;
+            color: #e2e8f0 !important;
+        }
+
+        [data-theme="dark"] .bg-light .card-title,
+        [data-theme="dark"] .bg-light h5,
+        [data-theme="dark"] .bg-light h6 {
+            color: #f1f5f9 !important;
+        }
+
+        [data-theme="dark"] .bg-light p,
+        [data-theme="dark"] .bg-light span,
+        [data-theme="dark"] .bg-light .text-muted {
+            color: #94a3b8 !important;
+        }
+
+        /* Dark mode for read-only form controls used as display fields */
+        [data-theme="dark"] .form-control.bg-light {
+            background-color: #334155 !important;
+            border-color: #475569 !important;
+            color: #e2e8f0 !important;
         }
 
         /* Dark mode table text */
@@ -882,6 +930,16 @@
             color: #047857;
         }
 
+        .btn-action-warning {
+            color: #d97706;
+        }
+
+        .btn-action-warning:hover {
+            background: #fffbeb;
+            border-color: #fcd34d;
+            color: #b45309;
+        }
+
         /* Table Column Controls */
         .table-controls {
             display: flex;
@@ -1396,8 +1454,8 @@
         <div class="container-fluid px-4">
             <div class="d-flex justify-content-between align-items-center">
                 <a class="navbar-brand" href="/">
-                    <img src="/static/images/favicon-128x128.png" alt="SentriKat" style="width: 96px; height: 96px;">
-                    <span>SentriKat</span>
+                    <img src="{{ branding.logo_url }}" alt="{{ branding.app_name }}" style="width: 96px; height: 96px; object-fit: contain;">
+                    <span>{{ branding.app_name }}</span>
                 </a>
                 <div class="d-flex align-items-center gap-3">
                     <a class="nav-link {{ 'active' if request.endpoint == 'main.index' else '' }}" href="/">
@@ -1500,6 +1558,14 @@
                                 </span>
                             </li>
                             <li><hr class="dropdown-divider"></li>
+                            {% if current_user.auth_type == 'local' %}
+                            <li>
+                                <a class="dropdown-item" href="#" onclick="openSecuritySettings(); return false;">
+                                    <i class="bi bi-shield-lock me-2"></i>Security Settings
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            {% endif %}
                             <li>
                                 <a class="dropdown-item text-danger" href="/logout">
                                     <i class="bi bi-box-arrow-right me-2"></i>Logout
@@ -1525,16 +1591,26 @@
         <div class="container-fluid px-4">
             <div class="text-center">
                 <p class="mb-1">
-                    <strong>SentriKat</strong> - Enterprise Vulnerability Management Platform
+                    <strong>{{ branding.app_name }}</strong> - Enterprise Vulnerability Management Platform
                 </p>
                 <p class="copyright-notice mb-1">
                     Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
+                    {% if branding.support_email %}
+                    | <a href="mailto:{{ branding.support_email }}">Support</a>
+                    {% endif %}
                 </p>
                 <!-- CVE Service Status Indicator -->
+                {% if branding.show_version %}
                 <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
                     <span class="status-led status-led-yellow" id="cveStatusLed"></span>
                     <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
                 </div>
+                {% endif %}
+                {% if branding.show_powered_by | default(true) %}
+                <p class="text-muted mt-1 mb-0" style="font-size: 0.7rem; opacity: 0.7;">
+                    Powered by <a href="https://github.com/sbr0nch/SentriKat" target="_blank" class="text-muted text-decoration-none">SentriKat</a>
+                </p>
+                {% endif %}
             </div>
         </div>
     </footer>
@@ -1561,6 +1637,28 @@
                     </button>
                     <button type="button" class="btn btn-primary" id="confirmModalButton">
                         <i class="bi bi-check-circle me-1"></i>Confirm
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Modal (replacement for native alert()) -->
+    <div class="modal fade" id="alertModal" tabindex="-1" aria-labelledby="alertModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="alertModalLabel">
+                        <i class="bi bi-info-circle me-2"></i>Notice
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="alertModalBody">
+                    Message goes here
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                        <i class="bi bi-check me-1"></i>OK
                     </button>
                 </div>
             </div>
@@ -1625,31 +1723,17 @@
          * Used by the admin dropdown menu
          */
         function switchToAdminTab(tabId) {
-            console.log('switchToAdminTab called with:', tabId);
-            console.log('Current pathname:', window.location.pathname);
-
-            // Check if we're on the admin panel page
+            // Navigate to admin panel if not already there
             if (window.location.pathname !== '/admin-panel') {
-                console.log('Not on admin panel, navigating to:', '/admin-panel#' + tabId);
-                // Navigate to admin panel with hash
                 window.location.href = '/admin-panel#' + tabId;
                 return;
             }
 
-            // We're already on the page, just switch the tab
-            console.log('On admin panel, switching tab...');
-            const tabButtonId = tabId + '-tab';
-            console.log('Looking for tab button:', tabButtonId);
-            const tabButton = document.getElementById(tabButtonId);
-            console.log('Tab button found:', !!tabButton);
-
+            // Switch tab on current page
+            const tabButton = document.getElementById(tabId + '-tab');
             if (tabButton) {
-                console.log('Activating tab...');
                 const tab = new bootstrap.Tab(tabButton);
                 tab.show();
-                console.log('Tab shown');
-            } else {
-                console.error('Tab button not found:', tabButtonId);
             }
         }
 
@@ -1766,6 +1850,44 @@
                 confirmBtn.addEventListener('click', handleConfirm);
                 modal.addEventListener('hidden.bs.modal', handleCancel, { once: true });
 
+                bsModal.show();
+            });
+        }
+
+        /**
+         * Shows an alert modal dialog (replacement for alert())
+         * @param {string} message - The message to display
+         * @param {string} title - Optional title (default: "Notice")
+         * @param {string} type - Optional type: 'info', 'success', 'warning', 'error' (default: 'info')
+         * @returns {Promise<void>} - Resolves when user closes the modal
+         */
+        function showAlert(message, title = 'Notice', type = 'info') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('alertModal');
+                const modalTitle = document.getElementById('alertModalLabel');
+                const modalBody = document.getElementById('alertModalBody');
+
+                // Icon based on type
+                const icons = {
+                    'info': 'bi-info-circle text-primary',
+                    'success': 'bi-check-circle text-success',
+                    'warning': 'bi-exclamation-triangle text-warning',
+                    'error': 'bi-x-circle text-danger'
+                };
+                const icon = icons[type] || icons['info'];
+
+                // Set content
+                modalTitle.innerHTML = `<i class="bi ${icon} me-2"></i>${title}`;
+                modalBody.innerHTML = message.replace(/\n/g, '<br>');
+
+                const bsModal = new bootstrap.Modal(modal);
+
+                const handleClose = () => {
+                    modal.removeEventListener('hidden.bs.modal', handleClose);
+                    resolve();
+                };
+
+                modal.addEventListener('hidden.bs.modal', handleClose, { once: true });
                 bsModal.show();
             });
         }
@@ -1923,7 +2045,18 @@
                 // Get current organization
                 const currentResponse = await fetch('/api/session/organization');
                 if (!currentResponse.ok) {
+                    // Check if session expired (redirect to login)
+                    if (currentResponse.status === 401) {
+                        window.location.href = '/login';
+                        return;
+                    }
                     throw new Error(`Failed to load current organization: ${currentResponse.status}`);
+                }
+
+                // Check content type before parsing JSON
+                const currentContentType = currentResponse.headers.get('content-type');
+                if (!currentContentType || !currentContentType.includes('application/json')) {
+                    throw new Error('Invalid response from server');
                 }
                 const currentOrg = await currentResponse.json();
 
@@ -1936,7 +2069,18 @@
                 // Get all organizations
                 const orgsResponse = await fetch('/api/organizations');
                 if (!orgsResponse.ok) {
+                    // Check if session expired (redirect to login)
+                    if (orgsResponse.status === 401) {
+                        window.location.href = '/login';
+                        return;
+                    }
                     throw new Error(`Failed to load organizations: ${orgsResponse.status}`);
+                }
+
+                // Check content type before parsing JSON
+                const orgsContentType = orgsResponse.headers.get('content-type');
+                if (!orgsContentType || !orgsContentType.includes('application/json')) {
+                    throw new Error('Invalid response from server');
                 }
                 const organizations = await orgsResponse.json();
 
@@ -1967,7 +2111,10 @@
         async function switchOrganization(orgId, orgName) {
             try {
                 const response = await fetch(`/api/session/organization/${orgId}`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: {
+                        'Cache-Control': 'no-cache'
+                    }
                 });
 
                 if (response.ok) {
@@ -1976,12 +2123,31 @@
                     localStorage.setItem('currentOrgName', orgName);
                     showToast(`Switched to ${orgName}`, 'success');
 
-                    // Reload page to refresh data
-                    setTimeout(() => location.reload(), 500);
+                    // Reload page immediately with cache-bust to ensure fresh data
+                    // The short delay is just for the toast to be visible
+                    setTimeout(() => {
+                        // Add cache-bust parameter to force fresh load
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('_t', Date.now());
+                        window.location.href = url.toString();
+                    }, 300);
                 } else {
-                    showToast('Failed to switch organization', 'danger');
+                    // Check if session expired
+                    if (response.status === 401) {
+                        window.location.href = '/login';
+                        return;
+                    }
+                    // Try to parse error message from JSON response
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const errorData = await response.json();
+                        showToast(`Error: ${errorData.error || 'Failed to switch organization'}`, 'danger');
+                    } else {
+                        showToast('Failed to switch organization', 'danger');
+                    }
                 }
             } catch (error) {
+                console.error('Error switching organization:', error);
                 showToast(`Error: ${error.message}`, 'danger');
             }
         }
@@ -2092,7 +2258,15 @@
                     }
 
                     // Create and store click handler for cleanup
-                    const handler = function() {
+                    const handler = function(e) {
+                        // Prevent sorting if we just finished resizing a column
+                        if (typeof TableEnhancements !== 'undefined' && TableEnhancements.justResized) {
+                            return;
+                        }
+                        // Prevent sorting if click was on resize handle
+                        if (e.target.classList.contains('resize-handle')) {
+                            return;
+                        }
                         self.sortTable(tableId, header);
                     };
                     header.addEventListener('click', handler);
@@ -2283,6 +2457,7 @@
         const TableEnhancements = {
             tables: {},
             resizeState: null,
+            justResized: false, // Flag to prevent click-to-sort after resize
 
             /**
              * Initialize enhancements for a table
@@ -2454,6 +2629,12 @@
                 // Save width preference
                 this.savePreferences(tableId);
                 this.resizeState = null;
+
+                // Set flag to prevent click-to-sort from triggering
+                this.justResized = true;
+                setTimeout(() => {
+                    this.justResized = false;
+                }, 100);
             },
 
             /**
@@ -2666,6 +2847,295 @@
             });
         });
     </script>
+
+    <!-- Security Settings Modal -->
+    {% if auth_enabled and current_user and current_user.auth_type == 'local' %}
+    <div class="modal fade" id="securitySettingsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-shield-lock me-2"></i>Security Settings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Password Change Section -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <i class="bi bi-key me-2"></i>Change Password
+                        </div>
+                        <div class="card-body">
+                            <form id="changePasswordForm">
+                                <div class="row g-3">
+                                    <div class="col-md-12">
+                                        <label class="form-label">Current Password</label>
+                                        <input type="password" class="form-control" id="secCurrentPassword" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">New Password</label>
+                                        <input type="password" class="form-control" id="secNewPassword" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Confirm New Password</label>
+                                        <input type="password" class="form-control" id="secConfirmPassword" required>
+                                    </div>
+                                    <div class="col-12">
+                                        <button type="submit" class="btn btn-primary">
+                                            <i class="bi bi-check-circle me-1"></i>Update Password
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Two-Factor Authentication Section -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-phone me-2"></i>Two-Factor Authentication
+                        </div>
+                        <div class="card-body">
+                            <div id="2faStatus">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border text-primary"></div>
+                                </div>
+                            </div>
+
+                            <!-- 2FA Disabled State -->
+                            <div id="2faDisabled" class="d-none">
+                                <div class="alert alert-info">
+                                    <i class="bi bi-info-circle me-2"></i>
+                                    Two-factor authentication adds an extra layer of security to your account by requiring a code from your authenticator app when you sign in.
+                                </div>
+                                <button type="button" class="btn btn-success" onclick="setup2FA()">
+                                    <i class="bi bi-shield-plus me-1"></i>Enable 2FA
+                                </button>
+                            </div>
+
+                            <!-- 2FA Setup State -->
+                            <div id="2faSetup" class="d-none">
+                                <div class="alert alert-warning">
+                                    <i class="bi bi-exclamation-triangle me-2"></i>
+                                    Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.) then enter the verification code.
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6 text-center">
+                                        <div id="qrCodeContainer" class="mb-3 p-3 bg-white rounded border d-inline-block">
+                                            <!-- QR Code will be generated here -->
+                                        </div>
+                                        <div class="mt-2">
+                                            <small class="text-muted">Can't scan? Use this code:</small><br>
+                                            <code id="totpSecretDisplay" class="user-select-all"></code>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-semibold">Verification Code</label>
+                                        <input type="text" class="form-control form-control-lg text-center"
+                                               id="verify2FACode" maxlength="6" pattern="[0-9]{6}"
+                                               placeholder="000000" style="letter-spacing: 0.5rem; font-family: monospace;">
+                                        <small class="form-text text-muted">Enter the 6-digit code from your app</small>
+                                        <div class="mt-3">
+                                            <button type="button" class="btn btn-success me-2" onclick="verify2FA()">
+                                                <i class="bi bi-check-circle me-1"></i>Verify & Enable
+                                            </button>
+                                            <button type="button" class="btn btn-outline-secondary" onclick="cancel2FASetup()">
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 2FA Enabled State -->
+                            <div id="2faEnabled" class="d-none">
+                                <div class="alert alert-success">
+                                    <i class="bi bi-shield-check me-2"></i>
+                                    Two-factor authentication is enabled on your account.
+                                </div>
+                                <button type="button" class="btn btn-danger" onclick="disable2FA()">
+                                    <i class="bi bi-shield-x me-1"></i>Disable 2FA
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Security Settings Functions
+        let securityModal = null;
+
+        function openSecuritySettings() {
+            if (!securityModal) {
+                securityModal = new bootstrap.Modal(document.getElementById('securitySettingsModal'));
+            }
+            securityModal.show();
+            load2FAStatus();
+        }
+
+        async function load2FAStatus() {
+            const statusDiv = document.getElementById('2faStatus');
+            const disabledDiv = document.getElementById('2faDisabled');
+            const setupDiv = document.getElementById('2faSetup');
+            const enabledDiv = document.getElementById('2faEnabled');
+
+            statusDiv.classList.remove('d-none');
+            disabledDiv.classList.add('d-none');
+            setupDiv.classList.add('d-none');
+            enabledDiv.classList.add('d-none');
+
+            try {
+                const response = await fetch('/api/auth/2fa/status');
+                const data = await response.json();
+
+                statusDiv.classList.add('d-none');
+
+                if (data.enabled) {
+                    enabledDiv.classList.remove('d-none');
+                } else {
+                    disabledDiv.classList.remove('d-none');
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<div class="alert alert-danger">Error loading 2FA status</div>';
+            }
+        }
+
+        async function setup2FA() {
+            const disabledDiv = document.getElementById('2faDisabled');
+            const setupDiv = document.getElementById('2faSetup');
+
+            try {
+                const response = await fetch('/api/auth/2fa/setup', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    // Display secret
+                    document.getElementById('totpSecretDisplay').textContent = data.secret;
+
+                    // Generate QR code using server-side endpoint
+                    const qrContainer = document.getElementById('qrCodeContainer');
+                    // Add timestamp to prevent caching
+                    const qrUrl = `/api/auth/2fa/qrcode?t=${Date.now()}`;
+                    qrContainer.innerHTML = `<img src="${qrUrl}" alt="QR Code" style="width: 200px; height: 200px; border: 1px solid #dee2e6; border-radius: 8px;">`;
+
+                    disabledDiv.classList.add('d-none');
+                    setupDiv.classList.remove('d-none');
+
+                    document.getElementById('verify2FACode').focus();
+                } else {
+                    await showAlert(data.error || 'Failed to setup 2FA', 'Error', 'error');
+                }
+            } catch (error) {
+                await showAlert('Error setting up 2FA: ' + error.message, 'Error', 'error');
+            }
+        }
+
+        async function verify2FA() {
+            const code = document.getElementById('verify2FACode').value;
+
+            if (!code || code.length !== 6) {
+                await showAlert('Please enter a valid 6-digit code', 'Invalid Code', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/2fa/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    await showAlert('Two-factor authentication has been enabled successfully!', 'Success', 'success');
+                    load2FAStatus();
+                } else {
+                    await showAlert(data.error || 'Invalid verification code', 'Error', 'error');
+                    document.getElementById('verify2FACode').value = '';
+                    document.getElementById('verify2FACode').focus();
+                }
+            } catch (error) {
+                await showAlert('Error verifying code: ' + error.message, 'Error', 'error');
+            }
+        }
+
+        function cancel2FASetup() {
+            document.getElementById('2faSetup').classList.add('d-none');
+            document.getElementById('2faDisabled').classList.remove('d-none');
+            document.getElementById('verify2FACode').value = '';
+        }
+
+        async function disable2FA() {
+            const password = await showPrompt('Enter your password to disable 2FA:', '', 'Disable 2FA');
+            if (!password) return;
+
+            try {
+                const response = await fetch('/api/auth/2fa/disable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    await showAlert('Two-factor authentication has been disabled.', 'Success', 'success');
+                    load2FAStatus();
+                } else {
+                    await showAlert(data.error || 'Failed to disable 2FA', 'Error', 'error');
+                }
+            } catch (error) {
+                await showAlert('Error disabling 2FA: ' + error.message, 'Error', 'error');
+            }
+        }
+
+        // Password Change Form
+        document.getElementById('changePasswordForm')?.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const currentPassword = document.getElementById('secCurrentPassword').value;
+            const newPassword = document.getElementById('secNewPassword').value;
+            const confirmPassword = document.getElementById('secConfirmPassword').value;
+
+            if (newPassword !== confirmPassword) {
+                await showAlert('New passwords do not match', 'Validation Error', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        current_password: currentPassword,
+                        new_password: newPassword
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    await showAlert('Password changed successfully!', 'Success', 'success');
+                    document.getElementById('secCurrentPassword').value = '';
+                    document.getElementById('secNewPassword').value = '';
+                    document.getElementById('secConfirmPassword').value = '';
+                } else {
+                    await showAlert(data.error || 'Failed to change password', 'Error', 'error');
+                }
+            } catch (error) {
+                await showAlert('Error changing password: ' + error.message, 'Error', 'error');
+            }
+        });
+
+        // Auto-format 2FA code input
+        document.getElementById('verify2FACode')?.addEventListener('input', function(e) {
+            this.value = this.value.replace(/[^0-9]/g, '').slice(0, 6);
+        });
+    </script>
+    {% endif %}
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

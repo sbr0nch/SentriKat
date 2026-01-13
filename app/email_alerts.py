@@ -174,13 +174,21 @@ class EmailAlertManager:
 
     @staticmethod
     def _build_alert_email_html(organization, matches):
-        """Build HTML email body - Professional enterprise design"""
+        """Build HTML email body - Clean, professional enterprise design"""
 
         # Group by priority
         by_priority = {'critical': [], 'high': [], 'medium': [], 'low': []}
         for match in matches:
             priority = match.calculate_effective_priority()
             by_priority[priority].append(match)
+
+        # Group by product for executive summary
+        by_product = {}
+        for match in matches:
+            product_key = f"{match.product.vendor} {match.product.product_name}"
+            if product_key not in by_product:
+                by_product[product_key] = {'product': match.product, 'matches': []}
+            by_product[product_key]['matches'].append(match)
 
         priority_colors = {
             'critical': '#dc2626',
@@ -191,6 +199,22 @@ class EmailAlertManager:
 
         app_url = get_app_url()
 
+        # Build affected products summary (top 5)
+        affected_products_html = ""
+        for i, (product_key, data) in enumerate(sorted(by_product.items(), key=lambda x: len(x[1]['matches']), reverse=True)[:5]):
+            product = data['product']
+            count = len(data['matches'])
+            affected_products_html += f"""
+                <tr>
+                    <td style="padding: 8px 12px; border-bottom: 1px solid #f3f4f6;">
+                        <span style="color: #111827; font-weight: 500;">{product.vendor} - {product.product_name}</span>
+                        {f'<span style="color: #6b7280; font-size: 12px;"> v{product.version}</span>' if product.version else ''}
+                    </td>
+                    <td style="padding: 8px 12px; border-bottom: 1px solid #f3f4f6; text-align: right;">
+                        <span style="background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{count} CVE{'s' if count > 1 else ''}</span>
+                    </td>
+                </tr>"""
+
         html = f"""
 <!DOCTYPE html>
 <html>
@@ -198,223 +222,174 @@ class EmailAlertManager:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-    <!-- Wrapper -->
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9;">
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.5;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc;">
         <tr>
-            <td align="center" style="padding: 40px 20px;">
-                <!-- Main Container -->
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 680px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e5e7eb; overflow: hidden;">
+            <td align="center" style="padding: 32px 16px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
 
-                    <!-- Header - Dark text for visibility on any background -->
+                    <!-- Simple Header -->
                     <tr>
-                        <td style="background-color: #1e3a8a; padding: 30px; text-align: center; border-bottom: 4px solid #3b82f6;">
+                        <td style="padding: 24px 32px; border-bottom: 1px solid #e5e7eb;">
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                                <tr>
-                                    <td align="center">
-                                        <!-- Text-based logo for maximum compatibility -->
-                                        <div style="display: inline-block; background-color: #ffffff; border-radius: 12px; padding: 12px 20px; margin-bottom: 15px;">
-                                            <span style="font-size: 28px;">🐱🛡️</span>
-                                        </div>
-                                        <h1 style="margin: 0; font-size: 28px; font-weight: 800; color: #1e3a8a; background-color: #ffffff; padding: 8px 20px; border-radius: 8px; display: inline-block;">
-                                            SentriKat
-                                        </h1>
-                                        <p style="margin: 12px 0 0 0; font-size: 13px; color: #ffffff; background-color: #3b82f6; padding: 6px 16px; border-radius: 4px; display: inline-block; text-transform: uppercase; letter-spacing: 2px; font-weight: 600;">
-                                            Security Alert
-                                        </p>
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-
-                    <!-- Alert Banner - High contrast red -->
-                    <tr>
-                        <td style="background-color: #dc2626; padding: 24px 30px; border-bottom: 4px solid #991b1b;">
-                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                                <tr>
-                                    <td align="center">
-                                        <div style="background-color: #ffffff; border-radius: 8px; padding: 16px 24px; display: inline-block;">
-                                            <p style="margin: 0; font-size: 20px; font-weight: 700; color: #dc2626;">
-                                                ⚠️ {len(matches)} Critical Vulnerabilities Detected
-                                            </p>
-                                            <p style="margin: 8px 0 0 0; font-size: 14px; color: #374151;">
-                                                Immediate action required for <strong>{organization.display_name}</strong>
-                                            </p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-
-                    <!-- Priority Summary Cards -->
-                    <tr>
-                        <td style="padding: 30px;">
-                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                                <tr>
-                                    <td style="padding-bottom: 20px;">
-                                        <p style="margin: 0 0 5px 0; font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">
-                                            Priority Breakdown
-                                        </p>
-                                    </td>
-                                </tr>
                                 <tr>
                                     <td>
-                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                                            <tr>
-                                                <!-- Critical -->
-                                                <td width="33%" style="padding: 0 5px 0 0;">
-                                                    <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-left: 4px solid #dc2626; border-radius: 8px; padding: 15px; text-align: center;">
-                                                        <div style="font-size: 28px; font-weight: 800; color: #dc2626;">{len(by_priority['critical'])}</div>
-                                                        <div style="font-size: 11px; font-weight: 600; color: #991b1b; text-transform: uppercase; letter-spacing: 0.5px;">Critical</div>
-                                                    </div>
-                                                </td>
-                                                <!-- High -->
-                                                <td width="33%" style="padding: 0 5px;">
-                                                    <div style="background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); border-left: 4px solid #ea580c; border-radius: 8px; padding: 15px; text-align: center;">
-                                                        <div style="font-size: 28px; font-weight: 800; color: #ea580c;">{len(by_priority['high'])}</div>
-                                                        <div style="font-size: 11px; font-weight: 600; color: #9a3412; text-transform: uppercase; letter-spacing: 0.5px;">High</div>
-                                                    </div>
-                                                </td>
-                                                <!-- Medium -->
-                                                <td width="33%" style="padding: 0 0 0 5px;">
-                                                    <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #ca8a04; border-radius: 8px; padding: 15px; text-align: center;">
-                                                        <div style="font-size: 28px; font-weight: 800; color: #ca8a04;">{len(by_priority['medium'])}</div>
-                                                        <div style="font-size: 11px; font-weight: 600; color: #854d0e; text-transform: uppercase; letter-spacing: 0.5px;">Medium</div>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        </table>
+                                        <span style="font-size: 20px; font-weight: 700; color: #1e40af;">SentriKat</span>
+                                        <span style="color: #9ca3af; margin-left: 8px;">|</span>
+                                        <span style="color: #6b7280; margin-left: 8px; font-size: 14px;">Security Alert</span>
+                                    </td>
+                                    <td align="right">
+                                        <span style="font-size: 12px; color: #9ca3af;">{datetime.now().strftime('%Y-%m-%d %H:%M')}</span>
                                     </td>
                                 </tr>
                             </table>
                         </td>
                     </tr>
 
-                    <!-- CTA Button -->
+                    <!-- Alert Summary -->
                     <tr>
-                        <td style="padding: 0 30px 30px 30px;" align="center">
-                            <a href="{app_url}" style="display: inline-block; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px; box-shadow: 0 4px 6px -1px rgba(30, 64, 175, 0.3);">
-                                View in SentriKat Dashboard →
-                            </a>
+                        <td style="padding: 32px;">
+                            <!-- Alert Badge -->
+                            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 16px 20px; margin-bottom: 24px;">
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                    <tr>
+                                        <td>
+                                            <span style="font-size: 18px; font-weight: 700; color: #991b1b;">
+                                                {len(matches)} Critical Vulnerabilities
+                                            </span>
+                                            <p style="margin: 4px 0 0 0; font-size: 14px; color: #7f1d1d;">
+                                                Affecting <strong>{organization.display_name}</strong> - Immediate action required
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <!-- Stats Row -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom: 24px;">
+                                <tr>
+                                    <td width="33%" style="text-align: center; padding: 12px 8px;">
+                                        <div style="font-size: 28px; font-weight: 700; color: #dc2626;">{len(by_priority['critical'])}</div>
+                                        <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Critical</div>
+                                    </td>
+                                    <td width="33%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">
+                                        <div style="font-size: 28px; font-weight: 700; color: #ea580c;">{len(by_priority['high'])}</div>
+                                        <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">High</div>
+                                    </td>
+                                    <td width="33%" style="text-align: center; padding: 12px 8px;">
+                                        <div style="font-size: 28px; font-weight: 700; color: #374151;">{len(by_product)}</div>
+                                        <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Products</div>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Affected Products Summary -->
+                            <div style="margin-bottom: 24px;">
+                                <div style="font-size: 13px; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">
+                                    Affected Products
+                                </div>
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
+                                    {affected_products_html}
+                                    {f'<tr><td colspan="2" style="padding: 8px 12px; text-align: center;"><span style="color: #6b7280; font-size: 12px;">+ {len(by_product) - 5} more products</span></td></tr>' if len(by_product) > 5 else ''}
+                                </table>
+                            </div>
+
+                            <!-- CTA Button -->
+                            <div style="text-align: center; margin-bottom: 8px;">
+                                <a href="{app_url}" style="display: inline-block; background: #1e40af; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px;">
+                                    View Dashboard
+                                </a>
+                            </div>
                         </td>
                     </tr>
 
                     <!-- Divider -->
                     <tr>
-                        <td style="padding: 0 30px;">
-                            <div style="height: 1px; background: linear-gradient(to right, transparent, #e5e7eb, transparent);"></div>
+                        <td style="padding: 0 32px;">
+                            <div style="height: 1px; background: #e5e7eb;"></div>
                         </td>
                     </tr>
 
                     <!-- Vulnerability Details Header -->
                     <tr>
-                        <td style="padding: 30px 30px 20px 30px;">
-                            <h2 style="margin: 0; font-size: 18px; font-weight: 700; color: #111827;">
+                        <td style="padding: 24px 32px 16px 32px;">
+                            <span style="font-size: 14px; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: 0.5px;">
                                 Vulnerability Details
-                            </h2>
+                            </span>
                         </td>
                     </tr>
 """
 
-        # Add vulnerability cards (show top 15 to avoid huge emails)
-        for match in matches[:15]:
+        # Add vulnerability cards (show top 10 to avoid huge emails)
+        for match in matches[:10]:
             vuln = match.vulnerability
             product = match.product
             priority = match.calculate_effective_priority()
 
             border_color = priority_colors.get(priority, '#6b7280')
-            bg_colors = {
-                'critical': '#fef2f2',
-                'high': '#fff7ed',
-                'medium': '#fffbeb',
-                'low': '#f0fdf4'
-            }
-            bg_color = bg_colors.get(priority, '#f9fafb')
-
-            ransomware_badge = '<span style="display: inline-block; background: #7c2d12; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-left: 8px;">🦠 RANSOMWARE</span>' if vuln.known_ransomware else ''
-            severity_badge = f'<span style="display: inline-block; background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-left: 8px;">CVSS {vuln.cvss_score}</span>' if vuln.cvss_score else ''
-
             days_old = (date.today() - vuln.date_added).days if vuln.date_added else 0
-            new_badge = '<span style="display: inline-block; background: #059669; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-left: 8px;">NEW</span>' if days_old <= 7 else ''
+            days_until_due = (vuln.due_date - date.today()).days if vuln.due_date else None
+
+            # Urgency indicator
+            if days_until_due is not None and days_until_due <= 7:
+                urgency_html = f'<span style="background: #fef2f2; color: #991b1b; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">Due in {days_until_due} days</span>'
+            elif days_until_due is not None:
+                urgency_html = f'<span style="color: #6b7280; font-size: 11px;">Due: {vuln.due_date}</span>'
+            else:
+                urgency_html = ''
 
             html += f"""
                     <!-- Vulnerability Card -->
                     <tr>
-                        <td style="padding: 0 30px 20px 30px;">
-                            <div style="border-left: 4px solid {border_color}; background: {bg_color}; border-radius: 8px; padding: 20px;">
-                                <!-- CVE Header -->
-                                <div style="margin-bottom: 15px;">
-                                    <span style="display: inline-block; background: {border_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase;">{priority}</span>
-                                    {ransomware_badge}
-                                    {severity_badge}
-                                    {new_badge}
-                                </div>
-                                <h3 style="margin: 0 0 5px 0; font-size: 16px; font-weight: 700; color: #111827;">
-                                    {vuln.cve_id}
-                                </h3>
-                                <p style="margin: 0 0 15px 0; font-size: 14px; color: #374151;">
-                                    {vuln.vulnerability_name[:100]}
-                                </p>
-
-                                <!-- Info Grid -->
-                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size: 13px;">
-                                    <tr>
-                                        <td style="padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Affected Product</span><br>
-                                            <span style="color: #111827;"><strong>{vuln.vendor_project}</strong> - {vuln.product}</span>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Your Product</span><br>
-                                            <span style="color: #111827;"><strong>{product.vendor}</strong> - {product.product_name}{f' (v{product.version})' if product.version else ''}</span>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Description</span><br>
-                                            <span style="color: #374151;">{vuln.short_description[:200]}{'...' if len(vuln.short_description) > 200 else ''}</span>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Required Action</span><br>
-                                            <span style="color: #dc2626; font-weight: 600;">{vuln.required_action}</span>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 8px 0;">
-                                            <span style="color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Timeline</span><br>
-                                            <span style="color: #374151;">Added: {vuln.date_added} ({days_old} days ago){f' | <strong style="color:#dc2626;">Due: {vuln.due_date}</strong>' if vuln.due_date else ''}</span>
-                                        </td>
-                                    </tr>
-                                </table>
-
-                                <!-- NVD Link -->
-                                <div style="margin-top: 15px;">
-                                    <a href="https://nvd.nist.gov/vuln/detail/{vuln.cve_id}" style="color: #1e40af; text-decoration: none; font-size: 13px; font-weight: 600;">
-                                        View in NVD Database →
-                                    </a>
-                                </div>
-                            </div>
+                        <td style="padding: 0 32px 16px 32px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border: 1px solid #e5e7eb; border-radius: 6px; border-left: 3px solid {border_color};">
+                                <tr>
+                                    <td style="padding: 16px;">
+                                        <!-- Header row -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                            <tr>
+                                                <td>
+                                                    <a href="https://nvd.nist.gov/vuln/detail/{vuln.cve_id}" style="font-size: 15px; font-weight: 700; color: #1e40af; text-decoration: none;">{vuln.cve_id}</a>
+                                                    {f'<span style="background: #7c2d12; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">RANSOMWARE</span>' if vuln.known_ransomware else ''}
+                                                    {f'<span style="color: #6b7280; font-size: 12px; margin-left: 6px;">CVSS {vuln.cvss_score}</span>' if vuln.cvss_score else ''}
+                                                </td>
+                                                <td align="right">
+                                                    {urgency_html}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                        <!-- Product -->
+                                        <div style="margin-top: 8px; font-size: 13px;">
+                                            <span style="color: #6b7280;">Product:</span>
+                                            <span style="color: #111827; font-weight: 500;">{product.vendor} - {product.product_name}</span>
+                                            {f'<span style="color: #9ca3af;"> v{product.version}</span>' if product.version else ''}
+                                        </div>
+                                        <!-- Description -->
+                                        <div style="margin-top: 8px; font-size: 13px; color: #4b5563; line-height: 1.4;">
+                                            {vuln.short_description[:180]}{'...' if len(vuln.short_description) > 180 else ''}
+                                        </div>
+                                        <!-- Action -->
+                                        <div style="margin-top: 10px; padding: 8px 10px; background: #fef2f2; border-radius: 4px;">
+                                            <span style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Action Required:</span>
+                                            <span style="font-size: 12px; color: #991b1b; font-weight: 500;"> {vuln.required_action[:150]}{'...' if len(vuln.required_action) > 150 else ''}</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
                         </td>
                     </tr>
 """
 
-        if len(matches) > 15:
+        if len(matches) > 10:
             html += f"""
                     <!-- More Vulnerabilities Notice -->
                     <tr>
-                        <td style="padding: 0 30px 30px 30px;">
-                            <div style="background: #f3f4f6; border-radius: 8px; padding: 20px; text-align: center;">
-                                <p style="margin: 0; font-size: 16px; font-weight: 700; color: #374151;">
-                                    + {len(matches) - 15} more vulnerabilities
-                                </p>
-                                <p style="margin: 8px 0 0 0; font-size: 14px; color: #6b7280;">
-                                    Login to SentriKat to view all vulnerabilities
-                                </p>
+                        <td style="padding: 0 32px 24px 32px;">
+                            <div style="background: #f3f4f6; border-radius: 6px; padding: 12px; text-align: center;">
+                                <span style="font-size: 13px; color: #374151;">
+                                    + {len(matches) - 10} more vulnerabilities -
+                                </span>
+                                <a href="{app_url}" style="color: #1e40af; text-decoration: none; font-weight: 600; font-size: 13px;">View all in dashboard</a>
                             </div>
                         </td>
                     </tr>
@@ -423,19 +398,12 @@ class EmailAlertManager:
         html += f"""
                     <!-- Footer -->
                     <tr>
-                        <td style="background: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e5e7eb;">
-                            <p style="margin: 0 0 10px 0; font-size: 14px; font-weight: 700; color: #1e40af;">
-                                SentriKat
+                        <td style="padding: 24px 32px; border-top: 1px solid #e5e7eb; text-align: center;">
+                            <p style="margin: 0; font-size: 12px; color: #9ca3af;">
+                                Automated alert from SentriKat - {organization.display_name}
                             </p>
-                            <p style="margin: 0 0 5px 0; font-size: 12px; color: #6b7280;">
-                                Enterprise Vulnerability Management Platform
-                            </p>
-                            <p style="margin: 15px 0 0 0; font-size: 11px; color: #9ca3af;">
-                                This is an automated security alert from SentriKat.<br>
-                                Please do not reply to this email. Contact your administrator for support.
-                            </p>
-                            <p style="margin: 15px 0 0 0; font-size: 10px; color: #9ca3af;">
-                                © {datetime.now().year} {organization.display_name}
+                            <p style="margin: 8px 0 0 0; font-size: 11px; color: #d1d5db;">
+                                Do not reply to this email
                             </p>
                         </td>
                     </tr>
@@ -1115,3 +1083,302 @@ def _role_level(role):
         'super_admin': 4
     }
     return levels.get(role, 0)
+
+
+# ============================================================================
+# Admin-Triggered 2FA Reset Email
+# ============================================================================
+
+def send_2fa_reset_email(user, reset_by_username=None):
+    """
+    Send email notification when an admin resets a user's 2FA
+
+    Args:
+        user: User object whose 2FA was reset
+        reset_by_username: Username of admin who performed the reset
+
+    Returns:
+        tuple: (success: bool, details: str) - success status and details message
+    """
+    from app.models import Organization
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        organization = Organization.query.get(user.organization_id)
+        if not organization:
+            msg = f"No organization found for user {user.username}"
+            logger.warning(msg)
+            return False, msg
+
+        smtp_config = organization.get_smtp_config()
+        smtp_source = "organization"
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            smtp_source = "global"
+            from app.settings_api import get_setting
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587') or '587'),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat')
+            }
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            msg = "No SMTP configured (neither org nor global)"
+            logger.warning(f"{msg} - cannot send 2FA reset email to {user.email}")
+            return False, msg
+
+        subject = f"SentriKat - Two-Factor Authentication Reset"
+        html_body = _build_2fa_reset_email_html(user, organization, reset_by_username)
+
+        logger.info(f"Sending 2FA reset email to {user.email} via {smtp_source} SMTP")
+
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=[user.email],
+            subject=subject,
+            html_body=html_body
+        )
+
+        msg = f"Email sent via {smtp_source} SMTP to {user.email}"
+        logger.info(msg)
+        return True, msg
+
+    except Exception as e:
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"Failed to send 2FA reset email to {user.email}: {error_detail}")
+        logger.error(traceback.format_exc())
+        return False, error_detail
+
+
+def _build_2fa_reset_email_html(user, organization, reset_by_username=None):
+    """Build HTML email for 2FA reset notification"""
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
+            <div style="font-size: 48px; margin-bottom: 10px;">🔐</div>
+            <h1 style="color: white; margin: 0; font-size: 24px;">Two-Factor Authentication Reset</h1>
+        </div>
+
+        <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+            <p style="font-size: 16px; color: #374151;">Hello <strong>{user.full_name or user.username}</strong>,</p>
+
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0; color: #92400e; font-weight: 600;">
+                    ⚠️ Your two-factor authentication has been reset by an administrator.
+                </p>
+            </div>
+
+            <p style="color: #374151; font-size: 16px;">
+                This means:
+            </p>
+            <ul style="color: #374151; font-size: 16px;">
+                <li>Your previous 2FA setup has been disabled</li>
+                <li>You can now log in without a 2FA code</li>
+                <li>You should set up 2FA again from your Security Settings after logging in</li>
+            </ul>
+
+            <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <div style="margin-bottom: 10px;">
+                    <strong>Username:</strong> {user.username}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Organization:</strong> {organization.display_name}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Reset by:</strong> {reset_by_username or 'Administrator'}
+                </div>
+                <div>
+                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </div>
+            </div>
+
+            <p style="color: #dc2626; font-size: 14px; font-weight: 600;">
+                🔒 Security Recommendation: Set up 2FA again as soon as possible to protect your account.
+            </p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{get_app_url()}/login" style="display: inline-block; background: #7c3aed; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px;">
+                    Login to SentriKat
+                </a>
+            </div>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                If you did not request this reset, please contact your administrator immediately.
+            </p>
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>This is an automated security notification from SentriKat</p>
+            <p>© {datetime.now().year} {organization.display_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    return html
+
+
+# ============================================================================
+# Admin-Triggered Password Change Email
+# ============================================================================
+
+def send_password_change_forced_email(user, forced_by_username=None):
+    """
+    Send email notification when an admin forces a user to change password
+
+    Args:
+        user: User object who must change password
+        forced_by_username: Username of admin who triggered this
+
+    Returns:
+        tuple: (success: bool, details: str) - success status and details message
+    """
+    from app.models import Organization
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        organization = Organization.query.get(user.organization_id)
+        if not organization:
+            msg = f"No organization found for user {user.username}"
+            logger.warning(msg)
+            return False, msg
+
+        smtp_config = organization.get_smtp_config()
+        smtp_source = "organization"
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            smtp_source = "global"
+            from app.settings_api import get_setting
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587') or '587'),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat')
+            }
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            msg = "No SMTP configured (neither org nor global)"
+            logger.warning(f"{msg} - cannot send password change email to {user.email}")
+            return False, msg
+
+        subject = f"SentriKat - Password Change Required"
+        html_body = _build_password_change_forced_email_html(user, organization, forced_by_username)
+
+        logger.info(f"Sending password change required email to {user.email} via {smtp_source} SMTP")
+
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=[user.email],
+            subject=subject,
+            html_body=html_body
+        )
+
+        msg = f"Email sent via {smtp_source} SMTP to {user.email}"
+        logger.info(msg)
+        return True, msg
+
+    except Exception as e:
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"Failed to send password change email to {user.email}: {error_detail}")
+        logger.error(traceback.format_exc())
+        return False, error_detail
+
+
+def _build_password_change_forced_email_html(user, organization, forced_by_username=None):
+    """Build HTML email for forced password change notification"""
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
+            <div style="font-size: 48px; margin-bottom: 10px;">🔑</div>
+            <h1 style="color: white; margin: 0; font-size: 24px;">Password Change Required</h1>
+        </div>
+
+        <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+            <p style="font-size: 16px; color: #374151;">Hello <strong>{user.full_name or user.username}</strong>,</p>
+
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0; color: #92400e; font-weight: 600;">
+                    ⚠️ An administrator has required you to change your password.
+                </p>
+            </div>
+
+            <p style="color: #374151; font-size: 16px;">
+                On your next login, you will be prompted to create a new password. This is a security measure to ensure your account remains protected.
+            </p>
+
+            <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <div style="margin-bottom: 10px;">
+                    <strong>Username:</strong> {user.username}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Organization:</strong> {organization.display_name}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Required by:</strong> {forced_by_username or 'Administrator'}
+                </div>
+                <div>
+                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </div>
+            </div>
+
+            <p style="color: #374151; font-size: 14px;">
+                <strong>What happens next:</strong>
+            </p>
+            <ol style="color: #374151; font-size: 14px;">
+                <li>Log in with your current password</li>
+                <li>You'll be prompted to create a new password</li>
+                <li>Choose a strong, unique password</li>
+                <li>You'll be logged in with your new credentials</li>
+            </ol>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{get_app_url()}/login" style="display: inline-block; background: #ea580c; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px;">
+                    Login to SentriKat
+                </a>
+            </div>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                If you did not expect this requirement, please contact your administrator.
+            </p>
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>This is an automated security notification from SentriKat</p>
+            <p>© {datetime.now().year} {organization.display_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    return html

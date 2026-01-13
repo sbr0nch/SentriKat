@@ -145,109 +145,237 @@
     </div>
 </div>
 
-<!-- Product Modal -->
+<!-- Product Modal - Redesigned with cleaner UX -->
 <div class="modal fade" id="productModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <div class="modal-header">
+            <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title" id="productModalTitle">
                     <i class="bi bi-plus-circle me-2"></i>Add Product
                 </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <!-- Service Catalog Quick Select -->
-                <div class="alert alert-info mb-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <span>
-                            <i class="bi bi-lightbulb me-2"></i>
-                            <strong>Quick Add:</strong> Select from 80+ pre-configured services
-                        </span>
-                        <button type="button" class="btn btn-sm btn-primary" onclick="showServiceCatalog()">
-                            <i class="bi bi-search me-1"></i>Browse Catalog
-                        </button>
-                    </div>
-                </div>
-
                 <form id="productForm">
                     <input type="hidden" id="productId">
                     <input type="hidden" id="serviceCatalogId">
+                    <input type="hidden" id="cpeVendor">
+                    <input type="hidden" id="cpeProduct">
+                    <input type="hidden" id="cpeUri">
 
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <label for="vendor" class="form-label fw-semibold">Vendor *</label>
-                            <input type="text" class="form-control" id="vendor" required
-                                   placeholder="e.g., Microsoft, Cisco, Apache"
-                                   list="vendorSuggestions"
-                                   oninput="searchVendors(this.value)">
-                            <datalist id="vendorSuggestions"></datalist>
-                            <small class="form-text text-muted">The vendor/manufacturer name or select from catalog</small>
+                    <!-- Step 1: Find Product -->
+                    <div class="mb-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 16px;">1</span>
+                            <h6 class="mb-0 fw-bold">Find Your Product</h6>
+                            <span class="badge bg-success ms-2">Recommended</span>
                         </div>
 
-                        <div class="col-md-6">
-                            <label for="productName" class="form-label fw-semibold">Product Name *</label>
-                            <input type="text" class="form-control" id="productName" required
-                                   placeholder="e.g., Windows Server, IOS, Tomcat"
-                                   list="productSuggestions"
-                                   oninput="searchProducts(this.value)">
-                            <datalist id="productSuggestions"></datalist>
-                            <small class="form-text text-muted">The software/product name or select from catalog</small>
+                        <!-- NVD Search -->
+                        <div class="input-group mb-2">
+                            <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control" id="nvdSearchInput"
+                                   placeholder="Search NVD database (e.g., 'apache tomcat', 'microsoft windows')..."
+                                   oninput="debounceNVDSearch()">
+                            <button class="btn btn-outline-primary" type="button" onclick="performNVDSearchNow()">
+                                Search
+                            </button>
+                        </div>
+                        <small class="text-muted">
+                            <i class="bi bi-database me-1"></i>Search 800,000+ products from NIST National Vulnerability Database for accurate CPE matching
+                        </small>
+
+                        <!-- Rate Limit Warning (shown when no NVD API key configured) -->
+                        <div id="nvdRateLimitWarning" class="alert alert-warning alert-sm py-1 px-2 mt-2 mb-0 small" style="display: none;">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            <strong>Rate limited:</strong> Searches are slower without NVD API key.
+                            <a href="/admin_panel#sync-settings" class="alert-link">Configure API key</a> for faster searches (free).
                         </div>
 
-                        <div class="col-md-6">
-                            <label for="version" class="form-label fw-semibold">Version</label>
-                            <input type="text" class="form-control" id="version"
-                                   placeholder="e.g., 2022, 15.2, 9.0">
-                            <small class="form-text text-muted">Optional: Specific version you're using</small>
+                        <div id="nvdSearchStatus" class="small text-muted mt-2" style="display: none;"></div>
+
+                        <!-- Search Results -->
+                        <div id="nvdResultsList" class="border rounded mt-2" style="max-height: 250px; overflow-y: auto; display: none;">
+                            <!-- NVD Results populated here -->
                         </div>
 
-                        <div class="col-md-6">
-                            <label for="criticality" class="form-label fw-semibold">Criticality Level *</label>
-                            <select class="form-select" id="criticality" required>
-                                <option value="critical">Critical - Mission Critical Systems</option>
-                                <option value="high">High - Important Production Systems</option>
-                                <option value="medium" selected>Medium - Standard Systems</option>
-                                <option value="low">Low - Non-Critical Systems</option>
-                            </select>
-                            <small class="form-text text-muted">How critical is this product to your organization?</small>
+                        <!-- Selected Product Display -->
+                        <div id="nvdSelectedProduct" class="alert alert-success mt-3 mb-0" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <div class="fw-bold mb-1">
+                                        <i class="bi bi-check-circle-fill me-1"></i>
+                                        <span id="nvdSelectedName"></span>
+                                    </div>
+                                    <small class="text-muted d-block">
+                                        CPE Identifier: <code id="nvdSelectedCpe" class="user-select-all"></code>
+                                    </small>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearNVDSelection()">
+                                    <i class="bi bi-x"></i> Clear
+                                </button>
+                            </div>
                         </div>
 
-                        <div class="col-md-6">
-                            <label for="productOrganization" class="form-label fw-semibold">Organization</label>
-                            <select class="form-select" id="productOrganization">
-                                <option value="">Loading organizations...</option>
-                            </select>
-                            <small class="form-text text-muted">Assign this product to an organization</small>
+                        <!-- Or Manual Entry Toggle -->
+                        <div class="text-center my-3" id="manualEntryToggle">
+                            <span class="text-muted">- or -</span>
+                            <button type="button" class="btn btn-link btn-sm" onclick="toggleManualEntry()">
+                                Enter product details manually
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Product Details -->
+                    <div class="mb-4" id="productDetailsSection">
+                        <div class="d-flex align-items-center mb-3">
+                            <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 16px;">2</span>
+                            <h6 class="mb-0 fw-bold">Product Details</h6>
                         </div>
 
-                        <div class="col-md-12">
-                            <label for="keywords" class="form-label fw-semibold">Additional Keywords</label>
-                            <input type="text" class="form-control" id="keywords"
-                                   placeholder="e.g., Exchange, Webex, Struts">
-                            <small class="form-text text-muted">Comma-separated keywords for better matching</small>
-                        </div>
-
-                        <div class="col-md-12">
-                            <label for="description" class="form-label fw-semibold">Description</label>
-                            <textarea class="form-control" id="description" rows="3"
-                                      placeholder="Optional notes about this product (e.g., deployment details, business use)"></textarea>
-                        </div>
-
-                        <div class="col-md-12">
-                            <div class="form-check form-switch">
-                                <input type="checkbox" class="form-check-input" id="active" checked>
-                                <label class="form-check-label fw-semibold" for="active">
-                                    Active (track vulnerabilities for this product)
+                        <div class="row g-3">
+                            <!-- Vendor - Required -->
+                            <div class="col-md-6">
+                                <label for="vendor" class="form-label">
+                                    Vendor <span class="text-danger">*</span>
                                 </label>
+                                <input type="text" class="form-control" id="vendor" required
+                                       placeholder="e.g., Microsoft, Cisco, Apache">
+                            </div>
+
+                            <!-- Product Name - Required -->
+                            <div class="col-md-6">
+                                <label for="productName" class="form-label">
+                                    Product Name <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="productName" required
+                                       placeholder="e.g., Windows Server, IOS, Tomcat">
+                            </div>
+
+                            <!-- Version - Optional with explanation -->
+                            <div class="col-md-6">
+                                <label for="version" class="form-label">
+                                    Version <span class="text-muted small">(optional)</span>
+                                </label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="version"
+                                           placeholder="Leave empty for ALL versions"
+                                           list="versionSuggestions">
+                                    <datalist id="versionSuggestions"></datalist>
+                                    <button class="btn btn-outline-secondary" type="button" id="loadVersionsBtn"
+                                            onclick="loadVersionsFromNVD()" title="Load versions from NVD" style="display: none;">
+                                        <i class="bi bi-arrow-repeat"></i>
+                                    </button>
+                                </div>
+                                <small class="form-text text-muted">
+                                    Empty = matches ALL versions | Specific = matches only that version
+                                </small>
+                            </div>
+
+                            <!-- Organization - Optional -->
+                            <div class="col-md-6">
+                                <label for="productOrganization" class="form-label">
+                                    Organization <span class="text-muted small">(optional)</span>
+                                </label>
+                                <select class="form-select" id="productOrganization">
+                                    <option value="">Loading organizations...</option>
+                                </select>
+                            </div>
+
+                            <!-- Criticality - Required -->
+                            <div class="col-md-6">
+                                <label for="criticality" class="form-label">
+                                    Criticality <span class="text-danger">*</span>
+                                </label>
+                                <select class="form-select" id="criticality" required>
+                                    <option value="critical">Critical - Mission Critical</option>
+                                    <option value="high">High - Important Systems</option>
+                                    <option value="medium" selected>Medium - Standard</option>
+                                    <option value="low">Low - Non-Critical</option>
+                                </select>
+                            </div>
+
+                            <!-- Active Toggle -->
+                            <div class="col-md-6">
+                                <label class="form-label">Status</label>
+                                <div class="form-check form-switch">
+                                    <input type="checkbox" class="form-check-input" id="active" checked>
+                                    <label class="form-check-label" for="active">
+                                        Active - track vulnerabilities
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Options (Collapsed by Default) -->
+                    <div class="border-top pt-3">
+                        <button class="btn btn-link text-decoration-none p-0 text-muted" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#advancedOptionsCollapse">
+                            <i class="bi bi-gear me-1"></i>Advanced Options
+                            <i class="bi bi-chevron-down ms-1 small"></i>
+                        </button>
+
+                        <div id="advancedOptionsCollapse" class="collapse mt-3">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="matchType" class="form-label">Matching Strategy</label>
+                                    <select class="form-select form-select-sm" id="matchType">
+                                        <option value="auto">Auto (CPE if available, else keywords)</option>
+                                        <option value="cpe">CPE Only</option>
+                                        <option value="keyword">Keywords Only</option>
+                                        <option value="both">Both CPE and Keywords</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label for="keywords" class="form-label">Additional Keywords</label>
+                                    <input type="text" class="form-control form-control-sm" id="keywords"
+                                           placeholder="Comma-separated (e.g., httpd, apache2)">
+                                </div>
+
+                                <div class="col-12">
+                                    <label for="description" class="form-label">Notes</label>
+                                    <textarea class="form-control form-control-sm" id="description" rows="2"
+                                              placeholder="Optional notes about this product"></textarea>
+                                </div>
+
+                                <!-- CPE Status -->
+                                <div class="col-12" id="cpeStatusSection">
+                                    <div class="alert alert-light py-2 mb-0 small">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <strong><i class="bi bi-link-45deg me-1"></i>CPE Status:</strong>
+                                                <span id="cpeSelectedInfo" style="display: none;">
+                                                    <span class="badge bg-success">Linked</span>
+                                                    <code id="cpeDisplayUri" class="ms-1"></code>
+                                                </span>
+                                                <span id="cpeNotLinkedInfo">
+                                                    <span class="badge bg-secondary">Not linked</span>
+                                                    <span class="text-muted ms-1">Use NVD search for better accuracy</span>
+                                                </span>
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary py-0" onclick="clearCPE()" id="clearCpeBtn" style="display: none;">
+                                                Clear
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Legacy Static Catalog -->
+                                <div class="col-12">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showServiceCatalog()">
+                                        <i class="bi bi-archive me-1"></i>Browse Static Catalog (Legacy)
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </form>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                    <i class="bi bi-x-circle me-1"></i>Cancel
-                </button>
+            <div class="modal-footer bg-light">
+                <small class="text-muted me-auto"><span class="text-danger">*</span> Required fields</small>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="saveProduct()">
                     <i class="bi bi-check-circle me-1"></i>Save Product
                 </button>
@@ -642,14 +770,62 @@
         document.getElementById('productForm').reset();
         document.getElementById('active').checked = true;
         document.getElementById('criticality').value = 'medium';
+        document.getElementById('matchType').value = 'auto';
+
+        // Reset NVD search UI (primary method)
+        resetNVDSearch();
+
+        // Reset legacy CPE form
+        resetCPEForm();
+
+        // Collapse advanced options
+        const advancedCollapse = document.getElementById('advancedOptionsCollapse');
+        if (advancedCollapse) advancedCollapse.classList.remove('show');
+
+        // Show manual entry toggle
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'block';
+
+        // Check NVD API key status and show rate limit warning if needed
+        checkNvdApiKeyStatus();
 
         // Load organizations into dropdown
         await loadOrganizationsIntoProductForm();
+
+        // Show the modal - reuse or create instance
+        const modalEl = document.getElementById('productModal');
+        let modal = bootstrap.Modal.getInstance(modalEl);
+        if (!modal) {
+            modal = new bootstrap.Modal(modalEl);
+        }
+        modal.show();
+    }
+
+    async function checkNvdApiKeyStatus() {
+        const warningEl = document.getElementById('nvdRateLimitWarning');
+        if (!warningEl) return;
+
+        try {
+            const response = await fetch('/api/cpe/stats');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.api && !data.api.nvd_api_key_configured) {
+                    warningEl.style.display = 'block';
+                } else {
+                    warningEl.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            // Silently fail - don't block the modal
+        }
     }
 
     async function editProduct(productId) {
         currentProductId = productId;
         document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Product';
+
+        // Reset NVD search UI
+        resetNVDSearch();
 
         try {
             // Load organizations first
@@ -667,7 +843,24 @@
             document.getElementById('active').checked = product.active;
             document.getElementById('productOrganization').value = product.organization_id || '';
 
-            new bootstrap.Modal(document.getElementById('productModal')).show();
+            // Load CPE data and update NVD selection display
+            loadCPEIntoForm(product);
+
+            // Hide manual entry toggle when editing (data is already filled)
+            const toggle = document.getElementById('manualEntryToggle');
+            if (toggle) toggle.style.display = 'none';
+
+            // Collapse advanced options by default
+            const advancedCollapse = document.getElementById('advancedOptionsCollapse');
+            if (advancedCollapse) advancedCollapse.classList.remove('show');
+
+            // Show the modal - reuse or create instance
+            const modalEl = document.getElementById('productModal');
+            let modal = bootstrap.Modal.getInstance(modalEl);
+            if (!modal) {
+                modal = new bootstrap.Modal(modalEl);
+            }
+            modal.show();
         } catch (error) {
             showToast(`Error loading product: ${error.message}`, 'danger');
         }
@@ -692,7 +885,12 @@
             criticality: criticality,
             keywords: document.getElementById('keywords').value.trim(),
             description: document.getElementById('description').value.trim(),
-            active: document.getElementById('active').checked
+            active: document.getElementById('active').checked,
+            // CPE fields
+            cpe_vendor: document.getElementById('cpeVendor').value.trim() || null,
+            cpe_product: document.getElementById('cpeProduct').value.trim() || null,
+            cpe_uri: document.getElementById('cpeUri').value.trim() || null,
+            match_type: document.getElementById('matchType').value || 'auto'
         };
 
         if (orgId) {
@@ -721,15 +919,30 @@
                     currentProductId ? '✓ Product updated successfully' : '✓ Product added successfully',
                     'success'
                 );
-                bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+                // Safely close modal
+                const modalEl = document.getElementById('productModal');
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                if (modal) {
+                    modal.hide();
+                }
                 loadProducts();
             } else {
-                const error = await response.json();
+                // Safely parse error response - handle non-JSON responses
+                let errorMessage = 'Unknown error occurred';
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || errorData.message || 'Request failed';
+                } catch (parseError) {
+                    // Response was not JSON (could be HTML error page or empty)
+                    console.error('Failed to parse error response:', parseError);
+                    errorMessage = `Server error (${response.status}: ${response.statusText})`;
+                }
                 // Show warning for duplicates, danger for other errors
                 const toastType = response.status === 409 ? 'warning' : 'danger';
-                showToast(`⚠ ${error.error}`, toastType);
+                showToast(`${errorMessage}`, toastType);
             }
         } catch (error) {
+            console.error('Error saving product:', error);
             showToast(`Error saving product: ${error.message}`, 'danger');
         } finally {
             hideLoading();
@@ -768,16 +981,34 @@
     }
 
     async function loadOrganizationsIntoProductForm() {
+        const select = document.getElementById('productOrganization');
+        if (!select) return;
+
+        select.innerHTML = '<option value="">Loading...</option>';
+        select.disabled = true;
+
         try {
-            const response = await fetch('/api/organizations');
+            const response = await fetch('/api/organizations', {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' }
+            });
+
             if (response.ok) {
                 const orgs = await response.json();
-                const select = document.getElementById('productOrganization');
-                select.innerHTML = '<option value="">No organization (use default)</option>' +
-                    orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+                if (Array.isArray(orgs) && orgs.length > 0) {
+                    select.innerHTML = '<option value="">Select organization (optional)...</option>' +
+                        orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
+                } else {
+                    select.innerHTML = '<option value="">No organizations available</option>';
+                }
+            } else {
+                select.innerHTML = `<option value="">Failed to load (${response.status})</option>`;
             }
         } catch (error) {
-            console.error('Error loading organizations for product form:', error);
+            select.innerHTML = '<option value="">Network error</option>';
+        } finally {
+            select.disabled = false;
         }
     }
 
@@ -1702,10 +1933,479 @@
         `;
     }
 
+    // =========================================================================
+    // NVD Search Functions (Primary Method for Adding Products)
+    // =========================================================================
+
+    let nvdSearchTimeout = null;
+    let nvdSelectedVendor = null;
+    let nvdSelectedProduct = null;
+
+    function debounceNVDSearch() {
+        if (nvdSearchTimeout) clearTimeout(nvdSearchTimeout);
+        const statusEl = document.getElementById('nvdSearchStatus');
+        statusEl.textContent = 'Typing...';
+        statusEl.style.display = 'block';
+
+        nvdSearchTimeout = setTimeout(() => {
+            const query = document.getElementById('nvdSearchInput').value.trim();
+            if (query.length >= 2) {
+                performNVDSearchNow();
+            } else {
+                statusEl.textContent = 'Enter at least 2 characters to search';
+                document.getElementById('nvdResultsList').style.display = 'none';
+            }
+        }, 400);
+    }
+
+    async function performNVDSearchNow() {
+        const query = document.getElementById('nvdSearchInput').value.trim();
+        const statusEl = document.getElementById('nvdSearchStatus');
+        const resultsList = document.getElementById('nvdResultsList');
+
+        if (query.length < 2) {
+            statusEl.textContent = 'Enter at least 2 characters to search';
+            statusEl.style.display = 'block';
+            resultsList.style.display = 'none';
+            return;
+        }
+
+        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Searching NVD database...';
+        statusEl.style.display = 'block';
+        resultsList.style.display = 'block';
+        resultsList.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+
+        try {
+            const response = await fetch(`/api/cpe/search?q=${encodeURIComponent(query)}&grouped=true&limit=50`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                statusEl.textContent = data.error || 'Search failed';
+                statusEl.className = 'small text-danger mb-2';
+                resultsList.innerHTML = '';
+                resultsList.style.display = 'none';
+                return;
+            }
+
+            const vendors = data.vendors || {};
+            const vendorKeys = Object.keys(vendors);
+            const totalProducts = vendorKeys.reduce((sum, v) => sum + Object.keys(vendors[v].products || {}).length, 0);
+
+            if (vendorKeys.length === 0) {
+                statusEl.textContent = 'No products found. Try different search terms.';
+                statusEl.className = 'small text-muted mb-2';
+                resultsList.innerHTML = `
+                    <div class="p-4 text-center text-muted">
+                        <i class="bi bi-search" style="font-size: 2rem;"></i>
+                        <p class="mt-2 mb-0">No results found in NVD database.</p>
+                        <small>Try searching for vendor names like "microsoft", "apache", "cisco"</small>
+                    </div>
+                `;
+                return;
+            }
+
+            statusEl.textContent = `Found ${totalProducts} product(s) from ${vendorKeys.length} vendor(s) - Click to select`;
+            statusEl.className = 'small text-success mb-2';
+
+            let html = '';
+            for (const vendorKey of vendorKeys) {
+                const vendorData = vendors[vendorKey];
+                const products = vendorData.products || {};
+
+                // Format vendor name for display
+                const formattedVendor = vendorKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+                for (const [productKey, productData] of Object.entries(products)) {
+                    const versions = productData.versions || [];
+                    const displayName = productData.display_name || productData.title || productKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    const versionCount = versions.length;
+
+                    html += `
+                        <div class="p-2 border-bottom nvd-result-item" style="cursor: pointer;"
+                             onclick="selectNVDProduct('${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(formattedVendor)} - ${escapeHtml(displayName)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <span class="badge bg-secondary me-2">${escapeHtml(formattedVendor)}</span>
+                                    <strong>${escapeHtml(displayName)}</strong>
+                                </div>
+                                <span class="badge bg-light text-dark">${versionCount} versions</span>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            resultsList.innerHTML = html;
+
+            // Add hover effect
+            document.querySelectorAll('.nvd-result-item').forEach(item => {
+                item.addEventListener('mouseenter', () => item.classList.add('bg-light'));
+                item.addEventListener('mouseleave', () => item.classList.remove('bg-light'));
+            });
+
+        } catch (error) {
+            statusEl.textContent = `Error: ${error.message}`;
+            statusEl.className = 'small text-danger mb-2';
+            resultsList.innerHTML = '';
+            resultsList.style.display = 'none';
+        }
+    }
+
+    function selectNVDProduct(vendor, product, displayName, versions) {
+        nvdSelectedVendor = vendor;
+        nvdSelectedProduct = product;
+
+        // Set hidden CPE fields
+        document.getElementById('cpeVendor').value = vendor;
+        document.getElementById('cpeProduct').value = product;
+        document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:*:*:*:*:*:*:*:*`;
+
+        // Show selected product card
+        document.getElementById('nvdSelectedName').textContent = displayName;
+        document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${vendor}:${product}:*`;
+        document.getElementById('nvdSelectedProduct').style.display = 'block';
+
+        // Hide search results and manual entry toggle
+        document.getElementById('nvdResultsList').style.display = 'none';
+        document.getElementById('nvdSearchStatus').style.display = 'none';
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'none';
+
+        // Auto-fill vendor and product name fields
+        const vendorInput = document.getElementById('vendor');
+        const productInput = document.getElementById('productName');
+
+        // Format for display (capitalize words, replace underscores)
+        const formattedVendor = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        const formattedProduct = product.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+        vendorInput.value = formattedVendor;
+        productInput.value = formattedProduct;
+
+        // Populate version suggestions
+        if (versions && versions.length > 0) {
+            const datalist = document.getElementById('versionSuggestions');
+            datalist.innerHTML = versions.map(v => `<option value="${escapeHtml(v)}">`).join('');
+            document.getElementById('loadVersionsBtn').style.display = 'inline-block';
+        }
+
+        // Update CPE status in advanced options
+        document.getElementById('cpeSelectedInfo').style.display = 'block';
+        document.getElementById('cpeDisplayUri').textContent = `${vendor}:${product}`;
+        document.getElementById('cpeNotLinkedInfo').style.display = 'none';
+        document.getElementById('clearCpeBtn').style.display = 'inline-block';
+
+        showToast(`Selected: ${displayName}`, 'success');
+    }
+
+    function clearNVDSelection() {
+        nvdSelectedVendor = null;
+        nvdSelectedProduct = null;
+
+        // Clear hidden fields
+        document.getElementById('cpeVendor').value = '';
+        document.getElementById('cpeProduct').value = '';
+        document.getElementById('cpeUri').value = '';
+
+        // Hide selected product card
+        document.getElementById('nvdSelectedProduct').style.display = 'none';
+        document.getElementById('nvdSelectedName').textContent = '';
+        document.getElementById('nvdSelectedCpe').textContent = '';
+
+        // Clear form fields
+        document.getElementById('vendor').value = '';
+        document.getElementById('productName').value = '';
+        document.getElementById('version').value = '';
+        document.getElementById('versionSuggestions').innerHTML = '';
+        document.getElementById('loadVersionsBtn').style.display = 'none';
+
+        // Reset CPE status in advanced options
+        document.getElementById('cpeSelectedInfo').style.display = 'none';
+        document.getElementById('cpeNotLinkedInfo').style.display = 'block';
+        document.getElementById('clearCpeBtn').style.display = 'none';
+
+        // Clear search
+        document.getElementById('nvdSearchInput').value = '';
+        document.getElementById('nvdSearchStatus').style.display = 'none';
+        document.getElementById('nvdResultsList').style.display = 'none';
+
+        // Show manual entry toggle again
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'block';
+    }
+
+    function toggleManualEntry() {
+        // Hide the toggle button and focus on vendor field
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'none';
+
+        // Focus on the vendor field for manual entry
+        const vendorInput = document.getElementById('vendor');
+        if (vendorInput) {
+            vendorInput.focus();
+        }
+    }
+
+    async function loadVersionsFromNVD() {
+        if (!nvdSelectedVendor || !nvdSelectedProduct) {
+            showToast('Please select a product from NVD search first', 'warning');
+            return;
+        }
+
+        const btn = document.getElementById('loadVersionsBtn');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(`/api/cpe/versions?vendor=${encodeURIComponent(nvdSelectedVendor)}&product=${encodeURIComponent(nvdSelectedProduct)}`);
+            const data = await response.json();
+
+            if (response.ok && data.versions) {
+                const datalist = document.getElementById('versionSuggestions');
+                datalist.innerHTML = data.versions.map(v => `<option value="${escapeHtml(v)}">`).join('');
+                showToast(`Loaded ${data.versions.length} versions`, 'success');
+            } else {
+                showToast(data.error || 'Failed to load versions', 'warning');
+            }
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+
+    function resetNVDSearch() {
+        nvdSelectedVendor = null;
+        nvdSelectedProduct = null;
+        document.getElementById('nvdSearchInput').value = '';
+        document.getElementById('nvdSearchStatus').style.display = 'none';
+        document.getElementById('nvdResultsList').style.display = 'none';
+        document.getElementById('nvdResultsList').innerHTML = '';
+        document.getElementById('nvdSelectedProduct').style.display = 'none';
+        document.getElementById('versionSuggestions').innerHTML = '';
+        document.getElementById('loadVersionsBtn').style.display = 'none';
+
+        // Reset CPE status display
+        document.getElementById('cpeSelectedInfo').style.display = 'none';
+        document.getElementById('cpeNotLinkedInfo').style.display = 'block';
+        document.getElementById('clearCpeBtn').style.display = 'none';
+
+        // Show manual entry toggle
+        const toggle = document.getElementById('manualEntryToggle');
+        if (toggle) toggle.style.display = 'block';
+    }
+
+    // =========================================================================
+    // CPE (Common Platform Enumeration) Search Functions
+    // =========================================================================
+
+    let cpeSearchTimeout = null;
+
+    function searchCPE() {
+        // Pre-populate search with vendor + product name
+        const vendor = document.getElementById('vendor').value.trim();
+        const productName = document.getElementById('productName').value.trim();
+        const searchInput = document.getElementById('cpeSearchInput');
+
+        searchInput.value = `${vendor} ${productName}`.trim();
+
+        document.getElementById('cpeSearchResults').style.display = 'block';
+        document.getElementById('cpeResultsList').innerHTML = `
+            <div class="text-center py-3">
+                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                <span class="ms-2 small">Searching NVD database...</span>
+            </div>
+        `;
+
+        if (searchInput.value.length >= 2) {
+            performCPESearch(searchInput.value);
+        }
+    }
+
+    function closeCPESearch() {
+        document.getElementById('cpeSearchResults').style.display = 'none';
+    }
+
+    function debounceCPESearch() {
+        if (cpeSearchTimeout) clearTimeout(cpeSearchTimeout);
+        cpeSearchTimeout = setTimeout(() => {
+            const query = document.getElementById('cpeSearchInput').value.trim();
+            if (query.length >= 2) {
+                performCPESearch(query);
+            }
+        }, 400);
+    }
+
+    async function performCPESearch(query) {
+        const resultsList = document.getElementById('cpeResultsList');
+
+        try {
+            const response = await fetch(`/api/cpe/search?q=${encodeURIComponent(query)}&grouped=true&limit=50`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                resultsList.innerHTML = `<div class="p-3 text-danger small">${data.error || 'Search failed'}</div>`;
+                return;
+            }
+
+            const vendors = data.vendors || {};
+            const vendorKeys = Object.keys(vendors);
+
+            if (vendorKeys.length === 0) {
+                resultsList.innerHTML = `
+                    <div class="p-3 text-muted small text-center">
+                        <i class="bi bi-search me-1"></i>No products found in NVD database.
+                        <br><small>Try a different search term or use keyword matching.</small>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '<div class="list-group list-group-flush">';
+
+            for (const vendorKey of vendorKeys) {
+                const vendorData = vendors[vendorKey];
+                const products = vendorData.products || {};
+
+                for (const [productKey, productData] of Object.entries(products)) {
+                    const versions = productData.versions || [];
+                    const displayName = productData.display_name || productData.title || `${vendorKey}/${productKey}`;
+                    const versionPreview = versions.slice(0, 5).join(', ');
+
+                    html += `
+                        <div class="list-group-item list-group-item-action py-2" style="cursor: pointer;"
+                             onclick="selectCPE('${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(displayName)}')">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <div class="fw-semibold">${escapeHtml(displayName)}</div>
+                                    <small class="text-muted">
+                                        <code>cpe:2.3:a:${escapeHtml(vendorKey)}:${escapeHtml(productKey)}:*</code>
+                                    </small>
+                                </div>
+                                <span class="badge bg-secondary">${versions.length} versions</span>
+                            </div>
+                            ${versionPreview ? `<small class="text-muted">Versions: ${escapeHtml(versionPreview)}${versions.length > 5 ? '...' : ''}</small>` : ''}
+                        </div>
+                    `;
+                }
+            }
+
+            html += '</div>';
+            resultsList.innerHTML = html;
+
+        } catch (error) {
+            resultsList.innerHTML = `<div class="p-3 text-danger small">Error: ${error.message}</div>`;
+        }
+    }
+
+    function selectCPE(vendor, product, displayName) {
+        // Set hidden fields
+        document.getElementById('cpeVendor').value = vendor;
+        document.getElementById('cpeProduct').value = product;
+        document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:*:*:*:*:*:*:*:*`;
+
+        // Show selected info
+        document.getElementById('cpeSelectedInfo').style.display = 'block';
+        document.getElementById('cpeDisplayUri').textContent = `${vendor}:${product}`;
+
+        // Hide search results
+        document.getElementById('cpeSearchResults').style.display = 'none';
+
+        // If vendor/product fields are empty, populate them
+        const vendorInput = document.getElementById('vendor');
+        const productInput = document.getElementById('productName');
+
+        if (!vendorInput.value.trim()) {
+            vendorInput.value = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+        if (!productInput.value.trim()) {
+            productInput.value = product.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        showToast('CPE linked: ' + displayName, 'success');
+    }
+
+    function clearCPE() {
+        document.getElementById('cpeVendor').value = '';
+        document.getElementById('cpeProduct').value = '';
+        document.getElementById('cpeUri').value = '';
+        document.getElementById('cpeSelectedInfo').style.display = 'none';
+        document.getElementById('matchType').value = 'auto';
+    }
+
+    function resetCPEForm() {
+        clearCPE();
+        document.getElementById('cpeSearchResults').style.display = 'none';
+        document.getElementById('cpeSearchInput').value = '';
+        document.getElementById('cpeResultsList').innerHTML = '';
+    }
+
+    function loadCPEIntoForm(product) {
+        // Load CPE data when editing a product
+        if (product.cpe_vendor && product.cpe_product) {
+            // Set global variables for version loading
+            nvdSelectedVendor = product.cpe_vendor;
+            nvdSelectedProduct = product.cpe_product;
+
+            // Set hidden fields
+            document.getElementById('cpeVendor').value = product.cpe_vendor;
+            document.getElementById('cpeProduct').value = product.cpe_product;
+            document.getElementById('cpeUri').value = product.cpe_uri || '';
+
+            // Show NVD selected product display (primary UI)
+            const displayName = `${product.vendor} ${product.product_name}`;
+            document.getElementById('nvdSelectedName').textContent = displayName;
+            document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${product.cpe_vendor}:${product.cpe_product}:*`;
+            document.getElementById('nvdSelectedProduct').style.display = 'block';
+            document.getElementById('loadVersionsBtn').style.display = 'inline-block';
+
+            // Update CPE status in advanced options
+            document.getElementById('cpeSelectedInfo').style.display = 'block';
+            document.getElementById('cpeDisplayUri').textContent = `${product.cpe_vendor}:${product.cpe_product}`;
+            document.getElementById('cpeNotLinkedInfo').style.display = 'none';
+            document.getElementById('clearCpeBtn').style.display = 'inline-block';
+        } else if (product.effective_cpe_vendor && product.effective_cpe_product) {
+            // Show effective CPE from catalog (linked via ServiceCatalog)
+            nvdSelectedVendor = product.effective_cpe_vendor;
+            nvdSelectedProduct = product.effective_cpe_product;
+
+            const displayName = `${product.vendor} ${product.product_name}`;
+            document.getElementById('nvdSelectedName').textContent = `${displayName} (from catalog)`;
+            document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${product.effective_cpe_vendor}:${product.effective_cpe_product}:*`;
+            document.getElementById('nvdSelectedProduct').style.display = 'block';
+            document.getElementById('loadVersionsBtn').style.display = 'inline-block';
+
+            // Update CPE status in advanced options
+            document.getElementById('cpeSelectedInfo').style.display = 'block';
+            document.getElementById('cpeDisplayUri').textContent = `${product.effective_cpe_vendor}:${product.effective_cpe_product} (from catalog)`;
+            document.getElementById('cpeNotLinkedInfo').style.display = 'none';
+        } else {
+            // No CPE data - show manual entry state
+            resetNVDSearch();
+            resetCPEForm();
+        }
+
+        document.getElementById('matchType').value = product.match_type || 'auto';
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         loadFilterOrganizations(); // Load org filter dropdown (super admin only)
         loadProducts();
         // TableEnhancements auto-initializes via data-enhanced="true"
+
+        // Load organizations when product modal is shown (backup trigger)
+        const productModal = document.getElementById('productModal');
+        if (productModal) {
+            productModal.addEventListener('shown.bs.modal', function() {
+                // Retry loading organizations if still showing "Loading"
+                const select = document.getElementById('productOrganization');
+                if (select && select.innerHTML.includes('Loading')) {
+                    loadOrganizationsIntoProductForm();
+                }
+            });
+        }
     });
 </script>
 {% endblock %}

@@ -77,6 +77,18 @@ class Organization(db.Model):
     alert_time_end = db.Column(db.String(5), default='18:00')    # HH:MM format
     alert_days = db.Column(db.String(50), default='mon,tue,wed,thu,fri')  # Comma-separated days
 
+    # Alert Mode Settings (null = use global default)
+    # Modes: 'new_only' (only new CVEs), 'daily_reminder' (all unack'd due <=7d), 'escalation' (re-alert at X days)
+    alert_mode = db.Column(db.String(20), nullable=True)  # null = use global default
+    escalation_days = db.Column(db.Integer, nullable=True)  # Days before due to escalate (null = use global, default 3)
+
+    # Webhook Settings (per organization - takes priority over global)
+    webhook_enabled = db.Column(db.Boolean, default=False)
+    webhook_url = db.Column(db.String(500), nullable=True)
+    webhook_name = db.Column(db.String(100), default='Organization Webhook')
+    webhook_format = db.Column(db.String(50), default='slack')  # slack, discord, teams, rocketchat, custom
+    webhook_token = db.Column(db.String(500), nullable=True)  # Optional auth token
+
     # Metadata
     active = db.Column(db.Boolean, default=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -86,12 +98,18 @@ class Organization(db.Model):
         # Count active users in this organization
         user_count = User.query.filter_by(organization_id=self.id, is_active=True).count()
 
+        # Safely parse notification_emails JSON
+        try:
+            notification_emails = json.loads(self.notification_emails) if self.notification_emails else []
+        except (json.JSONDecodeError, TypeError):
+            notification_emails = []
+
         return {
             'id': self.id,
             'name': self.name,
             'display_name': self.display_name,
             'description': self.description,
-            'notification_emails': json.loads(self.notification_emails) if self.notification_emails else [],
+            'notification_emails': notification_emails,
             'alert_settings': {
                 'critical': self.alert_on_critical,
                 'high': self.alert_on_high,
@@ -99,7 +117,9 @@ class Organization(db.Model):
                 'ransomware': self.alert_on_ransomware,
                 'time_start': self.alert_time_start,
                 'time_end': self.alert_time_end,
-                'days': self.alert_days
+                'days': self.alert_days,
+                'mode': self.alert_mode,  # null = use global default
+                'escalation_days': self.escalation_days
             },
             # SMTP Settings (return all except password for security)
             'smtp_host': self.smtp_host,
@@ -116,9 +136,51 @@ class Organization(db.Model):
             'alert_on_high': self.alert_on_high,
             'alert_on_new_cve': self.alert_on_new_cve,
             'alert_on_ransomware': self.alert_on_ransomware,
+            # Webhook settings (decrypt URL for editing)
+            'webhook_enabled': self.webhook_enabled,
+            'webhook_url': self._decrypt_webhook_url(),
+            'webhook_name': self.webhook_name,
+            'webhook_format': self.webhook_format,
+            'webhook_token': '********' if self.webhook_token else '',  # Mask token
+            'webhook_configured': bool(self.webhook_enabled and self.webhook_url),
             'user_count': user_count,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+    def _decrypt_webhook_url(self):
+        """Decrypt webhook URL for display/editing"""
+        if not self.webhook_url:
+            return None
+        try:
+            from app.encryption import decrypt_value, is_encrypted
+            if is_encrypted(self.webhook_url):
+                return decrypt_value(self.webhook_url)
+            return self.webhook_url
+        except Exception:
+            return self.webhook_url
+
+    def get_webhook_config(self):
+        """Return webhook configuration dictionary with decrypted values"""
+        webhook_url = self.webhook_url
+        webhook_token = self.webhook_token
+
+        # Decrypt values if encrypted
+        try:
+            from app.encryption import decrypt_value, is_encrypted
+            if webhook_url and is_encrypted(webhook_url):
+                webhook_url = decrypt_value(webhook_url)
+            if webhook_token and is_encrypted(webhook_token):
+                webhook_token = decrypt_value(webhook_token)
+        except Exception:
+            pass
+
+        return {
+            'enabled': self.webhook_enabled,
+            'url': webhook_url,
+            'name': self.webhook_name,
+            'format': self.webhook_format,
+            'token': webhook_token
         }
 
     def get_smtp_config(self):
@@ -146,6 +208,32 @@ class Organization(db.Model):
             'from_name': self.smtp_from_name
         }
 
+    def get_effective_alert_mode(self):
+        """
+        Get the effective alert mode for this organization.
+        Uses org-specific setting if set, otherwise falls back to global default.
+
+        Returns dict with:
+            - mode: 'new_only', 'daily_reminder', or 'escalation'
+            - escalation_days: int (only relevant for escalation mode)
+        """
+        from app.settings_api import get_setting
+
+        # Get org-specific or global default
+        mode = self.alert_mode
+        if not mode:
+            mode = get_setting('default_alert_mode', 'daily_reminder')
+
+        escalation_days = self.escalation_days
+        if escalation_days is None:
+            escalation_days = int(get_setting('default_escalation_days', '3') or '3')
+
+        return {
+            'mode': mode,
+            'escalation_days': escalation_days
+        }
+
+
 class Product(db.Model):
     """Software/service inventory managed by admins"""
     __tablename__ = 'products'
@@ -163,10 +251,40 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # CPE (Common Platform Enumeration) fields for precise vulnerability matching
+    cpe_vendor = db.Column(db.String(200), nullable=True, index=True)  # NVD CPE vendor identifier
+    cpe_product = db.Column(db.String(200), nullable=True, index=True)  # NVD CPE product identifier
+    cpe_uri = db.Column(db.String(500), nullable=True)  # Full CPE 2.3 URI (optional)
+    match_type = db.Column(db.String(20), default='auto')  # auto, cpe, keyword, both
+
     # Relationships
     organization = db.relationship('Organization', backref='products')  # Legacy single org (deprecated)
     organizations = db.relationship('Organization', secondary=product_organizations, backref='assigned_products', lazy='dynamic')  # Multi-org support
     catalog_entry = db.relationship('ServiceCatalog', backref='deployed_instances')
+
+    def get_effective_cpe(self):
+        """
+        Get effective CPE identifiers, checking product fields first, then catalog entry.
+        Returns: (cpe_vendor, cpe_product, cpe_uri) tuple
+        """
+        # Product-level CPE takes precedence
+        if self.cpe_vendor and self.cpe_product:
+            return self.cpe_vendor, self.cpe_product, self.cpe_uri
+
+        # Fall back to catalog entry CPE
+        if self.catalog_entry:
+            return (
+                self.catalog_entry.cpe_vendor,
+                self.catalog_entry.cpe_product,
+                None  # Catalog entries don't have full URI
+            )
+
+        return None, None, None
+
+    def has_cpe(self):
+        """Check if this product has CPE identifiers configured."""
+        cpe_vendor, cpe_product, _ = self.get_effective_cpe()
+        return bool(cpe_vendor and cpe_product)
 
     def to_dict(self):
         # Get assigned organizations
@@ -178,6 +296,9 @@ class Product(db.Model):
             # If using legacy single org, add it to the list
             if self.organization:
                 assigned_orgs = [{'id': self.organization.id, 'name': self.organization.name, 'display_name': self.organization.display_name}]
+
+        # Get effective CPE (product-level or from catalog)
+        eff_cpe_vendor, eff_cpe_product, eff_cpe_uri = self.get_effective_cpe()
 
         return {
             'id': self.id,
@@ -192,7 +313,17 @@ class Product(db.Model):
             'active': self.active,
             'criticality': self.criticality,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            # CPE fields
+            'cpe_vendor': self.cpe_vendor,
+            'cpe_product': self.cpe_product,
+            'cpe_uri': self.cpe_uri,
+            'match_type': self.match_type or 'auto',
+            # Effective CPE (resolved from product or catalog)
+            'effective_cpe_vendor': eff_cpe_vendor,
+            'effective_cpe_product': eff_cpe_product,
+            'effective_cpe_uri': eff_cpe_uri,
+            'has_cpe': self.has_cpe()
         }
 
 class Vulnerability(db.Model):
@@ -213,6 +344,10 @@ class Vulnerability(db.Model):
     cvss_score = db.Column(db.Float, nullable=True, index=True)  # CVSS score from NVD
     severity = db.Column(db.String(20), nullable=True, index=True)  # CRITICAL, HIGH, MEDIUM, LOW
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # CPE data from NVD (cached for better matching)
+    cpe_data = db.Column(db.Text, nullable=True)  # JSON array of affected CPE entries
+    cpe_fetched_at = db.Column(db.DateTime, nullable=True)  # When CPE data was last fetched
 
     def calculate_priority(self):
         """
@@ -259,6 +394,28 @@ class Vulnerability(db.Model):
 
         return 'medium'
 
+    def get_cpe_entries(self):
+        """Get parsed CPE data if available."""
+        if not self.cpe_data:
+            return []
+        try:
+            return json.loads(self.cpe_data)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def set_cpe_entries(self, entries):
+        """Set CPE data from a list of CPE entries."""
+        if entries:
+            self.cpe_data = json.dumps(entries)
+            self.cpe_fetched_at = datetime.utcnow()
+        else:
+            self.cpe_data = None
+            self.cpe_fetched_at = None
+
+    def has_cpe_data(self):
+        """Check if CPE data is available."""
+        return bool(self.cpe_data)
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -275,7 +432,9 @@ class Vulnerability(db.Model):
             'cvss_score': self.cvss_score,
             'severity': self.severity,
             'priority': self.calculate_priority(),
-            'days_old': (date.today() - self.date_added).days if self.date_added else None
+            'days_old': (date.today() - self.date_added).days if self.date_added else None,
+            'has_cpe_data': self.has_cpe_data(),
+            'cpe_fetched_at': self.cpe_fetched_at.isoformat() if self.cpe_fetched_at else None
         }
 
 class VulnerabilityMatch(db.Model):
@@ -288,6 +447,10 @@ class VulnerabilityMatch(db.Model):
     match_reason = db.Column(db.String(200), nullable=True)  # Why it matched (vendor, product, keyword)
     acknowledged = db.Column(db.Boolean, default=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Match method and confidence
+    match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
+    match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
 
     product = db.relationship('Product', backref='matches')
     vulnerability = db.relationship('Vulnerability', backref='matches')
@@ -325,6 +488,8 @@ class VulnerabilityMatch(db.Model):
             'product': product_dict,
             'vulnerability': vuln_dict,
             'match_reason': self.match_reason,
+            'match_method': self.match_method or 'keyword',
+            'match_confidence': self.match_confidence or 'medium',
             'acknowledged': self.acknowledged,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'effective_priority': self.calculate_effective_priority(),
@@ -438,6 +603,18 @@ class User(db.Model):
     last_login = db.Column(db.DateTime, nullable=True)
     last_login_ip = db.Column(db.String(50), nullable=True)
 
+    # Failed login tracking
+    failed_login_attempts = db.Column(db.Integer, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
+
+    # Password expiration
+    password_changed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    must_change_password = db.Column(db.Boolean, default=False)
+
+    # Two-Factor Authentication
+    totp_secret = db.Column(db.String(32), nullable=True)
+    totp_enabled = db.Column(db.Boolean, default=False)
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -454,6 +631,193 @@ class User(db.Model):
         if not self.password_hash:
             return False
         return check_password_hash(self.password_hash, password)
+
+    def is_locked(self):
+        """Check if account is locked due to failed login attempts"""
+        if self.locked_until is None:
+            return False
+        return datetime.utcnow() < self.locked_until
+
+    def get_lockout_remaining_minutes(self):
+        """Get remaining lockout time in minutes"""
+        if not self.is_locked():
+            return 0
+        remaining = (self.locked_until - datetime.utcnow()).total_seconds() / 60
+        return max(0, int(remaining) + 1)  # Round up
+
+    def record_failed_login(self):
+        """Record a failed login attempt and lock if threshold reached"""
+        from app.models import SystemSettings
+
+        # Get lockout settings
+        max_attempts_setting = SystemSettings.query.filter_by(key='failed_login_attempts').first()
+        lockout_duration_setting = SystemSettings.query.filter_by(key='lockout_duration').first()
+
+        max_attempts = int(max_attempts_setting.value) if max_attempts_setting else 5
+        lockout_minutes = int(lockout_duration_setting.value) if lockout_duration_setting else 15
+
+        # Increment failed attempts
+        self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
+
+        # Lock if threshold reached
+        if self.failed_login_attempts >= max_attempts:
+            from datetime import timedelta
+            self.locked_until = datetime.utcnow() + timedelta(minutes=lockout_minutes)
+
+    def reset_failed_login_attempts(self):
+        """Reset failed login counter on successful login"""
+        self.failed_login_attempts = 0
+        self.locked_until = None
+
+    def is_password_expired(self):
+        """Check if password has expired based on settings"""
+        if self.auth_type != 'local':
+            return False  # LDAP handles its own expiration
+
+        if self.must_change_password:
+            return True
+
+        # Get expiration setting
+        expiry_setting = SystemSettings.query.filter_by(key='password_expiry_days').first()
+        expiry_days = int(expiry_setting.value) if expiry_setting else 0
+
+        if expiry_days <= 0:
+            return False  # Password expiration disabled
+
+        if not self.password_changed_at:
+            return True  # Never set, force change
+
+        from datetime import timedelta
+        expiry_date = self.password_changed_at + timedelta(days=expiry_days)
+        return datetime.utcnow() > expiry_date
+
+    def get_password_days_until_expiry(self):
+        """Get number of days until password expires"""
+        if self.auth_type != 'local':
+            return None
+
+        expiry_setting = SystemSettings.query.filter_by(key='password_expiry_days').first()
+        expiry_days = int(expiry_setting.value) if expiry_setting else 0
+
+        if expiry_days <= 0:
+            return None  # Never expires
+
+        if not self.password_changed_at:
+            return 0
+
+        from datetime import timedelta
+        expiry_date = self.password_changed_at + timedelta(days=expiry_days)
+        remaining = (expiry_date - datetime.utcnow()).days
+        return max(0, remaining)
+
+    def update_password(self, new_password):
+        """Update password and reset expiration timer"""
+        self.set_password(new_password)
+        self.password_changed_at = datetime.utcnow()
+        self.must_change_password = False
+
+    def setup_totp(self):
+        """Generate a new TOTP secret for 2FA setup"""
+        import secrets
+        import base64
+        # Generate 20 random bytes and encode as base32
+        secret_bytes = secrets.token_bytes(20)
+        self.totp_secret = base64.b32encode(secret_bytes).decode('utf-8')
+        return self.totp_secret
+
+    def get_totp_uri(self, app_name='SentriKat'):
+        """Get the TOTP URI for QR code generation"""
+        if not self.totp_secret:
+            return None
+        from urllib.parse import quote
+        return f'otpauth://totp/{quote(app_name)}:{quote(self.email)}?secret={self.totp_secret}&issuer={quote(app_name)}'
+
+    def verify_totp(self, code):
+        """Verify a TOTP code"""
+        if not self.totp_secret:
+            return False
+        try:
+            import hmac
+            import struct
+            import time
+            import base64
+            import hashlib
+
+            # Decode the secret
+            key = base64.b32decode(self.totp_secret, casefold=True)
+
+            # Get the current time step (30-second window)
+            counter = int(time.time()) // 30
+
+            # Check current and adjacent time windows for clock skew
+            for offset in range(-1, 2):
+                check_counter = counter + offset
+                # Generate TOTP
+                counter_bytes = struct.pack('>Q', check_counter)
+                hmac_hash = hmac.new(key, counter_bytes, hashlib.sha1).digest()
+                offset_val = hmac_hash[-1] & 0x0f
+                truncated = struct.unpack('>I', hmac_hash[offset_val:offset_val + 4])[0]
+                totp_code = (truncated & 0x7fffffff) % 1000000
+
+                if str(totp_code).zfill(6) == str(code).zfill(6):
+                    return True
+
+            return False
+        except Exception:
+            return False
+
+    def enable_totp(self):
+        """Enable 2FA after verification"""
+        if self.totp_secret:
+            self.totp_enabled = True
+
+    def disable_totp(self):
+        """Disable 2FA"""
+        self.totp_secret = None
+        self.totp_enabled = False
+
+    @staticmethod
+    def validate_password_policy(password):
+        """
+        Validate password against policy settings.
+        Returns (is_valid, error_message)
+        Only applies to local users.
+        """
+        # Get policy settings
+        min_length = SystemSettings.query.filter_by(key='password_min_length').first()
+        req_upper = SystemSettings.query.filter_by(key='password_require_uppercase').first()
+        req_lower = SystemSettings.query.filter_by(key='password_require_lowercase').first()
+        req_numbers = SystemSettings.query.filter_by(key='password_require_numbers').first()
+        req_special = SystemSettings.query.filter_by(key='password_require_special').first()
+
+        min_len = int(min_length.value) if min_length else 8
+        require_upper = req_upper.value == 'true' if req_upper else True
+        require_lower = req_lower.value == 'true' if req_lower else True
+        require_numbers = req_numbers.value == 'true' if req_numbers else True
+        require_special = req_special.value == 'true' if req_special else False
+
+        errors = []
+
+        if len(password) < min_len:
+            errors.append(f'Password must be at least {min_len} characters')
+
+        if require_upper and not any(c.isupper() for c in password):
+            errors.append('Password must contain at least one uppercase letter')
+
+        if require_lower and not any(c.islower() for c in password):
+            errors.append('Password must contain at least one lowercase letter')
+
+        if require_numbers and not any(c.isdigit() for c in password):
+            errors.append('Password must contain at least one number')
+
+        if require_special:
+            special_chars = '!@#$%^&*()_+-=[]{}|;:,.<>?'
+            if not any(c in special_chars for c in password):
+                errors.append('Password must contain at least one special character (!@#$%^&*)')
+
+        if errors:
+            return False, '; '.join(errors)
+        return True, None
 
     def is_super_admin(self):
         """Check if user is a super admin - only role-based, not legacy flags"""
@@ -604,6 +968,16 @@ class User(db.Model):
             'can_view_all_orgs': self.can_view_all_orgs,
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            # Lockout info
+            'is_locked': self.is_locked(),
+            'failed_login_attempts': self.failed_login_attempts or 0,
+            'locked_until': self.locked_until.isoformat() if self.locked_until else None,
+            # Password expiration
+            'password_expired': self.is_password_expired() if self.auth_type == 'local' else False,
+            'password_days_until_expiry': self.get_password_days_until_expiry(),
+            'must_change_password': self.must_change_password or False,
+            # 2FA status
+            'totp_enabled': self.totp_enabled or False,
             # Multi-org data
             'org_memberships': org_memberships,
             'all_organizations': self.get_all_organizations()

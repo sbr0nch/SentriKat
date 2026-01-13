@@ -8,6 +8,7 @@ from app import db, csrf
 from app.models import Organization, User, ServiceCatalog
 from app.cisa_sync import sync_cisa_kev
 import os
+import json
 
 setup_bp = Blueprint('setup', __name__)
 
@@ -262,7 +263,7 @@ def save_proxy_settings():
 
 @setup_bp.route('/api/setup/seed-services', methods=['POST'])
 def seed_service_catalog():
-    """Seed the service catalog with common services"""
+    """Seed the service catalog with common enterprise services"""
     try:
         # Check if services already exist
         existing_count = ServiceCatalog.query.count()
@@ -273,44 +274,102 @@ def seed_service_catalog():
                 'count': existing_count
             })
 
-        # Import and run the seed script
-        import subprocess
-        import sys
+        # Common enterprise services organized by category
+        # Note: versions is an array since (vendor, product_name) must be unique
+        services = [
+            # Microsoft Products
+            {"vendor": "Microsoft", "product": "Windows Server", "versions": ["2019", "2022", "2016"], "category": "Operating System"},
+            {"vendor": "Microsoft", "product": "Windows 10", "versions": ["Enterprise", "Pro"], "category": "Operating System"},
+            {"vendor": "Microsoft", "product": "Windows 11", "versions": ["Enterprise", "Pro"], "category": "Operating System"},
+            {"vendor": "Microsoft", "product": "Exchange Server", "versions": ["2019", "2016"], "category": "Email Server"},
+            {"vendor": "Microsoft", "product": "SQL Server", "versions": ["2022", "2019", "2017"], "category": "Database"},
+            {"vendor": "Microsoft", "product": "SharePoint Server", "versions": ["2019", "2016"], "category": "Collaboration"},
+            {"vendor": "Microsoft", "product": "Active Directory", "versions": ["2019", "2016"], "category": "Identity"},
+            {"vendor": "Microsoft", "product": ".NET Framework", "versions": ["4.8", "4.7"], "category": "Runtime"},
+            {"vendor": "Microsoft", "product": "IIS", "versions": ["10.0", "8.5"], "category": "Web Server"},
+            {"vendor": "Microsoft", "product": "Office", "versions": ["365", "2021", "2019"], "category": "Productivity"},
+            {"vendor": "Microsoft", "product": "Defender for Endpoint", "versions": ["Latest"], "category": "EDR"},
 
-        # Get the project root directory
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        seed_script = os.path.join(project_root, 'seed_service_catalog.py')
+            # Database Systems
+            {"vendor": "Oracle", "product": "Database", "versions": ["21c", "19c", "18c"], "category": "Database"},
+            {"vendor": "MySQL", "product": "MySQL", "versions": ["8.0", "5.7"], "category": "Database"},
+            {"vendor": "PostgreSQL", "product": "PostgreSQL", "versions": ["16", "15", "14"], "category": "Database"},
+            {"vendor": "MongoDB", "product": "MongoDB", "versions": ["7.0", "6.0"], "category": "Database"},
+            {"vendor": "Redis", "product": "Redis", "versions": ["7.0", "6.2"], "category": "Database"},
+            {"vendor": "Elastic", "product": "Elasticsearch", "versions": ["8.x", "7.x"], "category": "Database"},
 
-        # Check if seed script exists
-        if not os.path.exists(seed_script):
-            return jsonify({
-                'success': False,
-                'error': f'Seed script not found at: {seed_script}'
-            }), 500
+            # Web Servers & Frameworks
+            {"vendor": "Apache", "product": "HTTP Server", "versions": ["2.4"], "category": "Web Server"},
+            {"vendor": "Nginx", "product": "Nginx", "versions": ["1.24", "1.22"], "category": "Web Server"},
+            {"vendor": "Apache", "product": "Tomcat", "versions": ["10", "9"], "category": "Application Server"},
+            {"vendor": "Node.js", "product": "Node.js", "versions": ["20 LTS", "18 LTS"], "category": "Runtime"},
+            {"vendor": "PHP", "product": "PHP", "versions": ["8.2", "8.1", "7.4"], "category": "Runtime"},
+            {"vendor": "Python", "product": "Python", "versions": ["3.12", "3.11", "3.10"], "category": "Runtime"},
+            {"vendor": "Java", "product": "OpenJDK", "versions": ["21", "17", "11"], "category": "Runtime"},
 
-        result = subprocess.run(
-            [sys.executable, seed_script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=project_root
-        )
+            # Network Equipment
+            {"vendor": "Cisco", "product": "IOS", "versions": ["17.x", "16.x"], "category": "Network"},
+            {"vendor": "Cisco", "product": "ASA", "versions": ["9.x"], "category": "Firewall"},
+            {"vendor": "Cisco", "product": "Firepower", "versions": ["7.x", "6.x"], "category": "Firewall"},
+            {"vendor": "Palo Alto", "product": "PAN-OS", "versions": ["11.x", "10.x"], "category": "Firewall"},
+            {"vendor": "Fortinet", "product": "FortiOS", "versions": ["7.x", "6.x"], "category": "Firewall"},
+            {"vendor": "Juniper", "product": "Junos OS", "versions": ["23.x", "22.x"], "category": "Network"},
+            {"vendor": "F5", "product": "BIG-IP", "versions": ["17.x", "16.x"], "category": "Load Balancer"},
 
-        if result.returncode == 0:
-            # Count services
-            service_count = ServiceCatalog.query.count()
-            return jsonify({
-                'success': True,
-                'message': f'Successfully seeded {service_count} services',
-                'count': service_count
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': result.stderr or 'Failed to seed services'
-            }), 500
+            # Virtualization & Cloud
+            {"vendor": "VMware", "product": "vSphere", "versions": ["8.0", "7.0"], "category": "Virtualization"},
+            {"vendor": "VMware", "product": "ESXi", "versions": ["8.0", "7.0"], "category": "Hypervisor"},
+            {"vendor": "VMware", "product": "vCenter", "versions": ["8.0", "7.0"], "category": "Management"},
+            {"vendor": "Citrix", "product": "XenServer", "versions": ["8.x"], "category": "Hypervisor"},
+            {"vendor": "Docker", "product": "Docker Engine", "versions": ["24.x", "23.x"], "category": "Container"},
+            {"vendor": "Kubernetes", "product": "Kubernetes", "versions": ["1.29", "1.28", "1.27"], "category": "Container Orchestration"},
+
+            # Security Products
+            {"vendor": "CrowdStrike", "product": "Falcon", "versions": ["Latest"], "category": "EDR"},
+            {"vendor": "Splunk", "product": "Enterprise", "versions": ["9.x", "8.x"], "category": "SIEM"},
+            {"vendor": "Elastic", "product": "Security", "versions": ["8.x", "7.x"], "category": "SIEM"},
+            {"vendor": "Tenable", "product": "Nessus", "versions": ["Latest"], "category": "Vulnerability Scanner"},
+            {"vendor": "Qualys", "product": "VMDR", "versions": ["Latest"], "category": "Vulnerability Scanner"},
+
+            # Linux Distributions
+            {"vendor": "Red Hat", "product": "Enterprise Linux", "versions": ["9", "8", "7"], "category": "Operating System"},
+            {"vendor": "Canonical", "product": "Ubuntu", "versions": ["24.04 LTS", "22.04 LTS", "20.04 LTS"], "category": "Operating System"},
+            {"vendor": "SUSE", "product": "Linux Enterprise Server", "versions": ["15", "12"], "category": "Operating System"},
+            {"vendor": "Debian", "product": "Debian", "versions": ["12", "11"], "category": "Operating System"},
+
+            # Backup & Storage
+            {"vendor": "Veeam", "product": "Backup & Replication", "versions": ["12", "11"], "category": "Backup"},
+            {"vendor": "Commvault", "product": "Complete Backup", "versions": ["Latest"], "category": "Backup"},
+            {"vendor": "NetApp", "product": "ONTAP", "versions": ["9.x"], "category": "Storage"},
+            {"vendor": "Dell EMC", "product": "PowerStore", "versions": ["Latest"], "category": "Storage"},
+        ]
+
+        # Insert services
+        added = 0
+        for svc in services:
+            versions = svc.get('versions', [])
+            service = ServiceCatalog(
+                vendor=svc['vendor'],
+                product_name=svc['product'],
+                category=svc.get('category', 'Other'),
+                typical_versions=json.dumps(versions) if versions else None,
+                description=f"{svc['vendor']} {svc['product']}",
+                is_popular=True,
+                is_active=True
+            )
+            db.session.add(service)
+            added += 1
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': f'Successfully seeded {added} services',
+            'count': added
+        })
 
     except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @setup_bp.route('/api/setup/initial-sync', methods=['POST'])

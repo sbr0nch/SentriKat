@@ -1,18 +1,7 @@
-<p align="center">
-  <img src="docs/images/logo.png" alt="SentriKat Logo" width="200"/>
-</p>
-
 <h1 align="center">SentriKat</h1>
 
 <p align="center">
   <strong>Enterprise Vulnerability Management Platform</strong>
-</p>
-
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#documentation">Documentation</a> •
-  <a href="#support">Support</a>
 </p>
 
 <p align="center">
@@ -25,48 +14,20 @@
 
 ## Overview
 
-**SentriKat** is an enterprise-grade vulnerability management platform that automatically tracks and filters the CISA Known Exploited Vulnerabilities (KEV) catalog against your organization's software inventory. It provides real-time alerting, multi-tenant support, and comprehensive reporting capabilities.
+**SentriKat** is an enterprise-grade vulnerability management platform that automatically tracks and filters the CISA Known Exploited Vulnerabilities (KEV) catalog against your organization's software inventory.
 
-### Why SentriKat?
+### Key Features
 
-- **Automated Threat Intelligence**: Automatically syncs with CISA KEV feed daily
-- **Smart Matching**: Intelligent CVE-to-product matching with custom keywords
-- **Multi-Tenant**: Separate organizations with their own products, users, and settings
-- **Enterprise Authentication**: LDAP/Active Directory integration
-- **Secure by Design**: Encrypted credentials, rate limiting, CSRF protection
-- **Actionable Alerts**: Email notifications for critical vulnerabilities
-
----
-
-## Features
-
-### Core Functionality
 - **CISA KEV Integration** - Automatic daily sync of Known Exploited Vulnerabilities
-- **Product Inventory** - Manage software/service inventory per organization
-- **Intelligent Matching** - CVE matching by vendor, product, version, and keywords
-- **Dashboard** - Interactive vulnerability overview with statistics
-- **Acknowledgement Workflow** - Track reviewed vulnerabilities
-
-### Enterprise Features
-- **Multi-Tenancy** - Multiple organizations with isolated data
-- **Role-Based Access Control** - Super Admin, Org Admin, Manager, User roles
-- **LDAP/AD Authentication** - Integrate with corporate directories
-- **Email Alerts** - Configurable notifications for new vulnerabilities
-- **PDF Reports** - Generate vulnerability reports
-- **Audit Logging** - Track all user actions
-
-### Security
-- **Encrypted Credentials** - LDAP and SMTP passwords encrypted at rest
-- **Rate Limiting** - Protection against brute force attacks
-- **CSRF Protection** - Cross-site request forgery prevention
-- **Secure Sessions** - HttpOnly, SameSite cookies
-- **Security Headers** - HSTS, CSP in production
+- **NVD CPE Search** - Real-time search of 800,000+ products from NIST NVD
+- **Smart Matching** - CVE matching via CPE identifiers and keywords
+- **Multi-Tenant** - Separate organizations with isolated data
+- **LDAP/AD Integration** - Enterprise authentication support
+- **Email Alerts** - Configurable notifications for critical vulnerabilities
 
 ---
 
 ## Quick Start
-
-### Option 1: Docker (Recommended)
 
 ```bash
 # Clone repository
@@ -76,7 +37,7 @@ cd SentriKat
 # Create environment file
 cp .env.example .env
 
-# Generate required keys
+# Generate security keys
 python3 -c "import secrets; print(f'SECRET_KEY={secrets.token_hex(32)}')" >> .env
 python3 -c "from cryptography.fernet import Fernet; print(f'ENCRYPTION_KEY={Fernet.generate_key().decode()}')" >> .env
 
@@ -86,120 +47,30 @@ docker-compose up -d
 # Access at http://localhost:5000
 ```
 
-### Option 2: Manual Installation
+---
 
-```bash
-# Install Python 3.11+
-python3 -m venv venv
-source venv/bin/activate
+## Requirements
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# Run application
-python run.py
-```
-
-**First-time Setup**: Visit http://localhost:5000 and complete the setup wizard.
+- **Docker** 20.10+ with Docker Compose
+- **Memory**: 1GB minimum, 2GB recommended
+- **Disk**: 500MB for application
 
 ---
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Installation Guide](docs/INSTALLATION.md) | Complete installation instructions (Linux, Docker, Windows) |
-| [Configuration Guide](docs/CONFIGURATION.md) | Environment variables, GUI settings, encryption keys |
-| [User Guide](docs/USER_GUIDE.md) | End-user documentation for daily operations |
-| [Admin Guide](docs/ADMIN_GUIDE.md) | Technical administration and troubleshooting |
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        SentriKat                            │
-├─────────────────────────────────────────────────────────────┤
-│  Frontend: Bootstrap 5 + JavaScript                         │
-├─────────────────────────────────────────────────────────────┤
-│  Backend: Python 3.11 + Flask                               │
-│  ├── Authentication (Local + LDAP)                          │
-│  ├── REST API                                               │
-│  ├── Background Scheduler (APScheduler)                     │
-│  └── Email Service                                          │
-├─────────────────────────────────────────────────────────────┤
-│  Database: SQLite / PostgreSQL                              │
-├─────────────────────────────────────────────────────────────┤
-│  External: CISA KEV Feed, LDAP Server, SMTP Server          │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Requirements
-
-- **Python**: 3.11 or higher
-- **Database**: SQLite (included) or PostgreSQL
-- **Memory**: 512MB minimum, 1GB recommended
-- **Disk**: 100MB for application, additional for database
-
-### Optional
-- LDAP/Active Directory server for enterprise authentication
-- SMTP server for email notifications
-- Reverse proxy (Nginx/Apache) for production
-
----
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SECRET_KEY` | Yes (production) | Flask session signing key |
-| `ENCRYPTION_KEY` | Yes (production) | Fernet key for credential encryption |
-| `DATABASE_URL` | No | Database connection string |
-| `FLASK_ENV` | No | `production` or `development` |
-
-See [Configuration Guide](docs/CONFIGURATION.md) for complete reference.
-
----
-
-## Support
-
-### Bug Reports & Feature Requests
-
-- **Website**: *Coming Soon*
-- **GitHub Issues**: Report bugs and request features
-
-### Commercial Support
-
-For enterprise support, custom development, or licensing inquiries:
-
-- **Website**: *Coming Soon*
-- **Email**: *Contact for details*
+Full documentation available at: **[docs.sentrikat.com](https://docs.sentrikat.com)** *(Coming Soon)*
 
 ---
 
 ## License
 
-SentriKat is a **commercial product**. See [LICENSE.md](LICENSE.md) for terms.
+SentriKat is **commercial software**. See [LICENSE.md](LICENSE.md) for terms.
 
-**Special License**: Free for use by Zertificon Solutions GmbH.
-
----
-
-## Credits
-
-- **Vulnerability Data**: [CISA Known Exploited Vulnerabilities Catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
-- **Framework**: Flask, SQLAlchemy, Bootstrap
-- **Icons**: Bootstrap Icons
+For licensing inquiries: **[sentrikat.com](https://sentrikat.com)** *(Coming Soon)*
 
 ---
 
 <p align="center">
-  <sub>Built with security in mind</sub>
+  <sub>© 2024-2025 Denis Sota. All Rights Reserved.</sub>
 </p>

@@ -5,13 +5,96 @@ from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required, org_admin_required, manager_required
+from app.licensing import requires_professional, check_user_limit, check_org_limit, check_product_limit
 import json
 import re
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# Application version
+APP_VERSION = "1.0.0"
+APP_NAME = "SentriKat"
 
 bp = Blueprint('main', __name__)
 
 # Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
 csrf.exempt(bp)
+
+
+# =============================================================================
+# Health & Status Endpoints (No authentication required)
+# =============================================================================
+
+@bp.route('/api/health', methods=['GET'])
+def health_check():
+    """
+    Health check endpoint for load balancers and monitoring.
+    Returns 200 if application is healthy, 503 if database is down.
+    """
+    health = {
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'version': APP_VERSION,
+        'checks': {}
+    }
+
+    # Check database connectivity
+    try:
+        db.session.execute(db.text('SELECT 1'))
+        health['checks']['database'] = 'ok'
+    except Exception as e:
+        health['status'] = 'unhealthy'
+        health['checks']['database'] = 'error'
+        logger.error(f"Health check - database error: {str(e)}")
+        return jsonify(health), 503
+
+    return jsonify(health), 200
+
+
+@bp.route('/api/version', methods=['GET'])
+def get_version():
+    """
+    Get application version information.
+    Useful for update checking and support.
+    """
+    from app.licensing import get_license
+
+    license_info = get_license()
+
+    return jsonify({
+        'name': APP_NAME,
+        'version': APP_VERSION,
+        'edition': license_info.edition if license_info else 'community',
+        'python': '3.11+',
+        'database': 'PostgreSQL'
+    })
+
+
+@bp.route('/api/status', methods=['GET'])
+def get_status():
+    """
+    Get system status including last sync time.
+    No authentication required - basic status only.
+    """
+    try:
+        last_sync = SyncLog.query.order_by(SyncLog.started_at.desc()).first()
+        vuln_count = Vulnerability.query.count()
+
+        return jsonify({
+            'status': 'online',
+            'version': APP_VERSION,
+            'vulnerabilities_tracked': vuln_count,
+            'last_sync': last_sync.started_at.isoformat() + 'Z' if last_sync else None,
+            'last_sync_status': last_sync.status if last_sync else None
+        })
+    except Exception as e:
+        logger.error(f"Status check error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'version': APP_VERSION
+        }), 500
 
 
 def validate_email(email):
@@ -32,22 +115,44 @@ def validate_username(username):
 
 def validate_password_strength(password):
     """
-    Validate password meets security requirements:
-    - At least 12 characters
-    - Contains uppercase and lowercase
-    - Contains digit
-    - Contains special character
+    Validate password meets security requirements from database settings.
+    Only applies to local users.
     """
-    if not password or len(password) < 12:
-        return False, "Password must be at least 12 characters"
-    if not re.search(r'[A-Z]', password):
-        return False, "Password must contain at least one uppercase letter"
-    if not re.search(r'[a-z]', password):
-        return False, "Password must contain at least one lowercase letter"
-    if not re.search(r'[0-9]', password):
-        return False, "Password must contain at least one digit"
-    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-        return False, "Password must contain at least one special character"
+    from app.models import SystemSettings
+
+    # Get policy settings from database
+    min_length = SystemSettings.query.filter_by(key='password_min_length').first()
+    req_upper = SystemSettings.query.filter_by(key='password_require_uppercase').first()
+    req_lower = SystemSettings.query.filter_by(key='password_require_lowercase').first()
+    req_numbers = SystemSettings.query.filter_by(key='password_require_numbers').first()
+    req_special = SystemSettings.query.filter_by(key='password_require_special').first()
+
+    # Use settings or defaults
+    min_len = int(min_length.value) if min_length else 8
+    require_upper = req_upper.value == 'true' if req_upper else True
+    require_lower = req_lower.value == 'true' if req_lower else True
+    require_numbers = req_numbers.value == 'true' if req_numbers else True
+    require_special = req_special.value == 'true' if req_special else False
+
+    errors = []
+
+    if not password or len(password) < min_len:
+        errors.append(f'Password must be at least {min_len} characters')
+
+    if require_upper and not re.search(r'[A-Z]', password):
+        errors.append('Password must contain at least one uppercase letter')
+
+    if require_lower and not re.search(r'[a-z]', password):
+        errors.append('Password must contain at least one lowercase letter')
+
+    if require_numbers and not re.search(r'[0-9]', password):
+        errors.append('Password must contain at least one digit')
+
+    if require_special and not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        errors.append('Password must contain at least one special character')
+
+    if errors:
+        return False, '; '.join(errors)
     return True, None
 
 @bp.route('/')
@@ -210,6 +315,11 @@ def create_product():
     - Org Admin: Can create products for their org only
     - Manager: Can create products for their org only
     """
+    # Check license limit for products
+    allowed, limit, message = check_product_limit()
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
+
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
 
@@ -263,7 +373,12 @@ def create_product():
         keywords=data.get('keywords'),
         description=data.get('description'),
         active=data.get('active', True),
-        criticality=data.get('criticality', 'medium')
+        criticality=data.get('criticality', 'medium'),
+        # CPE fields for NVD matching
+        cpe_vendor=data.get('cpe_vendor'),
+        cpe_product=data.get('cpe_product'),
+        cpe_uri=data.get('cpe_uri'),
+        match_type=data.get('match_type', 'auto')
     )
 
     # If service catalog entry was used, increment its usage
@@ -363,6 +478,15 @@ def update_product(product_id):
         product.active = data['active']
     if 'criticality' in data:
         product.criticality = data['criticality']
+    # CPE fields for NVD matching
+    if 'cpe_vendor' in data:
+        product.cpe_vendor = data['cpe_vendor']
+    if 'cpe_product' in data:
+        product.cpe_product = data['cpe_product']
+    if 'cpe_uri' in data:
+        product.cpe_uri = data['cpe_uri']
+    if 'match_type' in data:
+        product.match_type = data['match_type']
     if 'organization_id' in data:
         # Allow setting to None or a valid organization ID
         org_id = data['organization_id']
@@ -538,7 +662,7 @@ def assign_product_organizations(product_id):
                 send_product_assignment_notification(product, org, 'assigned')
             except Exception as e:
                 # Log but don't fail the request
-                print(f"Failed to send notification to {org.name}: {str(e)}")
+                logger.warning(f"Failed to send notification to {org.name}: {str(e)}")
 
         return jsonify({
             'success': True,
@@ -604,7 +728,7 @@ def remove_product_organization(product_id, org_id):
         try:
             send_product_assignment_notification(product, org, 'removed')
         except Exception as e:
-            print(f"Failed to send notification to {org.name}: {str(e)}")
+            logger.warning(f"Failed to send notification to {org.name}: {str(e)}")
 
         # Check if product has any organizations left after removal
         remaining_orgs = product.organizations.count()
@@ -718,7 +842,20 @@ def get_vulnerability_stats():
 @login_required
 def acknowledge_match(match_id):
     """Acknowledge a vulnerability match"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     match = VulnerabilityMatch.query.get_or_404(match_id)
+
+    # Authorization: verify user can manage this product's matches
+    if not current_user.is_super_admin():
+        # Get all org IDs the product belongs to
+        product_org_ids = [org.id for org in match.product.organizations.all()]
+        if match.product.organization_id:
+            product_org_ids.append(match.product.organization_id)
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if not any(org_id in user_org_ids for org_id in product_org_ids):
+            return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
+
     match.acknowledged = True
     db.session.commit()
     return jsonify(match.to_dict())
@@ -727,7 +864,20 @@ def acknowledge_match(match_id):
 @login_required
 def unacknowledge_match(match_id):
     """Unacknowledge a vulnerability match"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     match = VulnerabilityMatch.query.get_or_404(match_id)
+
+    # Authorization: verify user can manage this product's matches
+    if not current_user.is_super_admin():
+        # Get all org IDs the product belongs to
+        product_org_ids = [org.id for org in match.product.organizations.all()]
+        if match.product.organization_id:
+            product_org_ids.append(match.product.organization_id)
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if not any(org_id in user_org_ids for org_id in product_org_ids):
+            return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
+
     match.acknowledged = False
     db.session.commit()
     return jsonify(match.to_dict())
@@ -1037,28 +1187,51 @@ def increment_catalog_usage(catalog_id):
 @login_required
 def get_organizations():
     """Get organizations based on user permissions"""
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
+    try:
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
 
-    if not current_user:
-        return jsonify({'error': 'User not found'}), 404
+        if not current_user:
+            return jsonify({'error': 'User not found'}), 404
 
-    # Super admins and users with can_view_all_orgs see all organizations
-    if current_user.is_super_admin() or current_user.can_view_all_orgs:
-        orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
-    else:
-        # Regular users only see their own organization
-        if current_user.organization_id:
-            orgs = Organization.query.filter_by(id=current_user.organization_id, active=True).all()
+        # Super admins and users with can_view_all_orgs see all organizations
+        if current_user.is_super_admin() or current_user.can_view_all_orgs:
+            orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
         else:
-            orgs = []
+            # Regular users see all organizations they have access to (primary + multi-org memberships)
+            org_ids = set()
 
-    return jsonify([o.to_dict() for o in orgs])
+            # Add primary organization
+            if current_user.organization_id:
+                org_ids.add(current_user.organization_id)
+
+            # Add multi-org memberships
+            for membership in current_user.org_memberships.all():
+                org_ids.add(membership.organization_id)
+
+            if org_ids:
+                orgs = Organization.query.filter(
+                    Organization.id.in_(org_ids),
+                    Organization.active == True
+                ).order_by(Organization.display_name).all()
+            else:
+                orgs = []
+
+        return jsonify([o.to_dict() for o in orgs])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in get_organizations: {str(e)}")
+        return jsonify({'error': 'Failed to load organizations'}), 500
 
 @bp.route('/api/organizations', methods=['POST'])
 @admin_required
 def create_organization():
     """Create a new organization"""
+    # Check license limit for organizations
+    allowed, limit, message = check_org_limit()
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
+
     data = request.get_json()
 
     if not data.get('name') or not data.get('display_name'):
@@ -1151,6 +1324,14 @@ def update_organization(org_id):
         org.alert_time_end = data['alert_time_end']
     if 'alert_days' in data:
         org.alert_days = data['alert_days']
+    # Alert mode settings (null = use global default)
+    if 'alert_mode' in data:
+        mode = data['alert_mode']
+        if mode in ['new_only', 'daily_reminder', 'escalation', None, '']:
+            org.alert_mode = mode if mode else None  # Empty string becomes null (use default)
+    if 'escalation_days' in data:
+        days = data['escalation_days']
+        org.escalation_days = int(days) if days else None  # Empty becomes null (use default)
     if 'active' in data:
         org.active = data['active']
 
@@ -1173,6 +1354,35 @@ def update_organization(org_id):
         org.smtp_from_email = data['smtp_from_email']
     if 'smtp_from_name' in data:
         org.smtp_from_name = data['smtp_from_name']
+
+    # Webhook settings (requires Professional license for Email Alerts feature)
+    webhook_fields = ['webhook_enabled', 'webhook_url', 'webhook_name', 'webhook_format', 'webhook_token']
+    if any(field in data for field in webhook_fields):
+        from app.licensing import get_license
+        license_info = get_license()
+        if not license_info.is_professional():
+            return jsonify({
+                'error': 'Organization webhooks require a Professional license',
+                'license_required': True
+            }), 403
+
+    if 'webhook_enabled' in data:
+        org.webhook_enabled = data['webhook_enabled']
+    if 'webhook_url' in data:
+        from app.encryption import encrypt_value
+        # Encrypt webhook URL (may contain credentials)
+        org.webhook_url = encrypt_value(data['webhook_url']) if data['webhook_url'] else None
+    if 'webhook_name' in data:
+        org.webhook_name = data['webhook_name'] if data['webhook_name'] else 'Organization Webhook'
+    if 'webhook_format' in data:
+        org.webhook_format = data['webhook_format'] if data['webhook_format'] else 'slack'
+    # Allow clearing webhook_token by sending empty/null value
+    if 'webhook_token' in data:
+        from app.encryption import encrypt_value
+        if data['webhook_token']:
+            org.webhook_token = encrypt_value(data['webhook_token'])
+        else:
+            org.webhook_token = None  # Clear the token
 
     db.session.commit()
 
@@ -1283,6 +1493,16 @@ def test_smtp(org_id):
 @login_required
 def get_alert_logs(org_id):
     """Get alert logs for an organization"""
+    # Authorization: verify user can access this organization
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user.is_super_admin():
+        # Check if user belongs to this organization
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if org_id not in user_org_ids:
+            return jsonify({'error': 'Insufficient permissions to view this organization\'s alert logs'}), 403
+
     limit = request.args.get('limit', 50, type=int)
     logs = AlertLog.query.filter_by(organization_id=org_id)\
         .order_by(AlertLog.sent_at.desc()).limit(limit).all()
@@ -1303,6 +1523,18 @@ def get_current_user():
         return jsonify({'error': 'User not found'}), 404
 
     user_dict = current_user.to_dict()
+
+    # Add session-specific info (active organization may differ from primary)
+    active_org_id = session.get('organization_id')
+    active_org = Organization.query.get(active_org_id) if active_org_id else None
+    user_dict['active_organization'] = {
+        'id': active_org.id if active_org else None,
+        'name': active_org.name if active_org else None,
+        'display_name': active_org.display_name if active_org else None
+    }
+    user_dict['active_organization_id'] = active_org_id
+    user_dict['role_in_active_org'] = current_user.get_role_for_org(active_org_id) if active_org_id else None
+
     # Add debug info to help troubleshoot permissions
     user_dict['debug'] = {
         'is_admin': current_user.is_admin,
@@ -1366,6 +1598,11 @@ def get_users():
 @org_admin_required
 def create_user():
     """Create a new user (local auth only - LDAP users must be discovered/invited)"""
+    # Check license limit for users
+    allowed, limit, message = check_user_limit()
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
+
     data = request.get_json()
 
     # Validate required fields
@@ -1407,11 +1644,27 @@ def create_user():
     if role not in valid_roles:
         return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
 
+    # Authorization: org_admins can only create users in their own organization
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    target_org_id = data.get('organization_id')
+
+    if not current_user.is_super_admin():
+        # Org admins cannot create super_admin or org_admin users
+        if role in ['super_admin', 'org_admin']:
+            return jsonify({'error': 'Only super admins can create admin users'}), 403
+
+        # Org admins can only create users in their own organization
+        if target_org_id:
+            user_org_ids = [org.id for org in current_user.get_all_organizations()]
+            if target_org_id not in user_org_ids:
+                return jsonify({'error': 'Cannot create users in other organizations'}), 403
+
     user = User(
         username=data['username'],
         email=data['email'],
         full_name=data.get('full_name', '')[:100],  # Limit length
-        organization_id=data.get('organization_id'),
+        organization_id=target_org_id,
         auth_type='local',  # Force local auth for created users
         role=role,
         is_admin=data.get('is_admin', False),
@@ -1432,7 +1685,14 @@ def create_user():
 @org_admin_required
 def get_user(user_id):
     """Get a specific user"""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
     user = User.query.get_or_404(user_id)
+
+    # Permission check: can this user view this user's details?
+    if not current_user.can_manage_user(user) and user_id != current_user_id:
+        return jsonify({'error': 'Insufficient permissions to view this user'}), 403
+
     return jsonify(user.to_dict())
 
 @bp.route('/api/users/<int:user_id>', methods=['PUT'])
@@ -1471,7 +1731,14 @@ def update_user(user_id):
             return jsonify({'error': 'Username already exists'}), 400
         user.username = data['username']
 
-    if 'email' in data:
+    if 'email' in data and data['email'] != user.email:
+        # Validate email format
+        if not validate_email(data['email']):
+            return jsonify({'error': 'Invalid email format'}), 400
+        # Check for duplicate email
+        existing = User.query.filter_by(email=data['email']).first()
+        if existing and existing.id != user_id:
+            return jsonify({'error': 'Email already exists'}), 400
         user.email = data['email']
     if 'full_name' in data:
         user.full_name = data['full_name']
@@ -1519,8 +1786,11 @@ def update_user(user_id):
     if 'can_view_all_orgs' in data and current_user.is_super_admin():
         user.can_view_all_orgs = data['can_view_all_orgs']
 
-    # Update password if provided
+    # Update password if provided (with validation for local users)
     if 'password' in data and user.auth_type == 'local':
+        is_valid, error_msg = validate_password_strength(data['password'])
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
         user.set_password(data['password'])
 
     db.session.commit()
@@ -1670,6 +1940,186 @@ def toggle_user_active(user_id):
     return jsonify({
         'success': True,
         'is_active': user.is_active,
+        'message': message,
+        'email_sent': email_sent
+    })
+
+@bp.route('/api/users/<int:user_id>/unlock', methods=['POST'])
+@org_admin_required
+def unlock_user(user_id):
+    """
+    Unlock a user account that was locked due to failed login attempts.
+
+    Permissions:
+    - Super Admin: Can unlock any user
+    - Org Admin: Can only unlock users in their organization
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions to unlock this user'}), 403
+
+    # Check if actually locked
+    if not user.is_locked():
+        return jsonify({'error': 'User account is not locked'}), 400
+
+    # Store old values for audit
+    old_attempts = user.failed_login_attempts
+    old_locked_until = user.locked_until.isoformat() if user.locked_until else None
+
+    # Reset lockout
+    user.reset_failed_login_attempts()
+
+    # Log the action
+    log_audit_event(
+        'UNLOCK',
+        'users',
+        user.id,
+        old_value={'failed_login_attempts': old_attempts, 'locked_until': old_locked_until},
+        new_value={'failed_login_attempts': 0, 'locked_until': None},
+        details=f"User {user.username} unlocked by {current_user.username}"
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'User {user.username} has been unlocked'
+    })
+
+@bp.route('/api/users/<int:user_id>/reset-2fa', methods=['POST'])
+@org_admin_required
+def reset_user_2fa(user_id):
+    """
+    Reset a user's 2FA (disable it) when they lose access to their authenticator.
+
+    Permissions:
+    - Super Admin: Can reset any user's 2FA
+    - Org Admin: Can only reset 2FA for users in their organization
+    """
+    from app.logging_config import log_audit_event
+    import logging
+    logger = logging.getLogger('security')
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Cannot reset your own 2FA through admin panel
+    if user_id == current_user_id:
+        return jsonify({'error': 'Cannot reset your own 2FA through admin panel. Use Security Settings instead.'}), 400
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions to reset 2FA for this user'}), 403
+
+    # Check if 2FA is enabled
+    if not user.totp_enabled:
+        return jsonify({'error': 'User does not have 2FA enabled'}), 400
+
+    # Disable 2FA
+    user.disable_totp()
+
+    # Log the action
+    log_audit_event(
+        'RESET_2FA',
+        'users',
+        user.id,
+        old_value={'totp_enabled': True},
+        new_value={'totp_enabled': False},
+        details=f"2FA reset for {user.username} by {current_user.username}"
+    )
+
+    logger.warning(f"2FA reset for user {user.username} (id={user.id}) by admin {current_user.username}")
+
+    db.session.commit()
+
+    # Send email notification
+    email_sent = False
+    email_details = None
+    try:
+        from app.email_alerts import send_2fa_reset_email
+        email_sent, email_details = send_2fa_reset_email(user, current_user.username)
+    except Exception as e:
+        email_details = str(e)
+        logger.warning(f"Failed to send 2FA reset email: {e}")
+
+    message = f'Two-factor authentication has been reset for {user.username}. They will need to set it up again.'
+    if email_sent:
+        message += ' (notification email sent)'
+    elif email_details:
+        message += f' (email failed: {email_details})'
+
+    return jsonify({
+        'success': True,
+        'message': message,
+        'email_sent': email_sent
+    })
+
+@bp.route('/api/users/<int:user_id>/force-password-change', methods=['POST'])
+@org_admin_required
+def force_password_change(user_id):
+    """
+    Force a user to change their password on next login.
+
+    Permissions:
+    - Super Admin: Can force any user
+    - Org Admin: Can only force users in their organization
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Cannot force your own password change
+    if user_id == current_user_id:
+        return jsonify({'error': 'Cannot force password change on your own account. Use Security Settings instead.'}), 400
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Only for local users
+    if user.auth_type != 'local':
+        return jsonify({'error': 'Password changes only apply to local users'}), 400
+
+    # Set flag
+    user.must_change_password = True
+
+    log_audit_event(
+        'FORCE_PASSWORD_CHANGE',
+        'users',
+        user.id,
+        details=f"Password change forced for {user.username} by {current_user.username}"
+    )
+
+    db.session.commit()
+
+    # Send email notification
+    email_sent = False
+    email_details = None
+    try:
+        from app.email_alerts import send_password_change_forced_email
+        email_sent, email_details = send_password_change_forced_email(user, current_user.username)
+    except Exception as e:
+        email_details = str(e)
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to send password change email: {e}")
+
+    message = f'{user.username} will be required to change their password on next login'
+    if email_sent:
+        message += ' (notification email sent)'
+    elif email_details:
+        message += f' (email failed: {email_details})'
+
+    return jsonify({
+        'success': True,
         'message': message,
         'email_sent': email_sent
     })
@@ -1946,9 +2396,22 @@ def get_audit_logs():
     """
     Get audit logs from the audit.log file
     Only accessible by super admins
+
+    Query params:
+    - page: Page number (default: 1)
+    - per_page: Items per page (default: 50, max: 500)
+    - action: Filter by action type (CREATE, UPDATE, DELETE, etc.)
+    - resource: Filter by resource type (users, products, etc.)
+    - user_id: Filter by user ID
+    - search: Text search in message/details
+    - start_date: Filter from date (ISO format)
+    - end_date: Filter to date (ISO format)
+    - sort: Sort field (timestamp, action, resource, user_id)
+    - order: Sort order (asc, desc - default: desc)
     """
     import os
     import json
+    from datetime import datetime
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -1958,10 +2421,16 @@ def get_audit_logs():
         return jsonify({'error': 'Only super admins can view audit logs'}), 403
 
     # Get query parameters
-    limit = request.args.get('limit', 100, type=int)
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 50, type=int), 500)
     action_filter = request.args.get('action')
     resource_filter = request.args.get('resource')
     user_filter = request.args.get('user_id')
+    search_query = request.args.get('search', '').lower()
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    sort_field = request.args.get('sort', 'timestamp')
+    sort_order = request.args.get('order', 'desc')
 
     # Find the audit log file
     log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
@@ -1971,45 +2440,194 @@ def get_audit_logs():
     audit_log_path = os.path.join(log_dir, 'audit.log')
 
     if not os.path.exists(audit_log_path):
-        return jsonify({'logs': [], 'total': 0, 'message': 'No audit logs found'})
+        return jsonify({
+            'logs': [],
+            'total': 0,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': 0,
+            'message': 'No audit logs found'
+        })
 
-    logs = []
+    all_logs = []
     try:
-        # Read the file in reverse to get most recent first
+        # Read all logs and filter
         with open(audit_log_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-        # Parse JSON lines (most recent first)
-        for line in reversed(lines):
-            if not line.strip():
-                continue
-            try:
-                log_entry = json.loads(line.strip())
-
-                # Apply filters
-                if action_filter and log_entry.get('action') != action_filter:
+            for line in f:
+                if not line.strip():
                     continue
-                if resource_filter and not log_entry.get('resource', '').startswith(resource_filter):
+                try:
+                    log_entry = json.loads(line.strip())
+
+                    # Apply filters
+                    if action_filter and log_entry.get('action') != action_filter:
+                        continue
+                    if resource_filter:
+                        resource = log_entry.get('resource', '')
+                        # Handle resource:id format
+                        base_resource = resource.split(':')[0] if ':' in resource else resource
+                        if base_resource != resource_filter:
+                            continue
+                    if user_filter and str(log_entry.get('user_id')) != str(user_filter):
+                        continue
+
+                    # Text search
+                    if search_query:
+                        searchable = json.dumps(log_entry).lower()
+                        if search_query not in searchable:
+                            continue
+
+                    # Date range filtering
+                    log_timestamp = log_entry.get('timestamp', '')
+                    if start_date:
+                        if log_timestamp < start_date:
+                            continue
+                    if end_date:
+                        if log_timestamp > end_date + 'T23:59:59Z':
+                            continue
+
+                    all_logs.append(log_entry)
+
+                except json.JSONDecodeError:
                     continue
-                if user_filter and str(log_entry.get('user_id')) != str(user_filter):
-                    continue
 
-                logs.append(log_entry)
+        # Sort logs
+        reverse_sort = (sort_order == 'desc')
+        if sort_field in ['timestamp', 'action', 'resource', 'user_id']:
+            all_logs.sort(key=lambda x: x.get(sort_field, ''), reverse=reverse_sort)
+        else:
+            # Default: sort by timestamp descending (most recent first)
+            all_logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
 
-                if len(logs) >= limit:
-                    break
-
-            except json.JSONDecodeError:
-                continue
+        # Calculate pagination
+        total = len(all_logs)
+        total_pages = (total + per_page - 1) // per_page
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_logs = all_logs[start_idx:end_idx]
 
     except Exception as e:
         return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
 
     return jsonify({
-        'logs': logs,
-        'total': len(logs),
-        'limit': limit
+        'logs': paginated_logs,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'total_pages': total_pages
     })
+
+@bp.route('/api/audit-logs/export', methods=['GET'])
+@admin_required
+@requires_professional('Audit Export')
+def export_audit_logs():
+    """
+    Export audit logs as CSV or JSON file
+    Only accessible by super admins
+
+    Query params:
+    - format: 'csv' or 'json' (default: csv)
+    - days: Number of days to include (default: 30)
+    - action: Filter by action type
+    - resource: Filter by resource type
+    """
+    import os
+    import json
+    import io
+    import csv
+    from datetime import datetime, timedelta
+    from flask import Response
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Only super admins can export audit logs
+    if not current_user or not current_user.is_super_admin():
+        return jsonify({'error': 'Only super admins can export audit logs'}), 403
+
+    # Get query parameters
+    export_format = request.args.get('format', 'csv').lower()
+    days = request.args.get('days', 30, type=int)
+    action_filter = request.args.get('action')
+    resource_filter = request.args.get('resource')
+
+    if export_format not in ['csv', 'json']:
+        return jsonify({'error': 'Invalid format. Use csv or json'}), 400
+
+    # Calculate date cutoff
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_str = cutoff_date.isoformat()
+
+    # Find the audit log file
+    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    if not os.path.exists(log_dir):
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+
+    audit_log_path = os.path.join(log_dir, 'audit.log')
+
+    if not os.path.exists(audit_log_path):
+        return jsonify({'error': 'No audit logs found'}), 404
+
+    logs = []
+    try:
+        with open(audit_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    log_entry = json.loads(line.strip())
+
+                    # Apply date filter
+                    log_time = log_entry.get('timestamp', '')
+                    if log_time < cutoff_str:
+                        continue
+
+                    # Apply filters
+                    if action_filter and log_entry.get('action') != action_filter:
+                        continue
+                    if resource_filter and not log_entry.get('resource', '').startswith(resource_filter):
+                        continue
+
+                    logs.append(log_entry)
+
+                except json.JSONDecodeError:
+                    continue
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
+
+    # Sort by timestamp descending (most recent first)
+    logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+
+    # Generate filename
+    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    filename = f'audit_logs_{timestamp}.{export_format}'
+
+    if export_format == 'json':
+        # Export as JSON
+        output = json.dumps(logs, indent=2)
+        mimetype = 'application/json'
+    else:
+        # Export as CSV
+        output = io.StringIO()
+        if logs:
+            # Determine all possible fields from logs
+            fieldnames = ['timestamp', 'action', 'resource', 'resource_id', 'user_id', 'username', 'ip_address', 'details']
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            for log in logs:
+                # Flatten any nested objects in details
+                if 'details' in log and isinstance(log['details'], dict):
+                    log['details'] = json.dumps(log['details'])
+                writer.writerow(log)
+        output = output.getvalue()
+        mimetype = 'text/csv'
+
+    return Response(
+        output,
+        mimetype=mimetype,
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
 
 # ============================================================================
 # CVE SERVICE STATUS CHECK
@@ -2252,36 +2870,55 @@ def export_selected_matches():
 @login_required
 def get_current_organization():
     """Get current organization from session"""
-    org_id = session.get('organization_id')
-    if org_id:
-        org = Organization.query.get(org_id)
-        if org:
-            return jsonify(org.to_dict())
+    try:
+        org_id = session.get('organization_id')
+        if org_id:
+            org = Organization.query.get(org_id)
+            if org:
+                return jsonify(org.to_dict())
 
-    # Return default organization
-    default_org = Organization.query.filter_by(name='default').first()
-    if default_org:
-        return jsonify(default_org.to_dict())
+        # Return default organization
+        default_org = Organization.query.filter_by(name='default').first()
+        if default_org:
+            return jsonify(default_org.to_dict())
 
-    return jsonify({'error': 'No organization found'}), 404
+        return jsonify({'error': 'No organization found'}), 404
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in get_current_organization: {str(e)}")
+        return jsonify({'error': 'Failed to load organization'}), 500
 
 @bp.route('/api/session/organization/<int:org_id>', methods=['POST'])
 @login_required
 def switch_organization(org_id):
     """Switch to a different organization (with permission check)"""
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
+    try:
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
 
-    if not current_user:
-        return jsonify({'error': 'User not found'}), 404
+        if not current_user:
+            return jsonify({'error': 'User not found'}), 404
 
-    org = Organization.query.get_or_404(org_id)
+        org = Organization.query.get(org_id)
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
 
-    # Check if user has permission to switch to this organization
-    if not current_user.is_super_admin() and not current_user.can_view_all_orgs:
-        # Regular users can only access their own organization
-        if current_user.organization_id != org_id:
+        # Check if user has permission to switch to this organization
+        # This checks: super_admin, can_view_all_orgs, primary org, and multi-org memberships
+        if not current_user.has_access_to_org(org_id):
             return jsonify({'error': 'You do not have permission to access this organization'}), 403
 
-    session['organization_id'] = org_id
-    return jsonify({'success': True, 'organization': org.to_dict()})
+        session['organization_id'] = org_id
+
+        # Also get the user's role for this organization for proper permissions
+        user_role = current_user.get_role_for_org(org_id)
+
+        return jsonify({
+            'success': True,
+            'organization': org.to_dict(),
+            'role_in_org': user_role
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in switch_organization: {str(e)}")
+        return jsonify({'error': 'Failed to switch organization'}), 500

@@ -58,6 +58,13 @@ def setup_performance_middleware(app):
             if hasattr(g, 'query_count'):
                 response.headers['X-Query-Count'] = str(g.query_count)
 
+        # Prevent browser caching of API responses to avoid stale data
+        # This is crucial for session-dependent data (organization context)
+        if request.path.startswith('/api/'):
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+
         return response
 
     # Setup SQLAlchemy query counting if available

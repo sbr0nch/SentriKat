@@ -1,10 +1,14 @@
 """
-Email notification service for product assignments
+Email notification service for product assignments.
 """
 import smtplib
+import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.models import User
+
+logger = logging.getLogger(__name__)
+
 
 def send_product_assignment_notification(product, organization, action='assigned'):
     """
@@ -20,7 +24,7 @@ def send_product_assignment_notification(product, organization, action='assigned
 
     # Skip if SMTP not configured
     if not smtp_config.get('host') or not smtp_config.get('from_email'):
-        print(f"SMTP not configured for organization {organization.name}, skipping notification")
+        logger.debug(f"SMTP not configured for organization {organization.name}, skipping notification")
         return
 
     # Get org admins
@@ -32,7 +36,7 @@ def send_product_assignment_notification(product, organization, action='assigned
     ).all()
 
     if not org_admins:
-        print(f"No admins found for organization {organization.name}")
+        logger.debug(f"No admins found for organization {organization.name}")
         return
 
     # Prepare email content
@@ -125,8 +129,8 @@ def send_product_assignment_notification(product, organization, action='assigned
             server.send_message(msg)
             server.quit()
 
-            print(f"Notification sent to {admin.email} for {action} action on product {product.vendor} {product.product_name}")
+            logger.info(f"Notification sent to {admin.email} for {action} action on product {product.vendor} {product.product_name}")
 
         except Exception as e:
-            print(f"Failed to send email to {admin.email}: {str(e)}")
+            logger.error(f"Failed to send email to {admin.email}: {str(e)}")
             raise
