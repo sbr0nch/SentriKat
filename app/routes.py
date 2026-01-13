@@ -13,8 +13,18 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Application version
-APP_VERSION = "1.0.0"
+# =============================================================================
+# Application Version
+# =============================================================================
+# Versioning: MAJOR.MINOR.PATCH[-STAGE]
+#   - alpha: Internal testing, unstable
+#   - beta: External testing, feature complete
+#   - rc: Release candidate, final testing
+#   - (none): Stable release
+#
+# Examples: 1.0.0-alpha.1, 1.0.0-beta.2, 1.0.0-rc.1, 1.0.0
+# =============================================================================
+APP_VERSION = "1.0.0-alpha.1"
 APP_NAME = "SentriKat"
 
 bp = Blueprint('main', __name__)
