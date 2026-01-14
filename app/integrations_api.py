@@ -19,12 +19,15 @@ from datetime import datetime, timedelta
 import secrets
 import uuid
 import re
+import logging
 from functools import wraps
 
 from app import db, csrf, limiter
 from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User
 from app.auth import admin_required, login_required
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('integrations', __name__)
 
@@ -43,6 +46,34 @@ def sanitize_string(value, max_length=200):
     value = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', value)
     # Limit length
     return value[:max_length]
+
+
+def sanitize_script_param(value):
+    """Sanitize parameters for shell script injection prevention."""
+    if not value:
+        return ''
+    value = str(value)
+    # Remove shell-dangerous characters
+    value = re.sub(r'[;&|`$(){}[\]<>\\"\'\n\r]', '', value)
+    return value[:100]
+
+
+VALID_CRITICALITIES = ['critical', 'high', 'medium', 'low']
+VALID_APP_TYPES = ['client', 'server', 'both', 'unknown']
+
+
+def validate_criticality(value):
+    """Validate criticality value."""
+    if value and value not in VALID_CRITICALITIES:
+        return 'medium'
+    return value or 'medium'
+
+
+def validate_app_type(value):
+    """Validate app_type value."""
+    if value and value not in VALID_APP_TYPES:
+        return 'unknown'
+    return value or 'unknown'
 
 
 def validate_api_key_format(api_key):
@@ -318,6 +349,7 @@ def attempt_cpe_match(vendor, product_name):
         return None, None, 0.0
 
     except Exception as e:
+        logger.debug(f"CPE match failed for '{vendor} {product_name}': {e}")
         return None, None, 0.0
 
 
@@ -357,7 +389,8 @@ def get_cpe_versions(cpe_vendor, cpe_product):
                 return products[cpe_product].get('versions', [])[:20]
 
         return []
-    except:
+    except Exception as e:
+        logger.debug(f"Failed to get CPE versions for {cpe_vendor}:{cpe_product}: {e}")
         return []
 
 
@@ -447,17 +480,22 @@ def update_queue_item(item_id):
         return jsonify({'error': 'Can only update pending items'}), 400
 
     if 'selected_version' in data:
-        item.selected_version = data['selected_version'] or None
+        item.selected_version = sanitize_string(data['selected_version'], 50) or None
     if 'organization_id' in data:
-        item.organization_id = data['organization_id']
+        org_id = data['organization_id']
+        if org_id:
+            org = Organization.query.get(org_id)
+            if not org:
+                return jsonify({'error': 'Invalid organization'}), 400
+        item.organization_id = org_id
     if 'criticality' in data:
-        item.criticality = data['criticality']
+        item.criticality = validate_criticality(data['criticality'])
     if 'app_type' in data:
-        item.app_type = data['app_type']
+        item.app_type = validate_app_type(data['app_type'])
     if 'cpe_vendor' in data:
-        item.cpe_vendor = data['cpe_vendor']
+        item.cpe_vendor = sanitize_string(data['cpe_vendor'], 100)
     if 'cpe_product' in data:
-        item.cpe_product = data['cpe_product']
+        item.cpe_product = sanitize_string(data['cpe_product'], 100)
 
     db.session.commit()
     return jsonify(item.to_dict())
@@ -501,8 +539,8 @@ def approve_queue_item(item_id):
     try:
         from app.filters import match_vulnerabilities_to_products
         match_vulnerabilities_to_products([product])
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to match vulnerabilities for product {product.id}: {e}")
 
     return jsonify({
         'success': True,
@@ -584,8 +622,8 @@ def bulk_process_queue():
             from app.filters import match_vulnerabilities_to_products
             products = Product.query.filter(Product.id.in_(results['products'])).all()
             match_vulnerabilities_to_products(products)
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to match vulnerabilities for bulk approved products: {e}")
 
     return jsonify(results)
 
@@ -1101,7 +1139,9 @@ def delete_agent(agent_id):
 def download_windows_agent():
     """Download Windows PowerShell agent script."""
     api_key = request.args.get('api_key', 'YOUR_API_KEY_HERE')
-    base_url = request.url_root.rstrip('/')
+    # Sanitize to prevent script injection
+    api_key = sanitize_script_param(api_key) or 'YOUR_API_KEY_HERE'
+    base_url = sanitize_script_param(request.url_root.rstrip('/'))
 
     script = f'''# SentriKat Discovery Agent for Windows
 # ================================================
@@ -1244,7 +1284,9 @@ Write-Host "`nAgent completed successfully!" -ForegroundColor Green
 def download_linux_agent():
     """Download Linux Bash agent script."""
     api_key = request.args.get('api_key', 'YOUR_API_KEY_HERE')
-    base_url = request.url_root.rstrip('/')
+    # Sanitize to prevent script injection
+    api_key = sanitize_script_param(api_key) or 'YOUR_API_KEY_HERE'
+    base_url = sanitize_script_param(request.url_root.rstrip('/'))
 
     script = f'''#!/bin/bash
 # ================================================
