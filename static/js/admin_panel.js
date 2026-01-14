@@ -695,6 +695,10 @@ async function editUser(userId) {
 
     try {
         const response = await fetch(`/api/users/${userId}`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Failed to load user (${response.status})`);
+        }
         const user = await response.json();
 
         document.getElementById('username').value = user.username;
@@ -814,10 +818,16 @@ async function showAddOrgMembershipModal() {
     // Load available organizations
     try {
         const response = await fetch('/api/organizations');
+        if (!response.ok) {
+            throw new Error(`Failed to load organizations (${response.status})`);
+        }
         const orgs = await response.json();
 
         // Get current memberships to exclude
         const membershipsResponse = await fetch(`/api/users/${currentUserId}/organizations`);
+        if (!membershipsResponse.ok) {
+            throw new Error(`Failed to load memberships (${membershipsResponse.status})`);
+        }
         const memberships = await membershipsResponse.json();
         const memberOrgIds = new Set(memberships.map(m => m.organization_id));
 
@@ -1350,6 +1360,9 @@ async function editOrganization(orgId) {
 
     try {
         const response = await fetch(`/api/organizations/${orgId}`);
+        if (!response.ok) {
+            throw new Error(`Failed to load organization (${response.status})`);
+        }
         const org = await response.json();
 
         // Basic info
@@ -1896,6 +1909,9 @@ async function saveSyncSettings() {
 async function loadSyncStatus() {
     try {
         const response = await fetch('/api/settings/sync/status');
+        if (!response.ok) {
+            throw new Error(`Failed to load sync status (${response.status})`);
+        }
         const status = await response.json();
 
         // Build last sync text with status icon

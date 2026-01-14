@@ -1884,8 +1884,33 @@ def delete_user(user_id):
     deleted_role = user.role
 
     try:
+        # Import models with user FK references
+        from app.ldap_models import LDAPGroupMapping, LDAPSyncLog, LDAPAuditLog
+        from app.shared_views import SharedView
+        from app.models import SystemSettings
+
         # Delete organization memberships first
         UserOrganization.query.filter_by(user_id=user_id).delete()
+
+        # Clear assigned_by references in remaining UserOrganization records
+        UserOrganization.query.filter_by(assigned_by=user_id).update({'assigned_by': None})
+
+        # Clear LDAP group mapping references
+        LDAPGroupMapping.query.filter_by(created_by=user_id).update({'created_by': None})
+        LDAPGroupMapping.query.filter_by(updated_by=user_id).update({'updated_by': None})
+
+        # Clear LDAP sync log references
+        LDAPSyncLog.query.filter_by(initiated_by=user_id).update({'initiated_by': None})
+
+        # Clear LDAP audit log references
+        LDAPAuditLog.query.filter_by(user_id=user_id).update({'user_id': None})
+        LDAPAuditLog.query.filter_by(target_user_id=user_id).update({'target_user_id': None})
+
+        # Clear system settings references
+        SystemSettings.query.filter_by(updated_by=user_id).update({'updated_by': None})
+
+        # Delete shared views created by this user (creator is required)
+        SharedView.query.filter_by(created_by=user_id).delete()
 
         # Delete the user
         db.session.delete(user)
