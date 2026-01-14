@@ -1605,9 +1605,11 @@
                     | <a href="mailto:{{ branding.support_email }}">Support</a>
                     {% endif %}
                 </p>
-                <!-- CVE Service Status Indicator -->
+                <!-- Version and CVE Service Status -->
                 {% if branding.show_version %}
-                <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
+                <div class="d-flex align-items-center justify-content-center gap-2 flex-wrap" id="cveServiceStatus" title="CVE Service Status">
+                    <small class="text-muted">v1.0.0-alpha</small>
+                    <span class="text-muted">|</span>
                     <span class="status-led status-led-yellow" id="cveStatusLed"></span>
                     <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
                 </div>

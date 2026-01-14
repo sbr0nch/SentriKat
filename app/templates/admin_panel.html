@@ -12,6 +12,14 @@
     margin-left: -100%;
     opacity: 0;
 }
+/* Sidebar inner container with border */
+.admin-sidebar-inner {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
 .admin-sidebar-toggle {
     background: #f8f9fa;
     border: 1px solid #dee2e6;
@@ -28,14 +36,18 @@
     padding: 0.5rem 0.75rem;
     border-radius: 0.375rem;
     font-size: 0.875rem;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
 }
 #adminTabs .nav-link:hover {
     background-color: #f8f9fa;
+    border-color: #e9ecef;
 }
 #adminTabs .nav-link.active {
-    background-color: #e9ecef;
-    color: #212529;
+    background-color: #e7f1ff;
+    color: #0d6efd;
     font-weight: 500;
+    border-color: #b6d4fe;
 }
 /* Section headers - improved visibility */
 .nav-section-header {
@@ -77,6 +89,11 @@
     .admin-sidebar.collapsed {
         display: none;
     }
+    .admin-sidebar-inner {
+        border: none;
+        box-shadow: none;
+        padding: 0;
+    }
     #adminTabs {
         flex-direction: row !important;
         flex-wrap: wrap;
@@ -94,14 +111,15 @@
     <div class="row" id="adminPanelContainer">
         <!-- Sidebar Navigation -->
         <div class="col-md-3 col-lg-2 admin-sidebar" id="adminSidebar">
-            <div class="sticky-top" style="top: 80px;">
-                <div class="d-flex justify-content-between align-items-center mb-3 px-2">
-                    <h6 class="text-muted text-uppercase small fw-bold mb-0">Administration</h6>
-                    <button class="admin-sidebar-toggle d-none d-md-block" onclick="toggleAdminSidebar()" title="Hide sidebar">
-                        <i class="bi bi-chevron-left" id="sidebarToggleIcon"></i>
-                    </button>
-                </div>
-                <nav class="nav flex-column nav-pills" id="adminTabs" role="tablist">
+            <div class="position-sticky" style="top: 100px; max-height: calc(100vh - 120px); overflow-y: auto;">
+                <div class="admin-sidebar-inner">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="text-muted text-uppercase small fw-bold mb-0">Administration</h6>
+                        <button class="admin-sidebar-toggle d-none d-md-block" onclick="toggleAdminSidebar()" title="Hide sidebar">
+                            <i class="bi bi-chevron-left" id="sidebarToggleIcon"></i>
+                        </button>
+                    </div>
+                    <nav class="nav flex-column nav-pills" id="adminTabs" role="tablist">
                     <!-- Identity Section -->
                     <div class="nav-section-header">Identity</div>
                     <button class="nav-link active text-start" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">
@@ -136,7 +154,8 @@
                         <i class="bi bi-gear me-2"></i>Settings
                     </button>
                     {% endif %}
-                </nav>
+                    </nav>
+                </div>
             </div>
         </div>
 
