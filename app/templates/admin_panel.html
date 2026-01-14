@@ -1882,7 +1882,7 @@
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" id="webhook-tab" data-bs-toggle="tab" data-bs-target="#webhookSettings" type="button">
                                 <i class="bi bi-broadcast me-1"></i>Webhook
-                                <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
+                                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
                             </button>
                         </li>
                     </ul>
