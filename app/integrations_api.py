@@ -89,10 +89,17 @@ def validate_api_key_format(api_key):
 # ============================================================================
 
 def get_integration_by_api_key(api_key):
-    """Look up integration by API key."""
+    """Look up integration by API key with timing-safe comparison."""
     if not api_key or not validate_api_key_format(api_key):
         return None
-    return Integration.query.filter_by(api_key=api_key, is_active=True).first()
+
+    # Get all active integrations and compare with timing-safe function
+    # This prevents timing attacks that could reveal valid API keys
+    active_integrations = Integration.query.filter_by(is_active=True).all()
+    for integration in active_integrations:
+        if integration.api_key and secrets.compare_digest(integration.api_key, api_key):
+            return integration
+    return None
 
 
 def api_key_or_login_required(f):
@@ -192,9 +199,10 @@ def import_software():
     }
 
     for item in software_list:
-        vendor = item.get('vendor', '').strip()
-        product_name = item.get('product', item.get('product_name', '')).strip()
-        version = item.get('version', '').strip() or None
+        # Sanitize all inputs to prevent injection attacks
+        vendor = sanitize_string(item.get('vendor', ''), 100)
+        product_name = sanitize_string(item.get('product', item.get('product_name', '')), 200)
+        version = sanitize_string(item.get('version', ''), 50) or None
 
         if not vendor or not product_name:
             results['errors'] += 1
@@ -859,8 +867,11 @@ def register_agent():
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    hostname = data.get('hostname', '').strip()
+    hostname = sanitize_string(data.get('hostname', ''), 100)
     os_type = data.get('os_type', '').strip().lower()
+    os_version = sanitize_string(data.get('os_version', ''), 100)
+    os_arch = sanitize_string(data.get('os_arch', ''), 50)
+    agent_version = sanitize_string(data.get('agent_version', ''), 20)
 
     if not hostname:
         return jsonify({'error': 'Hostname is required'}), 400
@@ -875,9 +886,9 @@ def register_agent():
 
     if existing:
         # Update existing agent
-        existing.os_version = data.get('os_version')
-        existing.os_arch = data.get('os_arch')
-        existing.agent_version = data.get('agent_version')
+        existing.os_version = os_version
+        existing.os_arch = os_arch
+        existing.agent_version = agent_version
         existing.last_seen_at = datetime.utcnow()
         existing.ip_address = request.remote_addr
         existing.is_active = True
@@ -897,9 +908,9 @@ def register_agent():
         agent_id=str(uuid.uuid4()),
         hostname=hostname,
         os_type=os_type,
-        os_version=data.get('os_version'),
-        os_arch=data.get('os_arch'),
-        agent_version=data.get('agent_version'),
+        os_version=os_version,
+        os_arch=os_arch,
+        agent_version=agent_version,
         integration_id=integration.id,
         organization_id=integration.organization_id,
         last_seen_at=datetime.utcnow(),
@@ -996,9 +1007,10 @@ def process_software_import(integration, data):
     results = {'queued': 0, 'auto_approved': 0, 'duplicates': 0, 'errors': 0, 'version_updates': 0}
 
     for item in software_list:
-        vendor = item.get('vendor', '').strip()
-        product_name = item.get('product', item.get('product_name', '')).strip()
-        version = item.get('version', '').strip() or None
+        # Sanitize all inputs to prevent injection attacks
+        vendor = sanitize_string(item.get('vendor', ''), 100)
+        product_name = sanitize_string(item.get('product', item.get('product_name', '')), 200)
+        version = sanitize_string(item.get('version', ''), 50) or None
 
         if not vendor or not product_name:
             results['errors'] += 1
@@ -1148,6 +1160,61 @@ def delete_agent(agent_id):
     agent.is_active = False
     db.session.commit()
     return jsonify({'success': True})
+
+
+@bp.route('/api/agents/<int:agent_id>/toggle', methods=['POST'])
+@csrf.exempt
+@admin_required
+def toggle_agent(agent_id):
+    """Enable or disable an agent."""
+    agent = AgentRegistration.query.get_or_404(agent_id)
+    agent.is_active = not agent.is_active
+    db.session.commit()
+    return jsonify({
+        'success': True,
+        'is_active': agent.is_active,
+        'status': agent.status
+    })
+
+
+@bp.route('/api/agent/heartbeat', methods=['POST'])
+@csrf.exempt
+@limiter.limit("120 per minute")  # Allow frequent heartbeats
+@api_key_or_login_required
+def agent_heartbeat():
+    """
+    Agent heartbeat endpoint.
+    Agents should call this periodically to indicate they're still running.
+    Useful for daemon-mode agents that want to show "online" status.
+    """
+    integration = getattr(request, 'integration', None)
+    if not integration:
+        return jsonify({'error': 'Valid integration API key required'}), 401
+
+    data = request.get_json() or {}
+    agent_id = data.get('agent_id')
+
+    if not agent_id:
+        return jsonify({'error': 'agent_id is required'}), 400
+
+    agent = AgentRegistration.query.filter_by(
+        agent_id=agent_id,
+        integration_id=integration.id
+    ).first()
+
+    if not agent:
+        return jsonify({'error': 'Agent not found'}), 404
+
+    # Update last_seen_at to keep agent "online"
+    agent.last_seen_at = datetime.utcnow()
+    agent.ip_address = request.remote_addr
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'status': agent.status,
+        'message': 'Heartbeat received'
+    })
 
 
 # ============================================================================
@@ -1412,23 +1479,29 @@ add_software() {{
     SOFTWARE_JSON="$SOFTWARE_JSON{{\\"vendor\\":\\"$vendor\\",\\"product\\":\\"$product\\",\\"version\\":\\"$version\\"}}"
 }}
 
-# Debian/Ubuntu - dpkg
+# Debian/Ubuntu - dpkg (no limit - capture all installed packages)
 if command -v dpkg &> /dev/null; then
     echo "  Scanning dpkg packages..."
+    PKG_COUNT=0
     # Query only installed packages, using tab separator for reliable parsing
     while IFS=$'\\t' read -r name version; do
         add_software "Debian Package" "$name" "$version"
-    done < <(dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null | head -500)
+        PKG_COUNT=$((PKG_COUNT + 1))
+    done < <(dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null)
+    echo "    Found $PKG_COUNT dpkg packages"
 fi
 
-# RHEL/CentOS/Fedora - rpm
+# RHEL/CentOS/Fedora - rpm (no limit - capture all installed packages)
 if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
     echo "  Scanning rpm packages..."
+    PKG_COUNT=0
     while IFS='|' read -r name version vendor; do
         if [ -n "$name" ]; then
             add_software "${{vendor:-RPM Package}}" "$name" "$version"
+            PKG_COUNT=$((PKG_COUNT + 1))
         fi
-    done < <(rpm -qa --queryformat '%{{NAME}}|%{{VERSION}}|%{{VENDOR}}\\n' 2>/dev/null | head -500)
+    done < <(rpm -qa --queryformat '%{{NAME}}|%{{VERSION}}|%{{VENDOR}}\\n' 2>/dev/null)
+    echo "    Found $PKG_COUNT rpm packages"
 fi
 
 # Snap packages

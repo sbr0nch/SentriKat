@@ -271,6 +271,31 @@ class AgentRegistration(db.Model):
         """Store system info as JSON."""
         self.system_info = json.dumps(info) if info else None
 
+    @property
+    def status(self):
+        """
+        Compute agent status based on last_seen_at and is_active.
+        Returns: 'online', 'offline', 'stale', or 'disabled'
+        """
+        if not self.is_active:
+            return 'disabled'
+
+        if not self.last_seen_at:
+            return 'never_seen'
+
+        now = datetime.utcnow()
+        time_since = now - self.last_seen_at
+
+        # Online: seen within last 10 minutes
+        if time_since.total_seconds() < 600:
+            return 'online'
+        # Offline: seen within last 24 hours
+        elif time_since.total_seconds() < 86400:
+            return 'offline'
+        # Stale: not seen for more than 24 hours
+        else:
+            return 'stale'
+
     def to_dict(self):
         """Convert to dictionary for JSON serialization."""
         return {
@@ -286,6 +311,7 @@ class AgentRegistration(db.Model):
             'organization_id': self.organization_id,
             'organization_name': self.organization.display_name if self.organization else None,
             'is_active': self.is_active,
+            'status': self.status,  # Computed status: online/offline/stale/disabled
             'last_seen_at': self.last_seen_at.isoformat() if self.last_seen_at else None,
             'last_report_at': self.last_report_at.isoformat() if self.last_report_at else None,
             'software_count': self.software_count,

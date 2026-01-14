@@ -6020,7 +6020,7 @@ async function loadAgents() {
         if (agents.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="text-center py-4 text-muted">
+                    <td colspan="7" class="text-center py-4 text-muted">
                         <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
                         <p class="mb-0 mt-2">No agents registered yet</p>
                         <small>Create an agent integration and deploy the script to get started</small>
@@ -6030,14 +6030,33 @@ async function loadAgents() {
             return;
         }
 
-        tbody.innerHTML = agents.map(agent => `
-            <tr>
-                <td class="fw-semibold">${escapeHtml(agent.hostname)}</td>
+        tbody.innerHTML = agents.map(agent => {
+            // Status badge color and icon
+            const statusConfig = {
+                'online': { color: 'success', icon: 'circle-fill', text: 'Online' },
+                'offline': { color: 'secondary', icon: 'circle', text: 'Offline' },
+                'stale': { color: 'warning', icon: 'exclamation-circle', text: 'Stale' },
+                'disabled': { color: 'danger', icon: 'slash-circle', text: 'Disabled' },
+                'never_seen': { color: 'info', icon: 'question-circle', text: 'Waiting' }
+            };
+            const status = statusConfig[agent.status] || statusConfig['offline'];
+
+            return `
+            <tr class="${!agent.is_active ? 'table-secondary' : ''}">
+                <td class="fw-semibold">
+                    ${escapeHtml(agent.hostname)}
+                    <br><small class="text-muted">${escapeHtml(agent.ip_address || '')}</small>
+                </td>
                 <td>
                     <span class="badge bg-${agent.os_type === 'windows' ? 'primary' : 'warning'}">
                         ${agent.os_type}
                     </span>
-                    <small class="text-muted ms-1">${escapeHtml(agent.os_version || '')}</small>
+                    <br><small class="text-muted">${escapeHtml(agent.os_version || '')}</small>
+                </td>
+                <td>
+                    <span class="badge bg-${status.color}">
+                        <i class="bi bi-${status.icon} me-1"></i>${status.text}
+                    </span>
                 </td>
                 <td>${escapeHtml(agent.organization_name || '-')}</td>
                 <td>
@@ -6045,18 +6064,23 @@ async function loadAgents() {
                 </td>
                 <td>${agent.software_count || 0}</td>
                 <td>
+                    <button class="btn btn-outline-${agent.is_active ? 'warning' : 'success'} btn-sm me-1"
+                            onclick="toggleAgent(${agent.id})"
+                            title="${agent.is_active ? 'Disable' : 'Enable'}">
+                        <i class="bi bi-${agent.is_active ? 'pause' : 'play'}"></i>
+                    </button>
                     <button class="btn btn-outline-danger btn-sm" onclick="deleteAgent(${agent.id})" title="Remove">
                         <i class="bi bi-trash"></i>
                     </button>
                 </td>
             </tr>
-        `).join('');
+        `}).join('');
 
     } catch (error) {
         const isDbError = error.message.includes('database') || error.message.includes('Server error') || error.message.includes('500');
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="text-center py-5">
+                <td colspan="7" class="text-center py-5">
                     <div class="text-muted">
                         <i class="bi bi-robot" style="font-size: 3rem; opacity: 0.5;"></i>
                         <p class="mt-3 mb-1 fs-5">${isDbError ? 'Agents Not Available' : 'Unable to Load Agents'}</p>
@@ -6086,6 +6110,19 @@ async function deleteAgent(agentId) {
     try {
         await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
         showToast('Agent removed', 'success');
+        loadAgents();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function toggleAgent(agentId) {
+    try {
+        const response = await fetch(`/api/agents/${agentId}/toggle`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to toggle agent');
+
+        const result = await response.json();
+        showToast(`Agent ${result.is_active ? 'enabled' : 'disabled'}`, 'success');
         loadAgents();
     } catch (error) {
         showToast('Error: ' + error.message, 'danger');
