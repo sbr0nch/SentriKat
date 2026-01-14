@@ -1412,6 +1412,10 @@ def delete_organization(org_id):
         }), 400
 
     try:
+        # Import LDAP models for FK cleanup
+        from app.ldap_models import LDAPGroupMapping, LDAPSyncLog, LDAPAuditLog
+        from app.shared_views import SharedView
+
         # Delete user organization memberships first
         UserOrganization.query.filter_by(organization_id=org_id).delete()
 
@@ -1423,6 +1427,14 @@ def delete_organization(org_id):
 
         # Delete alert logs for this organization
         AlertLog.query.filter_by(organization_id=org_id).delete()
+
+        # Clear LDAP references (set to NULL)
+        LDAPGroupMapping.query.filter_by(organization_id=org_id).update({'organization_id': None})
+        LDAPSyncLog.query.filter_by(organization_id=org_id).update({'organization_id': None})
+        LDAPAuditLog.query.filter_by(organization_id=org_id).update({'organization_id': None})
+
+        # Clear shared views organization reference
+        SharedView.query.filter_by(organization_id=org_id).update({'organization_id': None})
 
         # Now delete the organization
         db.session.delete(org)

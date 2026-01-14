@@ -1103,6 +1103,11 @@
                 ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === selectedVersion ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
                 : '<option value="">N/A</option>';
 
+            // Build a helpful description line
+            const keywords = service.keywords || '';
+            const description = service.description || '';
+            const helpText = description || keywords;
+
             return `
                 <tr onclick="toggleCatalogRow(${service.id}, event)" style="cursor: pointer;">
                     <td onclick="event.stopPropagation();">
@@ -1113,7 +1118,10 @@
                                onchange="toggleCatalogSelection(${service.id}, event)">
                     </td>
                     <td class="fw-semibold">${escapeHtml(service.vendor)}</td>
-                    <td>${escapeHtml(service.product_name)}</td>
+                    <td>
+                        <div>${escapeHtml(service.product_name)}</div>
+                        ${helpText ? `<small class="text-muted d-block" style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(helpText)}">${escapeHtml(helpText)}</small>` : ''}
+                    </td>
                     <td onclick="event.stopPropagation();">
                         <select class="form-select form-select-sm version-select"
                                 data-catalog-id="${service.id}"
