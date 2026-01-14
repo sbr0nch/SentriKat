@@ -1468,6 +1468,85 @@ echo "Collecting installed software..."
 SOFTWARE_JSON="["
 FIRST=true
 
+# Function to check if package is important (not a library or system fluff)
+is_important_package() {{
+    local name="$1"
+
+    # SKIP: Libraries (lib*), dev packages, debug symbols, docs, fonts, locales
+    case "$name" in
+        lib*) return 1 ;;
+        *-dev) return 1 ;;
+        *-dbg) return 1 ;;
+        *-doc) return 1 ;;
+        *-data) return 1 ;;
+        *-common) return 1 ;;
+        fonts-*) return 1 ;;
+        ttf-*) return 1 ;;
+        language-pack-*) return 1 ;;
+        aspell-*) return 1 ;;
+        hunspell-*) return 1 ;;
+        manpages*) return 1 ;;
+        *-locale*) return 1 ;;
+        *-l10n) return 1 ;;
+        *-i18n) return 1 ;;
+        linux-headers-*) return 1 ;;
+        linux-image-*) return 1 ;;
+        linux-modules-*) return 1 ;;
+    esac
+
+    # KEEP: Known important software patterns
+    case "$name" in
+        # Web servers
+        nginx*|apache2*|httpd*|caddy*|lighttpd*) return 0 ;;
+        # Databases
+        mysql*|mariadb*|postgresql*|mongodb*|redis*|sqlite*|memcached*) return 0 ;;
+        # Containers & orchestration
+        docker*|containerd*|podman*|kubernetes*|kubectl*|helm*) return 0 ;;
+        # Programming languages & runtimes
+        python*|php*|ruby*|nodejs*|npm*|java*|openjdk*|golang*|rustc*|dotnet*) return 0 ;;
+        # Security tools
+        openssh*|openssl*|gnupg*|fail2ban*|ufw*|iptables*|nftables*|apparmor*) return 0 ;;
+        # Monitoring & logging
+        zabbix*|nagios*|prometheus*|grafana*|telegraf*|rsyslog*|logrotate*) return 0 ;;
+        # System services
+        systemd*|cron*|sudo*|dbus*|polkit*) return 0 ;;
+        # Network tools
+        curl*|wget*|netcat*|nmap*|tcpdump*|wireshark*|bind9*|dnsmasq*) return 0 ;;
+        # Version control
+        git|git-*|subversion*|mercurial*) return 0 ;;
+        # Config management
+        ansible*|puppet*|chef*|salt*|terraform*) return 0 ;;
+        # Virtualization
+        qemu*|kvm*|virtualbox*|vagrant*|libvirt*) return 0 ;;
+        # Office & productivity
+        libreoffice*|firefox*|chromium*|chrome*|thunderbird*|vlc*|gimp*) return 0 ;;
+        # Message queues
+        rabbitmq*|kafka*|activemq*|mosquitto*) return 0 ;;
+        # Web frameworks/tools
+        tomcat*|jetty*|gunicorn*|uwsgi*|passenger*) return 0 ;;
+        # Backup tools
+        rsync*|bacula*|bareos*|borgbackup*|restic*) return 0 ;;
+        # Editors
+        vim*|nano*|emacs*|code*|vscode*) return 0 ;;
+    esac
+
+    # Skip anything else that looks like a library or minor package
+    # Keep only if it doesn't start with common prefixes
+    case "$name" in
+        acl|adduser|apt*|base-*|bash|bc|bsd*|busybox*) return 0 ;;
+        ca-certificates|coreutils|cpio|cron*|dash|debconf*) return 0 ;;
+        diffutils|dpkg*|e2fsprogs*|fdisk|file|findutils) return 0 ;;
+        grep|gzip|hostname|init*|iproute2|iputils*) return 0 ;;
+        less|login|logrotate|lsb*|lvm2|mount|ncurses*) return 0 ;;
+        net-tools|netbase|openssh*|openssl*|passwd|procps*) return 0 ;;
+        sed|sensible-utils|shadow*|tar|tzdata|ubuntu*|util-linux*) return 0 ;;
+        xz-utils|zip|unzip|zlib*) return 0 ;;
+    esac
+
+    # Default: skip unknown packages (be conservative)
+    return 1
+}}
+
 # Function to add software entry
 add_software() {{
     local vendor="$1"
@@ -1475,6 +1554,11 @@ add_software() {{
     local version="$3"
 
     if [ -z "$product" ]; then
+        return
+    fi
+
+    # Filter: only add important packages
+    if ! is_important_package "$product"; then
         return
     fi
 
