@@ -209,22 +209,38 @@ class LicenseInfo:
         }
 
 
-# Global license instance
+# Global license instance with timestamp for cache invalidation
 _current_license = None
+_license_loaded_at = None
+_LICENSE_CACHE_TTL = 30  # Refresh license from DB every 30 seconds
 
 
 def get_license():
-    """Get current license info"""
-    global _current_license
-    if _current_license is None:
+    """
+    Get current license info.
+
+    Uses a short-lived cache (30 seconds) to balance performance with
+    ensuring license changes propagate quickly across all workers.
+    """
+    import time
+    global _current_license, _license_loaded_at
+
+    now = time.time()
+
+    # Reload if cache is empty or expired
+    if _current_license is None or _license_loaded_at is None or (now - _license_loaded_at) > _LICENSE_CACHE_TTL:
         _current_license = load_license()
+        _license_loaded_at = now
+
     return _current_license
 
 
 def reload_license():
     """Force reload license from database"""
-    global _current_license
+    import time
+    global _current_license, _license_loaded_at
     _current_license = load_license()
+    _license_loaded_at = time.time()
     return _current_license
 
 
