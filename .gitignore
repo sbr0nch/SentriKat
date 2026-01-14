@@ -53,9 +53,9 @@ Thumbs.db
 *.log
 logs/
 
-# License Generation Tools (CONFIDENTIAL - Do not publish)
-tools/
+# License Private Keys (NEVER commit these!)
 .license_keys/
+*private_key*.pem
 
 # Test/Development files
 tests/
