@@ -1786,6 +1786,21 @@
                     {% endif %}
                 </div>
                 {% endif %}
+
+                <!-- Integrations (visible for super admins) -->
+                {% if current_user and current_user.is_super_admin() %}
+                <div class="sidebar-nav-section">
+                    <div class="sidebar-nav-title">Integrations</div>
+                    <a href="#" onclick="switchToAdminTab('ldapUsers'); return false;" class="sidebar-link">
+                        <i class="bi bi-diagram-3"></i>
+                        <span>LDAP Users</span>
+                    </a>
+                    <a href="#" onclick="switchToAdminTab('ldapGroups'); return false;" class="sidebar-link">
+                        <i class="bi bi-diagram-2"></i>
+                        <span>LDAP Groups</span>
+                    </a>
+                </div>
+                {% endif %}
             </nav>
 
         </aside>
