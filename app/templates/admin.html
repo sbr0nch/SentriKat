@@ -375,11 +375,24 @@
                                     </div>
                                 </div>
 
-                                <!-- Legacy Static Catalog -->
+                                <!-- Legacy Static Catalog - Collapsed -->
                                 <div class="col-12">
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showServiceCatalog()">
-                                        <i class="bi bi-archive me-1"></i>Browse Static Catalog (Legacy)
-                                    </button>
+                                    <details class="text-muted small">
+                                        <summary class="cursor-pointer">
+                                            <i class="bi bi-archive me-1"></i>Browse Static Catalog (Legacy)
+                                        </summary>
+                                        <div class="mt-2 p-2 bg-light rounded">
+                                            <p class="mb-2 small">
+                                                <i class="bi bi-info-circle me-1"></i>
+                                                <strong>Tip:</strong> For better software inventory, use
+                                                <a href="/admin_panel#integrations">Integrations</a>
+                                                to import products from PDQ, SCCM, or discovery agents.
+                                            </p>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showServiceCatalog()">
+                                                <i class="bi bi-archive me-1"></i>Open Static Catalog
+                                            </button>
+                                        </div>
+                                    </details>
                                 </div>
                             </div>
                         </div>

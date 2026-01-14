@@ -390,36 +390,42 @@ def create_product_from_queue(queue_item):
 @login_required
 def get_import_queue():
     """Get pending import queue items."""
-    status = request.args.get('status', 'pending')
-    integration_id = request.args.get('integration_id', type=int)
-    org_id = request.args.get('organization_id', type=int)
-    limit = request.args.get('limit', 100, type=int)
-    offset = request.args.get('offset', 0, type=int)
+    try:
+        status = request.args.get('status', 'pending')
+        integration_id = request.args.get('integration_id', type=int)
+        org_id = request.args.get('organization_id', type=int)
+        limit = request.args.get('limit', 100, type=int)
+        offset = request.args.get('offset', 0, type=int)
 
-    query = ImportQueue.query
+        query = ImportQueue.query
 
-    if status:
-        query = query.filter_by(status=status)
-    if integration_id:
-        query = query.filter_by(integration_id=integration_id)
-    if org_id:
-        query = query.filter_by(organization_id=org_id)
+        if status:
+            query = query.filter_by(status=status)
+        if integration_id:
+            query = query.filter_by(integration_id=integration_id)
+        if org_id:
+            query = query.filter_by(organization_id=org_id)
 
-    total = query.count()
-    items = query.order_by(ImportQueue.created_at.desc()).offset(offset).limit(limit).all()
+        total = query.count()
+        items = query.order_by(ImportQueue.created_at.desc()).offset(offset).limit(limit).all()
 
-    return jsonify({
-        'total': total,
-        'items': [item.to_dict() for item in items]
-    })
+        return jsonify({
+            'total': total,
+            'items': [item.to_dict() for item in items]
+        })
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}', 'items': []}), 500
 
 
 @bp.route('/api/import/queue/count', methods=['GET'])
 @login_required
 def get_import_queue_count():
     """Get count of pending import queue items."""
-    pending_count = ImportQueue.query.filter_by(status='pending').count()
-    return jsonify({'pending': pending_count})
+    try:
+        pending_count = ImportQueue.query.filter_by(status='pending').count()
+        return jsonify({'pending': pending_count})
+    except Exception as e:
+        return jsonify({'pending': 0, 'error': str(e)}), 200  # Return 0 count on error
 
 
 @bp.route('/api/import/queue/<int:item_id>', methods=['GET'])
@@ -592,8 +598,11 @@ def bulk_process_queue():
 @admin_required
 def get_integrations():
     """Get all integrations."""
-    integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
-    return jsonify([i.to_dict() for i in integrations])
+    try:
+        integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
+        return jsonify([i.to_dict() for i in integrations])
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}', 'integrations': []}), 500
 
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['GET'])
@@ -1052,16 +1061,19 @@ def track_version_observation(vendor, product_name, version, org_id, integration
 @admin_required
 def get_agents():
     """Get all registered agents."""
-    integration_id = request.args.get('integration_id', type=int)
+    try:
+        integration_id = request.args.get('integration_id', type=int)
 
-    query = AgentRegistration.query.filter_by(is_active=True)
+        query = AgentRegistration.query.filter_by(is_active=True)
 
-    if integration_id:
-        query = query.filter_by(integration_id=integration_id)
+        if integration_id:
+            query = query.filter_by(integration_id=integration_id)
 
-    agents = query.order_by(AgentRegistration.last_seen_at.desc()).all()
+        agents = query.order_by(AgentRegistration.last_seen_at.desc()).all()
 
-    return jsonify([agent.to_dict() for agent in agents])
+        return jsonify([agent.to_dict() for agent in agents])
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}', 'agents': []}), 500
 
 
 @bp.route('/api/agents/<int:agent_id>', methods=['DELETE'])
@@ -1419,73 +1431,76 @@ def get_version_audit():
     Get software version audit report.
     Shows version drift and multiple versions in use.
     """
-    from app.integrations_models import SoftwareVersionTracker
+    try:
+        from app.integrations_models import SoftwareVersionTracker
 
-    org_id = request.args.get('organization_id', type=int)
-    days_stale = request.args.get('days_stale', 30, type=int)
+        org_id = request.args.get('organization_id', type=int)
+        days_stale = request.args.get('days_stale', 30, type=int)
 
-    # Calculate stale threshold
-    stale_threshold = datetime.utcnow() - timedelta(days=days_stale)
+        # Calculate stale threshold
+        stale_threshold = datetime.utcnow() - timedelta(days=days_stale)
 
-    # Query version trackers
-    query = SoftwareVersionTracker.query
+        # Query version trackers
+        query = SoftwareVersionTracker.query
 
-    if org_id:
-        query = query.filter_by(organization_id=org_id)
+        if org_id:
+            query = query.filter_by(organization_id=org_id)
 
-    trackers = query.order_by(
-        SoftwareVersionTracker.vendor,
-        SoftwareVersionTracker.product_name,
-        SoftwareVersionTracker.last_seen_at.desc()
-    ).all()
+        trackers = query.order_by(
+            SoftwareVersionTracker.vendor,
+            SoftwareVersionTracker.product_name,
+            SoftwareVersionTracker.last_seen_at.desc()
+        ).all()
 
-    # Group by product to find version drift
-    products = {}
-    for tracker in trackers:
-        key = f"{tracker.vendor.lower()}:{tracker.product_name.lower()}"
-        if key not in products:
-            products[key] = {
-                'vendor': tracker.vendor,
-                'product_name': tracker.product_name,
-                'versions': [],
-                'product_id': tracker.product_id,
-                'has_multiple_versions': False,
-                'has_stale_versions': False
-            }
+        # Group by product to find version drift
+        products = {}
+        for tracker in trackers:
+            key = f"{tracker.vendor.lower()}:{tracker.product_name.lower()}"
+            if key not in products:
+                products[key] = {
+                    'vendor': tracker.vendor,
+                    'product_name': tracker.product_name,
+                    'versions': [],
+                    'product_id': tracker.product_id,
+                    'has_multiple_versions': False,
+                    'has_stale_versions': False
+                }
 
-        is_stale = tracker.last_seen_at < stale_threshold if tracker.last_seen_at else True
+            is_stale = tracker.last_seen_at < stale_threshold if tracker.last_seen_at else True
 
-        products[key]['versions'].append({
-            'id': tracker.id,
-            'version': tracker.version,
-            'observation_count': tracker.observation_count,
-            'first_seen': tracker.first_seen_at.isoformat() if tracker.first_seen_at else None,
-            'last_seen': tracker.last_seen_at.isoformat() if tracker.last_seen_at else None,
-            'is_current': tracker.is_current,
-            'is_stale': is_stale,
-            'is_outdated': tracker.is_outdated,
-            'organization_id': tracker.organization_id,
-            'organization_name': tracker.organization.display_name if tracker.organization else None
+            products[key]['versions'].append({
+                'id': tracker.id,
+                'version': tracker.version,
+                'observation_count': tracker.observation_count,
+                'first_seen': tracker.first_seen_at.isoformat() if tracker.first_seen_at else None,
+                'last_seen': tracker.last_seen_at.isoformat() if tracker.last_seen_at else None,
+                'is_current': tracker.is_current,
+                'is_stale': is_stale,
+                'is_outdated': tracker.is_outdated,
+                'organization_id': tracker.organization_id,
+                'organization_name': tracker.organization.display_name if tracker.organization else None
+            })
+
+            if is_stale:
+                products[key]['has_stale_versions'] = True
+
+        # Mark products with multiple versions
+        for key, product in products.items():
+            if len(product['versions']) > 1:
+                product['has_multiple_versions'] = True
+
+        # Convert to list and sort
+        result = list(products.values())
+        result.sort(key=lambda x: (not x['has_multiple_versions'], not x['has_stale_versions'], x['vendor'], x['product_name']))
+
+        return jsonify({
+            'products': result,
+            'total_products': len(result),
+            'products_with_drift': sum(1 for p in result if p['has_multiple_versions']),
+            'products_with_stale': sum(1 for p in result if p['has_stale_versions'])
         })
-
-        if is_stale:
-            products[key]['has_stale_versions'] = True
-
-    # Mark products with multiple versions
-    for key, product in products.items():
-        if len(product['versions']) > 1:
-            product['has_multiple_versions'] = True
-
-    # Convert to list and sort
-    result = list(products.values())
-    result.sort(key=lambda x: (not x['has_multiple_versions'], not x['has_stale_versions'], x['vendor'], x['product_name']))
-
-    return jsonify({
-        'products': result,
-        'total_products': len(result),
-        'products_with_drift': sum(1 for p in result if p['has_multiple_versions']),
-        'products_with_stale': sum(1 for p in result if p['has_stale_versions'])
-    })
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}', 'products': []}), 500
 
 
 @bp.route('/api/audit/versions/<int:tracker_id>/mark-outdated', methods=['POST'])

@@ -5225,9 +5225,24 @@ async function loadImportQueue() {
 
     try {
         const response = await fetch(`/api/import/queue?status=${status}`);
-        if (!response.ok) throw new Error('Failed to load queue');
+        if (!response.ok) {
+            // Try to get error message from JSON response, otherwise use status text
+            let errorMsg = 'Failed to load queue';
+            try {
+                const errorData = await response.json();
+                errorMsg = errorData.error || errorData.message || errorMsg;
+            } catch {
+                errorMsg = response.status === 500 ? 'Server error - database tables may need to be created' : response.statusText;
+            }
+            throw new Error(errorMsg);
+        }
 
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+        } catch {
+            throw new Error('Invalid response from server');
+        }
         importQueueData = data.items || [];
 
         if (importQueueData.length === 0) {
@@ -5327,11 +5342,26 @@ async function loadImportQueue() {
         loadImportQueueCount();
 
     } catch (error) {
+        // Show a nicer error state with helpful suggestions
+        const isDbError = error.message.includes('database') || error.message.includes('Server error');
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" class="text-center py-4 text-danger">
-                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
-                    <p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p>
+                <td colspan="8" class="text-center py-5">
+                    <div class="text-muted">
+                        <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.5;"></i>
+                        <p class="mt-3 mb-1 fs-5">${isDbError ? 'Queue Not Available' : 'Unable to Load Queue'}</p>
+                        <p class="text-secondary small mb-3">${escapeHtml(error.message)}</p>
+                        ${isDbError ? `
+                            <p class="text-secondary small">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Try restarting the application to initialize database tables.
+                            </p>
+                        ` : `
+                            <button class="btn btn-outline-secondary btn-sm" onclick="loadImportQueue()">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Retry
+                            </button>
+                        `}
+                    </div>
                 </td>
             </tr>
         `;
@@ -5586,10 +5616,20 @@ async function loadIntegrations() {
         }).join('');
 
     } catch (error) {
+        const isDbError = error.message.includes('database') || error.message.includes('Server error') || error.message.includes('500');
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="text-center py-4 text-danger">
-                    Error loading integrations: ${escapeHtml(error.message)}
+                <td colspan="6" class="text-center py-5">
+                    <div class="text-muted">
+                        <i class="bi bi-plug" style="font-size: 3rem; opacity: 0.5;"></i>
+                        <p class="mt-3 mb-1 fs-5">${isDbError ? 'Integrations Not Available' : 'Unable to Load Integrations'}</p>
+                        <p class="text-secondary small mb-3">${escapeHtml(error.message)}</p>
+                        ${!isDbError ? `
+                            <button class="btn btn-outline-secondary btn-sm" onclick="loadIntegrations()">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Retry
+                            </button>
+                        ` : ''}
+                    </div>
                 </td>
             </tr>
         `;
@@ -5894,10 +5934,20 @@ async function loadAgents() {
         `).join('');
 
     } catch (error) {
+        const isDbError = error.message.includes('database') || error.message.includes('Server error') || error.message.includes('500');
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="text-center py-4 text-danger">
-                    Error loading agents: ${escapeHtml(error.message)}
+                <td colspan="6" class="text-center py-5">
+                    <div class="text-muted">
+                        <i class="bi bi-robot" style="font-size: 3rem; opacity: 0.5;"></i>
+                        <p class="mt-3 mb-1 fs-5">${isDbError ? 'Agents Not Available' : 'Unable to Load Agents'}</p>
+                        <p class="text-secondary small mb-3">${escapeHtml(error.message)}</p>
+                        ${!isDbError ? `
+                            <button class="btn btn-outline-secondary btn-sm" onclick="loadAgents()">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Retry
+                            </button>
+                        ` : ''}
+                    </div>
                 </td>
             </tr>
         `;
@@ -6089,11 +6139,20 @@ async function loadSoftwareAudit() {
         }).join('');
 
     } catch (error) {
+        const isDbError = error.message.includes('database') || error.message.includes('Server error') || error.message.includes('500');
         tbody.innerHTML = `
             <tr>
-                <td colspan="5" class="text-center py-4 text-danger">
-                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
-                    <p class="mb-0 mt-2">Error loading audit data: ${escapeHtml(error.message)}</p>
+                <td colspan="5" class="text-center py-5">
+                    <div class="text-muted">
+                        <i class="bi bi-clipboard-check" style="font-size: 3rem; opacity: 0.5;"></i>
+                        <p class="mt-3 mb-1 fs-5">${isDbError ? 'Audit Not Available' : 'Unable to Load Audit Data'}</p>
+                        <p class="text-secondary small mb-3">${escapeHtml(error.message)}</p>
+                        ${!isDbError ? `
+                            <button class="btn btn-outline-secondary btn-sm" onclick="loadSoftwareAudit()">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Retry
+                            </button>
+                        ` : ''}
+                    </div>
                 </td>
             </tr>
         `;
