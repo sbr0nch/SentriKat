@@ -1415,11 +1415,10 @@ add_software() {{
 # Debian/Ubuntu - dpkg
 if command -v dpkg &> /dev/null; then
     echo "  Scanning dpkg packages..."
-    while IFS= read -r line; do
-        name=$(echo "$line" | awk '{{print $2}}')
-        version=$(echo "$line" | awk '{{print $3}}')
+    # Query only installed packages, using tab separator for reliable parsing
+    while IFS=$'\\t' read -r name version; do
         add_software "Debian Package" "$name" "$version"
-    done < <(dpkg-query -W -f='${{Status}} ${{Package}} ${{Version}}\\n' 2>/dev/null | grep "^install ok installed" | head -500)
+    done < <(dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null | head -500)
 fi
 
 # RHEL/CentOS/Fedora - rpm
