@@ -5584,19 +5584,33 @@ async function loadIntegrations() {
                 'csv': 'CSV Import'
             };
 
-            const statusBadge = int.last_sync_status
-                ? `<span class="badge bg-${int.last_sync_status === 'success' ? 'success' : 'danger'}">${int.last_sync_status}</span>`
-                : '<span class="badge bg-secondary">Never synced</span>';
+            // Different status display for agent vs pull integrations
+            let statusBadge, lastActivity;
+            if (int.integration_type === 'agent') {
+                // Agent integrations show agent count and last report
+                const agentCount = int.agent_count || 0;
+                statusBadge = agentCount > 0
+                    ? `<span class="badge bg-success">${agentCount} agent${agentCount !== 1 ? 's' : ''}</span>`
+                    : '<span class="badge bg-secondary">No agents</span>';
+                lastActivity = int.last_sync_at
+                    ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small><br><small class="text-muted">${int.last_sync_count || 0} items reported</small>`
+                    : '<small class="text-muted">Waiting for agents</small>';
+            } else {
+                // Pull integrations show sync status
+                statusBadge = int.last_sync_status
+                    ? `<span class="badge bg-${int.last_sync_status === 'success' ? 'success' : 'danger'}">${int.last_sync_status}</span>`
+                    : '<span class="badge bg-secondary">Never synced</span>';
+                lastActivity = int.last_sync_at
+                    ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small><br><small class="text-muted">${int.last_sync_count || 0} items</small>`
+                    : '-';
+            }
 
             return `
                 <tr>
                     <td class="fw-semibold">${escapeHtml(int.name)}</td>
                     <td><span class="badge bg-info">${typeLabels[int.integration_type] || int.integration_type}</span></td>
                     <td>${escapeHtml(int.organization_name || 'All')}</td>
-                    <td>
-                        ${int.last_sync_at ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small>` : '-'}
-                        <br><small class="text-muted">${int.last_sync_count || 0} items</small>
-                    </td>
+                    <td>${lastActivity}</td>
                     <td>${statusBadge}</td>
                     <td>
                         ${int.integration_type !== 'agent' ? `

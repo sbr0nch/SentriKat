@@ -642,7 +642,16 @@ def get_integrations():
     """Get all integrations."""
     try:
         integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
-        return jsonify([i.to_dict() for i in integrations])
+        result = []
+        for i in integrations:
+            data = i.to_dict()
+            # Add agent count for agent-type integrations
+            if i.integration_type == 'agent':
+                data['agent_count'] = AgentRegistration.query.filter_by(
+                    integration_id=i.id, is_active=True
+                ).count()
+            result.append(data)
+        return jsonify(result)
     except Exception as e:
         return jsonify({'error': f'Database error: {str(e)}', 'integrations': []}), 500
 
