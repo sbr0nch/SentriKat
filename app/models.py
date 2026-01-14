@@ -1005,6 +1005,49 @@ class SystemSettings(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
+class LicenseActivation(db.Model):
+    """Tracks license activations to prevent unauthorized reuse"""
+    __tablename__ = 'license_activations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    license_id = db.Column(db.String(50), nullable=False, index=True)  # SK-YYYY-XXXXXXXX
+    license_key_hash = db.Column(db.String(64), nullable=False, index=True)  # SHA256 of license key
+    installation_id = db.Column(db.String(64), nullable=False, unique=True, index=True)  # Unique machine fingerprint
+
+    # Activation details
+    customer = db.Column(db.String(200), nullable=True)
+    edition = db.Column(db.String(20), nullable=True)
+    hostname = db.Column(db.String(255), nullable=True)
+    ip_address = db.Column(db.String(50), nullable=True)
+
+    # Status
+    is_active = db.Column(db.Boolean, default=True, index=True)
+    deactivated_at = db.Column(db.DateTime, nullable=True)
+    deactivation_reason = db.Column(db.String(200), nullable=True)
+
+    # Metadata
+    first_activated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    activation_count = db.Column(db.Integer, default=1)  # How many times re-activated
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'license_id': self.license_id,
+            'installation_id': self.installation_id[:12] + '...',  # Partial for privacy
+            'customer': self.customer,
+            'edition': self.edition,
+            'hostname': self.hostname,
+            'ip_address': self.ip_address,
+            'is_active': self.is_active,
+            'first_activated_at': self.first_activated_at.isoformat() if self.first_activated_at else None,
+            'last_seen_at': self.last_seen_at.isoformat() if self.last_seen_at else None,
+            'activation_count': self.activation_count,
+            'deactivated_at': self.deactivated_at.isoformat() if self.deactivated_at else None,
+            'deactivation_reason': self.deactivation_reason
+        }
+
+
 class AlertLog(db.Model):
     """Log of email alerts sent"""
     __tablename__ = 'alert_logs'

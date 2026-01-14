@@ -99,7 +99,7 @@ def generate_license_id():
     return f"SK-{datetime.now().year}-{hash_val}"
 
 
-def create_license(customer, email, edition, expires_at=None, max_users=None, max_organizations=None, max_products=None):
+def create_license(customer, email, edition, expires_at=None, max_users=None, max_organizations=None, max_products=None, max_activations=1):
     """Create a signed license key"""
     try:
         from cryptography.hazmat.primitives import hashes, serialization
@@ -135,6 +135,9 @@ def create_license(customer, email, edition, expires_at=None, max_users=None, ma
     # Add expiration
     if expires_at:
         payload['expires_at'] = expires_at
+
+    # Add activation limits (1 = single-use, -1 = unlimited)
+    payload['max_activations'] = max_activations
 
     # Add limits (for custom limits)
     limits = {}
@@ -212,6 +215,8 @@ Examples:
                         help='Custom max organizations limit')
     parser.add_argument('--max-products', type=int,
                         help='Custom max products limit')
+    parser.add_argument('--max-activations', type=int, default=1,
+                        help='Maximum number of installations (1=single-use, -1=unlimited, default: 1)')
     parser.add_argument('--output', type=str,
                         help='Output file for license key')
 
@@ -248,7 +253,8 @@ Examples:
         expires_at=expires_at,
         max_users=args.max_users,
         max_organizations=args.max_organizations,
-        max_products=args.max_products
+        max_products=args.max_products,
+        max_activations=args.max_activations
     )
 
     # Output
@@ -261,6 +267,10 @@ Examples:
     print(f"Edition:     {args.edition.upper()}")
     print(f"Issued:      {date.today().isoformat()}")
     print(f"Expires:     {expires_at or 'Never (Perpetual)'}")
+
+    # Show activation limits
+    max_act = payload['max_activations']
+    print(f"Activations: {'Unlimited' if max_act == -1 else f'{max_act} installation(s)'}")
 
     if args.edition == 'professional':
         print(f"Max Users:   {'Unlimited' if payload['limits']['max_users'] == -1 else payload['limits']['max_users']}")
