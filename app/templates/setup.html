@@ -427,46 +427,61 @@
             </div>
             {% endif %}
 
-            <!-- Step 4: Seed Services -->
+            <!-- Step 4: Seed Services (Optional - Legacy) -->
             <div class="step" id="step-{% if auth_enabled %}4{% else %}3{% endif %}">
-                <h2 class="mb-4"><i class="bi bi-collection"></i> Service Catalog</h2>
-                <p>Populate the service catalog with 80+ common enterprise services.</p>
+                <h2 class="mb-4"><i class="bi bi-collection"></i> Service Catalog <span class="badge bg-secondary">Optional</span></h2>
+                <p>Choose how to populate your software inventory:</p>
 
-                <div class="feature-card">
-                    <i class="bi bi-microsoft float-start"></i>
-                    <strong>Microsoft Products</strong>
-                    <p class="mb-0 mt-2">Windows Server, Exchange, SQL Server, SharePoint, and more</p>
-                </div>
-
-                <div class="feature-card">
-                    <i class="bi bi-database float-start"></i>
-                    <strong>Database Systems</strong>
-                    <p class="mb-0 mt-2">MySQL, PostgreSQL, MongoDB, Oracle, Redis</p>
-                </div>
-
-                <div class="feature-card">
-                    <i class="bi bi-code-square float-start"></i>
-                    <strong>Web Servers & Frameworks</strong>
-                    <p class="mb-0 mt-2">Apache, Nginx, Tomcat, Node.js, PHP</p>
-                </div>
-
-                <div class="feature-card">
-                    <i class="bi bi-router float-start"></i>
-                    <strong>Network Equipment</strong>
-                    <p class="mb-0 mt-2">Cisco, Juniper, Fortinet, Palo Alto, F5</p>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card border-success mb-3">
+                            <div class="card-header bg-success text-white">
+                                <i class="bi bi-plug me-2"></i>Recommended: Integrations
+                            </div>
+                            <div class="card-body">
+                                <p class="card-text">Use integrations to automatically discover software from:</p>
+                                <ul class="small">
+                                    <li>PDQ Inventory, SCCM, Intune</li>
+                                    <li>Deploy discovery agents on endpoints</li>
+                                    <li>Import from any REST API</li>
+                                </ul>
+                                <p class="text-muted small mb-0">
+                                    <i class="bi bi-info-circle"></i> Configure integrations in Admin Panel after setup
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-secondary mb-3">
+                            <div class="card-header bg-secondary text-white">
+                                <i class="bi bi-list-ul me-2"></i>Legacy: Hardcoded Catalog
+                            </div>
+                            <div class="card-body">
+                                <p class="card-text">Seed 80+ common enterprise services:</p>
+                                <ul class="small">
+                                    <li>Microsoft, Oracle, Cisco, VMware</li>
+                                    <li>Databases, Web Servers, Firewalls</li>
+                                    <li>Manual selection required</li>
+                                </ul>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="seedServices()" id="seedBtn">
+                                    <i class="bi bi-collection me-1"></i>Seed Catalog
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="alert alert-info">
-                    <i class="bi bi-info-circle"></i>
-                    This helps you quickly add products to track without typing everything manually.
+                    <i class="bi bi-lightbulb"></i>
+                    <strong>Tip:</strong> You can skip this step and use integrations to automatically discover your software inventory.
                 </div>
 
                 <div class="text-center mt-4">
                     <button type="button" class="btn btn-secondary me-2" onclick="previousStep()">
                         <i class="bi bi-arrow-left"></i> Back
                     </button>
-                    <button type="button" class="btn btn-setup" onclick="seedServices()" id="seedBtn">
-                        Seed Service Catalog <i class="bi bi-arrow-right"></i>
+                    <button type="button" class="btn btn-setup" onclick="nextStep()">
+                        Skip & Continue <i class="bi bi-arrow-right"></i>
                     </button>
                 </div>
             </div>
@@ -753,20 +768,20 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    showAlert(`Successfully seeded ${data.count} services!`, 'success');
-                    setTimeout(() => {
-                        clearAlert();
-                        nextStep();
-                    }, 1500);
+                    showAlert(`Successfully seeded ${data.count} services! You can now continue.`, 'success');
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="bi bi-check"></i> Seeded';
+                    btn.classList.remove('btn-outline-secondary');
+                    btn.classList.add('btn-success');
                 } else {
                     showAlert(data.error || 'Failed to seed services');
                     btn.disabled = false;
-                    btn.innerHTML = 'Seed Service Catalog <i class="bi bi-arrow-right"></i>';
+                    btn.innerHTML = '<i class="bi bi-collection me-1"></i>Seed Catalog';
                 }
             } catch (error) {
                 showAlert('Error: ' + error.message);
                 btn.disabled = false;
-                btn.innerHTML = 'Seed Service Catalog <i class="bi bi-arrow-right"></i>';
+                btn.innerHTML = '<i class="bi bi-collection me-1"></i>Seed Catalog';
             }
         }
 
