@@ -1032,3 +1032,253 @@ class AlertLog(db.Model):
             'error_message': self.error_message,
             'sent_at': self.sent_at.isoformat() if self.sent_at else None
         }
+
+
+# ============================================================================
+# ASSET MANAGEMENT - For agent-based inventory tracking
+# ============================================================================
+
+class Asset(db.Model):
+    """
+    Represents a server, host, or machine in the infrastructure.
+    Assets can have multiple products installed, each with its own version.
+    Used for agent-based inventory tracking across multiple deployments.
+    """
+    __tablename__ = 'assets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+
+    # Identification
+    hostname = db.Column(db.String(255), nullable=False, index=True)
+    ip_address = db.Column(db.String(45), nullable=True)  # IPv4 or IPv6
+    fqdn = db.Column(db.String(500), nullable=True)  # Fully Qualified Domain Name
+    asset_type = db.Column(db.String(50), default='server')  # server, workstation, container, appliance, etc.
+
+    # OS Information
+    os_name = db.Column(db.String(100), nullable=True)  # Linux, Windows, macOS, etc.
+    os_version = db.Column(db.String(100), nullable=True)  # Ubuntu 22.04, Windows Server 2022, etc.
+    os_kernel = db.Column(db.String(100), nullable=True)  # Kernel version
+
+    # Agent Information
+    agent_id = db.Column(db.String(255), unique=True, nullable=True, index=True)  # Unique agent identifier
+    agent_version = db.Column(db.String(50), nullable=True)
+    last_checkin = db.Column(db.DateTime, nullable=True)  # Last heartbeat from agent
+    last_inventory_at = db.Column(db.DateTime, nullable=True)  # Last successful inventory report
+
+    # Status
+    active = db.Column(db.Boolean, default=True, index=True)
+    status = db.Column(db.String(20), default='online')  # online, offline, unknown, decommissioned
+
+    # Additional info
+    description = db.Column(db.Text, nullable=True)
+    tags = db.Column(db.Text, nullable=True)  # JSON array of tags
+    metadata_json = db.Column(db.Text, nullable=True)  # JSON for custom fields
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('assets', lazy='dynamic'))
+    product_installations = db.relationship('ProductInstallation', backref='asset', cascade='all, delete-orphan', lazy='dynamic')
+
+    # Unique constraint: hostname should be unique per organization
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'hostname', name='uix_org_hostname'),
+    )
+
+    def get_tags(self):
+        """Get tags as list."""
+        if not self.tags:
+            return []
+        try:
+            return json.loads(self.tags)
+        except:
+            return []
+
+    def set_tags(self, tag_list):
+        """Set tags from list."""
+        self.tags = json.dumps(tag_list) if tag_list else None
+
+    def get_metadata(self):
+        """Get metadata as dict."""
+        if not self.metadata_json:
+            return {}
+        try:
+            return json.loads(self.metadata_json)
+        except:
+            return {}
+
+    def set_metadata(self, data):
+        """Set metadata from dict."""
+        self.metadata_json = json.dumps(data) if data else None
+
+    def to_dict(self, include_products=False):
+        result = {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'hostname': self.hostname,
+            'ip_address': self.ip_address,
+            'fqdn': self.fqdn,
+            'asset_type': self.asset_type,
+            'os_name': self.os_name,
+            'os_version': self.os_version,
+            'os_kernel': self.os_kernel,
+            'agent_id': self.agent_id,
+            'agent_version': self.agent_version,
+            'last_checkin': self.last_checkin.isoformat() if self.last_checkin else None,
+            'last_inventory_at': self.last_inventory_at.isoformat() if self.last_inventory_at else None,
+            'active': self.active,
+            'status': self.status,
+            'description': self.description,
+            'tags': self.get_tags(),
+            'metadata': self.get_metadata(),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'product_count': self.product_installations.count()
+        }
+
+        if include_products:
+            result['products'] = [pi.to_dict() for pi in self.product_installations.all()]
+
+        return result
+
+
+class ProductInstallation(db.Model):
+    """
+    Links an Asset to a Product with version information.
+    Represents "nginx version 1.24 is installed on server-1".
+
+    This allows tracking:
+    - Which assets have which products
+    - Different versions of the same product across different assets
+    - Installation discovery history
+    """
+    __tablename__ = 'product_installations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False, index=True)
+
+    # Version on this specific asset (may differ from Product.version)
+    version = db.Column(db.String(100), nullable=True)
+
+    # Installation details
+    install_path = db.Column(db.String(500), nullable=True)  # Where it's installed
+    detected_by = db.Column(db.String(50), default='agent')  # agent, manual, scan
+
+    # Status
+    is_vulnerable = db.Column(db.Boolean, default=False, index=True)  # Cached: has matching CVEs?
+    vulnerability_count = db.Column(db.Integer, default=0)  # Cached: how many CVEs?
+
+    # Timestamps
+    discovered_at = db.Column(db.DateTime, default=datetime.utcnow)  # When first seen
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)  # Last confirmed present
+    verified_at = db.Column(db.DateTime, nullable=True)  # Manual verification date
+
+    # Relationships
+    product = db.relationship('Product', backref=db.backref('installations', lazy='dynamic'))
+
+    # Unique constraint: one product per asset
+    __table_args__ = (
+        db.UniqueConstraint('asset_id', 'product_id', name='uix_asset_product'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'product_id': self.product_id,
+            'product_name': f"{self.product.vendor} {self.product.product_name}" if self.product else None,
+            'version': self.version,
+            'install_path': self.install_path,
+            'detected_by': self.detected_by,
+            'is_vulnerable': self.is_vulnerable,
+            'vulnerability_count': self.vulnerability_count,
+            'discovered_at': self.discovered_at.isoformat() if self.discovered_at else None,
+            'last_seen_at': self.last_seen_at.isoformat() if self.last_seen_at else None,
+            'verified_at': self.verified_at.isoformat() if self.verified_at else None
+        }
+
+
+class AgentApiKey(db.Model):
+    """
+    API keys for agent authentication.
+    Each organization can have multiple agent API keys.
+    Agents use these keys to authenticate when reporting inventory.
+    """
+    __tablename__ = 'agent_api_keys'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+
+    # Key identification
+    name = db.Column(db.String(100), nullable=False)  # Friendly name like "Production Agents"
+    key_hash = db.Column(db.String(256), nullable=False, unique=True)  # SHA256 hash of the key
+    key_prefix = db.Column(db.String(10), nullable=False)  # First 8 chars for identification
+
+    # Permissions & limits
+    active = db.Column(db.Boolean, default=True, index=True)
+    max_assets = db.Column(db.Integer, nullable=True)  # NULL = unlimited
+    allowed_ips = db.Column(db.Text, nullable=True)  # JSON array of allowed IPs/CIDRs
+
+    # Usage tracking
+    last_used_at = db.Column(db.DateTime, nullable=True)
+    usage_count = db.Column(db.Integer, default=0)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=True)  # NULL = never expires
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('agent_api_keys', lazy='dynamic'))
+    creator = db.relationship('User', backref='created_api_keys')
+
+    @staticmethod
+    def generate_key():
+        """Generate a new API key."""
+        import secrets
+        return f"sk_agent_{secrets.token_urlsafe(32)}"
+
+    @staticmethod
+    def hash_key(key):
+        """Hash an API key for storage."""
+        import hashlib
+        return hashlib.sha256(key.encode()).hexdigest()
+
+    def is_valid(self):
+        """Check if key is still valid (active and not expired)."""
+        if not self.active:
+            return False
+        if self.expires_at and datetime.utcnow() > self.expires_at:
+            return False
+        return True
+
+    def get_allowed_ips(self):
+        """Get allowed IPs as list."""
+        if not self.allowed_ips:
+            return []
+        try:
+            return json.loads(self.allowed_ips)
+        except:
+            return []
+
+    def to_dict(self, include_key=False):
+        result = {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'name': self.name,
+            'key_prefix': self.key_prefix,
+            'active': self.active,
+            'max_assets': self.max_assets,
+            'allowed_ips': self.get_allowed_ips(),
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
+            'usage_count': self.usage_count,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'is_valid': self.is_valid()
+        }
+        return result

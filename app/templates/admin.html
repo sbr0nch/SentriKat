@@ -40,6 +40,17 @@
                 <button class="btn btn-outline-secondary" onclick="bulkDeactivate()">
                     <i class="bi bi-pause-circle me-1"></i>Deactivate
                 </button>
+                <div class="btn-group">
+                    <button class="btn btn-outline-warning dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-flag me-1"></i>Set Priority
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item text-danger" href="#" onclick="bulkChangePriority('critical'); return false;"><i class="bi bi-exclamation-octagon me-1"></i>Critical</a></li>
+                        <li><a class="dropdown-item text-warning" href="#" onclick="bulkChangePriority('high'); return false;"><i class="bi bi-exclamation-triangle me-1"></i>High</a></li>
+                        <li><a class="dropdown-item text-info" href="#" onclick="bulkChangePriority('medium'); return false;"><i class="bi bi-exclamation-circle me-1"></i>Medium</a></li>
+                        <li><a class="dropdown-item text-secondary" href="#" onclick="bulkChangePriority('low'); return false;"><i class="bi bi-dash-circle me-1"></i>Low</a></li>
+                    </ul>
+                </div>
                 <button class="btn btn-outline-danger" onclick="bulkDelete()">
                     <i class="bi bi-trash me-1"></i>Delete
                 </button>
@@ -1688,6 +1699,53 @@
 
             await Promise.all(promises);
             showToast(`${selectedProducts.size} product(s) deleted`, 'success');
+            clearSelection();
+            loadProducts();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function bulkChangePriority(newPriority) {
+        if (selectedProducts.size === 0) return;
+
+        const priorityLabel = newPriority.charAt(0).toUpperCase() + newPriority.slice(1);
+        const priorityColors = {
+            critical: 'text-danger',
+            high: 'text-warning',
+            medium: 'text-info',
+            low: 'text-secondary'
+        };
+
+        const confirmed = await showConfirm(
+            `Set priority to <strong class="${priorityColors[newPriority]}">${priorityLabel}</strong> for <strong>${selectedProducts.size}</strong> product(s)?`,
+            'Change Priority',
+            'Change',
+            'btn-warning'
+        );
+
+        if (!confirmed) return;
+
+        showLoading();
+        try {
+            const promises = Array.from(selectedProducts.keys()).map(productId =>
+                fetch(`/api/products/${productId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ criticality: newPriority })
+                })
+            );
+
+            const results = await Promise.all(promises);
+            const successCount = results.filter(r => r.ok).length;
+
+            if (successCount === selectedProducts.size) {
+                showToast(`✓ Priority set to ${priorityLabel} for ${successCount} product(s)`, 'success');
+            } else {
+                showToast(`Priority changed for ${successCount}/${selectedProducts.size} products`, 'warning');
+            }
             clearSelection();
             loadProducts();
         } catch (error) {
