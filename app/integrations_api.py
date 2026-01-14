@@ -1576,7 +1576,7 @@ def download_linux_agent():
 # Security Notes:
 #   - API key is embedded in script - protect this file (chmod 600)
 #   - Run as root for full package visibility (or service account with read access)
-#   - Logs stored in /var/log/sentrikat-agent.log
+#   - Logs stored in /var/log/sentrikat-agent.log (or ~/.sentrikat/agent.log if no write access)
 #   - Only software inventory data is transmitted (no credentials/sensitive data)
 #   - Verify script checksum after download if security is critical
 # ================================================
@@ -1586,7 +1586,15 @@ SENTRIKAT_URL="{base_url}"
 API_KEY="{api_key}"
 SYNC_INTERVAL=21600  # Sync interval in seconds (default: 6 hours = 21600)
 HEARTBEAT_INTERVAL=300  # Heartbeat every 5 minutes
-LOG_FILE="/var/log/sentrikat-agent.log"
+
+# Determine log file location (prefer /var/log, fall back to user home)
+if [ -w /var/log ]; then
+    LOG_FILE="/var/log/sentrikat-agent.log"
+else
+    LOG_DIR="$HOME/.sentrikat"
+    mkdir -p "$LOG_DIR" 2>/dev/null
+    LOG_FILE="$LOG_DIR/agent.log"
+fi
 
 # Parse arguments
 RUN_ONCE=false
