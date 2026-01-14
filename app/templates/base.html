@@ -479,27 +479,67 @@
            SIDEBAR LAYOUT SYSTEM
            ============================================================================ */
 
-        /* App Wrapper - Contains everything */
-        .app-wrapper {
-            display: flex;
-            min-height: 100vh;
+        /* Top Navigation Bar - Clean and Professional */
+        .top-navbar {
+            background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+            border-bottom: 1px solid var(--gray-200);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            position: sticky;
+            top: 0;
+            z-index: 1050;
         }
 
-        /* Sidebar - Fixed left navigation */
+        [data-theme="dark"] .top-navbar {
+            background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+            border-bottom-color: var(--border-color);
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            font-size: 1.5rem;
+            color: #111827;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+        }
+
+        [data-theme="dark"] .navbar-brand {
+            color: #f1f5f9;
+        }
+
+        .navbar-brand img {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+        }
+
+        [data-theme="dark"] .navbar-brand img {
+            filter: brightness(0) invert(1);
+        }
+
+        /* Content wrapper - holds sidebar + main content */
+        .content-wrapper {
+            display: flex;
+            min-height: calc(100vh - 140px); /* Account for header and footer */
+        }
+
+        /* Sidebar - Between header and footer */
         .app-sidebar {
-            width: 260px;
-            background: linear-gradient(180deg, #1e3a5f 0%, #0f172a 100%);
-            border-right: 1px solid rgba(255,255,255,0.1);
+            width: 220px;
+            background: var(--gray-100);
+            border-right: 1px solid var(--gray-200);
             display: flex;
             flex-direction: column;
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            z-index: 1040;
-            transition: transform 0.3s ease, width 0.3s ease;
+            flex-shrink: 0;
+            transition: width 0.3s ease, margin-left 0.3s ease;
             overflow-y: auto;
             overflow-x: hidden;
+        }
+
+        [data-theme="dark"] .app-sidebar {
+            background: var(--surface-color);
+            border-right-color: var(--border-color);
         }
 
         .app-sidebar::-webkit-scrollbar {
@@ -511,32 +551,8 @@
         }
 
         .app-sidebar::-webkit-scrollbar-thumb {
-            background: rgba(255,255,255,0.2);
+            background: var(--gray-300);
             border-radius: 3px;
-        }
-
-        /* Sidebar Brand/Logo */
-        .sidebar-brand {
-            padding: 1.25rem 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            flex-shrink: 0;
-        }
-
-        .sidebar-brand img {
-            width: 48px;
-            height: 48px;
-            object-fit: contain;
-            filter: brightness(0) invert(1);
-        }
-
-        .sidebar-brand span {
-            font-weight: 700;
-            font-size: 1.25rem;
-            color: white;
-            white-space: nowrap;
         }
 
         /* Sidebar Navigation */
@@ -546,7 +562,7 @@
         }
 
         .sidebar-nav-section {
-            padding: 0 0.75rem;
+            padding: 0 0.5rem;
             margin-bottom: 1rem;
         }
 
@@ -555,7 +571,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: rgba(255,255,255,0.4);
+            color: var(--gray-500);
             padding: 0.5rem 0.75rem;
             margin-bottom: 0.25rem;
         }
@@ -564,29 +580,43 @@
             display: flex;
             align-items: center;
             gap: 0.75rem;
-            padding: 0.75rem 1rem;
-            color: rgba(255,255,255,0.7);
+            padding: 0.6rem 0.75rem;
+            color: var(--gray-700);
             text-decoration: none;
-            border-radius: 0.5rem;
+            border-radius: 0.375rem;
             transition: all 0.2s ease;
             font-weight: 500;
-            font-size: 0.9rem;
-            margin-bottom: 0.25rem;
+            font-size: 0.875rem;
+            margin-bottom: 0.125rem;
+        }
+
+        [data-theme="dark"] .sidebar-link {
+            color: var(--gray-400);
         }
 
         .sidebar-link:hover {
-            background: rgba(255,255,255,0.1);
-            color: white;
+            background: var(--gray-200);
+            color: var(--gray-900);
+        }
+
+        [data-theme="dark"] .sidebar-link:hover {
+            background: var(--gray-100);
+            color: var(--text-color);
         }
 
         .sidebar-link.active {
-            background: rgba(59, 130, 246, 0.3);
+            background: var(--primary-color);
+            color: white;
+        }
+
+        [data-theme="dark"] .sidebar-link.active {
+            background: var(--primary-color);
             color: white;
         }
 
         .sidebar-link i {
-            font-size: 1.1rem;
-            width: 24px;
+            font-size: 1rem;
+            width: 20px;
             text-align: center;
         }
 
@@ -597,50 +627,22 @@
 
         /* Sidebar Footer */
         .sidebar-footer {
-            padding: 1rem;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            padding: 0.75rem;
+            border-top: 1px solid var(--gray-200);
             flex-shrink: 0;
+        }
+
+        [data-theme="dark"] .sidebar-footer {
+            border-top-color: var(--border-color);
         }
 
         /* Main Content Area */
         .app-main {
             flex: 1;
-            margin-left: 260px;
             display: flex;
             flex-direction: column;
-            min-height: 100vh;
-            transition: margin-left 0.3s ease;
-        }
-
-        /* Top Header Bar */
-        .top-header {
-            background: white;
-            border-bottom: 1px solid var(--gray-200);
-            padding: 0.75rem 1.5rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 1030;
-            box-shadow: var(--shadow-sm);
-        }
-
-        [data-theme="dark"] .top-header {
-            background: var(--surface-color);
-            border-color: var(--border-color);
-        }
-
-        .top-header-left {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .top-header-right {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
+            min-width: 0; /* Prevent flex overflow */
+            overflow-x: hidden;
         }
 
         /* Sidebar Toggle Button */
@@ -652,6 +654,7 @@
             color: var(--gray-600);
             border-radius: 0.375rem;
             transition: all 0.2s;
+            display: none; /* Hidden by default on desktop */
         }
 
         .sidebar-toggle:hover {
@@ -666,60 +669,56 @@
         /* Main Content */
         .main-content {
             flex: 1;
-            padding: 1.5rem;
-            overflow-y: auto;
-        }
-
-        /* Footer stays at bottom */
-        .app-footer {
-            margin-top: auto;
+            padding: 1.5rem 2rem;
         }
 
         /* Sidebar Collapsed State */
         .sidebar-collapsed .app-sidebar {
-            transform: translateX(-100%);
+            width: 0;
+            overflow: hidden;
         }
 
-        .sidebar-collapsed .app-main {
-            margin-left: 0;
+        .sidebar-collapsed .sidebar-toggle {
+            display: block;
         }
 
         /* Mobile Responsive */
         @media (max-width: 991.98px) {
             .app-sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                z-index: 1045;
                 transform: translateX(-100%);
             }
 
-            .app-main {
-                margin-left: 0;
+            .content-wrapper {
+                flex-direction: column;
+            }
+
+            .sidebar-toggle {
+                display: block !important;
             }
 
             .sidebar-open .app-sidebar {
                 transform: translateX(0);
             }
 
-            .sidebar-open::before {
-                content: '';
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0,0,0,0.5);
-                z-index: 1035;
+            .sidebar-open .sidebar-overlay {
+                display: block;
             }
         }
 
-        @media (min-width: 992px) {
-            .sidebar-toggle-mobile {
-                display: none;
-            }
-        }
-
-        /* Dark mode sidebar adjustments */
-        [data-theme="dark"] .app-sidebar {
-            background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
-            border-right-color: var(--border-color);
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1040;
         }
 
         /* Legacy nav-link support */
@@ -1655,80 +1654,17 @@
         <p class="text-secondary fw-semibold">Processing...</p>
     </div>
 
-    <!-- App Wrapper -->
-    <div class="app-wrapper" id="appWrapper">
-        <!-- Sidebar -->
-        <aside class="app-sidebar" id="appSidebar">
-            <!-- Sidebar Brand -->
-            <div class="sidebar-brand">
-                <a href="/" style="display: flex; align-items: center; gap: 0.75rem; text-decoration: none;">
-                    <img src="{{ branding.logo_url }}" alt="{{ branding.app_name }}">
-                    <span>{{ branding.app_name }}</span>
-                </a>
-            </div>
-
-            <!-- Sidebar Navigation -->
-            <nav class="sidebar-nav">
-                <!-- Main Navigation -->
-                <div class="sidebar-nav-section">
-                    <div class="sidebar-nav-title">Main</div>
-                    <a href="/" class="sidebar-link {{ 'active' if request.endpoint == 'main.index' else '' }}">
-                        <i class="bi bi-grid-fill"></i>
-                        <span>Dashboard</span>
-                    </a>
-                    <a href="/admin" class="sidebar-link {{ 'active' if request.endpoint == 'main.admin' else '' }}">
-                        <i class="bi bi-server"></i>
-                        <span>Products</span>
+    <!-- Top Navigation Bar -->
+    <nav class="top-navbar py-2">
+        <div class="container-fluid px-4">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-3">
+                    <a class="navbar-brand" href="/">
+                        <img src="{{ branding.logo_url }}" alt="{{ branding.app_name }}">
+                        <span>{{ branding.app_name }}</span>
                     </a>
                 </div>
-
-                <!-- Administration (visible for admins) -->
-                {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
-                <div class="sidebar-nav-section">
-                    <div class="sidebar-nav-title">Administration</div>
-                    <a href="/admin-panel" class="sidebar-link {{ 'active' if request.endpoint == 'main.admin_panel' else '' }}">
-                        <i class="bi bi-speedometer2"></i>
-                        <span>Admin Panel</span>
-                    </a>
-                    <a href="#" onclick="switchToAdminTab('users'); return false;" class="sidebar-link">
-                        <i class="bi bi-people"></i>
-                        <span>Users</span>
-                    </a>
-                    <a href="#" onclick="switchToAdminTab('organizations'); return false;" class="sidebar-link">
-                        <i class="bi bi-building"></i>
-                        <span>Organizations</span>
-                    </a>
-                    {% if current_user and current_user.is_super_admin() %}
-                    <a href="#" onclick="switchToAdminTab('settings'); return false;" class="sidebar-link">
-                        <i class="bi bi-sliders"></i>
-                        <span>Settings</span>
-                    </a>
-                    {% endif %}
-                </div>
-                {% endif %}
-            </nav>
-
-            <!-- Sidebar Footer -->
-            <div class="sidebar-footer">
-                <button class="btn btn-primary btn-sm w-100 mb-2" onclick="triggerSync()">
-                    <i class="bi bi-arrow-clockwise me-1"></i> Sync Now
-                </button>
-                <div class="text-center">
-                    <small style="color: rgba(255,255,255,0.5); font-size: 0.7rem;">
-                        v1.0.0 | CISA KEV
-                    </small>
-                </div>
-            </div>
-        </aside>
-
-        <!-- Main Content Area -->
-        <div class="app-main">
-            <!-- Top Header Bar -->
-            <header class="top-header">
-                <div class="top-header-left">
-                    <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
-                        <i class="bi bi-list"></i>
-                    </button>
+                <div class="d-flex align-items-center gap-3">
                     <!-- Organization Switcher -->
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="orgDropdown" data-bs-toggle="dropdown" aria-expanded="false">
@@ -1738,8 +1674,12 @@
                             <li><span class="dropdown-item-text text-muted small">Loading organizations...</span></li>
                         </ul>
                     </div>
-                </div>
-                <div class="top-header-right">
+
+                    <div class="vr"></div>
+                    <button class="btn btn-primary btn-sm" onclick="triggerSync()">
+                        <i class="bi bi-arrow-clockwise"></i> Sync
+                    </button>
+
                     <!-- Dark Mode Toggle -->
                     <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" id="themeToggle">
                         <i class="bi bi-moon-fill" id="themeIcon"></i>
@@ -1747,6 +1687,7 @@
 
                     <!-- User Menu (when auth is enabled) -->
                     {% if auth_enabled and current_user %}
+                    <div class="vr"></div>
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle"
                                 type="button"
@@ -1792,15 +1733,82 @@
                     </div>
                     {% endif %}
                 </div>
-            </header>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Content Wrapper: Sidebar + Main Content -->
+    <div class="content-wrapper" id="contentWrapper">
+        <!-- Mobile Sidebar Overlay -->
+        <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+        <!-- Sidebar -->
+        <aside class="app-sidebar" id="appSidebar">
+            <!-- Sidebar Navigation -->
+            <nav class="sidebar-nav">
+                <!-- Main Navigation -->
+                <div class="sidebar-nav-section">
+                    <div class="sidebar-nav-title">Main</div>
+                    <a href="/" class="sidebar-link {{ 'active' if request.endpoint == 'main.index' else '' }}">
+                        <i class="bi bi-grid-fill"></i>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="/admin" class="sidebar-link {{ 'active' if request.endpoint == 'main.admin' else '' }}">
+                        <i class="bi bi-server"></i>
+                        <span>Products</span>
+                    </a>
+                </div>
+
+                <!-- Administration (visible for admins) -->
+                {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
+                <div class="sidebar-nav-section">
+                    <div class="sidebar-nav-title">Administration</div>
+                    <a href="/admin-panel" class="sidebar-link {{ 'active' if request.endpoint == 'main.admin_panel' else '' }}">
+                        <i class="bi bi-speedometer2"></i>
+                        <span>Admin Panel</span>
+                    </a>
+                    <a href="#" onclick="switchToAdminTab('users'); return false;" class="sidebar-link">
+                        <i class="bi bi-people"></i>
+                        <span>Users</span>
+                    </a>
+                    <a href="#" onclick="switchToAdminTab('organizations'); return false;" class="sidebar-link">
+                        <i class="bi bi-building"></i>
+                        <span>Organizations</span>
+                    </a>
+                    {% if current_user and current_user.is_super_admin() %}
+                    <a href="#" onclick="switchToAdminTab('settings'); return false;" class="sidebar-link">
+                        <i class="bi bi-sliders"></i>
+                        <span>Settings</span>
+                    </a>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </nav>
+
+            <!-- Sidebar Footer -->
+            <div class="sidebar-footer">
+                <small class="text-muted" style="font-size: 0.7rem;">v1.0.0</small>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <div class="app-main">
+            <!-- Mobile Sidebar Toggle -->
+            <div class="d-lg-none p-2 border-bottom">
+                <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+                    <i class="bi bi-list"></i> Menu
+                </button>
+            </div>
 
             <!-- Main Content -->
             <div class="main-content">
                 {% block content %}{% endblock %}
             </div>
+        </div>
+    </div>
 
-            <!-- Footer -->
-            <footer class="app-footer">
+    <!-- Footer -->
+    <footer class="app-footer">
         <div class="container-fluid px-4">
             <div class="text-center">
                 <p class="mb-1">
@@ -1827,8 +1835,6 @@
             </div>
         </div>
     </footer>
-        </div><!-- /.app-main -->
-    </div><!-- /.app-wrapper -->
 
     <!-- Toast Container -->
     <div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
@@ -2372,7 +2378,7 @@
         // ============================================================================
 
         function toggleSidebar() {
-            const wrapper = document.getElementById('appWrapper');
+            const wrapper = document.getElementById('contentWrapper');
             const isMobile = window.innerWidth < 992;
 
             if (isMobile) {
@@ -2389,7 +2395,9 @@
         }
 
         function initSidebar() {
-            const wrapper = document.getElementById('appWrapper');
+            const wrapper = document.getElementById('contentWrapper');
+            if (!wrapper) return;
+
             const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
             const isMobile = window.innerWidth < 992;
 
@@ -2397,16 +2405,6 @@
             if (isCollapsed && !isMobile) {
                 wrapper.classList.add('sidebar-collapsed');
             }
-
-            // Close sidebar when clicking overlay on mobile
-            document.addEventListener('click', function(e) {
-                if (window.innerWidth < 992 && wrapper.classList.contains('sidebar-open')) {
-                    const sidebar = document.getElementById('appSidebar');
-                    if (!sidebar.contains(e.target) && !e.target.closest('.sidebar-toggle')) {
-                        wrapper.classList.remove('sidebar-open');
-                    }
-                }
-            });
 
             // Handle window resize
             window.addEventListener('resize', function() {
