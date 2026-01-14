@@ -470,6 +470,7 @@ def get_queue_item(item_id):
 
 
 @bp.route('/api/import/queue/<int:item_id>', methods=['PUT'])
+@csrf.exempt
 @login_required
 def update_queue_item(item_id):
     """Update a queue item (change version, org, criticality)."""
@@ -502,6 +503,7 @@ def update_queue_item(item_id):
 
 
 @bp.route('/api/import/queue/<int:item_id>/approve', methods=['POST'])
+@csrf.exempt
 @login_required
 def approve_queue_item(item_id):
     """Approve a queue item and create the product."""
@@ -550,6 +552,7 @@ def approve_queue_item(item_id):
 
 
 @bp.route('/api/import/queue/<int:item_id>/reject', methods=['POST'])
+@csrf.exempt
 @login_required
 def reject_queue_item(item_id):
     """Reject/ignore a queue item."""
@@ -568,6 +571,7 @@ def reject_queue_item(item_id):
 
 
 @bp.route('/api/import/queue/bulk', methods=['POST'])
+@csrf.exempt
 @login_required
 def bulk_process_queue():
     """Bulk approve or reject queue items."""
@@ -653,6 +657,7 @@ def get_integration(integration_id):
 
 
 @bp.route('/api/integrations', methods=['POST'])
+@csrf.exempt  # JSON API endpoints - protected by admin_required + session auth
 @admin_required
 def create_integration():
     """Create a new integration."""
@@ -706,6 +711,7 @@ def create_integration():
 
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['PUT'])
+@csrf.exempt
 @admin_required
 def update_integration(integration_id):
     """Update an integration."""
@@ -736,6 +742,7 @@ def update_integration(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['DELETE'])
+@csrf.exempt
 @admin_required
 def delete_integration(integration_id):
     """Delete (deactivate) an integration."""
@@ -748,6 +755,7 @@ def delete_integration(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>/regenerate-key', methods=['POST'])
+@csrf.exempt
 @admin_required
 def regenerate_api_key(integration_id):
     """Regenerate API key for an integration."""
@@ -763,6 +771,7 @@ def regenerate_api_key(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>/test', methods=['POST'])
+@csrf.exempt
 @admin_required
 def test_integration(integration_id):
     """Test connection to an integration."""
@@ -788,6 +797,7 @@ def test_integration(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>/sync', methods=['POST'])
+@csrf.exempt
 @admin_required
 def trigger_sync(integration_id):
     """Manually trigger a sync for a pull integration."""
@@ -1121,6 +1131,7 @@ def get_agents():
 
 
 @bp.route('/api/agents/<int:agent_id>', methods=['DELETE'])
+@csrf.exempt
 @admin_required
 def delete_agent(agent_id):
     """Delete (deactivate) an agent."""
@@ -1552,6 +1563,7 @@ def get_version_audit():
 
 
 @bp.route('/api/audit/versions/<int:tracker_id>/mark-outdated', methods=['POST'])
+@csrf.exempt
 @admin_required
 def mark_version_outdated(tracker_id):
     """Mark a version as outdated (no longer in use)."""
@@ -1571,6 +1583,7 @@ def mark_version_outdated(tracker_id):
 
 
 @bp.route('/api/audit/versions/<int:tracker_id>', methods=['DELETE'])
+@csrf.exempt
 @admin_required
 def delete_version_tracker(tracker_id):
     """Delete a version tracking entry."""
@@ -1615,6 +1628,7 @@ def get_stale_software():
 
 
 @bp.route('/api/audit/cleanup', methods=['POST'])
+@csrf.exempt
 @admin_required
 def cleanup_stale_versions():
     """
