@@ -84,8 +84,11 @@ class EmailAlertManager:
         if not smtp_config['host'] or not smtp_config['from_email']:
             return {'status': 'error', 'reason': 'SMTP not configured (neither org nor global)'}
 
-        # Get recipient emails - handle potentially double-encoded JSON
+        # Get recipient emails - Organization first, then fall back to global default
         recipients = []
+        recipients_source = 'none'
+
+        # Try organization-specific recipients first
         if organization.notification_emails:
             try:
                 parsed = json.loads(organization.notification_emails)
@@ -93,11 +96,25 @@ class EmailAlertManager:
                 if isinstance(parsed, str):
                     parsed = json.loads(parsed)
                 recipients = parsed if isinstance(parsed, list) else []
+                if recipients:
+                    recipients_source = 'organization'
             except (json.JSONDecodeError, TypeError):
                 recipients = []
 
+        # Fall back to global default recipients if org has none
         if not recipients:
-            return {'status': 'error', 'reason': 'No recipients configured'}
+            from app.settings_api import get_setting
+            global_recipients_raw = get_setting('smtp_default_recipients', '[]')
+            try:
+                global_recipients = json.loads(global_recipients_raw) if global_recipients_raw else []
+                if isinstance(global_recipients, list) and global_recipients:
+                    recipients = global_recipients
+                    recipients_source = 'global'
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if not recipients:
+            return {'status': 'error', 'reason': 'No recipients configured (neither org nor global default)'}
 
         # Filter matches by alert settings
         filtered_matches = []

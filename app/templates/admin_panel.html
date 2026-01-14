@@ -766,7 +766,22 @@
                                         <small class="text-muted">For port 465 (implicit SSL)</small>
                                     </div>
 
+                                    <!-- Default Recipients Section -->
+                                    <div class="col-12 mt-4">
+                                        <hr>
+                                        <h6 class="text-muted"><i class="bi bi-people me-2"></i>Default Alert Recipients</h6>
+                                        <p class="text-muted small">
+                                            Fallback recipients when an organization doesn't have notification emails configured.
+                                            Organizations can override this with their own recipient list.
+                                        </p>
+                                    </div>
                                     <div class="col-md-12">
+                                        <label for="globalSmtpDefaultRecipients" class="form-label fw-semibold">Default Notification Emails</label>
+                                        <input type="text" class="form-control" id="globalSmtpDefaultRecipients" placeholder="security@company.com, alerts@company.com">
+                                        <small class="form-text text-muted">Comma-separated email addresses. Used when an organization has no recipients configured.</small>
+                                    </div>
+
+                                    <div class="col-md-12 mt-4">
                                         <hr>
                                         <button type="button" class="btn btn-primary me-2" onclick="saveGlobalSMTPSettings()">
                                             <i class="bi bi-check-circle me-1"></i>Save SMTP Settings
@@ -1911,7 +1926,10 @@
                                 <div class="col-md-12">
                                     <label for="orgEmails" class="form-label fw-semibold">Notification Emails</label>
                                     <input type="text" class="form-control" id="orgEmails" placeholder="email1@company.com, email2@company.com">
-                                    <small class="form-text text-muted">Comma-separated email addresses for vulnerability alerts</small>
+                                    <small class="form-text text-muted">
+                                        Comma-separated email addresses for vulnerability alerts.
+                                        <span class="text-info">Leave empty to use global default recipients.</span>
+                                    </small>
                                 </div>
 
                                 <div class="col-md-12">
@@ -2066,7 +2084,8 @@
                         <div class="tab-pane fade" id="webhookSettings">
                             <div class="alert alert-info">
                                 <i class="bi bi-info-circle me-2"></i>
-                                Configure a webhook for this organization. Takes priority over global webhook settings.
+                                Configure a webhook for this organization. When enabled, this takes priority over global webhook settings.
+                                When disabled, the organization will use the global webhook (if configured).
                             </div>
 
                             <div class="row g-3">

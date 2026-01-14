@@ -286,6 +286,15 @@ def test_ldap_connection():
 @requires_professional('Email Alerts')
 def get_smtp_settings():
     """Get global SMTP settings"""
+    import json
+
+    # Parse default recipients
+    default_recipients_raw = get_setting('smtp_default_recipients', '[]')
+    try:
+        default_recipients = json.loads(default_recipients_raw) if default_recipients_raw else []
+    except (json.JSONDecodeError, TypeError):
+        default_recipients = []
+
     settings = {
         'smtp_host': get_setting('smtp_host', ''),
         'smtp_port': int(get_setting('smtp_port', '587')),
@@ -293,7 +302,8 @@ def get_smtp_settings():
         'smtp_from_email': get_setting('smtp_from_email', ''),
         'smtp_from_name': get_setting('smtp_from_name', 'SentriKat Alerts'),
         'smtp_use_tls': get_setting('smtp_use_tls', 'false') == 'true',
-        'smtp_use_ssl': get_setting('smtp_use_ssl', 'false') == 'true'
+        'smtp_use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+        'smtp_default_recipients': default_recipients
     }
     return jsonify(settings)
 
@@ -317,6 +327,12 @@ def save_smtp_settings():
         set_setting('smtp_from_name', data.get('smtp_from_name', 'SentriKat Alerts'), 'smtp', 'From name')
         set_setting('smtp_use_tls', 'true' if data.get('smtp_use_tls') else 'false', 'smtp', 'Use TLS/STARTTLS')
         set_setting('smtp_use_ssl', 'true' if data.get('smtp_use_ssl') else 'false', 'smtp', 'Use SSL/TLS')
+
+        # Global default recipients (fallback for orgs without notification_emails)
+        default_recipients = data.get('smtp_default_recipients', [])
+        if isinstance(default_recipients, list):
+            import json
+            set_setting('smtp_default_recipients', json.dumps(default_recipients), 'smtp', 'Default notification recipients')
 
         return jsonify({'success': True, 'message': 'SMTP settings saved successfully'})
     except Exception as e:

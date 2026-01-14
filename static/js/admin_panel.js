@@ -1783,6 +1783,12 @@ async function testLDAPConnection() {
 
 // Global SMTP Settings
 async function saveGlobalSMTPSettings() {
+    // Parse default recipients from comma-separated string to array
+    const defaultRecipientsInput = document.getElementById('globalSmtpDefaultRecipients').value;
+    const defaultRecipients = defaultRecipientsInput
+        ? defaultRecipientsInput.split(',').map(e => e.trim()).filter(e => e)
+        : [];
+
     const settings = {
         smtp_host: document.getElementById('globalSmtpHost').value,
         smtp_port: document.getElementById('globalSmtpPort').value,
@@ -1791,7 +1797,8 @@ async function saveGlobalSMTPSettings() {
         smtp_from_email: document.getElementById('globalSmtpFromEmail').value,
         smtp_from_name: document.getElementById('globalSmtpFromName').value,
         smtp_use_tls: document.getElementById('globalSmtpUseTLS').checked,
-        smtp_use_ssl: document.getElementById('globalSmtpUseSSL').checked
+        smtp_use_ssl: document.getElementById('globalSmtpUseSSL').checked,
+        smtp_default_recipients: defaultRecipients
     };
 
     try {
@@ -2693,6 +2700,9 @@ async function loadAllSettings() {
             document.getElementById('globalSmtpFromName').value = smtp.smtp_from_name || 'SentriKat Alerts';
             document.getElementById('globalSmtpUseTLS').checked = smtp.smtp_use_tls !== false;
             document.getElementById('globalSmtpUseSSL').checked = smtp.smtp_use_ssl === true;
+            // Load default recipients (convert array to comma-separated string)
+            const defaultRecipients = smtp.smtp_default_recipients || [];
+            document.getElementById('globalSmtpDefaultRecipients').value = defaultRecipients.join(', ');
         }
 
         // Load Sync settings
