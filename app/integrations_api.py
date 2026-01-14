@@ -1303,14 +1303,26 @@ def download_windows_agent():
 
     script = f'''# SentriKat Discovery Agent for Windows (Daemon Mode)
 # ================================================
+# Version: 1.1.0
+#
+# Changelog:
+#   1.1.0 - Daemon mode with configurable sync interval, heartbeat support
+#   1.0.0 - Initial release, one-shot inventory scan
+#
 # Runs as a background service, syncing periodically
 #
-# Installation as Windows Service (requires NSSM or run as scheduled task):
+# Installation:
 #   Option 1 - Run directly: powershell -ExecutionPolicy Bypass -File sentrikat-agent.ps1
 #   Option 2 - One-shot:     powershell -File sentrikat-agent.ps1 -RunOnce
 #   Option 3 - As Service:   Use NSSM to install as Windows Service
 #
 # Requirements: PowerShell 5.1+, Windows 7/Server 2008 R2 or later
+#
+# Security Notes:
+#   - API key is embedded in script - protect this file
+#   - Run with least privileges needed (admin for full registry access)
+#   - Logs stored in %ProgramData%\SentriKat\agent.log
+#   - Only software inventory data is transmitted (no credentials/sensitive data)
 # ================================================
 
 param(
@@ -1541,6 +1553,13 @@ def download_linux_agent():
 # ================================================
 # SentriKat Discovery Agent for Linux (Daemon Mode)
 # ================================================
+# Version: 1.1.0
+#
+# Changelog:
+#   1.1.0 - Daemon mode with configurable sync interval, heartbeat support
+#         - Smart package filtering (skips libraries, dev packages)
+#   1.0.0 - Initial release, one-shot inventory scan
+#
 # Runs as a background service, syncing periodically
 #
 # Installation as systemd service:
@@ -1553,6 +1572,13 @@ def download_linux_agent():
 # One-shot:   ./sentrikat-agent.sh --once
 #
 # Requirements: bash, curl
+#
+# Security Notes:
+#   - API key is embedded in script - protect this file (chmod 600)
+#   - Run as root for full package visibility (or service account with read access)
+#   - Logs stored in /var/log/sentrikat-agent.log
+#   - Only software inventory data is transmitted (no credentials/sensitive data)
+#   - Verify script checksum after download if security is critical
 # ================================================
 
 # Configuration - EDIT THESE VALUES

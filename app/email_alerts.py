@@ -1399,3 +1399,202 @@ def _build_password_change_forced_email_html(user, organization, forced_by_usern
 """
 
     return html
+
+
+# ============================================================================
+# Agent Status Alert Email
+# ============================================================================
+
+def send_agent_offline_alert(offline_agents, stale_agents):
+    """
+    Send email alert when agents go offline or become stale.
+
+    Args:
+        offline_agents: List of agents that went offline (not seen for >10 min)
+        stale_agents: List of agents that became stale (not seen for >24 hours)
+
+    Returns:
+        dict: Status result with 'status', 'sent_to', or 'reason'
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if not offline_agents and not stale_agents:
+        return {'status': 'skipped', 'reason': 'No offline/stale agents'}
+
+    # Get global SMTP settings
+    from app.settings_api import get_setting
+    smtp_config = {
+        'host': get_setting('smtp_host'),
+        'port': int(get_setting('smtp_port', '587') or '587'),
+        'username': get_setting('smtp_username'),
+        'password': get_setting('smtp_password'),
+        'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+        'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+        'from_email': get_setting('smtp_from_email'),
+        'from_name': get_setting('smtp_from_name', 'SentriKat Alerts')
+    }
+
+    if not smtp_config['host'] or not smtp_config['from_email']:
+        return {'status': 'error', 'reason': 'SMTP not configured'}
+
+    # Get admin recipients
+    global_recipients_raw = get_setting('smtp_default_recipients', '[]')
+    try:
+        recipients = json.loads(global_recipients_raw) if global_recipients_raw else []
+    except (json.JSONDecodeError, TypeError):
+        recipients = []
+
+    if not recipients:
+        return {'status': 'error', 'reason': 'No recipients configured'}
+
+    # Build email
+    total_agents = len(offline_agents) + len(stale_agents)
+    subject = f"⚠️ SentriKat Alert: {total_agents} Agent(s) Offline"
+    html_body = _build_agent_offline_email_html(offline_agents, stale_agents)
+
+    try:
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=recipients,
+            subject=subject,
+            html_body=html_body
+        )
+
+        logger.info(f"Agent offline alert sent to {len(recipients)} recipients")
+        return {
+            'status': 'success',
+            'sent_to': len(recipients),
+            'offline_count': len(offline_agents),
+            'stale_count': len(stale_agents)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to send agent offline alert: {e}")
+        return {'status': 'error', 'reason': str(e)}
+
+
+def _build_agent_offline_email_html(offline_agents, stale_agents):
+    """Build HTML email for agent offline alert"""
+
+    app_url = get_app_url()
+
+    # Build offline agents table
+    offline_rows = ""
+    for agent in offline_agents:
+        last_seen = agent.last_seen_at.strftime('%Y-%m-%d %H:%M') if agent.last_seen_at else 'Never'
+        offline_rows += f"""
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">{agent.hostname}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">{agent.os_type}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">{agent.ip_address or '-'}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">{last_seen}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                    <span style="background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Offline</span>
+                </td>
+            </tr>"""
+
+    # Build stale agents table
+    stale_rows = ""
+    for agent in stale_agents:
+        last_seen = agent.last_seen_at.strftime('%Y-%m-%d %H:%M') if agent.last_seen_at else 'Never'
+        stale_rows += f"""
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">{agent.hostname}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">{agent.os_type}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">{agent.ip_address or '-'}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">{last_seen}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                    <span style="background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Stale (24h+)</span>
+                </td>
+            </tr>"""
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+    <div style="max-width: 700px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
+            <div style="font-size: 48px; margin-bottom: 10px;">🖥️</div>
+            <h1 style="color: white; margin: 0; font-size: 24px;">Agent Status Alert</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">{len(offline_agents) + len(stale_agents)} agent(s) require attention</p>
+        </div>
+
+        <div style="background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+                <p style="margin: 0; color: #991b1b; font-weight: 600;">
+                    ⚠️ The following discovery agents have stopped reporting:
+                </p>
+                <p style="margin: 8px 0 0 0; color: #7f1d1d; font-size: 14px;">
+                    This may indicate a service failure, network issue, or system shutdown.
+                </p>
+            </div>
+
+            {"" if not stale_agents else f'''
+            <h3 style="color: #991b1b; margin: 20px 0 10px 0; font-size: 16px;">Critical: Stale Agents (24+ hours)</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <thead>
+                    <tr style="background: #f9fafb;">
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">Hostname</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">OS</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">IP</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">Last Seen</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {stale_rows}
+                </tbody>
+            </table>
+            '''}
+
+            {"" if not offline_agents else f'''
+            <h3 style="color: #92400e; margin: 20px 0 10px 0; font-size: 16px;">Warning: Offline Agents (10+ minutes)</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <thead>
+                    <tr style="background: #f9fafb;">
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">Hostname</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">OS</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">IP</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">Last Seen</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {offline_rows}
+                </tbody>
+            </table>
+            '''}
+
+            <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-top: 20px;">
+                <h4 style="margin: 0 0 10px 0; color: #374151; font-size: 14px;">Recommended Actions:</h4>
+                <ul style="margin: 0; padding-left: 20px; color: #6b7280; font-size: 14px;">
+                    <li>Check if the agent service is running on the endpoint</li>
+                    <li>Verify network connectivity to SentriKat server</li>
+                    <li>Review system logs for errors</li>
+                    <li>Restart the agent service if necessary</li>
+                </ul>
+            </div>
+
+            <div style="text-align: center; margin-top: 24px;">
+                <a href="{app_url}/admin#integrations/agents" style="display: inline-block; background: #1e40af; color: white; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px;">
+                    View Agent Status
+                </a>
+            </div>
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>Automated alert from SentriKat Discovery Agent Monitoring</p>
+            <p>© {datetime.now().year} SentriKat</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    return html

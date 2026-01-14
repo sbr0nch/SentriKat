@@ -253,6 +253,10 @@ class AgentRegistration(db.Model):
     last_sync_queued = db.Column(db.Integer, default=0)  # Items added to queue
     last_sync_duplicates = db.Column(db.Integer, default=0)  # Duplicate items skipped
 
+    # Alert tracking (to prevent duplicate alerts)
+    alerted_offline = db.Column(db.Boolean, default=False)
+    alerted_stale = db.Column(db.Boolean, default=False)
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     ip_address = db.Column(db.String(45), nullable=True)  # Last known IP

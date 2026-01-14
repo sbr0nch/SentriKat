@@ -208,6 +208,9 @@ def run_auto_migrations(app):
         ('agent_registrations', 'last_sync_error', 'TEXT', "NULL"),
         ('agent_registrations', 'last_sync_queued', 'INTEGER', "0"),
         ('agent_registrations', 'last_sync_duplicates', 'INTEGER', "0"),
+        # Agent alert tracking columns
+        ('agent_registrations', 'alerted_offline', 'BOOLEAN', "0"),
+        ('agent_registrations', 'alerted_stale', 'BOOLEAN', "0"),
     ]
 
     # Define new tables to create (for integrations)

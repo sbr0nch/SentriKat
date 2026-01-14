@@ -85,6 +85,16 @@ def start_scheduler(app):
     )
     logger.info("Data retention cleanup scheduled at 03:00")
 
+    # Schedule agent status check (every 15 minutes)
+    scheduler.add_job(
+        func=lambda: agent_status_check_job(app),
+        trigger=IntervalTrigger(minutes=15),
+        id='agent_status_check',
+        name='Agent Status Check',
+        replace_existing=True
+    )
+    logger.info("Agent status check scheduled every 15 minutes")
+
     scheduler.start()
     logger.info(f"Scheduler started. CISA KEV sync scheduled at {Config.SYNC_HOUR:02d}:{Config.SYNC_MINUTE:02d}")
 
@@ -295,3 +305,56 @@ def data_retention_cleanup_job(app):
 
         except Exception as e:
             logger.error(f"Data retention cleanup failed: {str(e)}", exc_info=True)
+
+
+def agent_status_check_job(app):
+    """Job to check agent status and send alerts for offline/stale agents"""
+    with app.app_context():
+        try:
+            from app.integrations_models import AgentRegistration
+            from app.email_alerts import send_agent_offline_alert
+            from app import db
+            from datetime import datetime, timedelta
+
+            logger.info("Checking agent status...")
+
+            # Find agents that just went offline (last seen 10-30 min ago, not alerted yet)
+            now = datetime.utcnow()
+            offline_threshold = now - timedelta(minutes=10)
+            stale_threshold = now - timedelta(hours=24)
+
+            # Get all active agents
+            agents = AgentRegistration.query.filter_by(is_active=True).all()
+
+            newly_offline = []
+            newly_stale = []
+
+            for agent in agents:
+                if not agent.last_seen_at:
+                    continue
+
+                current_status = agent.status  # computed property
+
+                # Check if agent needs alerting (uses alerted_offline flag to prevent spam)
+                if current_status == 'stale' and not getattr(agent, 'alerted_stale', False):
+                    newly_stale.append(agent)
+                    agent.alerted_stale = True
+                elif current_status == 'offline' and not getattr(agent, 'alerted_offline', False):
+                    newly_offline.append(agent)
+                    agent.alerted_offline = True
+                elif current_status == 'online':
+                    # Reset alert flags when agent comes back online
+                    agent.alerted_offline = False
+                    agent.alerted_stale = False
+
+            # Commit alert flag changes
+            db.session.commit()
+
+            if newly_offline or newly_stale:
+                result = send_agent_offline_alert(newly_offline, newly_stale)
+                logger.info(f"Agent status check: {len(newly_offline)} offline, {len(newly_stale)} stale - Alert result: {result}")
+            else:
+                logger.debug("Agent status check: all agents online")
+
+        except Exception as e:
+            logger.error(f"Agent status check failed: {str(e)}", exc_info=True)
