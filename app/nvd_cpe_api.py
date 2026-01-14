@@ -36,6 +36,230 @@ CACHE_TTL_MINUTES = 15
 # With API key: 50 requests per 30 seconds = 0.06s delay
 MIN_REQUEST_DELAY = 0.6  # Default (no API key)
 
+# ============================================================================
+# Vendor Aliases & Smart Search Mappings
+# Maps common product names to their CPE vendor names
+# ============================================================================
+VENDOR_ALIASES = {
+    # Microsoft products
+    'windows': 'microsoft',
+    'office': 'microsoft',
+    'excel': 'microsoft',
+    'word': 'microsoft',
+    'outlook': 'microsoft',
+    'teams': 'microsoft',
+    'edge': 'microsoft',
+    'azure': 'microsoft',
+    'sql server': 'microsoft',
+    'sqlserver': 'microsoft',
+    'powershell': 'microsoft',
+    'visual studio': 'microsoft',
+    'vscode': 'microsoft',
+    '.net': 'microsoft',
+    'dotnet': 'microsoft',
+    # Adobe products
+    'acrobat': 'adobe',
+    'reader': 'adobe',
+    'photoshop': 'adobe',
+    'illustrator': 'adobe',
+    'premiere': 'adobe',
+    'flash': 'adobe',
+    'creative cloud': 'adobe',
+    # Google products
+    'chrome': 'google',
+    'android': 'google',
+    'gmail': 'google',
+    # Mozilla
+    'firefox': 'mozilla',
+    'thunderbird': 'mozilla',
+    # Apple
+    'macos': 'apple',
+    'ios': 'apple',
+    'safari': 'apple',
+    'xcode': 'apple',
+    'iphone': 'apple',
+    'ipad': 'apple',
+    # Oracle/Java
+    'java': 'oracle',
+    'jdk': 'oracle',
+    'jre': 'oracle',
+    'mysql': 'oracle',
+    'virtualbox': 'oracle',
+    # Linux
+    'ubuntu': 'canonical',
+    'debian': 'debian',
+    'redhat': 'redhat',
+    'rhel': 'redhat',
+    'centos': 'centos',
+    'fedora': 'fedoraproject',
+    # Cisco
+    'ios-xe': 'cisco',
+    'ios-xr': 'cisco',
+    'webex': 'cisco',
+    'anyconnect': 'cisco',
+    'jabber': 'cisco',
+    # VMware
+    'esxi': 'vmware',
+    'vcenter': 'vmware',
+    'vsphere': 'vmware',
+    'workstation': 'vmware',
+    # Other common vendors
+    'nginx': 'nginx',
+    'apache': 'apache',
+    'tomcat': 'apache',
+    'httpd': 'apache',
+    'openssl': 'openssl',
+    'openssh': 'openbsd',
+    'wordpress': 'wordpress',
+    'drupal': 'drupal',
+    'joomla': 'joomla',
+    'nodejs': 'nodejs',
+    'node': 'nodejs',
+    'python': 'python',
+    'php': 'php',
+    'postgresql': 'postgresql',
+    'postgres': 'postgresql',
+    'mongodb': 'mongodb',
+    'redis': 'redis',
+    'docker': 'docker',
+    'kubernetes': 'kubernetes',
+    'k8s': 'kubernetes',
+    'jenkins': 'jenkins',
+    'git': 'git-scm',
+    'gitlab': 'gitlab',
+    'github': 'github',
+    'zoom': 'zoom',
+    'slack': 'slack',
+    'splunk': 'splunk',
+    'fortinet': 'fortinet',
+    'fortigate': 'fortinet',
+    'paloalto': 'paloaltonetworks',
+    'pan-os': 'paloaltonetworks',
+    'citrix': 'citrix',
+    'netscaler': 'citrix',
+    '7-zip': '7-zip',
+    '7zip': '7-zip',
+    'winrar': 'rarlab',
+    'vlc': 'videolan',
+    'putty': 'putty',
+    'wireshark': 'wireshark',
+    'notepad++': 'notepad-plus-plus',
+}
+
+# Products that are both vendor AND product name (for direct CPE matching)
+KNOWN_PRODUCTS = {
+    # Format: 'search term': ('cpe_vendor', 'cpe_product')
+    'windows 10': ('microsoft', 'windows_10'),
+    'windows 11': ('microsoft', 'windows_11'),
+    'windows server': ('microsoft', 'windows_server'),
+    'windows server 2019': ('microsoft', 'windows_server_2019'),
+    'windows server 2022': ('microsoft', 'windows_server_2022'),
+    'office 365': ('microsoft', '365_apps'),
+    'sql server': ('microsoft', 'sql_server'),
+    'chrome': ('google', 'chrome'),
+    'firefox': ('mozilla', 'firefox'),
+    'edge': ('microsoft', 'edge'),
+    'safari': ('apple', 'safari'),
+    'acrobat reader': ('adobe', 'acrobat_reader'),
+    'acrobat': ('adobe', 'acrobat'),
+    'java': ('oracle', 'jdk'),
+    'jre': ('oracle', 'jre'),
+    'tomcat': ('apache', 'tomcat'),
+    'httpd': ('apache', 'http_server'),
+    'apache http': ('apache', 'http_server'),
+    'nginx': ('f5', 'nginx'),
+    'mysql': ('oracle', 'mysql'),
+    'postgresql': ('postgresql', 'postgresql'),
+    'mongodb': ('mongodb', 'mongodb'),
+    'redis': ('redis', 'redis'),
+    'docker': ('docker', 'docker'),
+    'kubernetes': ('kubernetes', 'kubernetes'),
+    'openssl': ('openssl', 'openssl'),
+    'openssh': ('openbsd', 'openssh'),
+    'git': ('git-scm', 'git'),
+    'python': ('python', 'python'),
+    'php': ('php', 'php'),
+    'nodejs': ('nodejs', 'node.js'),
+    'node.js': ('nodejs', 'node.js'),
+}
+
+
+def _parse_search_query(query: str) -> Dict[str, Any]:
+    """
+    Parse a search query to identify vendor, product, and version components.
+
+    Returns:
+        {
+            'original': original query,
+            'vendor': detected vendor (CPE format),
+            'product': detected product term,
+            'version': detected version,
+            'use_cpe_match': whether to use cpeMatchString,
+            'cpe_match_string': the CPE match pattern if applicable
+        }
+    """
+    query = query.strip().lower()
+    result = {
+        'original': query,
+        'vendor': None,
+        'product': None,
+        'version': None,
+        'use_cpe_match': False,
+        'cpe_match_string': None
+    }
+
+    # Check for known product patterns first (most specific)
+    for known_term, (vendor, product) in KNOWN_PRODUCTS.items():
+        if known_term in query:
+            result['vendor'] = vendor
+            result['product'] = product
+            result['use_cpe_match'] = True
+
+            # Extract version if present (e.g., "windows 11 22h2" -> version="22h2")
+            remaining = query.replace(known_term, '').strip()
+            if remaining:
+                # Look for version-like patterns
+                version_match = re.search(r'(\d+[\d\._\-]*\w*)', remaining)
+                if version_match:
+                    result['version'] = version_match.group(1)
+
+            # Build CPE match string
+            version_part = result['version'] if result['version'] else '*'
+            result['cpe_match_string'] = f"cpe:2.3:*:{vendor}:{product}:{version_part}:*:*:*:*:*:*:*"
+            return result
+
+    # Check for vendor alias (e.g., "windows" -> microsoft)
+    words = query.split()
+    for word in words:
+        if word in VENDOR_ALIASES:
+            result['vendor'] = VENDOR_ALIASES[word]
+            # The remaining words are likely the product
+            remaining_words = [w for w in words if w != word]
+            if remaining_words:
+                result['product'] = '_'.join(remaining_words)
+            else:
+                result['product'] = word  # Use the alias word as product hint
+            result['use_cpe_match'] = True
+            result['cpe_match_string'] = f"cpe:2.3:*:{result['vendor']}:*{result['product']}*:*:*:*:*:*:*:*:*"
+            return result
+
+    # No known pattern - try to split into vendor:product
+    if len(words) >= 2:
+        # Assume first word is vendor, rest is product
+        potential_vendor = words[0].replace(' ', '_')
+        potential_product = '_'.join(words[1:])
+        result['vendor'] = potential_vendor
+        result['product'] = potential_product
+        result['use_cpe_match'] = True
+        result['cpe_match_string'] = f"cpe:2.3:*:{potential_vendor}:*{potential_product}*:*:*:*:*:*:*:*:*"
+    else:
+        # Single word - search as product name across all vendors
+        result['product'] = query
+        result['use_cpe_match'] = True
+        result['cpe_match_string'] = f"cpe:2.3:*:*:*{query}*:*:*:*:*:*:*:*:*"
+
+    return result
+
 
 def _get_api_key() -> Optional[str]:
     """
@@ -207,6 +431,11 @@ def search_cpe(
     """
     Search NVD CPE database for matching products.
 
+    Uses smart query parsing to:
+    1. Recognize known products (e.g., "windows 11" -> microsoft:windows_11)
+    2. Map product names to vendors (e.g., "chrome" -> google:chrome)
+    3. Use cpeMatchString for targeted results instead of broad keyword search
+
     Args:
         keyword: Search term (vendor, product name, etc.)
         limit: Maximum results to return (max 2000)
@@ -225,6 +454,10 @@ def search_cpe(
     if cached is not None:
         return cached
 
+    # Parse the search query to identify vendor/product
+    parsed = _parse_search_query(keyword)
+    logger.debug(f"Parsed search query '{keyword}': vendor={parsed.get('vendor')}, product={parsed.get('product')}, cpe_match={parsed.get('cpe_match_string')}")
+
     # Build API request
     url = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
     params = {
@@ -235,8 +468,12 @@ def search_cpe(
     if exact_match:
         # Use CPE match string for exact matching
         params['cpeMatchString'] = f"cpe:2.3:*:*{keyword}*"
+    elif parsed.get('use_cpe_match') and parsed.get('cpe_match_string'):
+        # Use smart CPE match string for targeted results
+        params['cpeMatchString'] = parsed['cpe_match_string']
+        logger.info(f"Using cpeMatchString: {parsed['cpe_match_string']}")
     else:
-        # Keyword search (NVD API doesn't accept keywordExactMatch parameter)
+        # Fallback to keyword search
         params['keywordSearch'] = keyword
 
     # Get API key if available
