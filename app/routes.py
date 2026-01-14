@@ -89,14 +89,14 @@ def get_status():
     No authentication required - basic status only.
     """
     try:
-        last_sync = SyncLog.query.order_by(SyncLog.started_at.desc()).first()
+        last_sync = SyncLog.query.order_by(SyncLog.sync_date.desc()).first()
         vuln_count = Vulnerability.query.count()
 
         return jsonify({
             'status': 'online',
             'version': APP_VERSION,
             'vulnerabilities_tracked': vuln_count,
-            'last_sync': last_sync.started_at.isoformat() + 'Z' if last_sync else None,
+            'last_sync': last_sync.sync_date.isoformat() + 'Z' if last_sync else None,
             'last_sync_status': last_sync.status if last_sync else None
         })
     except Exception as e:
