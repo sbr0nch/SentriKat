@@ -203,6 +203,11 @@ def run_auto_migrations(app):
         ('products', 'app_type', 'VARCHAR(20)', "'unknown'"),
         ('products', 'source', 'VARCHAR(20)', "'manual'"),  # manual, catalog, agent, import
         ('import_queue', 'app_type', 'VARCHAR(20)', "'unknown'"),
+        # Agent sync status columns
+        ('agent_registrations', 'last_sync_status', 'VARCHAR(20)', "NULL"),
+        ('agent_registrations', 'last_sync_error', 'TEXT', "NULL"),
+        ('agent_registrations', 'last_sync_queued', 'INTEGER', "0"),
+        ('agent_registrations', 'last_sync_duplicates', 'INTEGER', "0"),
     ]
 
     # Define new tables to create (for integrations)

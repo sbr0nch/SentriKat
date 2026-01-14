@@ -973,6 +973,7 @@ def agent_report():
         ]
     }
     """
+    agent = None  # Initialize for error handling
     try:
         integration = getattr(request, 'integration', None)
 
@@ -1016,6 +1017,21 @@ def agent_report():
         # Store original request.integration and call import logic
         results = process_software_import(integration, import_data)
 
+        # Update sync status on agent
+        agent.last_sync_queued = results.get('queued', 0) + results.get('auto_approved', 0)
+        agent.last_sync_duplicates = results.get('duplicates', 0)
+
+        # Determine sync status
+        if results.get('errors', 0) > 0 and results.get('queued', 0) == 0:
+            agent.last_sync_status = 'failed'
+            agent.last_sync_error = f"All {results.get('errors', 0)} items failed to process"
+        elif results.get('errors', 0) > 0:
+            agent.last_sync_status = 'partial'
+            agent.last_sync_error = f"{results.get('errors', 0)} items had errors"
+        else:
+            agent.last_sync_status = 'success'
+            agent.last_sync_error = None
+
         db.session.commit()
 
         return jsonify({
@@ -1026,6 +1042,16 @@ def agent_report():
 
     except Exception as e:
         logger.error(f"Agent report error: {str(e)}")
+
+        # Try to update agent sync status with error
+        try:
+            if agent:
+                agent.last_sync_status = 'failed'
+                agent.last_sync_error = str(e)[:500]  # Truncate error message
+                db.session.commit()
+        except:
+            pass
+
         db.session.rollback()
         return jsonify({
             'error': f'Server error processing report: {str(e)}',

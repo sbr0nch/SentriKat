@@ -6113,7 +6113,7 @@ async function loadAgents() {
         if (agents.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center py-4 text-muted">
+                    <td colspan="8" class="text-center py-4 text-muted">
                         <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
                         <p class="mb-0 mt-2">No agents registered yet</p>
                         <small>Create an agent integration and deploy the script to get started</small>
@@ -6140,6 +6140,26 @@ async function loadAgents() {
                 'never_seen': 'Pending'
             };
 
+            // Sync status colors and labels
+            const syncColors = {
+                'success': 'success',
+                'partial': 'warning',
+                'failed': 'danger'
+            };
+
+            // Build sync status display
+            let syncDisplay = '-';
+            if (agent.last_sync_status) {
+                const syncColor = syncColors[agent.last_sync_status] || 'secondary';
+                const syncItems = agent.last_sync_queued || 0;
+                const syncDupes = agent.last_sync_duplicates || 0;
+                syncDisplay = `
+                    <span class="badge bg-${syncColor}">${agent.last_sync_status}</span>
+                    <br><small class="text-muted">${syncItems} new, ${syncDupes} dupe</small>
+                    ${agent.last_sync_error ? `<br><small class="text-danger" title="${escapeHtml(agent.last_sync_error)}">${escapeHtml(agent.last_sync_error).substring(0, 20)}...</small>` : ''}
+                `;
+            }
+
             return `
             <tr class="${!agent.is_active ? 'table-secondary' : ''}">
                 <td>
@@ -6153,6 +6173,7 @@ async function loadAgents() {
                 <td>
                     <span class="badge bg-${statusColors[agent.status] || 'secondary'}">${statusLabels[agent.status] || 'Unknown'}</span>
                 </td>
+                <td>${syncDisplay}</td>
                 <td><small>${escapeHtml(agent.organization_name || '-')}</small></td>
                 <td>
                     <small class="text-muted">${agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : '-'}</small>
@@ -6175,7 +6196,7 @@ async function loadAgents() {
         const isDbError = error.message.includes('database') || error.message.includes('Server error') || error.message.includes('500');
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="text-center py-5">
+                <td colspan="8" class="text-center py-5">
                     <div class="text-muted">
                         <i class="bi bi-robot" style="font-size: 3rem; opacity: 0.5;"></i>
                         <p class="mt-3 mb-1 fs-5">${isDbError ? 'Agents Not Available' : 'Unable to Load Agents'}</p>

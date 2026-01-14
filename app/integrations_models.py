@@ -247,6 +247,12 @@ class AgentRegistration(db.Model):
     last_report_at = db.Column(db.DateTime, nullable=True)
     software_count = db.Column(db.Integer, default=0)  # Number of software items reported
 
+    # Sync status
+    last_sync_status = db.Column(db.String(20), nullable=True)  # 'success', 'partial', 'failed'
+    last_sync_error = db.Column(db.Text, nullable=True)  # Error message if failed
+    last_sync_queued = db.Column(db.Integer, default=0)  # Items added to queue
+    last_sync_duplicates = db.Column(db.Integer, default=0)  # Duplicate items skipped
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     ip_address = db.Column(db.String(45), nullable=True)  # Last known IP
@@ -317,7 +323,12 @@ class AgentRegistration(db.Model):
             'software_count': self.software_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'ip_address': self.ip_address,
-            'system_info': self.get_system_info()
+            'system_info': self.get_system_info(),
+            # Sync status
+            'last_sync_status': self.last_sync_status,
+            'last_sync_error': self.last_sync_error,
+            'last_sync_queued': self.last_sync_queued,
+            'last_sync_duplicates': self.last_sync_duplicates
         }
 
 

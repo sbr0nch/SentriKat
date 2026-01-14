@@ -686,6 +686,47 @@
                         </div>
                     </div>
 
+                    <!-- Scheduling Guidance -->
+                    <div class="card mb-4 border-secondary">
+                        <div class="card-header bg-light d-flex justify-content-between align-items-center"
+                             style="cursor: pointer;" onclick="document.getElementById('schedulingGuide').classList.toggle('d-none')">
+                            <span><i class="bi bi-clock-history me-2"></i>Scheduling Guide</span>
+                            <i class="bi bi-chevron-down"></i>
+                        </div>
+                        <div class="card-body d-none" id="schedulingGuide">
+                            <p class="text-muted small mb-3">Agents report once when executed. Schedule them to run periodically for continuous monitoring:</p>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6><i class="bi bi-ubuntu me-2"></i>Linux (cron)</h6>
+                                    <p class="small text-muted mb-2">Edit crontab with <code>crontab -e</code> and add:</p>
+                                    <pre class="bg-dark text-light p-2 rounded small mb-2" style="font-size: 0.75rem;"># Every 6 hours
+0 */6 * * * /opt/sentrikat/sentrikat-agent.sh
+
+# Daily at 2 AM
+0 2 * * * /opt/sentrikat/sentrikat-agent.sh
+
+# Every hour
+0 * * * * /opt/sentrikat/sentrikat-agent.sh</pre>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6><i class="bi bi-windows me-2"></i>Windows (Task Scheduler)</h6>
+                                    <p class="small text-muted mb-2">Create a scheduled task via PowerShell:</p>
+                                    <pre class="bg-dark text-light p-2 rounded small mb-2" style="font-size: 0.75rem;"># Create daily task at 2 AM
+$action = New-ScheduledTaskAction `
+  -Execute "powershell.exe" `
+  -Argument "-File C:\sentrikat\agent.ps1"
+$trigger = New-ScheduledTaskTrigger `
+  -Daily -At 2:00AM
+Register-ScheduledTask `
+  -TaskName "SentriKat Agent" `
+  -Action $action -Trigger $trigger</pre>
+                                </div>
+                            </div>
+                            <p class="text-muted small mb-0 mt-2"><i class="bi bi-lightbulb me-1"></i>Recommended: Run every 6-24 hours. More frequent scans increase server load without significant benefit.</p>
+                        </div>
+                    </div>
+
                     <div class="card">
                         <div class="card-header">
                             <i class="bi bi-pc-display me-2"></i>Registered Agents
@@ -698,6 +739,7 @@
                                             <th>Hostname</th>
                                             <th>OS</th>
                                             <th>Status</th>
+                                            <th>Last Sync</th>
                                             <th>Organization</th>
                                             <th>Last Seen</th>
                                             <th>Software</th>
@@ -706,7 +748,7 @@
                                     </thead>
                                     <tbody id="agentsTable">
                                         <tr>
-                                            <td colspan="7" class="text-center py-4 text-muted">
+                                            <td colspan="8" class="text-center py-4 text-muted">
                                                 <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
                                                 <p class="mb-0 mt-2">No agents registered yet</p>
                                                 <small>Create an agent integration and deploy the script to get started</small>
