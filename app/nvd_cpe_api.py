@@ -344,9 +344,61 @@ def search_cpe_grouped(
     """
     raw_results = search_cpe(keyword, limit=limit)
 
+    # Filter results to prioritize vendor/product name matches
+    # and exclude results that only match on version numbers or platform strings
+    search_terms = keyword.lower().split()
+
+    def calculate_relevance(entry):
+        """Score how relevant a result is to the search query."""
+        vendor = (entry.get('vendor') or '').lower().replace('_', ' ')
+        product = (entry.get('product') or '').lower().replace('_', ' ')
+        title = (entry.get('title') or '').lower()
+
+        score = 0
+        matched_terms = 0
+
+        for term in search_terms:
+            # Skip pure numeric terms (version numbers) for relevance scoring
+            if term.isdigit():
+                continue
+
+            # High score for vendor/product name matches
+            if term in vendor:
+                score += 10
+                matched_terms += 1
+            if term in product:
+                score += 10
+                matched_terms += 1
+
+            # Lower score for title-only matches (could be "for Windows" etc.)
+            elif term in title:
+                # Check if it's just a platform indicator like "for windows"
+                if f"for {term}" in title or f"on {term}" in title:
+                    score += 1  # Very low score for platform indicators
+                else:
+                    score += 3
+                matched_terms += 1
+
+        # Require at least one non-numeric term to match vendor or product
+        if matched_terms == 0:
+            return -1  # Exclude results with no meaningful matches
+
+        return score
+
+    # Score and filter results
+    scored_results = []
+    for entry in raw_results:
+        score = calculate_relevance(entry)
+        if score > 0:  # Only include relevant results
+            scored_results.append((score, entry))
+
+    # Sort by score (highest first) and take top results
+    scored_results.sort(key=lambda x: x[0], reverse=True)
+    filtered_results = [entry for score, entry in scored_results]
+
     grouped: Dict[str, Dict[str, Any]] = {}
 
-    for entry in raw_results:
+    for entry in filtered_results:
         vendor = entry.get('vendor') or 'unknown'
         product = entry.get('product') or 'unknown'
         version = entry.get('version')

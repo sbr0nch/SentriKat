@@ -38,7 +38,14 @@ def setup_logging(app):
 
     # Configure root logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+
+    # Check for debug mode
+    debug_mode = app.config.get('DEBUG', False) or os.environ.get('FLASK_DEBUG', '').lower() == 'true'
+
+    if debug_mode:
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        root_logger.setLevel(logging.INFO)
 
     # Clear any existing handlers
     root_logger.handlers = []
@@ -53,6 +60,20 @@ def setup_logging(app):
         '[%(asctime)s] %(levelname)s: %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+
+    # ========================================
+    # Console Output (for debug mode)
+    # ========================================
+    console_handler = logging.StreamHandler()
+    if debug_mode:
+        console_handler.setLevel(logging.DEBUG)
+    else:
+        console_handler.setLevel(logging.WARNING)  # Only show warnings+ in production
+    console_handler.setFormatter(detailed_formatter)
+    root_logger.addHandler(console_handler)
+
+    # Log startup info
+    root_logger.info(f"Logging initialized - Debug mode: {debug_mode}, Log directory: {log_dir}")
 
     # ========================================
     # Application Log (INFO and above)

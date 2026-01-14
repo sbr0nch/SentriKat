@@ -183,4 +183,73 @@ def create_app(config_class=Config):
             # In production, migrations should be used instead
             db.create_all()
 
+        # Run auto-migrations to add any missing columns
+        run_auto_migrations(app)
+
     return app
+
+
+def run_auto_migrations(app):
+    """
+    Automatically add missing columns to existing tables.
+    This handles schema updates without requiring full migrations.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Define new columns that may need to be added
+    # Format: (table_name, column_name, column_type, default_value)
+    new_columns = [
+        ('products', 'app_type', 'VARCHAR(20)', "'unknown'"),
+        ('import_queue', 'app_type', 'VARCHAR(20)', "'unknown'"),
+    ]
+
+    # Define new tables to create (for integrations)
+    new_tables = [
+        'integrations',
+        'import_queue',
+        'agent_registrations',
+        'software_version_tracker',
+    ]
+
+    with app.app_context():
+        try:
+            # Check database type
+            db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+            is_postgres = 'postgresql' in db_uri.lower()
+            is_sqlite = 'sqlite' in db_uri.lower()
+
+            # Add missing columns
+            for table_name, column_name, column_type, default_value in new_columns:
+                try:
+                    # Check if column exists
+                    if is_postgres:
+                        result = db.session.execute(db.text(f"""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = '{table_name}' AND column_name = '{column_name}'
+                        """))
+                        exists = result.fetchone() is not None
+                    else:
+                        # SQLite
+                        result = db.session.execute(db.text(f"PRAGMA table_info({table_name})"))
+                        columns = [row[1] for row in result.fetchall()]
+                        exists = column_name in columns
+
+                    if not exists:
+                        # Add the column
+                        if is_postgres:
+                            sql = f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type} DEFAULT {default_value}"
+                        else:
+                            sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type} DEFAULT {default_value}"
+
+                        db.session.execute(db.text(sql))
+                        db.session.commit()
+                        logger.info(f"Added column {column_name} to {table_name}")
+
+                except Exception as e:
+                    # Table might not exist yet - that's okay, create_all will handle it
+                    db.session.rollback()
+                    logger.debug(f"Could not add column {column_name} to {table_name}: {e}")
+
+        except Exception as e:
+            logger.warning(f"Auto-migration check failed: {e}")

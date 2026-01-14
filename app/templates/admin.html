@@ -748,10 +748,25 @@
                 }).join('');
             }
         } catch (error) {
+            const isDbError = error.message.includes('500') || error.message.includes('database') || error.message.includes('Server');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="text-center text-danger py-4">
-                        <i class="bi bi-exclamation-triangle"></i> Error loading products: ${error.message}
+                    <td colspan="8" class="text-center py-5">
+                        <div class="text-muted">
+                            <i class="bi bi-box-seam" style="font-size: 3rem; opacity: 0.5;"></i>
+                            <p class="mt-3 mb-1 fs-5">${isDbError ? 'Products Not Available' : 'Unable to Load Products'}</p>
+                            <p class="text-secondary small mb-3">${escapeHtml(error.message)}</p>
+                            ${!isDbError ? `
+                                <button class="btn btn-outline-secondary btn-sm" onclick="loadProducts()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Retry
+                                </button>
+                            ` : `
+                                <p class="text-secondary small">
+                                    <i class="bi bi-info-circle me-1"></i>
+                                    Try restarting the application to initialize database.
+                                </p>
+                            `}
+                        </div>
                     </td>
                 </tr>
             `;

@@ -1,5 +1,27 @@
+# SentriKat Docker Compose Configuration
+# ========================================
+#
+# EXTERNAL DATABASE CONFIGURATION:
+# --------------------------------
+# To use an external PostgreSQL database (on another machine):
+#
+# 1. Comment out or remove the 'db' service below
+# 2. Update DATABASE_URL in the sentrikat service:
+#    DATABASE_URL=postgresql://user:password@external-host:5432/sentrikat
+# 3. Remove the 'depends_on' section from sentrikat service
+# 4. Remove 'postgres_data' from volumes section
+#
+# Example for external DB:
+#   DATABASE_URL=postgresql://sentrikat:mypassword@192.168.1.100:5432/sentrikat
+#
+# DEBUG MODE:
+# -----------
+# To enable debug mode with verbose logging:
+#   - Add FLASK_DEBUG=true to environment
+#   - Logs will appear in console and /var/log/sentrikat/
+
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database (comment out this section to use external DB)
   db:
     image: postgres:15-alpine
     container_name: sentrikat-db
@@ -15,6 +37,9 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    # Uncomment to expose DB port externally (for management tools):
+    # ports:
+    #   - "5432:5432"
 
   # SentriKat Application
   sentrikat:
@@ -30,9 +55,11 @@ services:
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      # For external DB, change 'db' to external hostname/IP:
       - DATABASE_URL=postgresql://sentrikat:${DB_PASSWORD:-sentrikat}@db:5432/sentrikat
       - SENTRIKAT_URL=${SENTRIKAT_URL:-http://localhost:5001}
       - FLASK_ENV=production
+      - FLASK_DEBUG=${FLASK_DEBUG:-false}
       - FORCE_HTTPS=false
       - SESSION_COOKIE_SECURE=false
       - HTTP_PROXY=${HTTP_PROXY:-}
@@ -40,6 +67,8 @@ services:
       - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,db}
     volumes:
       - sentrikat_data:/app/data
+      - sentrikat_logs:/var/log/sentrikat
+    # Remove depends_on if using external database:
     depends_on:
       db:
         condition: service_healthy
@@ -52,5 +81,6 @@ services:
       start_period: 60s
 
 volumes:
-  postgres_data:
+  postgres_data:      # Remove if using external DB
   sentrikat_data:
+  sentrikat_logs:
