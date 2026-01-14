@@ -4747,6 +4747,26 @@ document.addEventListener('DOMContentLoaded', function() {
             loadLicenseInfo();
         });
     }
+
+    // Load agent keys when tab is shown
+    const agentsTab = document.getElementById('agents-tab');
+    if (agentsTab) {
+        agentsTab.addEventListener('shown.bs.tab', function() {
+            if (!agentKeysLoaded) {
+                loadAgentKeys();
+            }
+        });
+    }
+
+    // Load assets when tab is shown
+    const assetsTab = document.getElementById('assets-tab');
+    if (assetsTab) {
+        assetsTab.addEventListener('shown.bs.tab', function() {
+            if (!assetsLoaded) {
+                loadAssets();
+            }
+        });
+    }
 });
 
 // ============================================================================
@@ -5153,12 +5173,451 @@ function fallbackCopy(inputEl) {
 }
 
 // ============================================================================
+// AGENT API KEYS MANAGEMENT
+// ============================================================================
+
+let agentKeysLoaded = false;
+
+async function loadAgentKeys() {
+    const tbody = document.getElementById('agentKeysTableBody');
+    if (!tbody) return;
+
+    try {
+        const response = await fetch('/api/agent-keys');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        const keys = data.keys || [];
+
+        if (keys.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-4 text-muted">
+                        <i class="bi bi-key" style="font-size: 2rem;"></i>
+                        <p class="mt-2 mb-0">No agent API keys configured</p>
+                        <p class="small">Create an API key to allow agents to report inventory</p>
+                    </td>
+                </tr>
+            `;
+        } else {
+            tbody.innerHTML = keys.map(key => `
+                <tr>
+                    <td><strong>${escapeHtml(key.name)}</strong></td>
+                    <td>${escapeHtml(key.organization_name || 'Unknown')}</td>
+                    <td>${formatDate(key.created_at)}</td>
+                    <td>${key.last_used_at ? formatDate(key.last_used_at) : '<span class="text-muted">Never</span>'}</td>
+                    <td>
+                        <span class="badge bg-secondary">${key.usage_count || 0} uses</span>
+                        ${key.max_assets > 0 ? `<span class="badge bg-info ms-1">${key.asset_count || 0}/${key.max_assets} assets</span>` : ''}
+                    </td>
+                    <td>${key.expires_at ? formatDate(key.expires_at) : '<span class="text-muted">Never</span>'}</td>
+                    <td>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteAgentKey(${key.id}, '${escapeHtml(key.name)}')" title="Delete key">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+        agentKeysLoaded = true;
+    } catch (error) {
+        console.error('Error loading agent keys:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-4 text-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <span class="ms-2">Error loading agent keys: ${error.message}</span>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+async function showCreateAgentKeyModal() {
+    // Populate organizations dropdown
+    const orgSelect = document.getElementById('agentKeyOrg');
+    if (orgSelect && organizations.length > 0) {
+        orgSelect.innerHTML = '<option value="">Select organization...</option>' +
+            organizations.map(org => `<option value="${org.id}">${escapeHtml(org.name)}</option>`).join('');
+    } else {
+        // Load organizations if not loaded
+        try {
+            const response = await fetch('/api/organizations');
+            if (response.ok) {
+                const data = await response.json();
+                organizations = data.organizations || [];
+                orgSelect.innerHTML = '<option value="">Select organization...</option>' +
+                    organizations.map(org => `<option value="${org.id}">${escapeHtml(org.name)}</option>`).join('');
+            }
+        } catch (error) {
+            console.error('Error loading organizations:', error);
+        }
+    }
+
+    // Reset form
+    document.getElementById('agentKeyForm').reset();
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('agentKeyModal'));
+    modal.show();
+}
+
+async function createAgentKey() {
+    const name = document.getElementById('agentKeyName').value.trim();
+    const orgId = document.getElementById('agentKeyOrg').value;
+    const maxAssets = parseInt(document.getElementById('agentKeyMaxAssets').value) || 0;
+    const expiresAt = document.getElementById('agentKeyExpires').value || null;
+
+    if (!name) {
+        showToast('Please enter a key name', 'warning');
+        return;
+    }
+    if (!orgId) {
+        showToast('Please select an organization', 'warning');
+        return;
+    }
+
+    showLoading();
+    try {
+        const response = await fetch('/api/agent-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                organization_id: parseInt(orgId),
+                max_assets: maxAssets,
+                expires_at: expiresAt
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Hide create modal
+        bootstrap.Modal.getInstance(document.getElementById('agentKeyModal')).hide();
+
+        // Show the key to user
+        document.getElementById('newAgentKeyValue').value = data.api_key;
+        const showModal = new bootstrap.Modal(document.getElementById('showAgentKeyModal'));
+        showModal.show();
+
+        showToast('Agent API key created successfully', 'success');
+    } catch (error) {
+        showToast(`Error creating key: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function deleteAgentKey(keyId, keyName) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to delete the API key "${keyName}"? Agents using this key will no longer be able to report inventory.`,
+        'Delete API Key',
+        'Delete',
+        'btn-danger'
+    );
+    if (!confirmed) return;
+
+    showLoading();
+    try {
+        const response = await fetch(`/api/agent-keys/${keyId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || `HTTP ${response.status}`);
+        }
+
+        showToast('API key deleted', 'success');
+        loadAgentKeys();
+    } catch (error) {
+        showToast(`Error deleting key: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+function copyAgentKey() {
+    const keyInput = document.getElementById('newAgentKeyValue');
+    if (!keyInput) return;
+
+    const key = keyInput.value;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(key).then(() => {
+            showToast('API key copied to clipboard', 'success');
+        }).catch(() => {
+            fallbackCopyText(key);
+        });
+    } else {
+        fallbackCopyText(key);
+    }
+}
+
+function fallbackCopyText(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+        document.execCommand('copy');
+        showToast('API key copied to clipboard', 'success');
+    } catch (e) {
+        showToast('Failed to copy. Please copy manually.', 'warning');
+    }
+    document.body.removeChild(textarea);
+}
+
+// ============================================================================
+// ASSETS MANAGEMENT
+// ============================================================================
+
+let assetsLoaded = false;
+let assetsPage = 1;
+const assetsPerPage = 20;
+
+async function loadAssets(page = 1) {
+    assetsPage = page;
+    const tbody = document.getElementById('assetsTableBody');
+    const countEl = document.getElementById('assetsCount');
+    const paginationEl = document.getElementById('assetsPagination');
+    if (!tbody) return;
+
+    const search = document.getElementById('assetSearchInput')?.value || '';
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="7" class="text-center py-4">
+                <div class="spinner-border spinner-border-sm text-primary"></div>
+                <span class="ms-2">Loading assets...</span>
+            </td>
+        </tr>
+    `;
+
+    try {
+        const params = new URLSearchParams({
+            page: page,
+            per_page: assetsPerPage
+        });
+        if (search) params.set('search', search);
+
+        const response = await fetch(`/api/assets?${params}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        const assets = data.assets || [];
+        const total = data.total || 0;
+        const pages = Math.ceil(total / assetsPerPage);
+
+        if (countEl) {
+            countEl.textContent = `Showing ${assets.length} of ${total} assets`;
+        }
+
+        if (assets.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-4 text-muted">
+                        <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
+                        <p class="mt-2 mb-0">No assets discovered</p>
+                        <p class="small">Assets will appear here when agents report their inventory</p>
+                    </td>
+                </tr>
+            `;
+            if (paginationEl) paginationEl.innerHTML = '';
+        } else {
+            tbody.innerHTML = assets.map(asset => `
+                <tr>
+                    <td>
+                        <a href="#" onclick="showAssetDetails(${asset.id}); return false;" class="fw-semibold text-decoration-none">
+                            ${escapeHtml(asset.hostname)}
+                        </a>
+                    </td>
+                    <td><code>${escapeHtml(asset.ip_address || '-')}</code></td>
+                    <td>${escapeHtml(asset.os_name || '-')} ${escapeHtml(asset.os_version || '')}</td>
+                    <td>${escapeHtml(asset.organization_name || 'Unknown')}</td>
+                    <td>
+                        <span class="badge bg-primary">${asset.product_count || 0} products</span>
+                        ${asset.vulnerable_count > 0 ? `<span class="badge bg-danger ms-1">${asset.vulnerable_count} vulnerable</span>` : ''}
+                    </td>
+                    <td>${asset.last_seen ? formatDate(asset.last_seen) : '<span class="text-muted">Never</span>'}</td>
+                    <td>
+                        <button class="btn btn-outline-primary btn-sm" onclick="showAssetDetails(${asset.id})" title="View details">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm ms-1" onclick="deleteAsset(${asset.id}, '${escapeHtml(asset.hostname)}')" title="Delete asset">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+
+            // Build pagination
+            if (paginationEl && pages > 1) {
+                let paginationHtml = '';
+                paginationHtml += `<li class="page-item ${page === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="loadAssets(${page - 1}); return false;">&laquo;</a>
+                </li>`;
+                for (let i = 1; i <= pages; i++) {
+                    if (i === 1 || i === pages || (i >= page - 2 && i <= page + 2)) {
+                        paginationHtml += `<li class="page-item ${i === page ? 'active' : ''}">
+                            <a class="page-link" href="#" onclick="loadAssets(${i}); return false;">${i}</a>
+                        </li>`;
+                    } else if (i === page - 3 || i === page + 3) {
+                        paginationHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                    }
+                }
+                paginationHtml += `<li class="page-item ${page === pages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="loadAssets(${page + 1}); return false;">&raquo;</a>
+                </li>`;
+                paginationEl.innerHTML = paginationHtml;
+            } else if (paginationEl) {
+                paginationEl.innerHTML = '';
+            }
+        }
+        assetsLoaded = true;
+    } catch (error) {
+        console.error('Error loading assets:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-4 text-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <span class="ms-2">Error loading assets: ${error.message}</span>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+async function showAssetDetails(assetId) {
+    const modalBody = document.getElementById('assetDetailsBody');
+    if (!modalBody) return;
+
+    modalBody.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary"></div>
+            <p class="mt-2">Loading asset details...</p>
+        </div>
+    `;
+
+    const modal = new bootstrap.Modal(document.getElementById('assetDetailsModal'));
+    modal.show();
+
+    try {
+        const response = await fetch(`/api/assets/${assetId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const asset = await response.json();
+
+        let productsHtml = '';
+        if (asset.products && asset.products.length > 0) {
+            productsHtml = `
+                <h6 class="mt-4 mb-3"><i class="bi bi-box me-2"></i>Installed Products (${asset.products.length})</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Product</th>
+                                <th>Version</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${asset.products.map(p => `
+                                <tr>
+                                    <td>${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}</td>
+                                    <td><code>${escapeHtml(p.version || '-')}</code></td>
+                                    <td>
+                                        ${p.is_vulnerable ? '<span class="badge bg-danger">Vulnerable</span>' : '<span class="badge bg-success">OK</span>'}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        } else {
+            productsHtml = '<p class="text-muted mt-4">No products reported by agent</p>';
+        }
+
+        modalBody.innerHTML = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6><i class="bi bi-pc-display me-2"></i>System Information</h6>
+                    <table class="table table-sm">
+                        <tr><td class="text-muted">Hostname</td><td><strong>${escapeHtml(asset.hostname)}</strong></td></tr>
+                        <tr><td class="text-muted">IP Address</td><td><code>${escapeHtml(asset.ip_address || '-')}</code></td></tr>
+                        <tr><td class="text-muted">OS</td><td>${escapeHtml(asset.os_name || '-')} ${escapeHtml(asset.os_version || '')}</td></tr>
+                        <tr><td class="text-muted">Kernel</td><td>${escapeHtml(asset.os_kernel || '-')}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6><i class="bi bi-info-circle me-2"></i>Agent Information</h6>
+                    <table class="table table-sm">
+                        <tr><td class="text-muted">Agent ID</td><td><code>${escapeHtml(asset.agent_id || '-')}</code></td></tr>
+                        <tr><td class="text-muted">Agent Version</td><td>${escapeHtml(asset.agent_version || '-')}</td></tr>
+                        <tr><td class="text-muted">Organization</td><td>${escapeHtml(asset.organization_name || 'Unknown')}</td></tr>
+                        <tr><td class="text-muted">Last Seen</td><td>${asset.last_seen ? formatDate(asset.last_seen) : 'Never'}</td></tr>
+                    </table>
+                </div>
+            </div>
+            ${productsHtml}
+        `;
+    } catch (error) {
+        console.error('Error loading asset details:', error);
+        modalBody.innerHTML = `
+            <div class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                <p class="mt-2">Error loading asset details: ${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+async function deleteAsset(assetId, hostname) {
+    const confirmed = await showConfirm(
+        `Are you sure you want to delete the asset "${hostname}"? This will remove all inventory data for this asset.`,
+        'Delete Asset',
+        'Delete',
+        'btn-danger'
+    );
+    if (!confirmed) return;
+
+    showLoading();
+    try {
+        const response = await fetch(`/api/assets/${assetId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || `HTTP ${response.status}`);
+        }
+
+        showToast('Asset deleted', 'success');
+        loadAssets(assetsPage);
+    } catch (error) {
+        showToast(`Error deleting asset: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ============================================================================
 // URL HASH HANDLING - Switch to tab based on URL hash
 // ============================================================================
 
 /**
  * Handle URL hash to switch to the correct tab on page load
- * Supports: #users, #organizations, #settings, #ldapUsers, #ldapGroups, #license
+ * Supports: #users, #organizations, #settings, #ldapUsers, #ldapGroups, #license, #agents, #assets
  */
 function handleUrlHash() {
     const hash = window.location.hash.substring(1); // Remove the '#'
@@ -5173,7 +5632,9 @@ function handleUrlHash() {
         'settings': 'settings-tab',
         'ldapUsers': 'ldap-users-tab',
         'ldapGroups': 'ldap-groups-tab',
-        'license': 'license-tab'
+        'license': 'license-tab',
+        'agents': 'agents-tab',
+        'assets': 'assets-tab'
     };
 
     const tabButtonId = tabMap[hash];
