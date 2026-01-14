@@ -51,7 +51,9 @@ LICENSE_TIERS = {
             'api_access',
             'backup_restore',
             'audit_export',
-            'multi_org'
+            'multi_org',
+            'integrations',
+            'discovery_agents'
         ],
         'powered_by_required': False
     }
@@ -65,7 +67,9 @@ PROFESSIONAL_FEATURES = [
     'api_access',
     'backup_restore',
     'audit_export',
-    'multi_org'
+    'multi_org',
+    'integrations',
+    'discovery_agents'
 ]
 
 

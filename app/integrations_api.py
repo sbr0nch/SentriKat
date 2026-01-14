@@ -15,7 +15,7 @@ Security:
 """
 
 from flask import Blueprint, request, jsonify, session, Response
-from datetime import datetime
+from datetime import datetime, timedelta
 import secrets
 import uuid
 import re
@@ -912,13 +912,16 @@ def agent_report():
 
 def process_software_import(integration, data):
     """Process software import (shared logic for API and agent)."""
+    from app.integrations_models import SoftwareVersionTracker
+
     software_list = data.get('software', [])
     org_id = data.get('organization_id')
+    agent_id = data.get('agent_id')
 
     auto_approve = integration.auto_approve if integration else False
     default_criticality = integration.default_criticality if integration else 'medium'
 
-    results = {'queued': 0, 'auto_approved': 0, 'duplicates': 0, 'errors': 0}
+    results = {'queued': 0, 'auto_approved': 0, 'duplicates': 0, 'errors': 0, 'version_updates': 0}
 
     for item in software_list:
         vendor = item.get('vendor', '').strip()
@@ -929,13 +932,26 @@ def process_software_import(integration, data):
             results['errors'] += 1
             continue
 
-        # Check for existing
+        # Track version observation (regardless of product existence)
+        track_version_observation(
+            vendor=vendor,
+            product_name=product_name,
+            version=version,
+            org_id=org_id,
+            integration_id=integration.id if integration else None,
+            agent_id=agent_id
+        )
+
+        # Check for existing product
         existing = Product.query.filter(
             db.func.lower(Product.vendor) == vendor.lower(),
             db.func.lower(Product.product_name) == product_name.lower()
         ).first()
 
         if existing:
+            # Check if version is different (version drift detection)
+            if version and existing.version and version != existing.version:
+                results['version_updates'] += 1
             results['duplicates'] += 1
             continue
 
@@ -946,6 +962,9 @@ def process_software_import(integration, data):
         ).first()
 
         if existing_queue:
+            # Update detected version if newer
+            if version and existing_queue.detected_version != version:
+                existing_queue.detected_version = version
             results['duplicates'] += 1
             continue
 
@@ -980,6 +999,49 @@ def process_software_import(integration, data):
             results['queued'] += 1
 
     return results
+
+
+def track_version_observation(vendor, product_name, version, org_id, integration_id=None, agent_id=None):
+    """Track a version observation from an agent or integration."""
+    from app.integrations_models import SoftwareVersionTracker
+
+    # Find existing tracker for this vendor/product/version/org combo
+    tracker = SoftwareVersionTracker.query.filter(
+        db.func.lower(SoftwareVersionTracker.vendor) == vendor.lower(),
+        db.func.lower(SoftwareVersionTracker.product_name) == product_name.lower(),
+        SoftwareVersionTracker.version == version,
+        SoftwareVersionTracker.organization_id == org_id
+    ).first()
+
+    if tracker:
+        # Update existing observation
+        tracker.observation_count += 1
+        tracker.last_seen_at = datetime.utcnow()
+        tracker.is_current = True
+    else:
+        # Create new tracker
+        tracker = SoftwareVersionTracker(
+            vendor=vendor,
+            product_name=product_name,
+            version=version,
+            organization_id=org_id,
+            integration_id=integration_id,
+            agent_id=agent_id,
+            observation_count=1,
+            first_seen_at=datetime.utcnow(),
+            last_seen_at=datetime.utcnow(),
+            is_current=True
+        )
+
+        # Link to existing product if found
+        existing_product = Product.query.filter(
+            db.func.lower(Product.vendor) == vendor.lower(),
+            db.func.lower(Product.product_name) == product_name.lower()
+        ).first()
+        if existing_product:
+            tracker.product_id = existing_product.id
+
+        db.session.add(tracker)
 
 
 # ============================================================================
@@ -1344,3 +1406,185 @@ echo "Agent completed successfully!"
         mimetype='text/plain',
         headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-linux.sh'}
     )
+
+
+# ============================================================================
+# Software Audit - Version Tracking
+# ============================================================================
+
+@bp.route('/api/audit/versions', methods=['GET'])
+@admin_required
+def get_version_audit():
+    """
+    Get software version audit report.
+    Shows version drift and multiple versions in use.
+    """
+    from app.integrations_models import SoftwareVersionTracker
+
+    org_id = request.args.get('organization_id', type=int)
+    days_stale = request.args.get('days_stale', 30, type=int)
+
+    # Calculate stale threshold
+    stale_threshold = datetime.utcnow() - timedelta(days=days_stale)
+
+    # Query version trackers
+    query = SoftwareVersionTracker.query
+
+    if org_id:
+        query = query.filter_by(organization_id=org_id)
+
+    trackers = query.order_by(
+        SoftwareVersionTracker.vendor,
+        SoftwareVersionTracker.product_name,
+        SoftwareVersionTracker.last_seen_at.desc()
+    ).all()
+
+    # Group by product to find version drift
+    products = {}
+    for tracker in trackers:
+        key = f"{tracker.vendor.lower()}:{tracker.product_name.lower()}"
+        if key not in products:
+            products[key] = {
+                'vendor': tracker.vendor,
+                'product_name': tracker.product_name,
+                'versions': [],
+                'product_id': tracker.product_id,
+                'has_multiple_versions': False,
+                'has_stale_versions': False
+            }
+
+        is_stale = tracker.last_seen_at < stale_threshold if tracker.last_seen_at else True
+
+        products[key]['versions'].append({
+            'id': tracker.id,
+            'version': tracker.version,
+            'observation_count': tracker.observation_count,
+            'first_seen': tracker.first_seen_at.isoformat() if tracker.first_seen_at else None,
+            'last_seen': tracker.last_seen_at.isoformat() if tracker.last_seen_at else None,
+            'is_current': tracker.is_current,
+            'is_stale': is_stale,
+            'is_outdated': tracker.is_outdated,
+            'organization_id': tracker.organization_id,
+            'organization_name': tracker.organization.display_name if tracker.organization else None
+        })
+
+        if is_stale:
+            products[key]['has_stale_versions'] = True
+
+    # Mark products with multiple versions
+    for key, product in products.items():
+        if len(product['versions']) > 1:
+            product['has_multiple_versions'] = True
+
+    # Convert to list and sort
+    result = list(products.values())
+    result.sort(key=lambda x: (not x['has_multiple_versions'], not x['has_stale_versions'], x['vendor'], x['product_name']))
+
+    return jsonify({
+        'products': result,
+        'total_products': len(result),
+        'products_with_drift': sum(1 for p in result if p['has_multiple_versions']),
+        'products_with_stale': sum(1 for p in result if p['has_stale_versions'])
+    })
+
+
+@bp.route('/api/audit/versions/<int:tracker_id>/mark-outdated', methods=['POST'])
+@admin_required
+def mark_version_outdated(tracker_id):
+    """Mark a version as outdated (no longer in use)."""
+    from app.integrations_models import SoftwareVersionTracker
+    from flask import session
+
+    tracker = SoftwareVersionTracker.query.get_or_404(tracker_id)
+
+    tracker.is_outdated = True
+    tracker.is_current = False
+    tracker.marked_outdated_at = datetime.utcnow()
+    tracker.marked_by = session.get('user_id')
+
+    db.session.commit()
+
+    return jsonify({'success': True, 'message': 'Version marked as outdated'})
+
+
+@bp.route('/api/audit/versions/<int:tracker_id>', methods=['DELETE'])
+@admin_required
+def delete_version_tracker(tracker_id):
+    """Delete a version tracking entry."""
+    from app.integrations_models import SoftwareVersionTracker
+
+    tracker = SoftwareVersionTracker.query.get_or_404(tracker_id)
+    db.session.delete(tracker)
+    db.session.commit()
+
+    return jsonify({'success': True, 'message': 'Version entry deleted'})
+
+
+@bp.route('/api/audit/stale', methods=['GET'])
+@admin_required
+def get_stale_software():
+    """
+    Get software that hasn't been seen in agent reports recently.
+    These are potential candidates for removal.
+    """
+    from app.integrations_models import SoftwareVersionTracker
+
+    days = request.args.get('days', 30, type=int)
+    org_id = request.args.get('organization_id', type=int)
+
+    stale_threshold = datetime.utcnow() - timedelta(days=days)
+
+    query = SoftwareVersionTracker.query.filter(
+        SoftwareVersionTracker.last_seen_at < stale_threshold,
+        SoftwareVersionTracker.is_outdated == False
+    )
+
+    if org_id:
+        query = query.filter_by(organization_id=org_id)
+
+    stale_items = query.order_by(SoftwareVersionTracker.last_seen_at.asc()).all()
+
+    return jsonify({
+        'items': [item.to_dict() for item in stale_items],
+        'count': len(stale_items),
+        'threshold_days': days
+    })
+
+
+@bp.route('/api/audit/cleanup', methods=['POST'])
+@admin_required
+def cleanup_stale_versions():
+    """
+    Bulk cleanup: mark all stale versions as outdated.
+    """
+    from app.integrations_models import SoftwareVersionTracker
+    from flask import session
+
+    data = request.get_json() or {}
+    days = data.get('days', 30)
+    org_id = data.get('organization_id')
+
+    stale_threshold = datetime.utcnow() - timedelta(days=days)
+
+    query = SoftwareVersionTracker.query.filter(
+        SoftwareVersionTracker.last_seen_at < stale_threshold,
+        SoftwareVersionTracker.is_outdated == False
+    )
+
+    if org_id:
+        query = query.filter_by(organization_id=org_id)
+
+    count = query.update({
+        'is_outdated': True,
+        'is_current': False,
+        'marked_outdated_at': datetime.utcnow(),
+        'marked_by': session.get('user_id')
+    }, synchronize_session=False)
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'marked_count': count,
+        'message': f'Marked {count} stale versions as outdated'
+    })

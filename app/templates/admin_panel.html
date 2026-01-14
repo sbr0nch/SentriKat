@@ -511,6 +511,11 @@
                         <i class="bi bi-pc-display me-2"></i>Discovery Agents
                     </button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="audit-tab" data-bs-toggle="pill" data-bs-target="#softwareAudit" type="button">
+                        <i class="bi bi-clipboard-check me-2"></i>Software Audit
+                    </button>
+                </li>
             </ul>
 
             <div class="tab-content" id="integrationsTabContent">
@@ -670,6 +675,92 @@
                                                 <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
                                                 <p class="mb-0 mt-2">No agents registered yet</p>
                                                 <small>Create an agent integration and deploy the script to get started</small>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Software Audit Sub-Tab -->
+                <div class="tab-pane fade" id="softwareAudit" role="tabpanel">
+                    <div class="alert alert-info mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Monitor software versions across your endpoints. Identify version drift, outdated software, and clean up unused entries.
+                    </div>
+
+                    <!-- Audit Stats -->
+                    <div class="row mb-4">
+                        <div class="col-md-4">
+                            <div class="card border-primary">
+                                <div class="card-body text-center">
+                                    <h3 class="mb-0" id="auditTotalProducts">-</h3>
+                                    <small class="text-muted">Tracked Products</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card border-warning">
+                                <div class="card-body text-center">
+                                    <h3 class="mb-0" id="auditVersionDrift">-</h3>
+                                    <small class="text-muted">With Multiple Versions</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card border-danger">
+                                <div class="card-body text-center">
+                                    <h3 class="mb-0" id="auditStaleProducts">-</h3>
+                                    <small class="text-muted">Stale (Not Seen in 30 Days)</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Audit Actions -->
+                    <div class="mb-3 d-flex justify-content-between align-items-center">
+                        <div class="btn-group">
+                            <button class="btn btn-outline-warning btn-sm" onclick="cleanupStaleVersions()">
+                                <i class="bi bi-trash me-1"></i>Mark Stale as Outdated
+                            </button>
+                        </div>
+                        <div>
+                            <select class="form-select form-select-sm d-inline-block w-auto" id="auditDaysFilter" onchange="loadSoftwareAudit()">
+                                <option value="7">Not seen in 7 days</option>
+                                <option value="30" selected>Not seen in 30 days</option>
+                                <option value="60">Not seen in 60 days</option>
+                                <option value="90">Not seen in 90 days</option>
+                            </select>
+                            <button class="btn btn-outline-primary btn-sm ms-2" onclick="loadSoftwareAudit()">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Audit Table -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-list-check me-2"></i>Version Audit Report
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Software</th>
+                                            <th>Versions Observed</th>
+                                            <th>Last Seen</th>
+                                            <th>Status</th>
+                                            <th style="width: 100px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="auditTable">
+                                        <tr>
+                                            <td colspan="5" class="text-center py-4 text-muted">
+                                                <i class="bi bi-clipboard-check" style="font-size: 2rem;"></i>
+                                                <p class="mb-0 mt-2">Loading audit data...</p>
                                             </td>
                                         </tr>
                                     </tbody>

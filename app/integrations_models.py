@@ -293,3 +293,66 @@ class AgentRegistration(db.Model):
             'ip_address': self.ip_address,
             'system_info': self.get_system_info()
         }
+
+
+class SoftwareVersionTracker(db.Model):
+    """
+    Tracks software versions observed from agents/integrations.
+    Used for version drift detection and audit purposes.
+    """
+    __tablename__ = 'software_version_tracker'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Link to product (if approved) or stand-alone tracking
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True, index=True)
+
+    # Software identification
+    vendor = db.Column(db.String(200), nullable=False, index=True)
+    product_name = db.Column(db.String(200), nullable=False, index=True)
+    version = db.Column(db.String(100), nullable=True, index=True)
+
+    # Source tracking
+    agent_id = db.Column(db.Integer, db.ForeignKey('agent_registrations.id'), nullable=True)
+    integration_id = db.Column(db.Integer, db.ForeignKey('integrations.id'), nullable=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True)
+
+    # Observation counts
+    observation_count = db.Column(db.Integer, default=1)
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Status
+    is_current = db.Column(db.Boolean, default=True, index=True)  # Still being reported
+    is_outdated = db.Column(db.Boolean, default=False, index=True)  # Marked as outdated
+    marked_outdated_at = db.Column(db.DateTime, nullable=True)
+    marked_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Relationships
+    product = db.relationship('Product', backref='version_observations')
+    agent = db.relationship('AgentRegistration', backref='version_observations')
+    integration = db.relationship('Integration', backref='version_observations')
+    organization = db.relationship('Organization', backref='version_observations')
+
+    __table_args__ = (
+        db.UniqueConstraint('vendor', 'product_name', 'version', 'organization_id', name='unique_version_per_org'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'product_id': self.product_id,
+            'vendor': self.vendor,
+            'product_name': self.product_name,
+            'version': self.version,
+            'agent_id': self.agent_id,
+            'integration_id': self.integration_id,
+            'organization_id': self.organization_id,
+            'organization_name': self.organization.display_name if self.organization else None,
+            'observation_count': self.observation_count,
+            'first_seen_at': self.first_seen_at.isoformat() if self.first_seen_at else None,
+            'last_seen_at': self.last_seen_at.isoformat() if self.last_seen_at else None,
+            'is_current': self.is_current,
+            'is_outdated': self.is_outdated,
+            'marked_outdated_at': self.marked_outdated_at.isoformat() if self.marked_outdated_at else None
+        }

@@ -564,17 +564,14 @@ async function loadUsers() {
                     ? '<span class="badge badge-auth-ldap">LDAP</span>'
                     : '<span class="badge badge-auth-local">Local</span>';
 
-                // Find organization display name from organizations array
+                // Use organization_name from API response (already resolved to display_name)
                 let orgDisplay = '<span class="text-muted">-</span>';
-                if (user.organization_id && organizations.length > 0) {
-                    const org = organizations.find(o => o.id === user.organization_id);
-                    if (org) {
-                        orgDisplay = escapeHtml(org.display_name);
-                    } else {
-                        orgDisplay = `Org ${user.organization_id}`;
-                    }
+                if (user.organization_name) {
+                    orgDisplay = escapeHtml(user.organization_name);
                 } else if (user.organization_id) {
-                    orgDisplay = `Org ${user.organization_id}`;
+                    // Fallback: lookup from organizations array if name not provided
+                    const org = organizations.find(o => o.id === user.organization_id);
+                    orgDisplay = org ? escapeHtml(org.display_name) : `Org ${user.organization_id}`;
                 }
 
                 return `
@@ -6002,6 +5999,168 @@ async function downloadLinuxAgent() {
     }
 }
 
+// ============================================================================
+// SOFTWARE AUDIT - Version Tracking
+// ============================================================================
+
+async function loadSoftwareAudit() {
+    const daysStale = document.getElementById('auditDaysFilter')?.value || 30;
+    const tbody = document.getElementById('auditTable');
+
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="5" class="text-center py-4 text-muted">
+                <div class="spinner-border spinner-border-sm me-2"></div>Loading audit data...
+            </td>
+        </tr>
+    `;
+
+    try {
+        const response = await fetch(`/api/audit/versions?days_stale=${daysStale}`);
+        if (!response.ok) throw new Error('Failed to load audit data');
+
+        const data = await response.json();
+
+        // Update stats
+        document.getElementById('auditTotalProducts').textContent = data.total_products || 0;
+        document.getElementById('auditVersionDrift').textContent = data.products_with_drift || 0;
+        document.getElementById('auditStaleProducts').textContent = data.products_with_stale || 0;
+
+        if (data.products.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center py-4 text-muted">
+                        <i class="bi bi-check-circle text-success" style="font-size: 2rem;"></i>
+                        <p class="mb-0 mt-2">No version tracking data yet</p>
+                        <small>Data will appear after agents report software</small>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = data.products.map(product => {
+            const latestVersion = product.versions[0];
+            const versionBadges = product.versions.map(v => {
+                const badgeClass = v.is_stale ? 'bg-danger' : v.is_outdated ? 'bg-secondary' : 'bg-success';
+                return `<span class="badge ${badgeClass} me-1" title="Seen ${v.observation_count} times">${escapeHtml(v.version || 'No version')} (${v.observation_count})</span>`;
+            }).join('');
+
+            const statusBadges = [];
+            if (product.has_multiple_versions) {
+                statusBadges.push('<span class="badge bg-warning text-dark">Multiple Versions</span>');
+            }
+            if (product.has_stale_versions) {
+                statusBadges.push('<span class="badge bg-danger">Has Stale</span>');
+            }
+            if (!product.has_multiple_versions && !product.has_stale_versions) {
+                statusBadges.push('<span class="badge bg-success">OK</span>');
+            }
+
+            const lastSeen = latestVersion?.last_seen
+                ? new Date(latestVersion.last_seen).toLocaleDateString()
+                : '-';
+
+            return `
+                <tr>
+                    <td>
+                        <div class="fw-semibold">${escapeHtml(product.vendor)}</div>
+                        <div class="text-muted small">${escapeHtml(product.product_name)}</div>
+                    </td>
+                    <td>${versionBadges}</td>
+                    <td><small>${lastSeen}</small></td>
+                    <td>${statusBadges.join(' ')}</td>
+                    <td>
+                        ${product.versions.filter(v => v.is_stale && !v.is_outdated).map(v => `
+                            <button class="btn btn-outline-warning btn-sm me-1" onclick="markVersionOutdated(${v.id})" title="Mark ${v.version || 'this version'} as outdated">
+                                <i class="bi bi-archive"></i>
+                            </button>
+                        `).join('')}
+                        ${product.versions.filter(v => v.is_outdated).map(v => `
+                            <button class="btn btn-outline-danger btn-sm me-1" onclick="deleteVersionTracker(${v.id})" title="Delete ${v.version || 'this version'}">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        `).join('')}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+    } catch (error) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center py-4 text-danger">
+                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                    <p class="mb-0 mt-2">Error loading audit data: ${escapeHtml(error.message)}</p>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+async function markVersionOutdated(trackerId) {
+    try {
+        const response = await fetch(`/api/audit/versions/${trackerId}/mark-outdated`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to mark as outdated');
+        showToast('Version marked as outdated', 'success');
+        loadSoftwareAudit();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function deleteVersionTracker(trackerId) {
+    const confirmed = await showConfirm(
+        'Are you sure you want to delete this version tracking entry?',
+        'Delete Version Entry',
+        'Delete',
+        'btn-danger'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`/api/audit/versions/${trackerId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete');
+        showToast('Version entry deleted', 'success');
+        loadSoftwareAudit();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function cleanupStaleVersions() {
+    const days = document.getElementById('auditDaysFilter')?.value || 30;
+
+    const confirmed = await showConfirm(
+        `Mark all software not seen in the last ${days} days as outdated?<br><br>This will help clean up your software audit.`,
+        'Cleanup Stale Versions',
+        'Mark as Outdated',
+        'btn-warning'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/api/audit/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ days: parseInt(days) })
+        });
+
+        if (!response.ok) throw new Error('Failed to cleanup');
+
+        const result = await response.json();
+        showToast(`Marked ${result.marked_count} versions as outdated`, 'success');
+        loadSoftwareAudit();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+
 // Initialize integrations when tab is shown
 document.addEventListener('DOMContentLoaded', function() {
     // Load queue count on page load
@@ -6021,4 +6180,5 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('import-queue-tab')?.addEventListener('shown.bs.pill', loadImportQueue);
     document.getElementById('connectors-tab')?.addEventListener('shown.bs.pill', loadIntegrations);
     document.getElementById('agents-tab')?.addEventListener('shown.bs.pill', loadAgents);
+    document.getElementById('audit-tab')?.addEventListener('shown.bs.pill', loadSoftwareAudit);
 });
