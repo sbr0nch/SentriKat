@@ -1066,13 +1066,13 @@
 
     function getSourceBadge(source) {
         const sourceConfig = {
-            'manual': { color: 'secondary', icon: 'pencil', label: 'Manual' },
-            'catalog': { color: 'primary', icon: 'book', label: 'Catalog' },
-            'agent': { color: 'success', icon: 'robot', label: 'Agent' },
-            'import': { color: 'info', icon: 'upload', label: 'Import' }
+            'manual': { color: 'light text-dark', label: 'Manual' },
+            'catalog': { color: 'light text-primary', label: 'Catalog' },
+            'agent': { color: 'light text-success', label: 'Agent' },
+            'import': { color: 'light text-info', label: 'Import' }
         };
         const config = sourceConfig[source] || sourceConfig['manual'];
-        return `<span class="badge bg-${config.color}" title="Added via ${config.label}"><i class="bi bi-${config.icon} me-1"></i>${config.label}</span>`;
+        return `<span class="badge bg-${config.color}" style="font-weight: 500;">${config.label}</span>`;
     }
 
     // Service Catalog Functions

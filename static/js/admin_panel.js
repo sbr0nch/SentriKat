@@ -5677,58 +5677,45 @@ async function loadIntegrations() {
                 'csv': 'CSV Import'
             };
 
-            // Different status display for agent vs pull integrations
-            let statusBadge, lastActivity;
+            // Simple status display
+            let statusText, lastActivity;
             if (int.integration_type === 'agent') {
-                // Agent integrations show agent stats
                 const totalAgents = int.agent_count || 0;
-                const activeAgents = int.active_agent_count || 0;
                 const onlineAgents = int.online_agent_count || 0;
-                const hostnames = int.agent_hostnames || [];
 
                 if (totalAgents > 0) {
-                    statusBadge = `
-                        <span class="badge bg-${onlineAgents > 0 ? 'success' : 'secondary'}" title="${hostnames.join(', ')}">
-                            ${onlineAgents}/${activeAgents} online
-                        </span>
-                        <br><small class="text-muted">${totalAgents} total device${totalAgents !== 1 ? 's' : ''}</small>
-                    `;
+                    statusText = `<span class="text-${onlineAgents > 0 ? 'success' : 'muted'}">${onlineAgents}/${totalAgents} online</span>`;
                 } else {
-                    statusBadge = '<span class="badge bg-secondary">No agents</span>';
+                    statusText = '<span class="text-muted">No agents</span>';
                 }
 
                 lastActivity = int.last_sync_at
-                    ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small><br><small class="text-muted">${int.last_sync_count || 0} items reported</small>`
-                    : '<small class="text-muted">Waiting for agents</small>';
+                    ? `<small class="text-muted">${new Date(int.last_sync_at).toLocaleString()}</small>`
+                    : '<small class="text-muted">Waiting</small>';
             } else {
-                // Pull integrations show sync status
-                statusBadge = int.last_sync_status
-                    ? `<span class="badge bg-${int.last_sync_status === 'success' ? 'success' : 'danger'}">${int.last_sync_status}</span>`
-                    : '<span class="badge bg-secondary">Never synced</span>';
+                statusText = int.last_sync_status === 'success'
+                    ? '<span class="text-success">OK</span>'
+                    : int.last_sync_status === 'failed'
+                    ? '<span class="text-danger">Failed</span>'
+                    : '<span class="text-muted">-</span>';
                 lastActivity = int.last_sync_at
-                    ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small><br><small class="text-muted">${int.last_sync_count || 0} items</small>`
+                    ? `<small class="text-muted">${new Date(int.last_sync_at).toLocaleString()}</small>`
                     : '-';
             }
 
             return `
                 <tr>
-                    <td class="fw-semibold">${escapeHtml(int.name)}</td>
-                    <td><span class="badge bg-info">${typeLabels[int.integration_type] || int.integration_type}</span></td>
-                    <td>${escapeHtml(int.organization_name || 'All')}</td>
+                    <td><strong>${escapeHtml(int.name)}</strong></td>
+                    <td><small class="text-muted">${typeLabels[int.integration_type] || int.integration_type}</small></td>
+                    <td><small>${escapeHtml(int.organization_name || 'All')}</small></td>
                     <td>${lastActivity}</td>
-                    <td>${statusBadge}</td>
+                    <td>${statusText}</td>
                     <td>
                         ${int.integration_type !== 'agent' ? `
-                            <button class="btn btn-outline-primary btn-sm me-1" onclick="syncIntegration(${int.id})" title="Sync Now">
-                                <i class="bi bi-arrow-repeat"></i>
-                            </button>
+                            <button class="btn btn-sm btn-link p-0 me-2" onclick="syncIntegration(${int.id})">Sync</button>
                         ` : ''}
-                        <button class="btn btn-outline-secondary btn-sm me-1" onclick="editIntegration(${int.id})" title="Edit">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="btn btn-outline-danger btn-sm" onclick="deleteIntegration(${int.id})" title="Delete">
-                            <i class="bi bi-trash"></i>
-                        </button>
+                        <button class="btn btn-sm btn-link p-0 me-2" onclick="editIntegration(${int.id})">Edit</button>
+                        <button class="btn btn-sm btn-link text-danger p-0" onclick="deleteIntegration(${int.id})">Delete</button>
                     </td>
                 </tr>
             `;
@@ -6136,46 +6123,48 @@ async function loadAgents() {
         }
 
         tbody.innerHTML = agents.map(agent => {
-            // Status badge color and icon
-            const statusConfig = {
-                'online': { color: 'success', icon: 'circle-fill', text: 'Online' },
-                'offline': { color: 'secondary', icon: 'circle', text: 'Offline' },
-                'stale': { color: 'warning', icon: 'exclamation-circle', text: 'Stale' },
-                'disabled': { color: 'danger', icon: 'slash-circle', text: 'Disabled' },
-                'never_seen': { color: 'info', icon: 'question-circle', text: 'Waiting' }
+            // Simple status colors
+            const statusColors = {
+                'online': 'success',
+                'offline': 'secondary',
+                'stale': 'warning',
+                'disabled': 'danger',
+                'never_seen': 'info'
             };
-            const status = statusConfig[agent.status] || statusConfig['offline'];
+            const statusLabels = {
+                'online': 'Online',
+                'offline': 'Offline',
+                'stale': 'Stale',
+                'disabled': 'Disabled',
+                'never_seen': 'Pending'
+            };
 
             return `
             <tr class="${!agent.is_active ? 'table-secondary' : ''}">
-                <td class="fw-semibold">
-                    ${escapeHtml(agent.hostname)}
+                <td>
+                    <strong>${escapeHtml(agent.hostname)}</strong>
                     <br><small class="text-muted">${escapeHtml(agent.ip_address || '')}</small>
                 </td>
                 <td>
-                    <span class="badge bg-${agent.os_type === 'windows' ? 'primary' : 'warning'}">
-                        ${agent.os_type}
-                    </span>
-                    <br><small class="text-muted">${escapeHtml(agent.os_version || '')}</small>
+                    <small class="text-muted">${escapeHtml(agent.os_type)}</small>
+                    <br><small class="text-muted">${escapeHtml(agent.os_version || '').substring(0, 25)}</small>
                 </td>
                 <td>
-                    <span class="badge bg-${status.color}">
-                        <i class="bi bi-${status.icon} me-1"></i>${status.text}
-                    </span>
+                    <span class="badge bg-${statusColors[agent.status] || 'secondary'}">${statusLabels[agent.status] || 'Unknown'}</span>
                 </td>
-                <td>${escapeHtml(agent.organization_name || '-')}</td>
+                <td><small>${escapeHtml(agent.organization_name || '-')}</small></td>
                 <td>
-                    ${agent.last_seen_at ? `<small>${new Date(agent.last_seen_at).toLocaleString()}</small>` : '-'}
+                    <small class="text-muted">${agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : '-'}</small>
                 </td>
                 <td>${agent.software_count || 0}</td>
                 <td>
-                    <button class="btn btn-outline-${agent.is_active ? 'warning' : 'success'} btn-sm me-1"
+                    <button class="btn btn-sm btn-link text-${agent.is_active ? 'warning' : 'success'} p-0 me-2"
                             onclick="toggleAgent(${agent.id})"
                             title="${agent.is_active ? 'Disable' : 'Enable'}">
-                        <i class="bi bi-${agent.is_active ? 'pause' : 'play'}"></i>
+                        ${agent.is_active ? 'Disable' : 'Enable'}
                     </button>
-                    <button class="btn btn-outline-danger btn-sm" onclick="deleteAgent(${agent.id})" title="Remove">
-                        <i class="bi bi-trash"></i>
+                    <button class="btn btn-sm btn-link text-danger p-0" onclick="deleteAgent(${agent.id})" title="Remove">
+                        Remove
                     </button>
                 </td>
             </tr>

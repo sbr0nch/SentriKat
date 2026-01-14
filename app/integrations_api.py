@@ -23,6 +23,7 @@ import logging
 from functools import wraps
 
 from app import db, csrf, limiter
+from app.logging_config import log_audit_event
 from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User
 from app.auth import admin_required, login_required
@@ -553,6 +554,10 @@ def approve_queue_item(item_id):
 
     db.session.commit()
 
+    log_audit_event('APPROVE', 'import_queue', item_id,
+                   new_value={'product_id': product.id, 'vendor': item.vendor, 'product': item.product_name},
+                   details=f"Approved '{item.vendor} {item.product_name}'")
+
     # Trigger vulnerability matching
     try:
         from app.filters import match_vulnerabilities_to_products
@@ -582,6 +587,9 @@ def reject_queue_item(item_id):
     item.processed_by = session.get('user_id')
 
     db.session.commit()
+
+    log_audit_event('REJECT', 'import_queue', item_id,
+                   details=f"Rejected '{item.vendor} {item.product_name}'")
 
     return jsonify({'success': True, 'item': item.to_dict()})
 
@@ -730,6 +738,10 @@ def create_integration():
         db.session.add(integration)
         db.session.commit()
 
+        log_audit_event('CREATE', 'integrations', integration.id,
+                       new_value={'name': integration.name, 'type': integration.integration_type},
+                       details=f"Integration '{integration.name}' created")
+
         return jsonify(integration.to_dict(include_sensitive=True)), 201
 
     except Exception as e:
@@ -775,9 +787,13 @@ def update_integration(integration_id):
 def delete_integration(integration_id):
     """Delete (deactivate) an integration."""
     integration = Integration.query.get_or_404(integration_id)
+    name = integration.name
 
     integration.is_active = False
     db.session.commit()
+
+    log_audit_event('DELETE', 'integrations', integration_id,
+                   details=f"Integration '{name}' deleted")
 
     return jsonify({'success': True})
 
