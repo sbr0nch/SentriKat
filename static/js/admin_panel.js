@@ -5111,20 +5111,45 @@ function formatDate(dateStr) {
 
 function copyInstallationId() {
     const installIdEl = document.getElementById('installationIdDisplay');
-    if (!installIdEl || !installIdEl.value) {
-        showToast('Installation ID not available', 'error');
+    if (!installIdEl) {
+        showToast('Installation ID element not found', 'error');
         return;
     }
 
-    // Copy to clipboard
-    navigator.clipboard.writeText(installIdEl.value).then(() => {
-        showToast('Installation ID copied to clipboard!', 'success');
-    }).catch(err => {
-        // Fallback for older browsers
-        installIdEl.select();
-        document.execCommand('copy');
-        showToast('Installation ID copied to clipboard!', 'success');
-    });
+    const value = installIdEl.value;
+    if (!value || value === 'Loading...' || value.length < 10) {
+        showToast('Installation ID not loaded yet. Please wait or refresh the page.', 'warning');
+        return;
+    }
+
+    // Try modern clipboard API first
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(value).then(() => {
+            showToast('Installation ID copied to clipboard!', 'success');
+        }).catch(err => {
+            console.error('Clipboard write failed:', err);
+            fallbackCopy(installIdEl);
+        });
+    } else {
+        // Use fallback for non-HTTPS contexts
+        fallbackCopy(installIdEl);
+    }
+}
+
+function fallbackCopy(inputEl) {
+    try {
+        inputEl.select();
+        inputEl.setSelectionRange(0, 99999); // For mobile
+        const success = document.execCommand('copy');
+        if (success) {
+            showToast('Installation ID copied to clipboard!', 'success');
+        } else {
+            showToast('Copy failed. Please select and copy manually (Ctrl+C)', 'warning');
+        }
+    } catch (err) {
+        console.error('Fallback copy failed:', err);
+        showToast('Copy failed. Please select and copy manually (Ctrl+C)', 'warning');
+    }
 }
 
 // ============================================================================
