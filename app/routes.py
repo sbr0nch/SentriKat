@@ -1621,24 +1621,66 @@ def get_users():
     - Super Admin: See all users
     - Org Admin: See only users in their organization
     """
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
+    import logging
+    logger = logging.getLogger(__name__)
 
-    if not current_user:
-        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
 
-    # Super admins see all users
-    if current_user.is_super_admin():
-        users = User.query.order_by(User.username).all()
-    # Org admins see only their organization's users
-    elif current_user.is_org_admin():
-        users = User.query.filter_by(
-            organization_id=current_user.organization_id
-        ).order_by(User.username).all()
-    else:
-        return jsonify({'error': 'Insufficient permissions'}), 403
+        if not current_user:
+            return jsonify({'error': 'Unauthorized'}), 401
 
-    return jsonify([u.to_dict() for u in users])
+        # Super admins see all users
+        if current_user.is_super_admin():
+            users = User.query.order_by(User.username).all()
+        # Org admins see only their organization's users
+        elif current_user.is_org_admin():
+            users = User.query.filter_by(
+                organization_id=current_user.organization_id
+            ).order_by(User.username).all()
+        else:
+            return jsonify({'error': 'Insufficient permissions'}), 403
+
+        # Convert to dict with error handling for each user
+        user_list = []
+        for u in users:
+            try:
+                user_list.append(u.to_dict())
+            except Exception as e:
+                logger.error(f"Error serializing user {u.id} ({u.username}): {e}")
+                # Return minimal user data on error
+                user_list.append({
+                    'id': u.id,
+                    'username': u.username,
+                    'email': u.email,
+                    'full_name': u.full_name,
+                    'organization_id': u.organization_id,
+                    'organization_name': None,
+                    'auth_type': u.auth_type,
+                    'role': u.role,
+                    'is_admin': u.is_admin,
+                    'is_active': u.is_active,
+                    'can_manage_products': u.can_manage_products,
+                    'can_view_all_orgs': u.can_view_all_orgs,
+                    'last_login': u.last_login.isoformat() if u.last_login else None,
+                    'created_at': u.created_at.isoformat() if u.created_at else None,
+                    'is_locked': False,
+                    'failed_login_attempts': 0,
+                    'locked_until': None,
+                    'password_expired': False,
+                    'password_days_until_expiry': None,
+                    'must_change_password': False,
+                    'totp_enabled': False,
+                    'org_memberships': [],
+                    'all_organizations': []
+                })
+
+        return jsonify(user_list)
+
+    except Exception as e:
+        logger.error(f"Error in get_users: {e}", exc_info=True)
+        return jsonify({'error': f'Internal error: {str(e)}'}), 500
 
 @bp.route('/api/users', methods=['POST'])
 @org_admin_required

@@ -5,6 +5,24 @@
 {% block extra_css %}
 <style>
 /* Admin Sidebar Navigation */
+.admin-sidebar {
+    transition: all 0.3s ease;
+}
+.admin-sidebar.collapsed {
+    margin-left: -100%;
+    opacity: 0;
+}
+.admin-sidebar-toggle {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.admin-sidebar-toggle:hover {
+    background: #e9ecef;
+}
 #adminTabs .nav-link {
     color: #495057;
     padding: 0.5rem 0.75rem;
@@ -19,19 +37,52 @@
     color: #212529;
     font-weight: 500;
 }
-#adminTabs .nav-section {
-    font-size: 0.7rem;
+/* Section headers - improved visibility */
+.nav-section-header {
+    font-size: 0.65rem;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    color: #6c757d;
+    font-weight: 600;
+    padding: 0.5rem 0.75rem 0.25rem;
+    margin-top: 0.75rem;
+    border-top: 1px solid #e9ecef;
+}
+.nav-section-header:first-of-type {
+    margin-top: 0;
+    border-top: none;
+}
+/* Main content expands when sidebar collapsed */
+.admin-main-content {
+    transition: all 0.3s ease;
+}
+.sidebar-collapsed .admin-main-content {
+    flex: 0 0 100%;
+    max-width: 100%;
 }
 /* Responsive: hide sidebar on mobile */
 @media (max-width: 767px) {
+    .admin-sidebar {
+        position: fixed;
+        top: 70px;
+        left: 0;
+        right: 0;
+        z-index: 1020;
+        background: white;
+        padding: 1rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+    .admin-sidebar.collapsed {
+        display: none;
+    }
     #adminTabs {
         flex-direction: row !important;
         flex-wrap: wrap;
         gap: 0.25rem;
     }
-    #adminTabs .nav-section {
+    .nav-section-header {
         display: none;
     }
 }
@@ -40,52 +91,64 @@
 
 {% block content %}
 <div class="fade-in">
-    <div class="row">
+    <div class="row" id="adminPanelContainer">
         <!-- Sidebar Navigation -->
-        <div class="col-md-3 col-lg-2">
+        <div class="col-md-3 col-lg-2 admin-sidebar" id="adminSidebar">
             <div class="sticky-top" style="top: 80px;">
-                <h6 class="text-muted text-uppercase small fw-bold mb-3 px-2">Administration</h6>
+                <div class="d-flex justify-content-between align-items-center mb-3 px-2">
+                    <h6 class="text-muted text-uppercase small fw-bold mb-0">Administration</h6>
+                    <button class="admin-sidebar-toggle d-none d-md-block" onclick="toggleAdminSidebar()" title="Hide sidebar">
+                        <i class="bi bi-chevron-left" id="sidebarToggleIcon"></i>
+                    </button>
+                </div>
                 <nav class="nav flex-column nav-pills" id="adminTabs" role="tablist">
                     <!-- Identity Section -->
-                    <span class="nav-section text-muted small px-2 mt-2 mb-1">Identity</span>
+                    <div class="nav-section-header">Identity</div>
                     <button class="nav-link active text-start" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">
-                        Users
+                        <i class="bi bi-people me-2"></i>Users
                     </button>
                     <button class="nav-link text-start" id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button" style="display: none;" data-tab-item="ldap-users-tab-item">
-                        LDAP Users
+                        <i class="bi bi-diagram-3 me-2"></i>LDAP Users
                         {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.55em;">PRO</span>{% endif %}
                     </button>
                     <button class="nav-link text-start" id="ldap-groups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button" style="display: none;" data-tab-item="ldap-groups-tab-item">
-                        LDAP Groups
+                        <i class="bi bi-collection me-2"></i>LDAP Groups
                         {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.55em;">PRO</span>{% endif %}
                     </button>
 
                     <!-- Organization Section -->
-                    <span class="nav-section text-muted small px-2 mt-3 mb-1">Organization</span>
+                    <div class="nav-section-header">Organization</div>
                     <button class="nav-link text-start" id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button">
-                        Organizations
+                        <i class="bi bi-building me-2"></i>Organizations
                     </button>
 
-                    <!-- Integrations Section -->
-                    <span class="nav-section text-muted small px-2 mt-3 mb-1">Data Sources</span>
+                    <!-- Data Sources Section -->
+                    <div class="nav-section-header">Data Sources</div>
                     <button class="nav-link text-start" id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button">
-                        Integrations
+                        <i class="bi bi-plug me-2"></i>Integrations
                         <span class="badge bg-primary rounded-pill ms-1" id="importQueueBadge" style="display: none; font-size: 0.65em;">0</span>
                     </button>
 
                     <!-- System Section -->
                     {% if current_user and current_user.is_super_admin() %}
-                    <span class="nav-section text-muted small px-2 mt-3 mb-1">System</span>
+                    <div class="nav-section-header">System</div>
                     <button class="nav-link text-start" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
-                        Settings
+                        <i class="bi bi-gear me-2"></i>Settings
                     </button>
                     {% endif %}
                 </nav>
             </div>
         </div>
 
+        <!-- Sidebar Toggle (when collapsed) -->
+        <div class="position-fixed d-none" id="sidebarShowBtn" style="left: 0; top: 50%; transform: translateY(-50%); z-index: 1030;">
+            <button class="btn btn-light border shadow-sm" onclick="toggleAdminSidebar()" title="Show sidebar" style="border-radius: 0 0.375rem 0.375rem 0;">
+                <i class="bi bi-chevron-right"></i>
+            </button>
+        </div>
+
         <!-- Main Content Area -->
-        <div class="col-md-9 col-lg-10">
+        <div class="col-md-9 col-lg-10 admin-main-content" id="adminMainContent">
             <div class="tab-content" id="adminTabsContent">
         <!-- Users Tab -->
         <div class="tab-pane fade show active" id="users" role="tabpanel">

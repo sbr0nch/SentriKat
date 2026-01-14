@@ -15,6 +15,77 @@ let selectedUsers = new Map(); // Map of userId -> { id, username, is_active }
 let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
 let selectedMappings = new Map(); // Map of mappingId -> { id, group_cn, is_active }
 
+// Sidebar state
+let sidebarCollapsed = localStorage.getItem('adminSidebarCollapsed') === 'true';
+
+// ============================================================================
+// SIDEBAR TOGGLE
+// ============================================================================
+
+/**
+ * Toggle the admin sidebar visibility
+ */
+function toggleAdminSidebar() {
+    const sidebar = document.getElementById('adminSidebar');
+    const mainContent = document.getElementById('adminMainContent');
+    const container = document.getElementById('adminPanelContainer');
+    const showBtn = document.getElementById('sidebarShowBtn');
+    const toggleIcon = document.getElementById('sidebarToggleIcon');
+
+    sidebarCollapsed = !sidebarCollapsed;
+    localStorage.setItem('adminSidebarCollapsed', sidebarCollapsed);
+
+    if (sidebarCollapsed) {
+        // Collapse sidebar
+        sidebar.classList.add('collapsed');
+        sidebar.classList.remove('col-md-3', 'col-lg-2');
+        sidebar.classList.add('d-none');
+        mainContent.classList.remove('col-md-9', 'col-lg-10');
+        mainContent.classList.add('col-12');
+        showBtn.classList.remove('d-none');
+        container.classList.add('sidebar-collapsed');
+    } else {
+        // Expand sidebar
+        sidebar.classList.remove('collapsed', 'd-none');
+        sidebar.classList.add('col-md-3', 'col-lg-2');
+        mainContent.classList.remove('col-12');
+        mainContent.classList.add('col-md-9', 'col-lg-10');
+        showBtn.classList.add('d-none');
+        container.classList.remove('sidebar-collapsed');
+    }
+}
+
+/**
+ * Initialize sidebar state on page load
+ */
+function initSidebarState() {
+    if (sidebarCollapsed) {
+        // Apply collapsed state without animation on initial load
+        const sidebar = document.getElementById('adminSidebar');
+        const mainContent = document.getElementById('adminMainContent');
+        const container = document.getElementById('adminPanelContainer');
+        const showBtn = document.getElementById('sidebarShowBtn');
+
+        if (sidebar && mainContent) {
+            sidebar.style.transition = 'none';
+            mainContent.style.transition = 'none';
+
+            sidebar.classList.add('collapsed', 'd-none');
+            sidebar.classList.remove('col-md-3', 'col-lg-2');
+            mainContent.classList.remove('col-md-9', 'col-lg-10');
+            mainContent.classList.add('col-12');
+            if (showBtn) showBtn.classList.remove('d-none');
+            if (container) container.classList.add('sidebar-collapsed');
+
+            // Re-enable transitions after a frame
+            requestAnimationFrame(() => {
+                sidebar.style.transition = '';
+                mainContent.style.transition = '';
+            });
+        }
+    }
+}
+
 // ============================================================================
 // URL HASH PERSISTENCE - Remember which tab/subtab user was on
 // ============================================================================
@@ -514,6 +585,9 @@ async function bulkDeleteMappings() {
 
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('Admin Panel: DOMContentLoaded fired');
+
+    // Initialize sidebar state early (before any async calls)
+    initSidebarState();
 
     // Check if Bootstrap is loaded
     if (typeof bootstrap === 'undefined') {
