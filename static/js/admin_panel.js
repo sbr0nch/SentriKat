@@ -5808,11 +5808,22 @@ async function saveIntegration() {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to create integration');
+            let errorMsg = 'Failed to create integration';
+            try {
+                const error = await response.json();
+                errorMsg = error.error || errorMsg;
+            } catch {
+                errorMsg = response.status === 500 ? 'Server error - database may need initialization' : response.statusText;
+            }
+            throw new Error(errorMsg);
         }
 
-        const integration = await response.json();
+        let integration;
+        try {
+            integration = await response.json();
+        } catch {
+            throw new Error('Invalid response from server');
+        }
 
         // Close modal
         bootstrap.Modal.getInstance(document.getElementById('createIntegrationModal')).hide();

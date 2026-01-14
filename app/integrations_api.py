@@ -618,47 +618,53 @@ def get_integration(integration_id):
 @admin_required
 def create_integration():
     """Create a new integration."""
-    data = request.get_json()
+    try:
+        data = request.get_json()
 
-    if not data:
-        return jsonify({'error': 'No data provided'}), 400
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
 
-    name = data.get('name', '').strip()
-    integration_type = data.get('integration_type', '').strip()
+        name = data.get('name', '').strip()
+        integration_type = data.get('integration_type', '').strip()
 
-    if not name:
-        return jsonify({'error': 'Name is required'}), 400
-    if not integration_type:
-        return jsonify({'error': 'Integration type is required'}), 400
+        if not name:
+            return jsonify({'error': 'Name is required'}), 400
+        if not integration_type:
+            return jsonify({'error': 'Integration type is required'}), 400
 
-    valid_types = ['pdq', 'sccm', 'intune', 'lansweeper', 'csv', 'generic_rest', 'agent']
-    if integration_type not in valid_types:
-        return jsonify({'error': f'Invalid type. Valid types: {", ".join(valid_types)}'}), 400
+        valid_types = ['pdq', 'sccm', 'intune', 'lansweeper', 'csv', 'generic_rest', 'agent']
+        if integration_type not in valid_types:
+            return jsonify({'error': f'Invalid type. Valid types: {", ".join(valid_types)}'}), 400
 
-    # Generate API key for push integrations
-    api_key = secrets.token_urlsafe(32)
+        # Generate API key for push integrations
+        api_key = secrets.token_urlsafe(32)
 
-    integration = Integration(
-        name=name,
-        integration_type=integration_type,
-        organization_id=data.get('organization_id'),
-        auto_approve=data.get('auto_approve', False),
-        default_criticality=data.get('default_criticality', 'medium'),
-        sync_enabled=data.get('sync_enabled', True),
-        sync_interval_hours=data.get('sync_interval_hours', 6),
-        api_key=api_key,
-        created_by=session.get('user_id')
-    )
+        integration = Integration(
+            name=name,
+            integration_type=integration_type,
+            organization_id=data.get('organization_id'),
+            auto_approve=data.get('auto_approve', False),
+            default_criticality=data.get('default_criticality', 'medium'),
+            sync_enabled=data.get('sync_enabled', True),
+            sync_interval_hours=data.get('sync_interval_hours', 6),
+            api_key=api_key,
+            created_by=session.get('user_id')
+        )
 
-    # Store configuration (encrypted)
-    config = data.get('config', {})
-    if config:
-        integration.set_config(config)
+        # Store configuration (encrypted)
+        config = data.get('config', {})
+        if config:
+            integration.set_config(config)
 
-    db.session.add(integration)
-    db.session.commit()
+        db.session.add(integration)
+        db.session.commit()
 
-    return jsonify(integration.to_dict(include_sensitive=True)), 201
+        return jsonify(integration.to_dict(include_sensitive=True)), 201
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating integration: {str(e)}")
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['PUT'])
