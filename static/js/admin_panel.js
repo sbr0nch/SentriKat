@@ -4940,15 +4940,16 @@ function displayLicenseInfo(data) {
         badgeEl.className = 'badge bg-success';
         badgeEl.textContent = 'Professional';
         removeBtn.style.display = 'inline-block';
-        // Load activation tracking for professional licenses
-        loadActivations();
     } else {
         badgeEl.className = 'badge bg-secondary';
         badgeEl.textContent = 'Community';
         removeBtn.style.display = 'none';
-        // Hide activation tracking card for community
-        const cardEl = document.getElementById('activationTrackingCard');
-        if (cardEl) cardEl.style.display = 'none';
+    }
+
+    // Display installation ID
+    const installIdEl = document.getElementById('installationIdDisplay');
+    if (installIdEl && data.installation_id) {
+        installIdEl.value = data.installation_id;
     }
 
     // License details
@@ -5105,111 +5106,25 @@ function formatDate(dateStr) {
 }
 
 // ============================================================================
-// LICENSE ACTIVATION TRACKING
+// INSTALLATION ID HELPER
 // ============================================================================
 
-async function loadActivations() {
-    try {
-        const response = await fetch('/api/license/activations');
-        if (!response.ok) {
-            throw new Error('Failed to load activations');
-        }
-
-        const data = await response.json();
-        displayActivations(data);
-
-    } catch (error) {
-        console.error('Error loading activations:', error);
-        document.getElementById('activationsList').innerHTML = `
-            <div class="alert alert-danger mb-0">
-                <i class="bi bi-exclamation-triangle me-2"></i>Failed to load activations
-            </div>
-        `;
-    }
-}
-
-function displayActivations(data) {
-    const infoEl = document.getElementById('activationInfo');
-    const listEl = document.getElementById('activationsList');
-    const cardEl = document.getElementById('activationTrackingCard');
-
-    // Show the card
-    cardEl.style.display = 'block';
-
-    // Display activation summary
-    const maxActivations = data.max_activations;
-    const maxStr = maxActivations === -1 ? 'Unlimited' : maxActivations;
-    const currentStr = data.active_count || 0;
-
-    infoEl.innerHTML = `
-        <div class="row">
-            <div class="col-sm-6">
-                <div class="d-flex justify-content-between">
-                    <span class="text-muted">Active Installations:</span>
-                    <strong>${currentStr} / ${maxStr}</strong>
-                </div>
-            </div>
-            <div class="col-sm-6">
-                <div class="d-flex justify-content-between">
-                    <span class="text-muted">This Installation:</span>
-                    <code class="small">${data.current_installation_id || 'Unknown'}</code>
-                </div>
-            </div>
-        </div>
-        ${maxActivations === 1 ? `
-            <div class="alert alert-info mt-2 mb-0 py-2">
-                <small><i class="bi bi-info-circle me-1"></i>This is a single-use license. It can only be activated on one installation at a time.</small>
-            </div>
-        ` : ''}
-    `;
-
-    // Display activations list
-    if (!data.activations || data.activations.length === 0) {
-        listEl.innerHTML = `
-            <div class="text-muted text-center py-2">
-                No activation records found.
-            </div>
-        `;
+function copyInstallationId() {
+    const installIdEl = document.getElementById('installationIdDisplay');
+    if (!installIdEl || !installIdEl.value) {
+        showToast('Installation ID not available', 'error');
         return;
     }
 
-    let tableHtml = `
-        <table class="table table-sm table-hover mb-0">
-            <thead>
-                <tr>
-                    <th>Hostname</th>
-                    <th>Status</th>
-                    <th>First Activated</th>
-                    <th>Last Seen</th>
-                    <th>Installation ID</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
-
-    for (const activation of data.activations) {
-        const isCurrentInstall = activation.installation_id === data.current_installation_id;
-        const statusBadge = activation.is_active
-            ? `<span class="badge bg-success">Active</span>${isCurrentInstall ? ' <span class="badge bg-primary">This</span>' : ''}`
-            : '<span class="badge bg-secondary">Deactivated</span>';
-
-        tableHtml += `
-            <tr class="${isCurrentInstall ? 'table-primary' : ''}">
-                <td>${escapeHtml(activation.hostname || 'Unknown')}</td>
-                <td>${statusBadge}</td>
-                <td><small>${formatDate(activation.first_activated_at)}</small></td>
-                <td><small>${formatDate(activation.last_seen_at)}</small></td>
-                <td><code class="small">${escapeHtml(activation.installation_id || '-')}</code></td>
-            </tr>
-        `;
-    }
-
-    tableHtml += `
-            </tbody>
-        </table>
-    `;
-
-    listEl.innerHTML = tableHtml;
+    // Copy to clipboard
+    navigator.clipboard.writeText(installIdEl.value).then(() => {
+        showToast('Installation ID copied to clipboard!', 'success');
+    }).catch(err => {
+        // Fallback for older browsers
+        installIdEl.select();
+        document.execCommand('copy');
+        showToast('Installation ID copied to clipboard!', 'success');
+    });
 }
 
 // ============================================================================

@@ -5,8 +5,8 @@ Two tiers:
 - Community (free): 3 users, 1 org, 20 products, no LDAP/alerts/API
 - Professional (paid): Unlimited, all features
 
-License keys are RSA-signed JSON payloads that can be validated offline.
-Single-use validation: Each license tracks activations and can limit installations.
+License keys are RSA-signed JSON payloads that are hardware-locked.
+Each license is tied to a specific installation ID and cannot be used elsewhere.
 """
 
 import json
@@ -18,7 +18,7 @@ import uuid
 import socket
 from datetime import datetime, date
 from functools import wraps
-from flask import g, jsonify, session, request
+from flask import jsonify
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ LICENSE_TIERS = {
         'max_users': 3,
         'max_organizations': 1,
         'max_products': 20,
-        'features': [],  # No premium features
+        'features': [],
         'powered_by_required': True
     },
     'professional': {
@@ -78,95 +78,104 @@ PROFESSIONAL_FEATURES = [
 
 
 # ============================================================================
-# Installation Fingerprint Generation
+# Installation ID - Stable Hardware Fingerprint
 # ============================================================================
 
 def get_installation_id():
     """
-    Get or generate a unique installation ID for this instance.
+    Get or generate a unique, STABLE installation ID for this instance.
     This ID is persisted to disk and survives restarts.
-    Used to track license activations and prevent unauthorized sharing.
+
+    The ID is deterministic based on machine characteristics - it will be
+    the same every time for the same installation.
+
+    Used for hardware-locked licensing: licenses are tied to this ID.
     """
-    # Try to load existing ID
+    # Try to load existing ID from file
     if os.path.exists(INSTALLATION_ID_FILE):
         try:
             with open(INSTALLATION_ID_FILE, 'r') as f:
                 installation_id = f.read().strip()
-                if installation_id and len(installation_id) == 64:
+                if installation_id and len(installation_id) >= 32:
                     return installation_id
         except Exception as e:
             logger.warning(f"Could not read installation ID: {e}")
 
-    # Generate new installation ID based on machine characteristics
-    installation_id = _generate_installation_fingerprint()
+    # Generate new stable installation ID
+    installation_id = _generate_stable_fingerprint()
 
-    # Save to file
+    # Save to file for persistence
     try:
-        # Ensure data directory exists
         data_dir = os.path.dirname(INSTALLATION_ID_FILE)
         if data_dir and not os.path.exists(data_dir):
             os.makedirs(data_dir, exist_ok=True)
 
         with open(INSTALLATION_ID_FILE, 'w') as f:
             f.write(installation_id)
-        logger.info(f"Generated new installation ID: {installation_id[:12]}...")
+
+        logger.info(f"Generated installation ID: {installation_id[:16]}...")
     except Exception as e:
         logger.error(f"Could not save installation ID: {e}")
 
     return installation_id
 
 
-def _generate_installation_fingerprint():
+def _generate_stable_fingerprint():
     """
-    Generate a unique fingerprint for this installation.
-    Combines multiple factors to create a stable identifier.
+    Generate a stable fingerprint for this installation.
+    Uses machine characteristics that don't change.
+
+    Components:
+    - MAC address (hardware)
+    - Hostname
+    - Database path (identifies the specific installation)
     """
     fingerprint_parts = []
 
-    # Machine-specific identifiers
+    # MAC address - stable hardware identifier
     try:
-        # Hostname
-        fingerprint_parts.append(socket.gethostname())
-    except:
-        pass
-
-    try:
-        # MAC address (if available)
         mac = uuid.getnode()
-        if mac != uuid.getnode():  # Verify it's stable
-            fingerprint_parts.append(str(mac))
-        else:
-            fingerprint_parts.append(str(mac))
+        # uuid.getnode() returns a random value if no MAC found,
+        # but it's consistent within a session
+        fingerprint_parts.append(f"mac:{mac}")
     except:
-        pass
+        fingerprint_parts.append("mac:unknown")
 
+    # Hostname
     try:
-        # Database file path (unique per installation)
+        hostname = socket.gethostname()
+        fingerprint_parts.append(f"host:{hostname}")
+    except:
+        fingerprint_parts.append("host:unknown")
+
+    # Database URI - unique per installation
+    try:
         from config import Config
-        fingerprint_parts.append(Config.SQLALCHEMY_DATABASE_URI or '')
+        db_uri = Config.SQLALCHEMY_DATABASE_URI or ''
+        # Hash the DB URI for privacy
+        db_hash = hashlib.sha256(db_uri.encode()).hexdigest()[:16]
+        fingerprint_parts.append(f"db:{db_hash}")
     except:
-        pass
+        fingerprint_parts.append("db:unknown")
 
-    try:
-        # Secret key (unique per installation if properly configured)
-        from flask import current_app
-        if current_app and current_app.config.get('SECRET_KEY'):
-            fingerprint_parts.append(current_app.config['SECRET_KEY'][:16])
-    except:
-        pass
+    # Combine and create final hash
+    fingerprint_string = '|'.join(fingerprint_parts)
+    full_hash = hashlib.sha256(fingerprint_string.encode()).hexdigest()
 
-    # Add a random component for truly unique ID
-    fingerprint_parts.append(str(uuid.uuid4()))
-
-    # Combine and hash
-    fingerprint_string = '|'.join(str(p) for p in fingerprint_parts)
-    return hashlib.sha256(fingerprint_string.encode()).hexdigest()
+    # Format as readable installation ID: SK-INST-XXXXXXXX...
+    return f"SK-INST-{full_hash[:32].upper()}"
 
 
-def hash_license_key(license_key):
-    """Generate SHA256 hash of license key for storage (don't store the key itself)"""
-    return hashlib.sha256(license_key.encode()).hexdigest()
+def get_installation_id_display():
+    """Get installation ID formatted for display to users."""
+    inst_id = get_installation_id()
+    # Return full ID for license requests
+    return inst_id
 
+
+# ============================================================================
+# License Info Class
+# ============================================================================
 
 class LicenseInfo:
     """Holds current license information"""
@@ -186,31 +195,21 @@ class LicenseInfo:
         self.is_expired = False
         self.days_until_expiry = None
         self.error = None
-        self.expiration_reason = None  # 'expired', 'grace_period', etc.
-
-        # Activation tracking fields
-        self.max_activations = 1  # Default: single-use license
-        self.current_activations = 0
-        self.activation_exceeded = False
-        self.installation_id = None
-        self.activation_info = None  # Current activation record
+        self.licensed_installation_id = None  # The installation ID this license is for
+        self.is_hardware_match = False  # Does license match this installation?
 
     def get_effective_edition(self):
-        """
-        Get the effective edition considering expiration.
-        Expired licenses revert to Community behavior.
-        """
+        """Get the effective edition considering expiration and hardware match."""
         if self.is_expired:
             return 'community'
         if not self.is_valid:
             return 'community'
+        if not self.is_hardware_match:
+            return 'community'
         return self.edition
 
     def get_effective_limits(self):
-        """
-        Get effective limits considering expiration.
-        Expired Professional licenses get Community limits.
-        """
+        """Get effective limits based on license status."""
         effective_edition = self.get_effective_edition()
         if effective_edition == 'community':
             return {
@@ -225,32 +224,20 @@ class LicenseInfo:
         }
 
     def has_feature(self, feature):
-        """
-        Check if license includes a specific feature.
-        Expired licenses lose all premium features.
-        """
-        effective_edition = self.get_effective_edition()
-        if effective_edition == 'professional':
-            return True
-        return False  # Community has no premium features
+        """Check if license includes a specific feature."""
+        return self.get_effective_edition() == 'professional'
 
     def is_professional(self):
-        """
-        Check if this is an active Professional license.
-        Returns False if expired, invalid, or Community.
-        """
+        """Check if this is an active, valid Professional license."""
         return (
             self.edition == 'professional' and
             self.is_valid and
-            not self.is_expired
+            not self.is_expired and
+            self.is_hardware_match
         )
 
     def check_limit(self, limit_type, current_count):
-        """
-        Check if a limit is exceeded.
-        Uses effective limits (Community limits if expired).
-        Returns: (allowed: bool, limit: int, message: str)
-        """
+        """Check if a limit is exceeded."""
         effective_limits = self.get_effective_limits()
 
         limit_map = {
@@ -264,28 +251,34 @@ class LicenseInfo:
             return True, -1, None
 
         if current_count >= limit:
-            if self.is_expired:
-                return False, limit, f'License expired. Community limit: {limit} {limit_type} maximum. Please renew your license.'
-            return False, limit, f'Community license limit: {limit} {limit_type} maximum. Upgrade to Professional for unlimited.'
+            edition = self.get_effective_edition()
+            if edition == 'community':
+                return False, limit, f'Community limit: {limit} {limit_type} maximum. Upgrade to Professional for unlimited.'
+            return False, limit, f'License limit: {limit} {limit_type} maximum.'
 
         return True, limit, None
 
     def get_status_message(self):
         """Get a human-readable status message"""
-        if not self.is_valid and self.error:
-            return f'Invalid license: {self.error}'
+        if self.error:
+            return f'License error: {self.error}'
+        if not self.is_valid:
+            return 'No valid license - Community edition'
+        if not self.is_hardware_match:
+            return 'License not valid for this installation'
         if self.is_expired:
-            return f'License expired on {self.expires_at}. Reverted to Community edition.'
+            return f'License expired on {self.expires_at}'
         if self.days_until_expiry is not None and self.days_until_expiry <= 30:
             return f'License expires in {self.days_until_expiry} days'
         if self.is_professional():
-            return f'Professional license active for {self.customer}'
+            return f'Professional license for {self.customer}'
         return 'Community edition'
 
     def to_dict(self):
         """Convert to dictionary for API responses"""
         effective_limits = self.get_effective_limits()
         effective_edition = self.get_effective_edition()
+        current_installation_id = get_installation_id()
 
         return {
             'edition': self.edition,
@@ -293,47 +286,36 @@ class LicenseInfo:
             'edition_name': LICENSE_TIERS.get(effective_edition, {}).get('name', 'Unknown'),
             'customer': self.customer,
             'license_id': self.license_id,
-            'is_valid': self.is_valid,
+            'is_valid': self.is_valid and self.is_hardware_match,
             'is_expired': self.is_expired,
             'is_professional': self.is_professional(),
+            'is_hardware_match': self.is_hardware_match,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
             'days_until_expiry': self.days_until_expiry,
             'status_message': self.get_status_message(),
             'limits': effective_limits,
-            'original_limits': {
-                'max_users': self.max_users,
-                'max_organizations': self.max_organizations,
-                'max_products': self.max_products
-            },
             'features': PROFESSIONAL_FEATURES if self.is_professional() else [],
             'powered_by_required': not self.is_professional(),
             'error': self.error,
-            # Activation tracking
-            'activation': {
-                'max_activations': self.max_activations,
-                'current_activations': self.current_activations,
-                'activation_exceeded': self.activation_exceeded,
-                'installation_id': self.installation_id[:12] + '...' if self.installation_id else None,
-                'is_single_use': self.max_activations == 1
-            }
+            # Installation info
+            'installation_id': current_installation_id,
+            'licensed_installation_id': self.licensed_installation_id
         }
 
 
-# Global license instance - ALWAYS reload from DB to ensure consistency
+# ============================================================================
+# License Loading and Caching
+# ============================================================================
+
 _current_license = None
 _license_load_time = None
-LICENSE_CACHE_SECONDS = 5  # Only cache for 5 seconds to reduce DB queries
+LICENSE_CACHE_SECONDS = 5
 
 
 def get_license():
-    """
-    Get current license info.
-    Always reads from database to ensure consistency across workers/requests.
-    Short cache to reduce DB queries within the same request.
-    """
+    """Get current license info with short caching."""
     global _current_license, _license_load_time
 
-    # Check if we need to reload (cache expired or never loaded)
     now = datetime.utcnow()
     if (_current_license is None or
         _license_load_time is None or
@@ -355,60 +337,29 @@ def reload_license():
 def load_license():
     """
     Load and validate license from database or environment.
-
-    Priority: Database > Environment Variable (SENTRIKAT_LICENSE)
-    This allows containerized deployments to set license via env.
-
-    Also checks activation status for single-use validation.
+    Checks hardware lock - license must match this installation's ID.
     """
-    from app.models import SystemSettings, LicenseActivation
+    from app.models import SystemSettings
 
     license_info = LicenseInfo()
     license_key = None
-    source = None
 
     try:
-        # First, check database
+        # Check database first
         setting = SystemSettings.query.filter_by(key='license_key').first()
         if setting and setting.value:
             license_key = setting.value
-            source = 'database'
-            logger.debug(f"License found in database: {len(license_key)} chars")
         else:
             # Fallback to environment variable
             env_key = os.environ.get('SENTRIKAT_LICENSE')
             if env_key:
                 license_key = env_key
-                source = 'environment'
-                logger.info("License loaded from SENTRIKAT_LICENSE environment variable")
 
         if not license_key:
-            logger.debug("No license key found, using Community edition")
             return license_info
 
-        # Validate the license
+        # Validate the license (includes hardware check)
         license_info = validate_license(license_key)
-        license_info.source = source  # Track where license came from
-
-        # Add installation ID
-        license_info.installation_id = get_installation_id()
-
-        # Check activation status if license is valid
-        if license_info.is_valid and license_info.license_id:
-            license_key_hash = hash_license_key(license_key)
-            activation_status = check_activation_status(
-                license_info.license_id,
-                license_key_hash,
-                license_info.max_activations
-            )
-            license_info.current_activations = activation_status['current_activations']
-            license_info.activation_exceeded = activation_status['exceeded']
-            license_info.activation_info = activation_status['current_activation']
-
-            # If activation limit exceeded and not this installation, mark as invalid
-            if activation_status['exceeded'] and not activation_status['is_current_installation']:
-                license_info.is_valid = False
-                license_info.error = f"License activation limit exceeded ({activation_status['current_activations']}/{license_info.max_activations}). This license is active on another installation."
 
     except Exception as e:
         logger.error(f"Error loading license: {e}", exc_info=True)
@@ -417,83 +368,29 @@ def load_license():
     return license_info
 
 
-def ensure_activation_table_exists():
-    """Ensure the license_activations table exists."""
-    try:
-        from app import db
-        from sqlalchemy import inspect
-        inspector = inspect(db.engine)
-        if 'license_activations' not in inspector.get_table_names():
-            from app.models import LicenseActivation
-            LicenseActivation.__table__.create(db.engine)
-            logger.info("Created license_activations table")
-    except Exception as e:
-        logger.warning(f"Could not ensure activation table exists: {e}")
-
-
-def check_activation_status(license_id, license_key_hash, max_activations):
-    """
-    Check activation status for a license.
-    Returns dict with activation details.
-    """
-    from app.models import LicenseActivation
-
-    # Ensure table exists
-    try:
-        ensure_activation_table_exists()
-    except:
-        pass
-
-    installation_id = get_installation_id()
-
-    # Get all active activations for this license
-    activations = LicenseActivation.query.filter_by(
-        license_id=license_id,
-        is_active=True
-    ).all()
-
-    current_activations = len(activations)
-
-    # Check if this installation is already activated
-    current_activation = None
-    is_current_installation = False
-    for activation in activations:
-        if activation.installation_id == installation_id:
-            current_activation = activation.to_dict()
-            is_current_installation = True
-            break
-
-    # Check if exceeded
-    exceeded = False
-    if max_activations > 0:  # -1 means unlimited
-        if current_activations >= max_activations and not is_current_installation:
-            exceeded = True
-
-    return {
-        'current_activations': current_activations,
-        'max_activations': max_activations,
-        'exceeded': exceeded,
-        'is_current_installation': is_current_installation,
-        'current_activation': current_activation,
-        'all_activations': [a.to_dict() for a in activations]
-    }
-
+# ============================================================================
+# License Validation
+# ============================================================================
 
 def validate_license(license_key):
     """
-    Validate a license key and return LicenseInfo
+    Validate a license key and check hardware lock.
 
     License format: base64(json_payload).base64(signature)
+
+    The payload contains an installation_id field that must match
+    this installation's ID for the license to be valid.
     """
     license_info = LicenseInfo()
 
     try:
-        # For development/testing: check for special dev key
+        # Development key for testing
         if license_key == 'SENTRIKAT-DEV-PROFESSIONAL':
             license_info.edition = 'professional'
-            license_info.customer = 'Development'
+            license_info.customer = 'Development Mode'
             license_info.license_id = 'DEV-001'
             license_info.is_valid = True
+            license_info.is_hardware_match = True  # Dev key works everywhere
             license_info.max_users = -1
             license_info.max_organizations = -1
             license_info.max_products = -1
@@ -517,32 +414,26 @@ def validate_license(license_key):
             license_info.error = f'Failed to decode license: {e}'
             return license_info
 
-        # Verify signature
+        # Verify RSA signature
         try:
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import padding
             from cryptography.hazmat.backends import default_backend
 
-            # Load public key
             public_key = serialization.load_pem_public_key(
                 LICENSE_PUBLIC_KEY.encode(),
                 backend=default_backend()
             )
-
-            # Decode signature
             signature = base64.urlsafe_b64decode(signature_b64 + '==')
-
-            # Verify
             public_key.verify(
                 signature,
                 payload_json.encode(),
                 padding.PKCS1v15(),
                 hashes.SHA256()
             )
-
         except Exception as e:
-            license_info.error = f'License signature invalid: {e}'
-            logger.warning(f"License validation failed: {e}")
+            license_info.error = 'Invalid license signature'
+            logger.warning(f"License signature verification failed: {e}")
             return license_info
 
         # Parse license data
@@ -550,6 +441,7 @@ def validate_license(license_key):
         license_info.customer = payload.get('customer')
         license_info.email = payload.get('email')
         license_info.edition = payload.get('edition', 'community')
+        license_info.licensed_installation_id = payload.get('installation_id')
 
         # Parse dates
         if payload.get('issued_at'):
@@ -561,25 +453,44 @@ def validate_license(license_key):
             license_info.days_until_expiry = days_left
             license_info.is_expired = days_left < 0
 
-        # Set limits based on edition
+        # Set limits
         tier = LICENSE_TIERS.get(license_info.edition, LICENSE_TIERS['community'])
         limits = payload.get('limits', {})
-
         license_info.max_users = limits.get('max_users', tier['max_users'])
         license_info.max_organizations = limits.get('max_organizations', tier['max_organizations'])
         license_info.max_products = limits.get('max_products', tier['max_products'])
         license_info.features = payload.get('features', tier['features'])
 
-        # Parse activation limits (default: 1 = single-use, -1 = unlimited)
-        license_info.max_activations = payload.get('max_activations', 1)
+        # CHECK HARDWARE LOCK
+        current_installation_id = get_installation_id()
+        licensed_installation_id = license_info.licensed_installation_id
 
-        # Mark as valid
+        if not licensed_installation_id:
+            # Legacy license without installation ID - allow for backwards compatibility
+            # but log a warning
+            logger.warning(f"License {license_info.license_id} has no installation_id - allowing for backwards compatibility")
+            license_info.is_hardware_match = True
+        elif licensed_installation_id == current_installation_id:
+            # Perfect match
+            license_info.is_hardware_match = True
+        else:
+            # Hardware mismatch - license is for different installation
+            license_info.is_hardware_match = False
+            license_info.error = (
+                f"License is for a different installation.\n"
+                f"Licensed for: {licensed_installation_id[:20]}...\n"
+                f"This system:  {current_installation_id[:20]}...\n\n"
+                f"Contact support to transfer this license."
+            )
+            logger.warning(f"Hardware mismatch: license for {licensed_installation_id[:16]}, this is {current_installation_id[:16]}")
+
+        # Mark signature as valid (hardware check is separate)
         license_info.is_valid = True
 
         if license_info.is_expired:
             logger.warning(f"License {license_info.license_id} has expired")
-        else:
-            logger.info(f"License validated: {license_info.edition} edition for {license_info.customer}")
+        elif license_info.is_hardware_match:
+            logger.info(f"License validated: {license_info.edition} for {license_info.customer}")
 
     except Exception as e:
         license_info.error = f'License validation error: {e}'
@@ -590,11 +501,9 @@ def validate_license(license_key):
 
 def save_license(license_key):
     """
-    Save license key to database, validate activation limits, and create activation record.
-
-    Returns: (success: bool, message: str)
+    Save license key to database after validation.
     """
-    from app.models import SystemSettings, LicenseActivation
+    from app.models import SystemSettings
     from app import db
 
     # Validate first
@@ -606,44 +515,10 @@ def save_license(license_key):
     if license_info.is_expired:
         return False, f'License has expired on {license_info.expires_at}'
 
-    # Check activation limits before saving
-    installation_id = get_installation_id()
-    license_key_hash = hash_license_key(license_key)
+    if not license_info.is_hardware_match:
+        return False, license_info.error or 'License is not valid for this installation'
 
-    # Ensure activation table exists
-    ensure_activation_table_exists()
-
-    # Check existing activations for this license
-    existing_activations = LicenseActivation.query.filter_by(
-        license_id=license_info.license_id,
-        is_active=True
-    ).all()
-
-    # Check if this installation is already activated
-    current_activation = None
-    for activation in existing_activations:
-        if activation.installation_id == installation_id:
-            current_activation = activation
-            break
-
-    # If not already activated, check limits
-    if not current_activation:
-        max_activations = license_info.max_activations
-        if max_activations > 0:  # -1 means unlimited
-            if len(existing_activations) >= max_activations:
-                # Provide details about existing activations
-                activation_details = []
-                for act in existing_activations:
-                    activation_details.append(f"- {act.hostname or 'Unknown'} (activated {act.first_activated_at.strftime('%Y-%m-%d') if act.first_activated_at else 'unknown'})")
-
-                details_str = '\n'.join(activation_details) if activation_details else 'No details available'
-                return False, (
-                    f"License activation limit reached ({len(existing_activations)}/{max_activations}).\n"
-                    f"This license is already activated on:\n{details_str}\n\n"
-                    f"Please deactivate one of the existing installations or contact support for additional licenses."
-                )
-
-    # Save license key to database
+    # Save to database
     setting = SystemSettings.query.filter_by(key='license_key').first()
     if setting:
         setting.value = license_key
@@ -656,130 +531,43 @@ def save_license(license_key):
         )
         db.session.add(setting)
 
-    # Create or update activation record
-    try:
-        hostname = socket.gethostname()
-    except:
-        hostname = 'Unknown'
-
-    # Try to get IP address
-    ip_address = None
-    try:
-        from flask import request
-        if request:
-            ip_address = request.remote_addr
-    except:
-        pass
-
-    if current_activation:
-        # Update existing activation
-        current_activation.license_key_hash = license_key_hash
-        current_activation.last_seen_at = datetime.utcnow()
-        current_activation.activation_count += 1
-        current_activation.hostname = hostname
-        if ip_address:
-            current_activation.ip_address = ip_address
-        logger.info(f"Updated activation record for license {license_info.license_id}")
-    else:
-        # Create new activation
-        new_activation = LicenseActivation(
-            license_id=license_info.license_id,
-            license_key_hash=license_key_hash,
-            installation_id=installation_id,
-            customer=license_info.customer,
-            edition=license_info.edition,
-            hostname=hostname,
-            ip_address=ip_address,
-            is_active=True,
-            first_activated_at=datetime.utcnow(),
-            last_seen_at=datetime.utcnow(),
-            activation_count=1
-        )
-        db.session.add(new_activation)
-        logger.info(f"Created new activation record for license {license_info.license_id}")
-
     db.session.commit()
-
-    # Reload global license
     reload_license()
 
-    activation_msg = ""
-    if license_info.max_activations > 0:
-        current_count = len(existing_activations) + (0 if current_activation else 1)
-        activation_msg = f" (Activation {current_count}/{license_info.max_activations})"
-
-    return True, f'License activated: {license_info.edition.title()} edition for {license_info.customer}{activation_msg}'
+    return True, f'License activated: {license_info.edition.title()} edition for {license_info.customer}'
 
 
 def remove_license():
-    """
-    Remove license and revert to Community.
-    Marks the activation as deactivated to free up the license slot.
-    """
-    from app.models import SystemSettings, LicenseActivation
+    """Remove license and revert to Community."""
+    from app.models import SystemSettings
     from app import db
 
-    installation_id = get_installation_id()
-
-    # First, get the current license to find the activation record
     setting = SystemSettings.query.filter_by(key='license_key').first()
-    if setting and setting.value:
-        # Mark activation as deactivated
-        license_info = validate_license(setting.value)
-        if license_info.license_id:
-            activation = LicenseActivation.query.filter_by(
-                license_id=license_info.license_id,
-                installation_id=installation_id,
-                is_active=True
-            ).first()
-
-            if activation:
-                activation.is_active = False
-                activation.deactivated_at = datetime.utcnow()
-                activation.deactivation_reason = 'Manual removal by admin'
-                logger.info(f"Deactivated license {license_info.license_id} on this installation")
-
-    # Remove license key
     if setting:
         db.session.delete(setting)
-
-    db.session.commit()
+        db.session.commit()
 
     reload_license()
-    return True, 'License removed and deactivated. Reverted to Community edition.'
+    return True, 'License removed. Reverted to Community edition.'
 
 
 # ============================================================================
-# Feature Gating Decorators
+# Feature Gating
 # ============================================================================
 
 def requires_professional(feature=None):
-    """
-    Decorator to require Professional license for a route
-
-    Usage:
-        @requires_professional()
-        def my_route():
-            ...
-
-        @requires_professional('ldap')
-        def ldap_config():
-            ...
-    """
+    """Decorator to require Professional license for a route."""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             license_info = get_license()
-
             if not license_info.is_professional():
                 feature_name = feature or 'This feature'
                 return jsonify({
                     'error': f'{feature_name} requires a Professional license',
                     'license_required': True,
-                    'current_edition': license_info.edition,
-                    'upgrade_message': 'Upgrade to Professional to unlock all features'
+                    'current_edition': license_info.get_effective_edition()
                 }), 403
-
             return f(*args, **kwargs)
         return decorated_function
     return decorator
@@ -788,30 +576,24 @@ def requires_professional(feature=None):
 def check_user_limit():
     """Check if user limit is reached"""
     from app.models import User
-
     license_info = get_license()
     current_users = User.query.filter_by(is_active=True).count()
-
     return license_info.check_limit('users', current_users)
 
 
 def check_org_limit():
     """Check if organization limit is reached"""
     from app.models import Organization
-
     license_info = get_license()
     current_orgs = Organization.query.count()
-
     return license_info.check_limit('organizations', current_orgs)
 
 
 def check_product_limit():
     """Check if product limit is reached"""
     from app.models import Product
-
     license_info = get_license()
     current_products = Product.query.count()
-
     return license_info.check_limit('products', current_products)
 
 
@@ -819,12 +601,10 @@ def check_product_limit():
 # License API Routes
 # ============================================================================
 
-from flask import Blueprint
+from flask import Blueprint, request
 from app import csrf
 
 license_bp = Blueprint('license', __name__)
-
-# Exempt license API from CSRF (uses JSON and session auth)
 csrf.exempt(license_bp)
 
 
@@ -832,16 +612,13 @@ csrf.exempt(license_bp)
 def get_license_info():
     """Get current license information"""
     from app.auth import get_current_user
+    from app.models import User, Organization, Product
 
     user = get_current_user()
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
     license_info = get_license()
-
-    # Get current usage
-    from app.models import User, Organization, Product
-
     response = license_info.to_dict()
     response['usage'] = {
         'users': User.query.filter_by(is_active=True).count(),
@@ -855,7 +632,6 @@ def get_license_info():
 @license_bp.route('/api/license', methods=['POST'])
 def activate_license():
     """Activate a license key"""
-    from flask import request
     from app.auth import get_current_user
     from app.logging_config import log_audit_event
 
@@ -873,11 +649,10 @@ def activate_license():
 
     if success:
         log_audit_event('UPDATE', 'license', details=f'License activated: {message}')
-        license_info = get_license()
         return jsonify({
             'success': True,
             'message': message,
-            'license': license_info.to_dict()
+            'license': get_license().to_dict()
         })
     else:
         return jsonify({'error': message}), 400
@@ -894,8 +669,7 @@ def deactivate_license():
         return jsonify({'error': 'Super admin access required'}), 403
 
     success, message = remove_license()
-
-    log_audit_event('UPDATE', 'license', details='License removed, reverted to Community')
+    log_audit_event('UPDATE', 'license', details='License removed')
 
     return jsonify({
         'success': True,
@@ -904,43 +678,9 @@ def deactivate_license():
     })
 
 
-@license_bp.route('/api/license/activations', methods=['GET'])
-def get_license_activations():
-    """Get all activations for the current license"""
-    from app.auth import get_current_user
-    from app.models import LicenseActivation
-
-    user = get_current_user()
-    if not user or not user.is_super_admin():
-        return jsonify({'error': 'Super admin access required'}), 403
-
-    license_info = get_license()
-    if not license_info.license_id:
-        return jsonify({
-            'activations': [],
-            'message': 'No license active'
-        })
-
-    # Get all activations (including deactivated for history)
-    activations = LicenseActivation.query.filter_by(
-        license_id=license_info.license_id
-    ).order_by(LicenseActivation.first_activated_at.desc()).all()
-
-    installation_id = get_installation_id()
-
-    return jsonify({
-        'license_id': license_info.license_id,
-        'max_activations': license_info.max_activations,
-        'current_installation_id': installation_id[:12] + '...',
-        'activations': [a.to_dict() for a in activations],
-        'active_count': sum(1 for a in activations if a.is_active),
-        'total_count': len(activations)
-    })
-
-
-@license_bp.route('/api/license/installation', methods=['GET'])
-def get_installation_info():
-    """Get this installation's ID and details"""
+@license_bp.route('/api/license/installation-id', methods=['GET'])
+def get_installation_id_api():
+    """Get this installation's ID for license requests"""
     from app.auth import get_current_user
 
     user = get_current_user()
@@ -955,7 +695,12 @@ def get_installation_info():
         hostname = 'Unknown'
 
     return jsonify({
-        'installation_id': installation_id[:12] + '...',  # Partial for privacy
-        'full_id': installation_id if user.is_super_admin() else None,
-        'hostname': hostname
+        'installation_id': installation_id,
+        'hostname': hostname,
+        'instructions': (
+            'To request a license:\n'
+            '1. Copy your Installation ID above\n'
+            '2. Send it to SentriKat sales with your company details\n'
+            '3. You will receive a license key locked to this installation'
+        )
     })
