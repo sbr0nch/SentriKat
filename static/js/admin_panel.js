@@ -3042,8 +3042,9 @@ async function checkLdapPermissions() {
             // LDAP Groups tab: only visible to super_admin (system-level config)
             const canAccessLdapGroups = user.role === 'super_admin' || user.is_admin === true;
 
-            const ldapUsersTab = document.getElementById('ldap-users-tab-item');
-            const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+            // Target the buttons directly (sidebar layout)
+            const ldapUsersTab = document.getElementById('ldap-users-tab');
+            const ldapGroupsTab = document.getElementById('ldap-groups-tab');
 
             if (ldapUsersTab && canAccessLdapUsers) {
                 ldapUsersTab.style.display = 'block';
@@ -4917,9 +4918,9 @@ function applyLicenseRestrictions() {
     // LDAP Features - requires 'ldap' license
     // ========================================
     if (!hasFeature('ldap')) {
-        // Hide LDAP tabs completely for Community
-        const ldapUsersTab = document.getElementById('ldap-users-tab-item');
-        const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+        // Hide LDAP tabs completely for Community (sidebar layout)
+        const ldapUsersTab = document.getElementById('ldap-users-tab');
+        const ldapGroupsTab = document.getElementById('ldap-groups-tab');
         if (ldapUsersTab) ldapUsersTab.style.display = 'none';
         if (ldapGroupsTab) ldapGroupsTab.style.display = 'none';
 
