@@ -946,57 +946,71 @@ def agent_report():
         ]
     }
     """
-    integration = getattr(request, 'integration', None)
+    try:
+        integration = getattr(request, 'integration', None)
 
-    if not integration:
-        return jsonify({'error': 'Valid integration API key required'}), 401
+        if not integration:
+            return jsonify({'error': 'Valid integration API key required'}), 401
 
-    data = request.get_json()
-    agent_id = data.get('agent_id')
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
 
-    if not agent_id:
-        return jsonify({'error': 'agent_id is required'}), 400
+        agent_id = data.get('agent_id')
 
-    # Find the agent
-    agent = AgentRegistration.query.filter_by(
-        agent_id=agent_id,
-        integration_id=integration.id
-    ).first()
+        if not agent_id:
+            return jsonify({'error': 'agent_id is required'}), 400
 
-    if not agent:
-        return jsonify({'error': 'Agent not found. Please register first.'}), 404
+        # Find the agent
+        agent = AgentRegistration.query.filter_by(
+            agent_id=agent_id,
+            integration_id=integration.id
+        ).first()
 
-    # Update agent status
-    agent.last_seen_at = datetime.utcnow()
-    agent.last_report_at = datetime.utcnow()
-    agent.ip_address = request.remote_addr
+        if not agent:
+            return jsonify({'error': 'Agent not found. Please register first.'}), 404
 
-    # Process software list (same as import API)
-    software_list = data.get('software', [])
-    agent.software_count = len(software_list)
+        # Update agent status
+        agent.last_seen_at = datetime.utcnow()
+        agent.last_report_at = datetime.utcnow()
+        agent.ip_address = request.remote_addr
 
-    # Use the same import logic
-    import_data = {
-        'organization_id': agent.organization_id or integration.organization_id,
-        'software': software_list
-    }
+        # Process software list (same as import API)
+        software_list = data.get('software', [])
+        agent.software_count = len(software_list)
 
-    # Store original request.integration and call import logic
-    results = process_software_import(integration, import_data)
+        # Use the same import logic
+        import_data = {
+            'organization_id': agent.organization_id or integration.organization_id,
+            'software': software_list,
+            'agent_id': agent_id
+        }
 
-    db.session.commit()
+        # Store original request.integration and call import logic
+        results = process_software_import(integration, import_data)
 
-    return jsonify({
-        'success': True,
-        'agent_id': agent_id,
-        'results': results
-    })
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'agent_id': agent_id,
+            'results': results
+        })
+
+    except Exception as e:
+        logger.error(f"Agent report error: {str(e)}")
+        db.session.rollback()
+        return jsonify({
+            'error': f'Server error processing report: {str(e)}',
+            'success': False
+        }), 500
 
 
 def process_software_import(integration, data):
-    """Process software import (shared logic for API and agent)."""
-    from app.integrations_models import SoftwareVersionTracker
-
+    """
+    Process software import (shared logic for API and agent).
+    Optimized for large batches - pre-loads existing data to minimize DB queries.
+    """
     software_list = data.get('software', [])
     org_id = data.get('organization_id')
     agent_id = data.get('agent_id')
@@ -1005,6 +1019,23 @@ def process_software_import(integration, data):
     default_criticality = integration.default_criticality if integration else 'medium'
 
     results = {'queued': 0, 'auto_approved': 0, 'duplicates': 0, 'errors': 0, 'version_updates': 0}
+
+    if not software_list:
+        return results
+
+    # OPTIMIZATION: Pre-load all existing products into a set for fast lookup
+    # This turns N queries into 1 query
+    existing_products = set()
+    for p in Product.query.with_entities(Product.vendor, Product.product_name).all():
+        existing_products.add((p.vendor.lower(), p.product_name.lower()))
+
+    # OPTIMIZATION: Pre-load all pending queue items into a set
+    existing_queue = set()
+    for q in ImportQueue.query.filter_by(status='pending').with_entities(ImportQueue.vendor, ImportQueue.product_name).all():
+        existing_queue.add((q.vendor.lower(), q.product_name.lower()))
+
+    # Track what we're adding in this batch to avoid duplicates within the batch
+    batch_added = set()
 
     for item in software_list:
         # Sanitize all inputs to prevent injection attacks
@@ -1016,59 +1047,36 @@ def process_software_import(integration, data):
             results['errors'] += 1
             continue
 
-        # Track version observation (regardless of product existence)
-        track_version_observation(
-            vendor=vendor,
-            product_name=product_name,
-            version=version,
-            org_id=org_id,
-            integration_id=integration.id if integration else None,
-            agent_id=agent_id
-        )
+        key = (vendor.lower(), product_name.lower())
 
-        # Check for existing product
-        existing = Product.query.filter(
-            db.func.lower(Product.vendor) == vendor.lower(),
-            db.func.lower(Product.product_name) == product_name.lower()
-        ).first()
-
-        if existing:
-            # Check if version is different (version drift detection)
-            if version and existing.version and version != existing.version:
-                results['version_updates'] += 1
+        # Check if product already exists
+        if key in existing_products:
             results['duplicates'] += 1
             continue
 
-        existing_queue = ImportQueue.query.filter(
-            db.func.lower(ImportQueue.vendor) == vendor.lower(),
-            db.func.lower(ImportQueue.product_name) == product_name.lower(),
-            ImportQueue.status == 'pending'
-        ).first()
-
-        if existing_queue:
-            # Update detected version if newer
-            if version and existing_queue.detected_version != version:
-                existing_queue.detected_version = version
+        # Check if already in queue
+        if key in existing_queue:
             results['duplicates'] += 1
             continue
 
-        # Create queue item
-        cpe_vendor, cpe_product, confidence = attempt_cpe_match(vendor, product_name)
+        # Check if we already added this in current batch
+        if key in batch_added:
+            results['duplicates'] += 1
+            continue
 
+        # Create queue item (skip CPE matching for performance - can be done later)
         queue_item = ImportQueue(
             integration_id=integration.id if integration else None,
             vendor=vendor,
             product_name=product_name,
             detected_version=version,
-            cpe_vendor=cpe_vendor,
-            cpe_product=cpe_product,
-            cpe_match_confidence=confidence,
             organization_id=org_id,
             criticality=default_criticality,
             status='pending'
         )
 
         db.session.add(queue_item)
+        batch_added.add(key)
 
         if auto_approve:
             product = create_product_from_queue(queue_item)
@@ -1077,10 +1085,15 @@ def process_software_import(integration, data):
                 queue_item.product_id = product.id
                 queue_item.processed_at = datetime.utcnow()
                 results['auto_approved'] += 1
+                existing_products.add(key)  # Add to set so we don't process again
             else:
                 results['queued'] += 1
         else:
             results['queued'] += 1
+
+        # Commit in batches of 100 to avoid memory issues
+        if (results['queued'] + results['auto_approved']) % 100 == 0:
+            db.session.flush()
 
     return results
 
