@@ -1569,8 +1569,16 @@ async function deleteOrganization(orgId, displayName) {
             loadOrganizations();
             loadOrganizationsDropdown();
         } else {
-            const error = await response.json();
-            showToast(`Error: ${error.error}`, 'danger');
+            // Safely try to parse JSON error response
+            let errorMessage = 'Failed to delete organization';
+            try {
+                const error = await response.json();
+                errorMessage = error.error || errorMessage;
+            } catch (parseError) {
+                // Server returned non-JSON response (e.g., HTML error page)
+                errorMessage = `Server error (${response.status})`;
+            }
+            showToast(`Error: ${errorMessage}`, 'danger');
         }
     } catch (error) {
         showToast(`Error deleting organization: ${error.message}`, 'danger');

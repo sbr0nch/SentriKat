@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
 from app import db, csrf
-from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog
+from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, UserOrganization, product_organizations
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
@@ -1401,7 +1401,7 @@ def update_organization(org_id):
 @bp.route('/api/organizations/<int:org_id>', methods=['DELETE'])
 @admin_required
 def delete_organization(org_id):
-    """Delete an organization"""
+    """Delete an organization and all associated data"""
     org = Organization.query.get_or_404(org_id)
 
     # Check if organization has products
@@ -1411,9 +1411,26 @@ def delete_organization(org_id):
             'error': f'Cannot delete organization with {product_count} products. Please reassign or delete products first.'
         }), 400
 
-    db.session.delete(org)
-    db.session.commit()
-    return jsonify({'success': True})
+    try:
+        # Delete user organization memberships first
+        UserOrganization.query.filter_by(organization_id=org_id).delete()
+
+        # Delete product-organization associations
+        db.session.execute(product_organizations.delete().where(product_organizations.c.organization_id == org_id))
+
+        # Clear organization_id from users (set to NULL instead of deleting users)
+        User.query.filter_by(organization_id=org_id).update({'organization_id': None})
+
+        # Delete alert logs for this organization
+        AlertLog.query.filter_by(organization_id=org_id).delete()
+
+        # Now delete the organization
+        db.session.delete(org)
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to delete organization: {str(e)}'}), 500
 
 @bp.route('/api/organizations/<int:org_id>/smtp/test', methods=['POST'])
 @admin_required
