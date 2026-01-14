@@ -137,6 +137,9 @@ class ImportQueue(db.Model):
     # Criticality assignment
     criticality = db.Column(db.String(20), default='medium')
 
+    # App type (client/server/both/unknown)
+    app_type = db.Column(db.String(20), default='unknown')
+
     # Status
     status = db.Column(db.String(20), default='pending', index=True)
     # Status: 'pending', 'approved', 'rejected', 'duplicate', 'error'
@@ -202,6 +205,7 @@ class ImportQueue(db.Model):
             'organization_id': self.organization_id,
             'organization_name': self.organization.display_name if self.organization else None,
             'criticality': self.criticality,
+            'app_type': self.app_type or 'unknown',
             'status': self.status,
             'source_data': self.get_source_data(),
             'created_at': self.created_at.isoformat() if self.created_at else None,

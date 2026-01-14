@@ -370,6 +370,7 @@ def create_product_from_queue(queue_item):
             version=queue_item.selected_version or queue_item.detected_version,
             organization_id=queue_item.organization_id,
             criticality=queue_item.criticality,
+            app_type=queue_item.app_type or 'unknown',
             cpe_vendor=queue_item.cpe_vendor,
             cpe_product=queue_item.cpe_product,
             active=True
@@ -445,6 +446,8 @@ def update_queue_item(item_id):
         item.organization_id = data['organization_id']
     if 'criticality' in data:
         item.criticality = data['criticality']
+    if 'app_type' in data:
+        item.app_type = data['app_type']
     if 'cpe_vendor' in data:
         item.cpe_vendor = data['cpe_vendor']
     if 'cpe_product' in data:
@@ -472,6 +475,8 @@ def approve_queue_item(item_id):
         item.organization_id = data['organization_id']
     if 'criticality' in data:
         item.criticality = data['criticality']
+    if 'app_type' in data:
+        item.app_type = data['app_type']
 
     # Create the product
     product = create_product_from_queue(item)

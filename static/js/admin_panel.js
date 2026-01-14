@@ -5220,7 +5220,7 @@ async function loadImportQueue() {
 
     tbody.innerHTML = `
         <tr>
-            <td colspan="7" class="text-center py-4 text-muted">
+            <td colspan="8" class="text-center py-4 text-muted">
                 <div class="spinner-border spinner-border-sm me-2"></div>Loading...
             </td>
         </tr>
@@ -5236,7 +5236,7 @@ async function loadImportQueue() {
         if (importQueueData.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center py-4 text-muted">
+                    <td colspan="8" class="text-center py-4 text-muted">
                         <i class="bi bi-inbox" style="font-size: 2rem;"></i>
                         <p class="mb-0 mt-2">No items in queue</p>
                     </td>
@@ -5297,6 +5297,17 @@ async function loadImportQueue() {
                         ` : `<span class="badge bg-${getCriticalityColor(item.criticality)}">${item.criticality || 'medium'}</span>`}
                     </td>
                     <td>
+                        ${item.status === 'pending' ? `
+                            <select class="form-select form-select-sm" style="width: 100px;"
+                                    onchange="updateQueueItemAppType(${item.id}, this.value)">
+                                <option value="unknown" ${(item.app_type || 'unknown') === 'unknown' ? 'selected' : ''}>Unknown</option>
+                                <option value="client" ${item.app_type === 'client' ? 'selected' : ''}>Client</option>
+                                <option value="server" ${item.app_type === 'server' ? 'selected' : ''}>Server</option>
+                                <option value="both" ${item.app_type === 'both' ? 'selected' : ''}>Both</option>
+                            </select>
+                        ` : `<span class="badge bg-${getAppTypeBadgeColor(item.app_type)}">${item.app_type || 'unknown'}</span>`}
+                    </td>
+                    <td>
                         <small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small>
                     </td>
                     <td>
@@ -5321,7 +5332,7 @@ async function loadImportQueue() {
     } catch (error) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="text-center py-4 text-danger">
+                <td colspan="8" class="text-center py-4 text-danger">
                     <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
                     <p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p>
                 </td>
@@ -5333,6 +5344,11 @@ async function loadImportQueue() {
 function getCriticalityColor(criticality) {
     const colors = { critical: 'danger', high: 'warning', medium: 'info', low: 'secondary' };
     return colors[criticality] || 'secondary';
+}
+
+function getAppTypeBadgeColor(appType) {
+    const colors = { client: 'primary', server: 'success', both: 'info', unknown: 'secondary' };
+    return colors[appType] || 'secondary';
 }
 
 function toggleQueueSelect(itemId, checkbox) {
@@ -5399,6 +5415,18 @@ async function updateQueueItemCriticality(itemId, criticality) {
         });
     } catch (error) {
         showToast('Error updating criticality: ' + error.message, 'danger');
+    }
+}
+
+async function updateQueueItemAppType(itemId, appType) {
+    try {
+        await fetch(`/api/import/queue/${itemId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ app_type: appType })
+        });
+    } catch (error) {
+        showToast('Error updating app type: ' + error.message, 'danger');
     }
 }
 

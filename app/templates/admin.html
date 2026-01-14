@@ -295,6 +295,19 @@
                                 </select>
                             </div>
 
+                            <!-- App Type -->
+                            <div class="col-md-6">
+                                <label for="appType" class="form-label">
+                                    App Type <span class="text-muted small">(optional)</span>
+                                </label>
+                                <select class="form-select" id="appType">
+                                    <option value="unknown" selected>Unknown</option>
+                                    <option value="client">Client - End-user Application</option>
+                                    <option value="server">Server - Backend Service</option>
+                                    <option value="both">Both - Client & Server</option>
+                                </select>
+                            </div>
+
                             <!-- Active Toggle -->
                             <div class="col-md-6">
                                 <label class="form-label">Status</label>
@@ -770,6 +783,7 @@
         document.getElementById('productForm').reset();
         document.getElementById('active').checked = true;
         document.getElementById('criticality').value = 'medium';
+        document.getElementById('appType').value = 'unknown';
         document.getElementById('matchType').value = 'auto';
 
         // Reset NVD search UI (primary method)
@@ -838,6 +852,7 @@
             document.getElementById('productName').value = product.product_name;
             document.getElementById('version').value = product.version || '';
             document.getElementById('criticality').value = product.criticality || 'medium';
+            document.getElementById('appType').value = product.app_type || 'unknown';
             document.getElementById('keywords').value = product.keywords || '';
             document.getElementById('description').value = product.description || '';
             document.getElementById('active').checked = product.active;
@@ -883,6 +898,7 @@
             product_name: productName,
             version: document.getElementById('version').value.trim(),
             criticality: criticality,
+            app_type: document.getElementById('appType').value || 'unknown',
             keywords: document.getElementById('keywords').value.trim(),
             description: document.getElementById('description').value.trim(),
             active: document.getElementById('active').checked,

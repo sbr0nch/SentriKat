@@ -384,6 +384,7 @@ def create_product():
         description=data.get('description'),
         active=data.get('active', True),
         criticality=data.get('criticality', 'medium'),
+        app_type=data.get('app_type', 'unknown'),
         # CPE fields for NVD matching
         cpe_vendor=data.get('cpe_vendor'),
         cpe_product=data.get('cpe_product'),
@@ -488,6 +489,8 @@ def update_product(product_id):
         product.active = data['active']
     if 'criticality' in data:
         product.criticality = data['criticality']
+    if 'app_type' in data:
+        product.app_type = data['app_type']
     # CPE fields for NVD matching
     if 'cpe_vendor' in data:
         product.cpe_vendor = data['cpe_vendor']
