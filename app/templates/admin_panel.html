@@ -37,6 +37,12 @@
                 <i class="bi bi-building me-2"></i>Organizations
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button">
+                <i class="bi bi-plug me-2"></i>Integrations
+                <span class="badge bg-secondary ms-1" id="importQueueBadge" style="display: none;">0</span>
+            </button>
+        </li>
         {% if current_user and current_user.is_super_admin() %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
@@ -474,6 +480,195 @@
                                             <td colspan="9" class="text-center py-4">
                                                 <div class="spinner-border text-primary" role="status"></div>
                                                 <p class="text-muted mt-2">Loading sync history...</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Integrations Tab -->
+        <div class="tab-pane fade" id="integrations" role="tabpanel">
+            <!-- Integrations Sub-Tabs -->
+            <ul class="nav nav-pills mb-4" id="integrationsTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="import-queue-tab" data-bs-toggle="pill" data-bs-target="#importQueue" type="button">
+                        <i class="bi bi-inbox me-2"></i>Import Queue
+                        <span class="badge bg-primary ms-1" id="importQueueCount">0</span>
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="connectors-tab" data-bs-toggle="pill" data-bs-target="#connectors" type="button">
+                        <i class="bi bi-plug me-2"></i>Connectors
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="agents-tab" data-bs-toggle="pill" data-bs-target="#agents" type="button">
+                        <i class="bi bi-pc-display me-2"></i>Discovery Agents
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content" id="integrationsTabContent">
+                <!-- Import Queue Sub-Tab -->
+                <div class="tab-pane fade show active" id="importQueue" role="tabpanel">
+                    <div class="alert alert-info mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Software discovered from integrations and agents appears here for review before being added to your product inventory.
+                    </div>
+
+                    <!-- Bulk Actions -->
+                    <div class="mb-3 d-flex justify-content-between align-items-center">
+                        <div class="btn-group">
+                            <button class="btn btn-success btn-sm" onclick="bulkApproveQueue()" id="bulkApproveBtn" disabled>
+                                <i class="bi bi-check-all me-1"></i>Approve Selected
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="bulkRejectQueue()" id="bulkRejectBtn" disabled>
+                                <i class="bi bi-x-lg me-1"></i>Reject Selected
+                            </button>
+                        </div>
+                        <div>
+                            <select class="form-select form-select-sm d-inline-block w-auto" id="queueFilterStatus" onchange="loadImportQueue()">
+                                <option value="pending">Pending</option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="">All</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Import Queue Table -->
+                    <div class="card">
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width: 40px;">
+                                                <input type="checkbox" class="form-check-input" id="selectAllQueue" onchange="toggleSelectAllQueue()">
+                                            </th>
+                                            <th>Software</th>
+                                            <th>Version</th>
+                                            <th>Organization</th>
+                                            <th>Criticality</th>
+                                            <th>Source</th>
+                                            <th style="width: 120px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="importQueueTable">
+                                        <tr>
+                                            <td colspan="7" class="text-center py-4 text-muted">
+                                                <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                                                <p class="mb-0 mt-2">Loading import queue...</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Connectors Sub-Tab -->
+                <div class="tab-pane fade" id="connectors" role="tabpanel">
+                    <div class="alert alert-info mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Connect to external software inventory systems (PDQ, SCCM, Intune, etc.) to automatically import your software list.
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-plug me-2"></i>Integration Connectors</span>
+                            <button class="btn btn-primary btn-sm" onclick="showCreateIntegrationModal()">
+                                <i class="bi bi-plus-circle me-1"></i>Add Integration
+                            </button>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Type</th>
+                                            <th>Organization</th>
+                                            <th>Last Sync</th>
+                                            <th>Status</th>
+                                            <th style="width: 150px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="integrationsTable">
+                                        <tr>
+                                            <td colspan="6" class="text-center py-4 text-muted">
+                                                <i class="bi bi-plug" style="font-size: 2rem;"></i>
+                                                <p class="mb-0 mt-2">No integrations configured</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Discovery Agents Sub-Tab -->
+                <div class="tab-pane fade" id="agents" role="tabpanel">
+                    <div class="alert alert-info mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Deploy lightweight agents on Windows/Linux endpoints to automatically discover installed software.
+                    </div>
+
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title"><i class="bi bi-windows me-2 text-primary"></i>Windows Agent</h5>
+                                    <p class="card-text small text-muted">PowerShell script that reads installed programs from registry and reports to SentriKat.</p>
+                                    <button class="btn btn-outline-primary btn-sm" onclick="downloadWindowsAgent()">
+                                        <i class="bi bi-download me-1"></i>Download Script
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title"><i class="bi bi-ubuntu me-2 text-warning"></i>Linux Agent</h5>
+                                    <p class="card-text small text-muted">Bash script that reads packages from dpkg/rpm/snap and reports to SentriKat.</p>
+                                    <button class="btn btn-outline-primary btn-sm" onclick="downloadLinuxAgent()">
+                                        <i class="bi bi-download me-1"></i>Download Script
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-pc-display me-2"></i>Registered Agents
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Hostname</th>
+                                            <th>OS</th>
+                                            <th>Organization</th>
+                                            <th>Last Seen</th>
+                                            <th>Software Count</th>
+                                            <th style="width: 100px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="agentsTable">
+                                        <tr>
+                                            <td colspan="6" class="text-center py-4 text-muted">
+                                                <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
+                                                <p class="mb-0 mt-2">No agents registered yet</p>
+                                                <small>Create an agent integration and deploy the script to get started</small>
                                             </td>
                                         </tr>
                                     </tbody>

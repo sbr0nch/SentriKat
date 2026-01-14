@@ -5179,3 +5179,889 @@ document.addEventListener('DOMContentLoaded', function() {
     // Also handle hash changes (e.g., if user clicks back button)
     window.addEventListener('hashchange', handleUrlHash);
 });
+
+// ============================================================================
+// INTEGRATIONS - Import Queue, Connectors, Agents
+// ============================================================================
+
+let selectedQueueItems = new Set();
+let integrationsList = [];
+let importQueueData = [];
+
+// Load import queue count for badge
+async function loadImportQueueCount() {
+    try {
+        const response = await fetch('/api/import/queue/count');
+        if (response.ok) {
+            const data = await response.json();
+            const count = data.pending || 0;
+            const badge = document.getElementById('importQueueBadge');
+            const countEl = document.getElementById('importQueueCount');
+
+            if (badge) {
+                badge.textContent = count;
+                badge.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+            if (countEl) {
+                countEl.textContent = count;
+            }
+        }
+    } catch (error) {
+        console.error('Error loading queue count:', error);
+    }
+}
+
+// Load import queue
+async function loadImportQueue() {
+    const status = document.getElementById('queueFilterStatus')?.value || 'pending';
+    const tbody = document.getElementById('importQueueTable');
+
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="7" class="text-center py-4 text-muted">
+                <div class="spinner-border spinner-border-sm me-2"></div>Loading...
+            </td>
+        </tr>
+    `;
+
+    try {
+        const response = await fetch(`/api/import/queue?status=${status}`);
+        if (!response.ok) throw new Error('Failed to load queue');
+
+        const data = await response.json();
+        importQueueData = data.items || [];
+
+        if (importQueueData.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-4 text-muted">
+                        <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                        <p class="mb-0 mt-2">No items in queue</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = importQueueData.map(item => {
+            const versions = item.available_versions || [];
+            const versionOptions = versions.length > 0
+                ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === item.selected_version ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
+                : `<option value="${escapeHtml(item.detected_version || '')}">${escapeHtml(item.detected_version || 'Any')}</option>`;
+
+            const confidenceBadge = item.cpe_match_confidence
+                ? `<span class="badge ${item.cpe_match_confidence > 0.7 ? 'bg-success' : item.cpe_match_confidence > 0.4 ? 'bg-warning' : 'bg-danger'}" title="CPE Match Confidence">${Math.round(item.cpe_match_confidence * 100)}%</span>`
+                : '';
+
+            return `
+                <tr data-queue-id="${item.id}">
+                    <td>
+                        <input type="checkbox" class="form-check-input queue-item-checkbox"
+                               data-queue-id="${item.id}" onchange="toggleQueueSelect(${item.id}, this)"
+                               ${item.status !== 'pending' ? 'disabled' : ''}>
+                    </td>
+                    <td>
+                        <div class="fw-semibold">${escapeHtml(item.vendor)}</div>
+                        <div class="text-muted small">${escapeHtml(item.product_name)}</div>
+                        ${confidenceBadge}
+                    </td>
+                    <td>
+                        ${item.status === 'pending' ? `
+                            <select class="form-select form-select-sm" style="width: 120px;"
+                                    onchange="updateQueueItemVersion(${item.id}, this.value)">
+                                <option value="">Any version</option>
+                                ${versionOptions}
+                            </select>
+                        ` : `<span class="text-muted">${escapeHtml(item.selected_version || item.detected_version || 'Any')}</span>`}
+                    </td>
+                    <td>
+                        ${item.status === 'pending' ? `
+                            <select class="form-select form-select-sm" style="width: 140px;"
+                                    onchange="updateQueueItemOrg(${item.id}, this.value)">
+                                <option value="">Select org...</option>
+                                ${organizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name)}</option>`).join('')}
+                            </select>
+                        ` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}
+                    </td>
+                    <td>
+                        ${item.status === 'pending' ? `
+                            <select class="form-select form-select-sm" style="width: 100px;"
+                                    onchange="updateQueueItemCriticality(${item.id}, this.value)">
+                                <option value="critical" ${item.criticality === 'critical' ? 'selected' : ''}>Critical</option>
+                                <option value="high" ${item.criticality === 'high' ? 'selected' : ''}>High</option>
+                                <option value="medium" ${item.criticality === 'medium' ? 'selected' : ''}>Medium</option>
+                                <option value="low" ${item.criticality === 'low' ? 'selected' : ''}>Low</option>
+                            </select>
+                        ` : `<span class="badge bg-${getCriticalityColor(item.criticality)}">${item.criticality || 'medium'}</span>`}
+                    </td>
+                    <td>
+                        <small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small>
+                    </td>
+                    <td>
+                        ${item.status === 'pending' ? `
+                            <button class="btn btn-success btn-sm me-1" onclick="approveQueueItem(${item.id})" title="Approve">
+                                <i class="bi bi-check"></i>
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="rejectQueueItem(${item.id})" title="Reject">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        ` : `
+                            <span class="badge bg-${item.status === 'approved' ? 'success' : 'secondary'}">${item.status}</span>
+                        `}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Update count
+        loadImportQueueCount();
+
+    } catch (error) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-4 text-danger">
+                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                    <p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function getCriticalityColor(criticality) {
+    const colors = { critical: 'danger', high: 'warning', medium: 'info', low: 'secondary' };
+    return colors[criticality] || 'secondary';
+}
+
+function toggleQueueSelect(itemId, checkbox) {
+    if (checkbox.checked) {
+        selectedQueueItems.add(itemId);
+    } else {
+        selectedQueueItems.delete(itemId);
+    }
+    updateQueueBulkButtons();
+}
+
+function toggleSelectAllQueue() {
+    const selectAll = document.getElementById('selectAllQueue');
+    const checkboxes = document.querySelectorAll('.queue-item-checkbox:not(:disabled)');
+
+    checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+        const itemId = parseInt(cb.dataset.queueId);
+        if (selectAll.checked) {
+            selectedQueueItems.add(itemId);
+        } else {
+            selectedQueueItems.delete(itemId);
+        }
+    });
+    updateQueueBulkButtons();
+}
+
+function updateQueueBulkButtons() {
+    const count = selectedQueueItems.size;
+    document.getElementById('bulkApproveBtn').disabled = count === 0;
+    document.getElementById('bulkRejectBtn').disabled = count === 0;
+}
+
+async function updateQueueItemVersion(itemId, version) {
+    try {
+        await fetch(`/api/import/queue/${itemId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selected_version: version || null })
+        });
+    } catch (error) {
+        showToast('Error updating version: ' + error.message, 'danger');
+    }
+}
+
+async function updateQueueItemOrg(itemId, orgId) {
+    try {
+        await fetch(`/api/import/queue/${itemId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organization_id: orgId ? parseInt(orgId) : null })
+        });
+    } catch (error) {
+        showToast('Error updating organization: ' + error.message, 'danger');
+    }
+}
+
+async function updateQueueItemCriticality(itemId, criticality) {
+    try {
+        await fetch(`/api/import/queue/${itemId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ criticality: criticality })
+        });
+    } catch (error) {
+        showToast('Error updating criticality: ' + error.message, 'danger');
+    }
+}
+
+async function approveQueueItem(itemId) {
+    try {
+        const response = await fetch(`/api/import/queue/${itemId}/approve`, { method: 'POST' });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to approve');
+        }
+        showToast('Product added successfully', 'success');
+        loadImportQueue();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function rejectQueueItem(itemId) {
+    try {
+        const response = await fetch(`/api/import/queue/${itemId}/reject`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to reject');
+        showToast('Item rejected', 'success');
+        loadImportQueue();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function bulkApproveQueue() {
+    if (selectedQueueItems.size === 0) return;
+
+    const confirmed = await showConfirm(
+        `Approve ${selectedQueueItems.size} item(s) and add to product inventory?`,
+        'Bulk Approve',
+        'Approve All',
+        'btn-success'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/api/import/queue/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'approve',
+                item_ids: Array.from(selectedQueueItems)
+            })
+        });
+
+        const result = await response.json();
+        showToast(`Approved ${result.processed} items`, 'success');
+        selectedQueueItems.clear();
+        loadImportQueue();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function bulkRejectQueue() {
+    if (selectedQueueItems.size === 0) return;
+
+    const confirmed = await showConfirm(
+        `Reject ${selectedQueueItems.size} item(s)?`,
+        'Bulk Reject',
+        'Reject All',
+        'btn-danger'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/api/import/queue/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'reject',
+                item_ids: Array.from(selectedQueueItems)
+            })
+        });
+
+        const result = await response.json();
+        showToast(`Rejected ${result.processed} items`, 'success');
+        selectedQueueItems.clear();
+        loadImportQueue();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+// ============================================================================
+// INTEGRATIONS - Connectors
+// ============================================================================
+
+async function loadIntegrations() {
+    const tbody = document.getElementById('integrationsTable');
+    if (!tbody) return;
+
+    try {
+        const response = await fetch('/api/integrations');
+        if (!response.ok) throw new Error('Failed to load integrations');
+
+        integrationsList = await response.json();
+
+        if (integrationsList.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-4 text-muted">
+                        <i class="bi bi-plug" style="font-size: 2rem;"></i>
+                        <p class="mb-0 mt-2">No integrations configured</p>
+                        <button class="btn btn-primary btn-sm mt-2" onclick="showCreateIntegrationModal()">
+                            <i class="bi bi-plus-circle me-1"></i>Add First Integration
+                        </button>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = integrationsList.map(int => {
+            const typeLabels = {
+                'pdq': 'PDQ Inventory',
+                'sccm': 'Microsoft SCCM',
+                'intune': 'Microsoft Intune',
+                'lansweeper': 'Lansweeper',
+                'generic_rest': 'REST API',
+                'agent': 'Discovery Agent',
+                'csv': 'CSV Import'
+            };
+
+            const statusBadge = int.last_sync_status
+                ? `<span class="badge bg-${int.last_sync_status === 'success' ? 'success' : 'danger'}">${int.last_sync_status}</span>`
+                : '<span class="badge bg-secondary">Never synced</span>';
+
+            return `
+                <tr>
+                    <td class="fw-semibold">${escapeHtml(int.name)}</td>
+                    <td><span class="badge bg-info">${typeLabels[int.integration_type] || int.integration_type}</span></td>
+                    <td>${escapeHtml(int.organization_name || 'All')}</td>
+                    <td>
+                        ${int.last_sync_at ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small>` : '-'}
+                        <br><small class="text-muted">${int.last_sync_count || 0} items</small>
+                    </td>
+                    <td>${statusBadge}</td>
+                    <td>
+                        ${int.integration_type !== 'agent' ? `
+                            <button class="btn btn-outline-primary btn-sm me-1" onclick="syncIntegration(${int.id})" title="Sync Now">
+                                <i class="bi bi-arrow-repeat"></i>
+                            </button>
+                        ` : ''}
+                        <button class="btn btn-outline-secondary btn-sm me-1" onclick="editIntegration(${int.id})" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteIntegration(${int.id})" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+    } catch (error) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-4 text-danger">
+                    Error loading integrations: ${escapeHtml(error.message)}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function showCreateIntegrationModal() {
+    // For now, use a simple prompt-based approach
+    // TODO: Create a proper modal form
+
+    const typeOptions = [
+        { value: 'agent', label: 'Discovery Agent (for endpoint deployment)' },
+        { value: 'generic_rest', label: 'Generic REST API' },
+        { value: 'pdq', label: 'PDQ Inventory' },
+        { value: 'sccm', label: 'Microsoft SCCM' },
+        { value: 'intune', label: 'Microsoft Intune' }
+    ];
+
+    // Create a simple modal dynamically
+    const modalHtml = `
+        <div class="modal fade" id="createIntegrationModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-plug me-2"></i>Create Integration</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Name</label>
+                            <input type="text" class="form-control" id="integrationName" placeholder="My PDQ Integration">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Type</label>
+                            <select class="form-select" id="integrationType" onchange="updateIntegrationFields()">
+                                ${typeOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Default Organization</label>
+                            <select class="form-select" id="integrationOrg">
+                                <option value="">None (assign per-item)</option>
+                                ${organizations.map(o => `<option value="${o.id}">${escapeHtml(o.display_name)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="integrationAutoApprove">
+                                <label class="form-check-label">Auto-approve imported items</label>
+                            </div>
+                        </div>
+                        <div id="integrationConfigFields">
+                            <!-- Dynamic fields based on type -->
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="saveIntegration()">Create</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('createIntegrationModal');
+    if (existingModal) existingModal.remove();
+
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('createIntegrationModal'));
+    modal.show();
+
+    // Initialize fields
+    updateIntegrationFields();
+}
+
+function updateIntegrationFields() {
+    const type = document.getElementById('integrationType').value;
+    const container = document.getElementById('integrationConfigFields');
+
+    let fieldsHtml = '';
+
+    if (type === 'generic_rest') {
+        fieldsHtml = `
+            <div class="mb-3">
+                <label class="form-label">API URL</label>
+                <input type="text" class="form-control" id="configApiUrl" placeholder="https://inventory.example.com/api/software">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">API Key</label>
+                <input type="password" class="form-control" id="configApiKey" placeholder="Your API key">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Response Path (JSON path to software array)</label>
+                <input type="text" class="form-control" id="configResponsePath" placeholder="data.software">
+            </div>
+        `;
+    } else if (type === 'pdq') {
+        fieldsHtml = `
+            <div class="mb-3">
+                <label class="form-label">PDQ Server URL</label>
+                <input type="text" class="form-control" id="configApiUrl" placeholder="https://pdq.example.com">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">API Key</label>
+                <input type="password" class="form-control" id="configApiKey">
+            </div>
+        `;
+    } else if (type === 'intune') {
+        fieldsHtml = `
+            <div class="mb-3">
+                <label class="form-label">Tenant ID</label>
+                <input type="text" class="form-control" id="configTenantId">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Client ID</label>
+                <input type="text" class="form-control" id="configClientId">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Client Secret</label>
+                <input type="password" class="form-control" id="configClientSecret">
+            </div>
+        `;
+    } else if (type === 'agent') {
+        fieldsHtml = `
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle me-2"></i>
+                After creating this integration, you'll get an API key to use with the discovery agent scripts.
+            </div>
+        `;
+    }
+
+    container.innerHTML = fieldsHtml;
+}
+
+async function saveIntegration() {
+    const name = document.getElementById('integrationName').value.trim();
+    const type = document.getElementById('integrationType').value;
+    const orgId = document.getElementById('integrationOrg').value;
+    const autoApprove = document.getElementById('integrationAutoApprove').checked;
+
+    if (!name) {
+        showToast('Please enter a name', 'warning');
+        return;
+    }
+
+    // Build config based on type
+    const config = {};
+
+    if (type === 'generic_rest' || type === 'pdq') {
+        config.api_url = document.getElementById('configApiUrl')?.value || '';
+        config.api_key = document.getElementById('configApiKey')?.value || '';
+        if (type === 'generic_rest') {
+            config.response_path = document.getElementById('configResponsePath')?.value || '';
+        }
+    } else if (type === 'intune') {
+        config.tenant_id = document.getElementById('configTenantId')?.value || '';
+        config.client_id = document.getElementById('configClientId')?.value || '';
+        config.client_secret = document.getElementById('configClientSecret')?.value || '';
+    }
+
+    try {
+        const response = await fetch('/api/integrations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                integration_type: type,
+                organization_id: orgId ? parseInt(orgId) : null,
+                auto_approve: autoApprove,
+                config: config
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to create integration');
+        }
+
+        const integration = await response.json();
+
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('createIntegrationModal')).hide();
+
+        // Show API key for agent type
+        if (type === 'agent') {
+            showToast(`Integration created! API Key: ${integration.api_key}`, 'success', 10000);
+        } else {
+            showToast('Integration created successfully', 'success');
+        }
+
+        loadIntegrations();
+
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function syncIntegration(integrationId) {
+    showToast('Starting sync...', 'info');
+
+    try {
+        const response = await fetch(`/api/integrations/${integrationId}/sync`, { method: 'POST' });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(`Sync complete: ${result.queued} queued, ${result.auto_approved} auto-approved`, 'success');
+            loadIntegrations();
+            loadImportQueue();
+        } else {
+            showToast('Sync failed: ' + (result.error || 'Unknown error'), 'danger');
+        }
+    } catch (error) {
+        showToast('Sync error: ' + error.message, 'danger');
+    }
+}
+
+async function deleteIntegration(integrationId) {
+    const confirmed = await showConfirm(
+        'Are you sure you want to delete this integration?',
+        'Delete Integration',
+        'Delete',
+        'btn-danger'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`/api/integrations/${integrationId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete');
+        showToast('Integration deleted', 'success');
+        loadIntegrations();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function editIntegration(integrationId) {
+    // For now, just show the API key
+    try {
+        const response = await fetch(`/api/integrations/${integrationId}`);
+        const integration = await response.json();
+
+        if (integration.api_key) {
+            showToast(`API Key: ${integration.api_key}`, 'info', 10000);
+        }
+    } catch (error) {
+        showToast('Error loading integration', 'danger');
+    }
+}
+
+// ============================================================================
+// INTEGRATIONS - Discovery Agents
+// ============================================================================
+
+async function loadAgents() {
+    const tbody = document.getElementById('agentsTable');
+    if (!tbody) return;
+
+    try {
+        const response = await fetch('/api/agents');
+        if (!response.ok) throw new Error('Failed to load agents');
+
+        const agents = await response.json();
+
+        if (agents.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-4 text-muted">
+                        <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
+                        <p class="mb-0 mt-2">No agents registered yet</p>
+                        <small>Create an agent integration and deploy the script to get started</small>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = agents.map(agent => `
+            <tr>
+                <td class="fw-semibold">${escapeHtml(agent.hostname)}</td>
+                <td>
+                    <span class="badge bg-${agent.os_type === 'windows' ? 'primary' : 'warning'}">
+                        ${agent.os_type}
+                    </span>
+                    <small class="text-muted ms-1">${escapeHtml(agent.os_version || '')}</small>
+                </td>
+                <td>${escapeHtml(agent.organization_name || '-')}</td>
+                <td>
+                    ${agent.last_seen_at ? `<small>${new Date(agent.last_seen_at).toLocaleString()}</small>` : '-'}
+                </td>
+                <td>${agent.software_count || 0}</td>
+                <td>
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteAgent(${agent.id})" title="Remove">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+    } catch (error) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-4 text-danger">
+                    Error loading agents: ${escapeHtml(error.message)}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+async function deleteAgent(agentId) {
+    const confirmed = await showConfirm(
+        'Remove this agent?',
+        'Remove Agent',
+        'Remove',
+        'btn-danger'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+        showToast('Agent removed', 'success');
+        loadAgents();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+function downloadWindowsAgent() {
+    // Get the first agent-type integration's API key, or prompt to create one
+    const agentIntegration = integrationsList.find(i => i.integration_type === 'agent');
+
+    if (!agentIntegration) {
+        showToast('Please create an Agent integration first to get an API key', 'warning');
+        return;
+    }
+
+    // Generate PowerShell script content
+    const scriptContent = `# SentriKat Discovery Agent for Windows
+# Deploy via GPO, SCCM, or run manually with Task Scheduler
+
+$SentriKatUrl = "${window.location.origin}"
+$ApiKey = "YOUR_API_KEY_HERE"  # Get from Admin Panel > Integrations
+
+# Get hostname
+$Hostname = $env:COMPUTERNAME
+
+# Register agent
+$RegisterBody = @{
+    hostname = $Hostname
+    os_type = "windows"
+    os_version = (Get-WmiObject Win32_OperatingSystem).Caption
+    os_arch = $env:PROCESSOR_ARCHITECTURE
+} | ConvertTo-Json
+
+try {
+    Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/register" -Method POST -Body $RegisterBody -ContentType "application/json" -Headers @{"X-API-Key" = $ApiKey}
+} catch {
+    Write-Error "Failed to register agent: $_"
+}
+
+# Get installed software
+$Software = @()
+
+# From registry (x64)
+Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.DisplayName) {
+        $Software += @{
+            vendor = if ($_.Publisher) { $_.Publisher } else { "Unknown" }
+            product = $_.DisplayName
+            version = if ($_.DisplayVersion) { $_.DisplayVersion } else { "" }
+        }
+    }
+}
+
+# From registry (x86 on x64)
+Get-ItemProperty "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.DisplayName) {
+        $Software += @{
+            vendor = if ($_.Publisher) { $_.Publisher } else { "Unknown" }
+            product = $_.DisplayName
+            version = if ($_.DisplayVersion) { $_.DisplayVersion } else { "" }
+        }
+    }
+}
+
+# Remove duplicates
+$UniqueSoftware = $Software | Sort-Object { $_.product } -Unique
+
+# Report to SentriKat
+$ReportBody = @{
+    agent_id = $RegisterResponse.agent_id
+    software = $UniqueSoftware
+} | ConvertTo-Json -Depth 3
+
+try {
+    Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/report" -Method POST -Body $ReportBody -ContentType "application/json" -Headers @{"X-API-Key" = $ApiKey}
+    Write-Host "Reported $($UniqueSoftware.Count) software items to SentriKat"
+} catch {
+    Write-Error "Failed to report software: $_"
+}
+`;
+
+    // Download as file
+    const blob = new Blob([scriptContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sentrikat-agent-windows.ps1';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast('Script downloaded. Edit it to add your API key from the Connectors tab.', 'info', 5000);
+}
+
+function downloadLinuxAgent() {
+    const scriptContent = `#!/bin/bash
+# SentriKat Discovery Agent for Linux
+# Deploy via Ansible, Puppet, or add to cron
+
+SENTRIKAT_URL="${window.location.origin}"
+API_KEY="YOUR_API_KEY_HERE"  # Get from Admin Panel > Integrations
+
+HOSTNAME=$(hostname)
+OS_TYPE="linux"
+OS_VERSION=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2)
+OS_ARCH=$(uname -m)
+
+# Register agent
+curl -s -X POST "$SENTRIKAT_URL/api/agent/register" \\
+    -H "Content-Type: application/json" \\
+    -H "X-API-Key: $API_KEY" \\
+    -d '{
+        "hostname": "'"$HOSTNAME"'",
+        "os_type": "'"$OS_TYPE"'",
+        "os_version": "'"$OS_VERSION"'",
+        "os_arch": "'"$OS_ARCH"'"
+    }'
+
+# Collect installed packages
+SOFTWARE="[]"
+
+# Debian/Ubuntu (dpkg)
+if command -v dpkg &> /dev/null; then
+    SOFTWARE=$(dpkg-query -W -f='{"vendor":"Debian Package","product":"\${Package}","version":"\${Version}"},' 2>/dev/null | sed 's/,$//' | sed 's/^/[/' | sed 's/$/]/')
+fi
+
+# RHEL/CentOS/Fedora (rpm)
+if command -v rpm &> /dev/null; then
+    SOFTWARE=$(rpm -qa --queryformat '{"vendor":"%{VENDOR}","product":"%{NAME}","version":"%{VERSION}"},' 2>/dev/null | sed 's/,$//' | sed 's/^/[/' | sed 's/$/]/')
+fi
+
+# Report to SentriKat
+curl -s -X POST "$SENTRIKAT_URL/api/agent/report" \\
+    -H "Content-Type: application/json" \\
+    -H "X-API-Key: $API_KEY" \\
+    -d '{
+        "agent_id": "'"$HOSTNAME"'",
+        "software": '"$SOFTWARE"'
+    }'
+
+echo "Software inventory reported to SentriKat"
+`;
+
+    const blob = new Blob([scriptContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sentrikat-agent-linux.sh';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast('Script downloaded. Edit it to add your API key from the Connectors tab.', 'info', 5000);
+}
+
+// Initialize integrations when tab is shown
+document.addEventListener('DOMContentLoaded', function() {
+    // Load queue count on page load
+    loadImportQueueCount();
+
+    // Load data when integrations tab is clicked
+    const integrationsTab = document.getElementById('integrations-tab');
+    if (integrationsTab) {
+        integrationsTab.addEventListener('shown.bs.tab', function() {
+            loadImportQueue();
+            loadIntegrations();
+            loadAgents();
+        });
+    }
+
+    // Load data when sub-tabs are clicked
+    document.getElementById('import-queue-tab')?.addEventListener('shown.bs.pill', loadImportQueue);
+    document.getElementById('connectors-tab')?.addEventListener('shown.bs.pill', loadIntegrations);
+    document.getElementById('agents-tab')?.addEventListener('shown.bs.pill', loadAgents);
+});
