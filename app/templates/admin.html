@@ -110,13 +110,14 @@
                             <th data-column="version" data-column-label="Version" data-sort-key="version" data-sort-type="string">Version</th>
                             <th data-column="organization" data-column-label="Organization" data-sort-key="organization" data-sort-type="string">Organization</th>
                             <th data-column="criticality" data-column-label="Criticality" data-sort-key="criticality" data-sort-type="priority">Criticality</th>
+                            <th data-column="source" data-column-label="Source" data-sort-key="source" data-sort-type="string">Source</th>
                             <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="boolean">Status</th>
                             <th data-column="actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="productsTable">
                         <tr>
-                            <td colspan="8" class="text-center py-4">
+                            <td colspan="9" class="text-center py-4">
                                 <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
@@ -686,7 +687,7 @@
                 const hasFilters = search || criticality || status || (filterOrgEl && filterOrgEl.value);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" class="text-center py-5">
+                        <td colspan="9" class="text-center py-5">
                             <i class="bi bi-${hasFilters ? 'search' : 'inbox'} text-muted" style="font-size: 3rem;"></i>
                             <h5 class="mt-3 text-muted">${hasFilters ? 'No products match your filters' : 'No products added yet'}</h5>
                             <p class="text-muted">${hasFilters ? 'Try adjusting your search or filters.' : 'Click "Add Product" to start tracking vulnerabilities for your software inventory.'}</p>
@@ -726,6 +727,7 @@
                             <td data-column="version">${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
                             <td data-column="organization">${orgDisplay}</td>
                             <td data-column="criticality">${criticalityBadge}</td>
+                            <td data-column="source">${getSourceBadge(product.source)}</td>
                             <td data-column="status">${statusBadge}</td>
                             <td data-column="actions" onclick="event.stopPropagation();">
                                 <div class="d-flex gap-1">
@@ -1060,6 +1062,17 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function getSourceBadge(source) {
+        const sourceConfig = {
+            'manual': { color: 'secondary', icon: 'pencil', label: 'Manual' },
+            'catalog': { color: 'primary', icon: 'book', label: 'Catalog' },
+            'agent': { color: 'success', icon: 'robot', label: 'Agent' },
+            'import': { color: 'info', icon: 'upload', label: 'Import' }
+        };
+        const config = sourceConfig[source] || sourceConfig['manual'];
+        return `<span class="badge bg-${config.color}" title="Added via ${config.label}"><i class="bi bi-${config.icon} me-1"></i>${config.label}</span>`;
     }
 
     // Service Catalog Functions

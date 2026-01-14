@@ -249,6 +249,7 @@ class Product(db.Model):
     active = db.Column(db.Boolean, default=True, index=True)
     criticality = db.Column(db.String(20), default='medium')  # critical, high, medium, low
     app_type = db.Column(db.String(20), default='unknown', index=True)  # client, server, both, unknown
+    source = db.Column(db.String(20), default='manual', index=True)  # manual, catalog, agent, import
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -314,6 +315,7 @@ class Product(db.Model):
             'active': self.active,
             'criticality': self.criticality,
             'app_type': self.app_type or 'unknown',
+            'source': self.source or 'manual',  # manual, catalog, agent, import
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             # CPE fields

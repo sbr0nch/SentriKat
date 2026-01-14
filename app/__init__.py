@@ -201,6 +201,7 @@ def run_auto_migrations(app):
     # Format: (table_name, column_name, column_type, default_value)
     new_columns = [
         ('products', 'app_type', 'VARCHAR(20)', "'unknown'"),
+        ('products', 'source', 'VARCHAR(20)', "'manual'"),  # manual, catalog, agent, import
         ('import_queue', 'app_type', 'VARCHAR(20)', "'unknown'"),
     ]
 

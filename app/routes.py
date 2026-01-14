@@ -374,6 +374,9 @@ def create_product():
             'error': 'A product with the same vendor, name, and version already exists. You can assign it to additional organizations from the product list.'
         }), 409
 
+    # Determine source based on how product was added
+    source = 'catalog' if data.get('service_catalog_id') else 'manual'
+
     product = Product(
         organization_id=data.get('organization_id', org_id),
         service_catalog_id=data.get('service_catalog_id'),
@@ -385,6 +388,7 @@ def create_product():
         active=data.get('active', True),
         criticality=data.get('criticality', 'medium'),
         app_type=data.get('app_type', 'unknown'),
+        source=source,  # manual, catalog, agent, import
         # CPE fields for NVD matching
         cpe_vendor=data.get('cpe_vendor'),
         cpe_product=data.get('cpe_product'),

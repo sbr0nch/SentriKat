@@ -16,6 +16,93 @@ let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
 let selectedMappings = new Map(); // Map of mappingId -> { id, group_cn, is_active }
 
 // ============================================================================
+// URL HASH PERSISTENCE - Remember which tab/subtab user was on
+// ============================================================================
+
+/**
+ * Save current tab state to URL hash
+ * Format: #mainTab/subTab (e.g., #integrations/agents or #settings)
+ */
+function saveTabToHash(mainTabId, subTabId = null) {
+    const hashParts = [mainTabId];
+    if (subTabId) {
+        hashParts.push(subTabId);
+    }
+    const newHash = '#' + hashParts.join('/');
+    if (window.location.hash !== newHash) {
+        history.replaceState(null, '', newHash);
+    }
+}
+
+/**
+ * Restore tab state from URL hash on page load
+ */
+function restoreTabFromHash() {
+    const hash = window.location.hash.slice(1); // Remove #
+    if (!hash) return;
+
+    const parts = hash.split('/');
+    const mainTabId = parts[0];
+    const subTabId = parts[1];
+
+    // Activate main tab
+    const mainTabEl = document.getElementById(mainTabId + '-tab') ||
+                      document.querySelector(`[data-bs-target="#${mainTabId}"]`);
+    if (mainTabEl) {
+        const tab = new bootstrap.Tab(mainTabEl);
+        tab.show();
+
+        // If there's a sub-tab, activate it after a short delay
+        if (subTabId) {
+            setTimeout(() => {
+                const subTabEl = document.getElementById(subTabId + '-tab') ||
+                                 document.querySelector(`[data-bs-target="#${subTabId}"]`);
+                if (subTabEl) {
+                    const subTab = new bootstrap.Tab(subTabEl);
+                    subTab.show();
+                }
+            }, 100);
+        }
+    }
+}
+
+/**
+ * Setup tab change listeners to update URL hash
+ */
+function setupTabHashTracking() {
+    // Main tabs
+    document.querySelectorAll('[data-bs-toggle="tab"], [data-bs-toggle="pill"]').forEach(tab => {
+        tab.addEventListener('shown.bs.tab', function(e) {
+            const target = e.target.getAttribute('data-bs-target') || e.target.getAttribute('href');
+            if (target) {
+                const tabId = target.replace('#', '');
+
+                // Check if this is a sub-tab (inside a main tab pane)
+                const parentPane = e.target.closest('.tab-pane');
+                if (parentPane && parentPane.id) {
+                    saveTabToHash(parentPane.id, tabId);
+                } else {
+                    saveTabToHash(tabId);
+                }
+            }
+        });
+
+        tab.addEventListener('shown.bs.pill', function(e) {
+            const target = e.target.getAttribute('data-bs-target') || e.target.getAttribute('href');
+            if (target) {
+                const tabId = target.replace('#', '');
+                const parentPane = e.target.closest('.tab-pane');
+                if (parentPane && parentPane.id) {
+                    saveTabToHash(parentPane.id, tabId);
+                } else {
+                    saveTabToHash(tabId);
+                }
+            }
+        });
+    });
+}
+
+// ============================================================================
 // BULK ACTIONS - USERS
 // ============================================================================
 
@@ -500,6 +587,12 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         // Load sync status immediately (doesn't require settings to be configured)
         loadSyncStatus();
+
+        // Setup URL hash tracking for tab persistence
+        setupTabHashTracking();
+
+        // Restore tab from URL hash (after a short delay to ensure tabs are ready)
+        setTimeout(restoreTabFromHash, 150);
 
         console.log('Admin Panel: Initialization complete');
     } catch (error) {
@@ -5587,11 +5680,23 @@ async function loadIntegrations() {
             // Different status display for agent vs pull integrations
             let statusBadge, lastActivity;
             if (int.integration_type === 'agent') {
-                // Agent integrations show agent count and last report
-                const agentCount = int.agent_count || 0;
-                statusBadge = agentCount > 0
-                    ? `<span class="badge bg-success">${agentCount} agent${agentCount !== 1 ? 's' : ''}</span>`
-                    : '<span class="badge bg-secondary">No agents</span>';
+                // Agent integrations show agent stats
+                const totalAgents = int.agent_count || 0;
+                const activeAgents = int.active_agent_count || 0;
+                const onlineAgents = int.online_agent_count || 0;
+                const hostnames = int.agent_hostnames || [];
+
+                if (totalAgents > 0) {
+                    statusBadge = `
+                        <span class="badge bg-${onlineAgents > 0 ? 'success' : 'secondary'}" title="${hostnames.join(', ')}">
+                            ${onlineAgents}/${activeAgents} online
+                        </span>
+                        <br><small class="text-muted">${totalAgents} total device${totalAgents !== 1 ? 's' : ''}</small>
+                    `;
+                } else {
+                    statusBadge = '<span class="badge bg-secondary">No agents</span>';
+                }
+
                 lastActivity = int.last_sync_at
                     ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small><br><small class="text-muted">${int.last_sync_count || 0} items reported</small>`
                     : '<small class="text-muted">Waiting for agents</small>';

@@ -405,6 +405,13 @@ def get_cpe_versions(cpe_vendor, cpe_product):
 def create_product_from_queue(queue_item):
     """Create a Product from an ImportQueue item."""
     try:
+        # Determine source based on integration type
+        source = 'import'  # Default for generic import
+        if queue_item.integration_id:
+            integration = Integration.query.get(queue_item.integration_id)
+            if integration and integration.integration_type == 'agent':
+                source = 'agent'
+
         product = Product(
             vendor=queue_item.vendor,
             product_name=queue_item.product_name,
@@ -412,6 +419,7 @@ def create_product_from_queue(queue_item):
             organization_id=queue_item.organization_id,
             criticality=queue_item.criticality,
             app_type=queue_item.app_type or 'unknown',
+            source=source,
             cpe_vendor=queue_item.cpe_vendor,
             cpe_product=queue_item.cpe_product,
             active=True
@@ -653,11 +661,14 @@ def get_integrations():
         result = []
         for i in integrations:
             data = i.to_dict()
-            # Add agent count for agent-type integrations
+            # Add agent stats for agent-type integrations
             if i.integration_type == 'agent':
-                data['agent_count'] = AgentRegistration.query.filter_by(
-                    integration_id=i.id, is_active=True
-                ).count()
+                all_agents = AgentRegistration.query.filter_by(integration_id=i.id).all()
+                data['agent_count'] = len(all_agents)
+                data['active_agent_count'] = sum(1 for a in all_agents if a.is_active)
+                data['online_agent_count'] = sum(1 for a in all_agents if a.is_active and a.status == 'online')
+                # List of agent hostnames for quick reference
+                data['agent_hostnames'] = [a.hostname for a in all_agents[:10]]  # First 10
             result.append(data)
         return jsonify(result)
     except Exception as e:
@@ -1148,11 +1159,16 @@ def track_version_observation(vendor, product_name, version, org_id, integration
 @bp.route('/api/agents', methods=['GET'])
 @admin_required
 def get_agents():
-    """Get all registered agents."""
+    """Get all registered agents (including disabled ones)."""
     try:
         integration_id = request.args.get('integration_id', type=int)
+        show_disabled = request.args.get('show_disabled', 'true').lower() == 'true'
 
-        query = AgentRegistration.query.filter_by(is_active=True)
+        query = AgentRegistration.query
+
+        # By default show all agents; optionally filter to active only
+        if not show_disabled:
+            query = query.filter_by(is_active=True)
 
         if integration_id:
             query = query.filter_by(integration_id=integration_id)
