@@ -5898,151 +5898,80 @@ async function deleteAgent(agentId) {
     }
 }
 
-function downloadWindowsAgent() {
-    // Get the first agent-type integration's API key, or prompt to create one
+async function downloadWindowsAgent() {
+    // Get the first agent-type integration to include API key in script
     const agentIntegration = integrationsList.find(i => i.integration_type === 'agent');
 
-    if (!agentIntegration) {
-        showToast('Please create an Agent integration first to get an API key', 'warning');
-        return;
-    }
+    let apiKey = 'YOUR_API_KEY_HERE';
 
-    // Generate PowerShell script content
-    const scriptContent = `# SentriKat Discovery Agent for Windows
-# Deploy via GPO, SCCM, or run manually with Task Scheduler
-
-$SentriKatUrl = "${window.location.origin}"
-$ApiKey = "YOUR_API_KEY_HERE"  # Get from Admin Panel > Integrations
-
-# Get hostname
-$Hostname = $env:COMPUTERNAME
-
-# Register agent
-$RegisterBody = @{
-    hostname = $Hostname
-    os_type = "windows"
-    os_version = (Get-WmiObject Win32_OperatingSystem).Caption
-    os_arch = $env:PROCESSOR_ARCHITECTURE
-} | ConvertTo-Json
-
-try {
-    Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/register" -Method POST -Body $RegisterBody -ContentType "application/json" -Headers @{"X-API-Key" = $ApiKey}
-} catch {
-    Write-Error "Failed to register agent: $_"
-}
-
-# Get installed software
-$Software = @()
-
-# From registry (x64)
-Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($_.DisplayName) {
-        $Software += @{
-            vendor = if ($_.Publisher) { $_.Publisher } else { "Unknown" }
-            product = $_.DisplayName
-            version = if ($_.DisplayVersion) { $_.DisplayVersion } else { "" }
+    if (agentIntegration) {
+        // Try to get the API key
+        try {
+            const response = await fetch(`/api/integrations/${agentIntegration.id}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.api_key) {
+                    apiKey = data.api_key;
+                }
+            }
+        } catch (e) {
+            console.error('Could not fetch API key:', e);
         }
     }
-}
 
-# From registry (x86 on x64)
-Get-ItemProperty "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($_.DisplayName) {
-        $Software += @{
-            vendor = if ($_.Publisher) { $_.Publisher } else { "Unknown" }
-            product = $_.DisplayName
-            version = if ($_.DisplayVersion) { $_.DisplayVersion } else { "" }
-        }
+    // Download script from server (pre-configured with URL and optionally API key)
+    const downloadUrl = `/api/agents/script/windows?api_key=${encodeURIComponent(apiKey)}`;
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = 'sentrikat-agent-windows.ps1';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    if (apiKey === 'YOUR_API_KEY_HERE') {
+        showToast('Script downloaded. Create an Agent integration first to get an API key, then edit the script.', 'warning', 7000);
+    } else {
+        showToast('Script downloaded with your API key pre-configured!', 'success', 5000);
     }
 }
 
-# Remove duplicates
-$UniqueSoftware = $Software | Sort-Object { $_.product } -Unique
+async function downloadLinuxAgent() {
+    // Get the first agent-type integration to include API key in script
+    const agentIntegration = integrationsList.find(i => i.integration_type === 'agent');
 
-# Report to SentriKat
-$ReportBody = @{
-    agent_id = $RegisterResponse.agent_id
-    software = $UniqueSoftware
-} | ConvertTo-Json -Depth 3
+    let apiKey = 'YOUR_API_KEY_HERE';
 
-try {
-    Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/report" -Method POST -Body $ReportBody -ContentType "application/json" -Headers @{"X-API-Key" = $ApiKey}
-    Write-Host "Reported $($UniqueSoftware.Count) software items to SentriKat"
-} catch {
-    Write-Error "Failed to report software: $_"
-}
-`;
+    if (agentIntegration) {
+        // Try to get the API key
+        try {
+            const response = await fetch(`/api/integrations/${agentIntegration.id}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.api_key) {
+                    apiKey = data.api_key;
+                }
+            }
+        } catch (e) {
+            console.error('Could not fetch API key:', e);
+        }
+    }
 
-    // Download as file
-    const blob = new Blob([scriptContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'sentrikat-agent-windows.ps1';
-    a.click();
-    URL.revokeObjectURL(url);
+    // Download script from server (pre-configured with URL and optionally API key)
+    const downloadUrl = `/api/agents/script/linux?api_key=${encodeURIComponent(apiKey)}`;
 
-    showToast('Script downloaded. Edit it to add your API key from the Connectors tab.', 'info', 5000);
-}
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = 'sentrikat-agent-linux.sh';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-function downloadLinuxAgent() {
-    const scriptContent = `#!/bin/bash
-# SentriKat Discovery Agent for Linux
-# Deploy via Ansible, Puppet, or add to cron
-
-SENTRIKAT_URL="${window.location.origin}"
-API_KEY="YOUR_API_KEY_HERE"  # Get from Admin Panel > Integrations
-
-HOSTNAME=$(hostname)
-OS_TYPE="linux"
-OS_VERSION=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2)
-OS_ARCH=$(uname -m)
-
-# Register agent
-curl -s -X POST "$SENTRIKAT_URL/api/agent/register" \\
-    -H "Content-Type: application/json" \\
-    -H "X-API-Key: $API_KEY" \\
-    -d '{
-        "hostname": "'"$HOSTNAME"'",
-        "os_type": "'"$OS_TYPE"'",
-        "os_version": "'"$OS_VERSION"'",
-        "os_arch": "'"$OS_ARCH"'"
-    }'
-
-# Collect installed packages
-SOFTWARE="[]"
-
-# Debian/Ubuntu (dpkg)
-if command -v dpkg &> /dev/null; then
-    SOFTWARE=$(dpkg-query -W -f='{"vendor":"Debian Package","product":"\${Package}","version":"\${Version}"},' 2>/dev/null | sed 's/,$//' | sed 's/^/[/' | sed 's/$/]/')
-fi
-
-# RHEL/CentOS/Fedora (rpm)
-if command -v rpm &> /dev/null; then
-    SOFTWARE=$(rpm -qa --queryformat '{"vendor":"%{VENDOR}","product":"%{NAME}","version":"%{VERSION}"},' 2>/dev/null | sed 's/,$//' | sed 's/^/[/' | sed 's/$/]/')
-fi
-
-# Report to SentriKat
-curl -s -X POST "$SENTRIKAT_URL/api/agent/report" \\
-    -H "Content-Type: application/json" \\
-    -H "X-API-Key: $API_KEY" \\
-    -d '{
-        "agent_id": "'"$HOSTNAME"'",
-        "software": '"$SOFTWARE"'
-    }'
-
-echo "Software inventory reported to SentriKat"
-`;
-
-    const blob = new Blob([scriptContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'sentrikat-agent-linux.sh';
-    a.click();
-    URL.revokeObjectURL(url);
-
-    showToast('Script downloaded. Edit it to add your API key from the Connectors tab.', 'info', 5000);
+    if (apiKey === 'YOUR_API_KEY_HERE') {
+        showToast('Script downloaded. Create an Agent integration first to get an API key, then edit the script.', 'warning', 7000);
+    } else {
+        showToast('Script downloaded with your API key pre-configured!', 'success', 5000);
+    }
 }
 
 // Initialize integrations when tab is shown

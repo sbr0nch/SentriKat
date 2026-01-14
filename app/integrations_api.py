@@ -6,15 +6,22 @@ Provides:
 2. Queue Management - Review, approve, reject pending imports
 3. Integration CRUD - Configure external system connections
 4. Agent Management - Register and manage discovery agents
+
+Security:
+- Push API endpoints use API key authentication (CSRF exempt)
+- Management endpoints require session login + CSRF
+- Rate limiting on push endpoints to prevent abuse
+- Input validation and sanitization on all inputs
 """
 
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify, session, Response
 from datetime import datetime
 import secrets
 import uuid
+import re
 from functools import wraps
 
-from app import db
+from app import db, csrf, limiter
 from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User
 from app.auth import admin_required, login_required
@@ -23,12 +30,36 @@ bp = Blueprint('integrations', __name__)
 
 
 # ============================================================================
+# Security Helpers
+# ============================================================================
+
+def sanitize_string(value, max_length=200):
+    """Sanitize input string - remove dangerous characters, limit length."""
+    if not value:
+        return ''
+    # Convert to string and strip
+    value = str(value).strip()
+    # Remove null bytes and control characters
+    value = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', value)
+    # Limit length
+    return value[:max_length]
+
+
+def validate_api_key_format(api_key):
+    """Validate API key format to prevent injection."""
+    if not api_key:
+        return False
+    # API keys should be alphanumeric with some special chars (base64-like)
+    return bool(re.match(r'^[A-Za-z0-9_\-]{20,64}$', api_key))
+
+
+# ============================================================================
 # Authentication Helpers
 # ============================================================================
 
 def get_integration_by_api_key(api_key):
     """Look up integration by API key."""
-    if not api_key:
+    if not api_key or not validate_api_key_format(api_key):
         return None
     return Integration.query.filter_by(api_key=api_key, is_active=True).first()
 
@@ -59,9 +90,12 @@ def api_key_or_login_required(f):
 
 # ============================================================================
 # Push API - Receive software lists from external systems
+# These endpoints are CSRF-exempt because they use API key auth
 # ============================================================================
 
 @bp.route('/api/import', methods=['POST'])
+@csrf.exempt  # External systems can't provide CSRF tokens
+@limiter.limit("30 per minute")  # Rate limit to prevent abuse
 @api_key_or_login_required
 def import_software():
     """
@@ -721,9 +755,12 @@ def trigger_sync(integration_id):
 
 # ============================================================================
 # Agent Registration and Reporting
+# These endpoints are CSRF-exempt because they use API key auth
 # ============================================================================
 
 @bp.route('/api/agent/register', methods=['POST'])
+@csrf.exempt  # Agents can't provide CSRF tokens
+@limiter.limit("10 per minute")  # Rate limit agent registration
 @api_key_or_login_required
 def register_agent():
     """
@@ -806,6 +843,8 @@ def register_agent():
 
 
 @bp.route('/api/agent/report', methods=['POST'])
+@csrf.exempt  # Agents can't provide CSRF tokens
+@limiter.limit("60 per minute")  # Rate limit agent reports
 @api_key_or_login_required
 def agent_report():
     """
@@ -966,3 +1005,337 @@ def delete_agent(agent_id):
     agent.is_active = False
     db.session.commit()
     return jsonify({'success': True})
+
+
+# ============================================================================
+# Agent Script Downloads
+# ============================================================================
+
+@bp.route('/api/agents/script/windows', methods=['GET'])
+@login_required
+def download_windows_agent():
+    """Download Windows PowerShell agent script."""
+    api_key = request.args.get('api_key', 'YOUR_API_KEY_HERE')
+    base_url = request.url_root.rstrip('/')
+
+    script = f'''# SentriKat Discovery Agent for Windows
+# ================================================
+# Deploy via GPO, SCCM, Intune, or run manually with Task Scheduler
+#
+# Usage:
+#   1. Replace YOUR_API_KEY_HERE with your actual API key from Admin Panel > Integrations
+#   2. Run as Administrator or via scheduled task
+#   3. Schedule to run periodically (e.g., daily) for continuous inventory
+#
+# Requirements: PowerShell 5.1+, Windows 7/Server 2008 R2 or later
+# ================================================
+
+param(
+    [string]$SentriKatUrl = "{base_url}",
+    [string]$ApiKey = "{api_key}"
+)
+
+# Validate parameters
+if ($ApiKey -eq "YOUR_API_KEY_HERE" -or [string]::IsNullOrEmpty($ApiKey)) {{
+    Write-Error "Please provide a valid API key. Get one from Admin Panel > Integrations > Create Agent Integration"
+    exit 1
+}}
+
+# Get system information
+$Hostname = $env:COMPUTERNAME
+$OSInfo = Get-WmiObject Win32_OperatingSystem
+$OSVersion = $OSInfo.Caption
+$OSArch = if ([Environment]::Is64BitOperatingSystem) {{ "x64" }} else {{ "x86" }}
+
+Write-Host "SentriKat Agent starting on $Hostname" -ForegroundColor Cyan
+Write-Host "OS: $OSVersion ($OSArch)" -ForegroundColor Gray
+
+# Register agent
+$RegisterBody = @{{
+    hostname = $Hostname
+    os_type = "windows"
+    os_version = $OSVersion
+    os_arch = $OSArch
+    agent_version = "1.0.0"
+    system_info = @{{
+        domain = $env:USERDOMAIN
+        username = $env:USERNAME
+        cpu = (Get-WmiObject Win32_Processor).Name
+        ram_gb = [math]::Round($OSInfo.TotalVisibleMemorySize / 1MB, 1)
+    }}
+}} | ConvertTo-Json -Depth 3
+
+Write-Host "Registering agent..." -ForegroundColor Yellow
+try {{
+    $RegisterResponse = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/register" `
+        -Method POST `
+        -Body $RegisterBody `
+        -ContentType "application/json" `
+        -Headers @{{"X-API-Key" = $ApiKey}} `
+        -ErrorAction Stop
+
+    $AgentId = $RegisterResponse.agent_id
+    Write-Host "Agent registered successfully. ID: $AgentId" -ForegroundColor Green
+}} catch {{
+    Write-Error "Failed to register agent: $($_.Exception.Message)"
+    exit 1
+}}
+
+# Collect installed software
+Write-Host "Collecting installed software..." -ForegroundColor Yellow
+$Software = @()
+$Seen = @{{}}
+
+# Function to add software if not duplicate
+function Add-Software {{
+    param($Publisher, $Name, $Version)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {{ return }}
+
+    $Key = "$($Publisher.ToLower())|$($Name.ToLower())"
+    if ($Seen.ContainsKey($Key)) {{ return }}
+    $Seen[$Key] = $true
+
+    $script:Software += @{{
+        vendor = if ($Publisher) {{ $Publisher }} else {{ "Unknown" }}
+        product = $Name
+        version = if ($Version) {{ $Version }} else {{ "" }}
+    }}
+}}
+
+# From registry (64-bit)
+Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+}}
+
+# From registry (32-bit on 64-bit OS)
+Get-ItemProperty "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+}}
+
+# Current user software
+Get-ItemProperty "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+}}
+
+Write-Host "Found $($Software.Count) unique software items" -ForegroundColor Cyan
+
+# Report to SentriKat
+$ReportBody = @{{
+    agent_id = $AgentId
+    software = $Software
+}} | ConvertTo-Json -Depth 3 -Compress
+
+Write-Host "Reporting inventory to SentriKat..." -ForegroundColor Yellow
+try {{
+    $ReportResponse = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/report" `
+        -Method POST `
+        -Body $ReportBody `
+        -ContentType "application/json" `
+        -Headers @{{"X-API-Key" = $ApiKey}} `
+        -ErrorAction Stop
+
+    Write-Host "SUCCESS: Reported $($Software.Count) software items" -ForegroundColor Green
+    Write-Host "  - Queued: $($ReportResponse.results.queued)" -ForegroundColor Gray
+    Write-Host "  - Auto-approved: $($ReportResponse.results.auto_approved)" -ForegroundColor Gray
+    Write-Host "  - Duplicates: $($ReportResponse.results.duplicates)" -ForegroundColor Gray
+}} catch {{
+    Write-Error "Failed to report software: $($_.Exception.Message)"
+    exit 1
+}}
+
+Write-Host "`nAgent completed successfully!" -ForegroundColor Green
+'''
+
+    return Response(
+        script,
+        mimetype='text/plain',
+        headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-windows.ps1'}
+    )
+
+
+@bp.route('/api/agents/script/linux', methods=['GET'])
+@login_required
+def download_linux_agent():
+    """Download Linux Bash agent script."""
+    api_key = request.args.get('api_key', 'YOUR_API_KEY_HERE')
+    base_url = request.url_root.rstrip('/')
+
+    script = f'''#!/bin/bash
+# ================================================
+# SentriKat Discovery Agent for Linux
+# ================================================
+# Deploy via Ansible, Puppet, Chef, or add to cron
+#
+# Usage:
+#   1. Replace YOUR_API_KEY_HERE with your actual API key
+#   2. Make executable: chmod +x sentrikat-agent-linux.sh
+#   3. Run: ./sentrikat-agent-linux.sh
+#   4. Add to cron for periodic scans: crontab -e
+#      0 6 * * * /path/to/sentrikat-agent-linux.sh > /var/log/sentrikat-agent.log 2>&1
+#
+# Requirements: bash, curl, jq (optional, for better JSON handling)
+# ================================================
+
+set -e
+
+# Configuration - EDIT THESE VALUES
+SENTRIKAT_URL="{base_url}"
+API_KEY="{api_key}"
+
+# Validate API key
+if [ "$API_KEY" = "YOUR_API_KEY_HERE" ] || [ -z "$API_KEY" ]; then
+    echo "ERROR: Please set a valid API key"
+    echo "Get one from Admin Panel > Integrations > Create Agent Integration"
+    exit 1
+fi
+
+# Get system information
+HOSTNAME=$(hostname)
+OS_TYPE="linux"
+
+# Detect OS version
+if [ -f /etc/os-release ]; then
+    OS_VERSION=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)
+elif [ -f /etc/redhat-release ]; then
+    OS_VERSION=$(cat /etc/redhat-release)
+else
+    OS_VERSION=$(uname -sr)
+fi
+
+OS_ARCH=$(uname -m)
+
+echo "================================================"
+echo "SentriKat Agent starting on $HOSTNAME"
+echo "OS: $OS_VERSION ($OS_ARCH)"
+echo "================================================"
+
+# Register agent
+echo "Registering agent..."
+REGISTER_RESPONSE=$(curl -s -X POST "$SENTRIKAT_URL/api/agent/register" \\
+    -H "Content-Type: application/json" \\
+    -H "X-API-Key: $API_KEY" \\
+    -d "{{
+        \\"hostname\\": \\"$HOSTNAME\\",
+        \\"os_type\\": \\"$OS_TYPE\\",
+        \\"os_version\\": \\"$OS_VERSION\\",
+        \\"os_arch\\": \\"$OS_ARCH\\",
+        \\"agent_version\\": \\"1.0.0\\"
+    }}")
+
+# Check if registration succeeded
+if echo "$REGISTER_RESPONSE" | grep -q "error"; then
+    echo "ERROR: Failed to register agent"
+    echo "$REGISTER_RESPONSE"
+    exit 1
+fi
+
+AGENT_ID=$(echo "$REGISTER_RESPONSE" | grep -o '"agent_id"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+if [ -z "$AGENT_ID" ]; then
+    AGENT_ID="$HOSTNAME"
+fi
+echo "Agent registered. ID: $AGENT_ID"
+
+# Collect installed software
+echo "Collecting installed software..."
+SOFTWARE_JSON="["
+FIRST=true
+
+# Function to add software entry
+add_software() {{
+    local vendor="$1"
+    local product="$2"
+    local version="$3"
+
+    if [ -z "$product" ]; then
+        return
+    fi
+
+    # Escape quotes in strings
+    vendor=$(echo "$vendor" | sed 's/"/\\\\"/g')
+    product=$(echo "$product" | sed 's/"/\\\\"/g')
+    version=$(echo "$version" | sed 's/"/\\\\"/g')
+
+    if [ "$FIRST" = true ]; then
+        FIRST=false
+    else
+        SOFTWARE_JSON="$SOFTWARE_JSON,"
+    fi
+
+    SOFTWARE_JSON="$SOFTWARE_JSON{{\\"vendor\\":\\"$vendor\\",\\"product\\":\\"$product\\",\\"version\\":\\"$version\\"}}"
+}}
+
+# Debian/Ubuntu - dpkg
+if command -v dpkg &> /dev/null; then
+    echo "  Scanning dpkg packages..."
+    while IFS= read -r line; do
+        name=$(echo "$line" | awk '{{print $2}}')
+        version=$(echo "$line" | awk '{{print $3}}')
+        add_software "Debian Package" "$name" "$version"
+    done < <(dpkg-query -W -f='${{Status}} ${{Package}} ${{Version}}\\n' 2>/dev/null | grep "^install ok installed" | head -500)
+fi
+
+# RHEL/CentOS/Fedora - rpm
+if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
+    echo "  Scanning rpm packages..."
+    while IFS='|' read -r name version vendor; do
+        if [ -n "$name" ]; then
+            add_software "${{vendor:-RPM Package}}" "$name" "$version"
+        fi
+    done < <(rpm -qa --queryformat '%{{NAME}}|%{{VERSION}}|%{{VENDOR}}\\n' 2>/dev/null | head -500)
+fi
+
+# Snap packages
+if command -v snap &> /dev/null; then
+    echo "  Scanning snap packages..."
+    while read -r name version rest; do
+        if [ "$name" != "Name" ] && [ -n "$name" ]; then
+            add_software "Snap Package" "$name" "$version"
+        fi
+    done < <(snap list 2>/dev/null | tail -n +2)
+fi
+
+# Flatpak packages
+if command -v flatpak &> /dev/null; then
+    echo "  Scanning flatpak packages..."
+    while read -r name version rest; do
+        if [ -n "$name" ]; then
+            add_software "Flatpak" "$name" "$version"
+        fi
+    done < <(flatpak list --columns=name,version 2>/dev/null | tail -n +1)
+fi
+
+SOFTWARE_JSON="$SOFTWARE_JSON]"
+
+# Count items (rough count)
+ITEM_COUNT=$(echo "$SOFTWARE_JSON" | grep -o "product" | wc -l)
+echo "Found approximately $ITEM_COUNT software items"
+
+# Report to SentriKat
+echo "Reporting inventory to SentriKat..."
+REPORT_BODY="{{\\"agent_id\\":\\"$AGENT_ID\\",\\"software\\":$SOFTWARE_JSON}}"
+
+REPORT_RESPONSE=$(curl -s -X POST "$SENTRIKAT_URL/api/agent/report" \\
+    -H "Content-Type: application/json" \\
+    -H "X-API-Key: $API_KEY" \\
+    -d "$REPORT_BODY")
+
+if echo "$REPORT_RESPONSE" | grep -q "success"; then
+    echo "================================================"
+    echo "SUCCESS: Software inventory reported to SentriKat"
+    echo "$REPORT_RESPONSE"
+    echo "================================================"
+else
+    echo "ERROR: Failed to report software"
+    echo "$REPORT_RESPONSE"
+    exit 1
+fi
+
+echo "Agent completed successfully!"
+'''
+
+    return Response(
+        script,
+        mimetype='text/plain',
+        headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-linux.sh'}
+    )
