@@ -686,44 +686,68 @@
                         </div>
                     </div>
 
-                    <!-- Scheduling Guidance -->
+                    <!-- Installation Guide -->
                     <div class="card mb-4 border-secondary">
                         <div class="card-header bg-light d-flex justify-content-between align-items-center"
-                             style="cursor: pointer;" onclick="document.getElementById('schedulingGuide').classList.toggle('d-none')">
-                            <span><i class="bi bi-clock-history me-2"></i>Scheduling Guide</span>
+                             style="cursor: pointer;" onclick="document.getElementById('installationGuide').classList.toggle('d-none')">
+                            <span><i class="bi bi-gear me-2"></i>Installation Guide</span>
                             <i class="bi bi-chevron-down"></i>
                         </div>
-                        <div class="card-body d-none" id="schedulingGuide">
-                            <p class="text-muted small mb-3">Agents report once when executed. Schedule them to run periodically for continuous monitoring:</p>
+                        <div class="card-body d-none" id="installationGuide">
+                            <p class="text-muted small mb-3">Agents run as background daemons, syncing every 6 hours by default. Install as a system service for continuous monitoring:</p>
 
                             <div class="row">
                                 <div class="col-md-6">
-                                    <h6><i class="bi bi-ubuntu me-2"></i>Linux (cron)</h6>
-                                    <p class="small text-muted mb-2">Edit crontab with <code>crontab -e</code> and add:</p>
-                                    <pre class="bg-dark text-light p-2 rounded small mb-2" style="font-size: 0.75rem;"># Every 6 hours
-0 */6 * * * /opt/sentrikat/sentrikat-agent.sh
+                                    <h6><i class="bi bi-ubuntu me-2"></i>Linux (systemd)</h6>
+                                    <pre class="bg-dark text-light p-2 rounded small mb-2" style="font-size: 0.70rem;"># 1. Copy script
+sudo mkdir -p /opt/sentrikat
+sudo cp sentrikat-agent-linux.sh /opt/sentrikat/
+sudo chmod +x /opt/sentrikat/sentrikat-agent-linux.sh
 
-# Daily at 2 AM
-0 2 * * * /opt/sentrikat/sentrikat-agent.sh
+# 2. Create service file
+sudo tee /etc/systemd/system/sentrikat-agent.service &lt;&lt;EOF
+[Unit]
+Description=SentriKat Discovery Agent
+After=network-online.target
 
-# Every hour
-0 * * * * /opt/sentrikat/sentrikat-agent.sh</pre>
+[Service]
+Type=simple
+ExecStart=/opt/sentrikat/sentrikat-agent-linux.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 3. Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable --now sentrikat-agent</pre>
                                 </div>
                                 <div class="col-md-6">
-                                    <h6><i class="bi bi-windows me-2"></i>Windows (Task Scheduler)</h6>
-                                    <p class="small text-muted mb-2">Create a scheduled task via PowerShell:</p>
-                                    <pre class="bg-dark text-light p-2 rounded small mb-2" style="font-size: 0.75rem;"># Create daily task at 2 AM
-$action = New-ScheduledTaskAction `
-  -Execute "powershell.exe" `
-  -Argument "-File C:\sentrikat\agent.ps1"
-$trigger = New-ScheduledTaskTrigger `
-  -Daily -At 2:00AM
-Register-ScheduledTask `
-  -TaskName "SentriKat Agent" `
-  -Action $action -Trigger $trigger</pre>
+                                    <h6><i class="bi bi-windows me-2"></i>Windows (Service via NSSM)</h6>
+                                    <pre class="bg-dark text-light p-2 rounded small mb-2" style="font-size: 0.70rem;"># 1. Copy script to C:\SentriKat\
+mkdir C:\SentriKat
+copy sentrikat-agent-windows.ps1 C:\SentriKat\
+
+# 2. Download NSSM: https://nssm.cc/download
+# Extract nssm.exe to C:\SentriKat\
+
+# 3. Install as service (Admin PowerShell)
+C:\SentriKat\nssm.exe install SentriKatAgent `
+  powershell.exe `
+  "-ExecutionPolicy Bypass -File C:\SentriKat\sentrikat-agent-windows.ps1"
+
+# 4. Start service
+net start SentriKatAgent
+
+# Or run directly:
+powershell -ExecutionPolicy Bypass `
+  -File C:\SentriKat\sentrikat-agent-windows.ps1</pre>
                                 </div>
                             </div>
-                            <p class="text-muted small mb-0 mt-2"><i class="bi bi-lightbulb me-1"></i>Recommended: Run every 6-24 hours. More frequent scans increase server load without significant benefit.</p>
+                            <p class="text-muted small mb-0 mt-2">
+                                <i class="bi bi-lightbulb me-1"></i>Default sync: every 6 hours. One-shot mode: <code>--once</code> (Linux) or <code>-RunOnce</code> (Windows).
+                            </p>
                         </div>
                     </div>
 
@@ -1663,7 +1687,7 @@ Register-ScheduledTask `
                                     <div class="col-md-6">
                                         <label class="form-label fw-semibold">Current Logo</label>
                                         <div class="d-flex align-items-center gap-3">
-                                            <img id="currentLogoPreview" src="/static/images/favicon-128x128.png" alt="Logo" style="width: 64px; height: 64px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; padding: 4px;">
+                                            <img id="currentLogoPreview" src="/static/images/logo-512.png" alt="Logo" style="width: 64px; height: 64px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; padding: 4px;">
                                             <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteLogo()" id="deleteLogoBtn" style="display: none;">
                                                 <i class="bi bi-trash me-1"></i>Remove
                                             </button>

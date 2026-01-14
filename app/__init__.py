@@ -84,7 +84,7 @@ def create_app(config_class=Config):
             'login_message': '',
             'support_email': '',
             'show_version': True,
-            'logo_url': '/static/images/favicon-128x128.png'  # Default logo
+            'logo_url': '/static/images/logo-512.png'  # Default logo
         }
         try:
             app_name = SystemSettings.query.filter_by(key='app_name').first()

@@ -37,9 +37,10 @@
             margin-bottom: 30px;
         }
 
-        .login-logo i {
-            font-size: 4rem;
-            color: #1e40af;
+        .login-logo img {
+            width: 96px;
+            height: 96px;
+            object-fit: contain;
         }
 
         .login-logo h1 {
@@ -120,7 +121,7 @@
     <div class="login-container">
         <div class="login-card">
             <div class="login-logo">
-                <i class="bi bi-shield-lock-fill" id="logoIcon"></i>
+                <img src="{{ branding.logo_url }}" alt="{{ branding.app_name }}" style="width: 96px; height: 96px; object-fit: contain;" id="logoIcon">
                 <h1>{{ branding.app_name }}</h1>
                 <p id="stepDescription">Enterprise Vulnerability Management</p>
             </div>

@@ -592,7 +592,7 @@ def get_branding_settings():
         'login_message': get_setting('login_message', ''),
         'support_email': get_setting('support_email', ''),
         'show_version': get_setting('show_version', 'true') == 'true',
-        'logo_url': get_setting('logo_url', '/static/images/favicon-128x128.png')
+        'logo_url': get_setting('logo_url', '/static/images/logo-512.png')
     }
     return jsonify(settings)
 

@@ -1295,27 +1295,30 @@ def agent_heartbeat():
 @bp.route('/api/agents/script/windows', methods=['GET'])
 @login_required
 def download_windows_agent():
-    """Download Windows PowerShell agent script."""
+    """Download Windows PowerShell agent script (daemon mode)."""
     api_key = request.args.get('api_key', 'YOUR_API_KEY_HERE')
     # Sanitize to prevent script injection
     api_key = sanitize_script_param(api_key) or 'YOUR_API_KEY_HERE'
     base_url = sanitize_script_param(request.url_root.rstrip('/'))
 
-    script = f'''# SentriKat Discovery Agent for Windows
+    script = f'''# SentriKat Discovery Agent for Windows (Daemon Mode)
 # ================================================
-# Deploy via GPO, SCCM, Intune, or run manually with Task Scheduler
+# Runs as a background service, syncing periodically
 #
-# Usage:
-#   1. Replace YOUR_API_KEY_HERE with your actual API key from Admin Panel > Integrations
-#   2. Run as Administrator or via scheduled task
-#   3. Schedule to run periodically (e.g., daily) for continuous inventory
+# Installation as Windows Service (requires NSSM or run as scheduled task):
+#   Option 1 - Run directly: powershell -ExecutionPolicy Bypass -File sentrikat-agent.ps1
+#   Option 2 - One-shot:     powershell -File sentrikat-agent.ps1 -RunOnce
+#   Option 3 - As Service:   Use NSSM to install as Windows Service
 #
 # Requirements: PowerShell 5.1+, Windows 7/Server 2008 R2 or later
 # ================================================
 
 param(
     [string]$SentriKatUrl = "{base_url}",
-    [string]$ApiKey = "{api_key}"
+    [string]$ApiKey = "{api_key}",
+    [int]$SyncIntervalHours = 6,
+    [int]$HeartbeatIntervalMinutes = 5,
+    [switch]$RunOnce = $false
 )
 
 # Validate parameters
@@ -1324,61 +1327,61 @@ if ($ApiKey -eq "YOUR_API_KEY_HERE" -or [string]::IsNullOrEmpty($ApiKey)) {{
     exit 1
 }}
 
-# Get system information
+# Global variables
+$script:AgentId = $null
 $Hostname = $env:COMPUTERNAME
 $OSInfo = Get-WmiObject Win32_OperatingSystem
 $OSVersion = $OSInfo.Caption
 $OSArch = if ([Environment]::Is64BitOperatingSystem) {{ "x64" }} else {{ "x86" }}
 
-Write-Host "SentriKat Agent starting on $Hostname" -ForegroundColor Cyan
-Write-Host "OS: $OSVersion ($OSArch)" -ForegroundColor Gray
+# ================================================
+# REGISTER AGENT FUNCTION
+# ================================================
+function Register-Agent {{
+    $RegisterBody = @{{
+        hostname = $Hostname
+        os_type = "windows"
+        os_version = $OSVersion
+        os_arch = $OSArch
+        agent_version = "1.1.0"
+        system_info = @{{
+            domain = $env:USERDOMAIN
+            username = $env:USERNAME
+            cpu = (Get-WmiObject Win32_Processor).Name
+            ram_gb = [math]::Round($OSInfo.TotalVisibleMemorySize / 1MB, 1)
+        }}
+    }} | ConvertTo-Json -Depth 3
 
-# Register agent
-$RegisterBody = @{{
-    hostname = $Hostname
-    os_type = "windows"
-    os_version = $OSVersion
-    os_arch = $OSArch
-    agent_version = "1.0.0"
-    system_info = @{{
-        domain = $env:USERDOMAIN
-        username = $env:USERNAME
-        cpu = (Get-WmiObject Win32_Processor).Name
-        ram_gb = [math]::Round($OSInfo.TotalVisibleMemorySize / 1MB, 1)
+    Write-Host "Registering agent..." -ForegroundColor Yellow
+    try {{
+        $RegisterResponse = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/register" `
+            -Method POST `
+            -Body $RegisterBody `
+            -ContentType "application/json" `
+            -Headers @{{"X-API-Key" = $ApiKey}} `
+            -ErrorAction Stop
+
+        $script:AgentId = $RegisterResponse.agent_id
+        Write-Host "Agent registered successfully. ID: $script:AgentId" -ForegroundColor Green
+    }} catch {{
+        Write-Error "Failed to register agent: $($_.Exception.Message)"
+        exit 1
     }}
-}} | ConvertTo-Json -Depth 3
-
-Write-Host "Registering agent..." -ForegroundColor Yellow
-try {{
-    $RegisterResponse = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/register" `
-        -Method POST `
-        -Body $RegisterBody `
-        -ContentType "application/json" `
-        -Headers @{{"X-API-Key" = $ApiKey}} `
-        -ErrorAction Stop
-
-    $AgentId = $RegisterResponse.agent_id
-    Write-Host "Agent registered successfully. ID: $AgentId" -ForegroundColor Green
-}} catch {{
-    Write-Error "Failed to register agent: $($_.Exception.Message)"
-    exit 1
 }}
 
-# Collect installed software
-Write-Host "Collecting installed software..." -ForegroundColor Yellow
-$Software = @()
-$Seen = @{{}}
+# ================================================
+# INVENTORY SYNC FUNCTION
+# ================================================
+# Helper function to add software if not duplicate
+$script:Seen = @{{}}
+$script:Software = @()
 
-# Function to add software if not duplicate
 function Add-Software {{
     param($Publisher, $Name, $Version)
-
     if ([string]::IsNullOrWhiteSpace($Name)) {{ return }}
-
     $Key = "$($Publisher.ToLower())|$($Name.ToLower())"
-    if ($Seen.ContainsKey($Key)) {{ return }}
-    $Seen[$Key] = $true
-
+    if ($script:Seen.ContainsKey($Key)) {{ return }}
+    $script:Seen[$Key] = $true
     $script:Software += @{{
         vendor = if ($Publisher) {{ $Publisher }} else {{ "Unknown" }}
         product = $Name
@@ -1386,48 +1389,136 @@ function Add-Software {{
     }}
 }}
 
-# From registry (64-bit)
-Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
-    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+# ================================================
+# INVENTORY SYNC FUNCTION
+# ================================================
+function Invoke-InventorySync {{
+    Write-Host "Collecting installed software..." -ForegroundColor Yellow
+    $script:Software = @()
+    $script:Seen = @{{}}
+
+    # From registry (64-bit)
+    Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+        Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+    }}
+
+    # From registry (32-bit on 64-bit OS)
+    Get-ItemProperty "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+        Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+    }}
+
+    # Current user software
+    Get-ItemProperty "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+        Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+    }}
+
+    Write-Host "Found $($script:Software.Count) unique software items" -ForegroundColor Cyan
+
+    # Report to SentriKat
+    $ReportBody = @{{
+        agent_id = $script:AgentId
+        software = $script:Software
+    }} | ConvertTo-Json -Depth 3 -Compress
+
+    Write-Host "Reporting inventory to SentriKat..." -ForegroundColor Yellow
+    try {{
+        $ReportResponse = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/report" `
+            -Method POST `
+            -Body $ReportBody `
+            -ContentType "application/json" `
+            -Headers @{{"X-API-Key" = $ApiKey}} `
+            -ErrorAction Stop
+
+        Write-Host "SUCCESS: Reported $($script:Software.Count) software items" -ForegroundColor Green
+        Write-Host "  - Queued: $($ReportResponse.results.queued)" -ForegroundColor Gray
+        Write-Host "  - Auto-approved: $($ReportResponse.results.auto_approved)" -ForegroundColor Gray
+        Write-Host "  - Duplicates: $($ReportResponse.results.duplicates)" -ForegroundColor Gray
+    }} catch {{
+        Write-Host "Failed to report software: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }}
+    return $true
 }}
 
-# From registry (32-bit on 64-bit OS)
-Get-ItemProperty "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
-    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+# Heartbeat function
+function Send-Heartbeat {{
+    try {{
+        Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/heartbeat" `
+            -Method POST `
+            -Body (@{{ agent_id = $script:AgentId }} | ConvertTo-Json) `
+            -ContentType "application/json" `
+            -Headers @{{"X-API-Key" = $ApiKey}} `
+            -ErrorAction SilentlyContinue | Out-Null
+    }} catch {{ }}
 }}
 
-# Current user software
-Get-ItemProperty "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
-    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion
+# ================================================
+# MAIN EXECUTION
+# ================================================
+
+$LogFile = "$env:ProgramData\\SentriKat\\agent.log"
+$LogDir = Split-Path $LogFile -Parent
+if (!(Test-Path $LogDir)) {{ New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }}
+
+function Write-Log {{
+    param([string]$Message)
+    $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $LogEntry = "[$Timestamp] $Message"
+    Write-Host $LogEntry
+    Add-Content -Path $LogFile -Value $LogEntry -ErrorAction SilentlyContinue
 }}
 
-Write-Host "Found $($Software.Count) unique software items" -ForegroundColor Cyan
+Write-Log "================================================"
+Write-Log "SentriKat Agent starting on $env:COMPUTERNAME"
+Write-Log "Mode: $(if ($RunOnce) {{ 'One-shot' }} else {{ 'Daemon' }})"
+Write-Log "Sync interval: $SyncIntervalHours hours"
+Write-Log "================================================"
 
-# Report to SentriKat
-$ReportBody = @{{
-    agent_id = $AgentId
-    software = $Software
-}} | ConvertTo-Json -Depth 3 -Compress
+# Initial registration and sync
+Register-Agent
+Invoke-InventorySync
 
-Write-Host "Reporting inventory to SentriKat..." -ForegroundColor Yellow
-try {{
-    $ReportResponse = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/report" `
-        -Method POST `
-        -Body $ReportBody `
-        -ContentType "application/json" `
-        -Headers @{{"X-API-Key" = $ApiKey}} `
-        -ErrorAction Stop
-
-    Write-Host "SUCCESS: Reported $($Software.Count) software items" -ForegroundColor Green
-    Write-Host "  - Queued: $($ReportResponse.results.queued)" -ForegroundColor Gray
-    Write-Host "  - Auto-approved: $($ReportResponse.results.auto_approved)" -ForegroundColor Gray
-    Write-Host "  - Duplicates: $($ReportResponse.results.duplicates)" -ForegroundColor Gray
-}} catch {{
-    Write-Error "Failed to report software: $($_.Exception.Message)"
-    exit 1
+if ($RunOnce) {{
+    Write-Log "One-shot mode: exiting after single sync"
+    exit 0
 }}
 
-Write-Host "`nAgent completed successfully!" -ForegroundColor Green
+# Daemon mode: loop forever
+Write-Log "Entering daemon mode..."
+$SyncIntervalSeconds = $SyncIntervalHours * 3600
+$HeartbeatIntervalSeconds = $HeartbeatIntervalMinutes * 60
+$LastSync = Get-Date
+$LastHeartbeat = Get-Date
+
+while ($true) {{
+    $Now = Get-Date
+
+    # Check if it's time for heartbeat
+    if (($Now - $LastHeartbeat).TotalSeconds -ge $HeartbeatIntervalSeconds) {{
+        Send-Heartbeat
+        $LastHeartbeat = $Now
+    }}
+
+    # Check if it's time for sync
+    if (($Now - $LastSync).TotalSeconds -ge $SyncIntervalSeconds) {{
+        Write-Log "Starting scheduled sync..."
+        Invoke-InventorySync
+        $LastSync = Get-Date
+    }}
+
+    # Sleep briefly to avoid busy loop
+    Start-Sleep -Seconds 60
+}}
+
+# ================================================
+# INSTALLING AS WINDOWS SERVICE (using NSSM)
+# ================================================
+# 1. Download NSSM from https://nssm.cc/download
+# 2. Run: nssm install SentriKatAgent
+# 3. Set Path: powershell.exe
+# 4. Set Arguments: -ExecutionPolicy Bypass -File "C:\\SentriKat\\sentrikat-agent.ps1"
+# 5. Set Startup type: Automatic
+# ================================================
 '''
 
     return Response(
@@ -1440,7 +1531,7 @@ Write-Host "`nAgent completed successfully!" -ForegroundColor Green
 @bp.route('/api/agents/script/linux', methods=['GET'])
 @login_required
 def download_linux_agent():
-    """Download Linux Bash agent script."""
+    """Download Linux Bash agent script (daemon mode)."""
     api_key = request.args.get('api_key', 'YOUR_API_KEY_HERE')
     # Sanitize to prevent script injection
     api_key = sanitize_script_param(api_key) or 'YOUR_API_KEY_HERE'
@@ -1448,25 +1539,36 @@ def download_linux_agent():
 
     script = f'''#!/bin/bash
 # ================================================
-# SentriKat Discovery Agent for Linux
+# SentriKat Discovery Agent for Linux (Daemon Mode)
 # ================================================
-# Deploy via Ansible, Puppet, Chef, or add to cron
+# Runs as a background service, syncing periodically
 #
-# Usage:
-#   1. Replace YOUR_API_KEY_HERE with your actual API key
-#   2. Make executable: chmod +x sentrikat-agent-linux.sh
-#   3. Run: ./sentrikat-agent-linux.sh
-#   4. Add to cron for periodic scans: crontab -e
-#      0 6 * * * /path/to/sentrikat-agent-linux.sh > /var/log/sentrikat-agent.log 2>&1
+# Installation as systemd service:
+#   1. Copy to /opt/sentrikat/sentrikat-agent.sh
+#   2. chmod +x /opt/sentrikat/sentrikat-agent.sh
+#   3. Create service file (see bottom of script)
+#   4. systemctl enable sentrikat-agent && systemctl start sentrikat-agent
 #
-# Requirements: bash, curl, jq (optional, for better JSON handling)
+# Manual run: ./sentrikat-agent.sh
+# One-shot:   ./sentrikat-agent.sh --once
+#
+# Requirements: bash, curl
 # ================================================
-
-set -e
 
 # Configuration - EDIT THESE VALUES
 SENTRIKAT_URL="{base_url}"
 API_KEY="{api_key}"
+SYNC_INTERVAL=21600  # Sync interval in seconds (default: 6 hours = 21600)
+HEARTBEAT_INTERVAL=300  # Heartbeat every 5 minutes
+LOG_FILE="/var/log/sentrikat-agent.log"
+
+# Parse arguments
+RUN_ONCE=false
+for arg in "$@"; do
+    case $arg in
+        --once) RUN_ONCE=true ;;
+    esac
+done
 
 # Validate API key
 if [ "$API_KEY" = "YOUR_API_KEY_HERE" ] || [ -z "$API_KEY" ]; then
@@ -1475,9 +1577,10 @@ if [ "$API_KEY" = "YOUR_API_KEY_HERE" ] || [ -z "$API_KEY" ]; then
     exit 1
 fi
 
-# Get system information
+# Global variables
 HOSTNAME=$(hostname)
 OS_TYPE="linux"
+AGENT_ID=""
 
 # Detect OS version
 if [ -f /etc/os-release ]; then
@@ -1487,44 +1590,52 @@ elif [ -f /etc/redhat-release ]; then
 else
     OS_VERSION=$(uname -sr)
 fi
-
 OS_ARCH=$(uname -m)
 
-echo "================================================"
-echo "SentriKat Agent starting on $HOSTNAME"
-echo "OS: $OS_VERSION ($OS_ARCH)"
-echo "================================================"
+# Logging function
+log_msg() {{
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}}
 
-# Register agent
-echo "Registering agent..."
-REGISTER_RESPONSE=$(curl -s -X POST "$SENTRIKAT_URL/api/agent/register" \\
-    -H "Content-Type: application/json" \\
-    -H "X-API-Key: $API_KEY" \\
-    -d "{{
-        \\"hostname\\": \\"$HOSTNAME\\",
-        \\"os_type\\": \\"$OS_TYPE\\",
-        \\"os_version\\": \\"$OS_VERSION\\",
-        \\"os_arch\\": \\"$OS_ARCH\\",
-        \\"agent_version\\": \\"1.0.0\\"
-    }}")
+# Signal handlers for clean shutdown
+cleanup() {{
+    log_msg "Agent shutting down..."
+    exit 0
+}}
+trap cleanup SIGTERM SIGINT
 
-# Check if registration succeeded
-if echo "$REGISTER_RESPONSE" | grep -q "error"; then
-    echo "ERROR: Failed to register agent"
-    echo "$REGISTER_RESPONSE"
-    exit 1
-fi
+# ================================================
+# REGISTER AGENT FUNCTION
+# ================================================
+register_agent() {{
+    log_msg "Registering agent..."
+    REGISTER_RESPONSE=$(curl -s -X POST "$SENTRIKAT_URL/api/agent/register" \\
+        -H "Content-Type: application/json" \\
+        -H "X-API-Key: $API_KEY" \\
+        -d "{{
+            \\"hostname\\": \\"$HOSTNAME\\",
+            \\"os_type\\": \\"$OS_TYPE\\",
+            \\"os_version\\": \\"$OS_VERSION\\",
+            \\"os_arch\\": \\"$OS_ARCH\\",
+            \\"agent_version\\": \\"1.1.0\\"
+        }}")
 
-AGENT_ID=$(echo "$REGISTER_RESPONSE" | grep -o '"agent_id"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
-if [ -z "$AGENT_ID" ]; then
-    AGENT_ID="$HOSTNAME"
-fi
-echo "Agent registered. ID: $AGENT_ID"
+    if echo "$REGISTER_RESPONSE" | grep -q "error"; then
+        log_msg "ERROR: Failed to register agent"
+        log_msg "$REGISTER_RESPONSE"
+        return 1
+    fi
 
-# Collect installed software
-echo "Collecting installed software..."
-SOFTWARE_JSON="["
-FIRST=true
+    AGENT_ID=$(echo "$REGISTER_RESPONSE" | grep -o '"agent_id"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+    if [ -z "$AGENT_ID" ]; then
+        AGENT_ID="$HOSTNAME"
+    fi
+    log_msg "Agent registered. ID: $AGENT_ID"
+}}
+
+# ================================================
+# HELPER FUNCTIONS
+# ================================================
 
 # Function to check if package is important (not a library or system fluff)
 is_important_package() {{
@@ -1634,78 +1745,157 @@ add_software() {{
     SOFTWARE_JSON="$SOFTWARE_JSON{{\\"vendor\\":\\"$vendor\\",\\"product\\":\\"$product\\",\\"version\\":\\"$version\\"}}"
 }}
 
-# Debian/Ubuntu - dpkg (no limit - capture all installed packages)
-if command -v dpkg &> /dev/null; then
-    echo "  Scanning dpkg packages..."
-    PKG_COUNT=0
-    # Query only installed packages, using tab separator for reliable parsing
-    while IFS=$'\\t' read -r name version; do
-        add_software "Debian Package" "$name" "$version"
-        PKG_COUNT=$((PKG_COUNT + 1))
-    done < <(dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null)
-    echo "    Found $PKG_COUNT dpkg packages"
-fi
+# ================================================
+# INVENTORY SYNC FUNCTION
+# ================================================
+do_inventory_sync() {{
+    log_msg "Collecting installed software..."
+    SOFTWARE_JSON="["
+    FIRST=true
 
-# RHEL/CentOS/Fedora - rpm (no limit - capture all installed packages)
-if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
-    echo "  Scanning rpm packages..."
-    PKG_COUNT=0
-    while IFS='|' read -r name version vendor; do
-        if [ -n "$name" ]; then
-            add_software "${{vendor:-RPM Package}}" "$name" "$version"
+    # Debian/Ubuntu - dpkg
+    if command -v dpkg &> /dev/null; then
+        log_msg "  Scanning dpkg packages..."
+        PKG_COUNT=0
+        while IFS=$'\\t' read -r name version; do
+            add_software "Debian Package" "$name" "$version"
             PKG_COUNT=$((PKG_COUNT + 1))
-        fi
-    done < <(rpm -qa --queryformat '%{{NAME}}|%{{VERSION}}|%{{VENDOR}}\\n' 2>/dev/null)
-    echo "    Found $PKG_COUNT rpm packages"
+        done < <(dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null)
+        log_msg "    Found $PKG_COUNT dpkg packages"
+    fi
+
+    # RHEL/CentOS/Fedora - rpm
+    if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
+        log_msg "  Scanning rpm packages..."
+        PKG_COUNT=0
+        while IFS='|' read -r name version vendor; do
+            if [ -n "$name" ]; then
+                add_software "${{vendor:-RPM Package}}" "$name" "$version"
+                PKG_COUNT=$((PKG_COUNT + 1))
+            fi
+        done < <(rpm -qa --queryformat '%{{NAME}}|%{{VERSION}}|%{{VENDOR}}\\n' 2>/dev/null)
+        log_msg "    Found $PKG_COUNT rpm packages"
+    fi
+
+    # Snap packages
+    if command -v snap &> /dev/null; then
+        log_msg "  Scanning snap packages..."
+        while read -r name version rest; do
+            if [ "$name" != "Name" ] && [ -n "$name" ]; then
+                add_software "Snap Package" "$name" "$version"
+            fi
+        done < <(snap list 2>/dev/null | tail -n +2)
+    fi
+
+    # Flatpak packages
+    if command -v flatpak &> /dev/null; then
+        log_msg "  Scanning flatpak packages..."
+        while read -r name version rest; do
+            if [ -n "$name" ]; then
+                add_software "Flatpak" "$name" "$version"
+            fi
+        done < <(flatpak list --columns=name,version 2>/dev/null | tail -n +1)
+    fi
+
+    SOFTWARE_JSON="$SOFTWARE_JSON]"
+
+    # Count items
+    ITEM_COUNT=$(echo "$SOFTWARE_JSON" | grep -o "product" | wc -l)
+    log_msg "Found approximately $ITEM_COUNT software items"
+
+    # Report to SentriKat
+    log_msg "Reporting inventory to SentriKat..."
+    REPORT_BODY="{{\\"agent_id\\":\\"$AGENT_ID\\",\\"software\\":$SOFTWARE_JSON}}"
+
+    REPORT_RESPONSE=$(curl -s -X POST "$SENTRIKAT_URL/api/agent/report" \\
+        -H "Content-Type: application/json" \\
+        -H "X-API-Key: $API_KEY" \\
+        -d "$REPORT_BODY")
+
+    if echo "$REPORT_RESPONSE" | grep -q "success"; then
+        log_msg "SUCCESS: Software inventory reported to SentriKat"
+        log_msg "$REPORT_RESPONSE"
+    else
+        log_msg "ERROR: Failed to report software"
+        log_msg "$REPORT_RESPONSE"
+        return 1
+    fi
+}}
+
+# Heartbeat function
+send_heartbeat() {{
+    curl -s -X POST "$SENTRIKAT_URL/api/agent/heartbeat" \\
+        -H "Content-Type: application/json" \\
+        -H "X-API-Key: $API_KEY" \\
+        -d "{{\\"agent_id\\":\\"$AGENT_ID\\"}}" > /dev/null 2>&1
+}}
+
+# ================================================
+# MAIN EXECUTION
+# ================================================
+
+log_msg "================================================"
+log_msg "SentriKat Agent starting on $(hostname)"
+log_msg "Mode: $([ "$RUN_ONCE" = true ] && echo 'One-shot' || echo 'Daemon')"
+log_msg "Sync interval: $((SYNC_INTERVAL / 3600)) hours"
+log_msg "================================================"
+
+# Initial registration
+register_agent
+
+# Run inventory sync
+do_inventory_sync
+
+if [ "$RUN_ONCE" = true ]; then
+    log_msg "One-shot mode: exiting after single sync"
+    exit 0
 fi
 
-# Snap packages
-if command -v snap &> /dev/null; then
-    echo "  Scanning snap packages..."
-    while read -r name version rest; do
-        if [ "$name" != "Name" ] && [ -n "$name" ]; then
-            add_software "Snap Package" "$name" "$version"
-        fi
-    done < <(snap list 2>/dev/null | tail -n +2)
-fi
+# Daemon mode: loop forever
+log_msg "Entering daemon mode..."
+LAST_SYNC=$(date +%s)
+LAST_HEARTBEAT=$(date +%s)
 
-# Flatpak packages
-if command -v flatpak &> /dev/null; then
-    echo "  Scanning flatpak packages..."
-    while read -r name version rest; do
-        if [ -n "$name" ]; then
-            add_software "Flatpak" "$name" "$version"
-        fi
-    done < <(flatpak list --columns=name,version 2>/dev/null | tail -n +1)
-fi
+while true; do
+    NOW=$(date +%s)
 
-SOFTWARE_JSON="$SOFTWARE_JSON]"
+    # Check if it's time for heartbeat
+    if [ $((NOW - LAST_HEARTBEAT)) -ge $HEARTBEAT_INTERVAL ]; then
+        send_heartbeat
+        LAST_HEARTBEAT=$NOW
+    fi
 
-# Count items (rough count)
-ITEM_COUNT=$(echo "$SOFTWARE_JSON" | grep -o "product" | wc -l)
-echo "Found approximately $ITEM_COUNT software items"
+    # Check if it's time for sync
+    if [ $((NOW - LAST_SYNC)) -ge $SYNC_INTERVAL ]; then
+        log_msg "Starting scheduled sync..."
+        do_inventory_sync
+        LAST_SYNC=$(date +%s)
+    fi
 
-# Report to SentriKat
-echo "Reporting inventory to SentriKat..."
-REPORT_BODY="{{\\"agent_id\\":\\"$AGENT_ID\\",\\"software\\":$SOFTWARE_JSON}}"
+    # Sleep briefly to avoid busy loop
+    sleep 60
+done
 
-REPORT_RESPONSE=$(curl -s -X POST "$SENTRIKAT_URL/api/agent/report" \\
-    -H "Content-Type: application/json" \\
-    -H "X-API-Key: $API_KEY" \\
-    -d "$REPORT_BODY")
-
-if echo "$REPORT_RESPONSE" | grep -q "success"; then
-    echo "================================================"
-    echo "SUCCESS: Software inventory reported to SentriKat"
-    echo "$REPORT_RESPONSE"
-    echo "================================================"
-else
-    echo "ERROR: Failed to report software"
-    echo "$REPORT_RESPONSE"
-    exit 1
-fi
-
-echo "Agent completed successfully!"
+# ================================================
+# SYSTEMD SERVICE FILE
+# ================================================
+# Save as /etc/systemd/system/sentrikat-agent.service
+#
+# [Unit]
+# Description=SentriKat Discovery Agent
+# After=network-online.target
+# Wants=network-online.target
+#
+# [Service]
+# Type=simple
+# ExecStart=/opt/sentrikat/sentrikat-agent.sh
+# Restart=always
+# RestartSec=30
+# User=root
+#
+# [Install]
+# WantedBy=multi-user.target
+# ================================================
 '''
 
     return Response(
