@@ -524,7 +524,7 @@
             min-height: calc(100vh - 140px); /* Account for header and footer */
         }
 
-        /* Sidebar - Between header and footer */
+        /* Sidebar - Fixed position, doesn't scroll with page */
         .app-sidebar {
             width: 220px;
             background: var(--gray-100);
@@ -532,9 +532,12 @@
             display: flex;
             flex-direction: column;
             flex-shrink: 0;
-            transition: width 0.3s ease, margin-left 0.3s ease;
+            position: sticky;
+            top: 0;
+            height: calc(100vh - 140px);
             overflow-y: auto;
             overflow-x: hidden;
+            transition: width 0.3s ease;
         }
 
         [data-theme="dark"] .app-sidebar {
@@ -1785,10 +1788,6 @@
                 {% endif %}
             </nav>
 
-            <!-- Sidebar Footer -->
-            <div class="sidebar-footer">
-                <small class="text-muted" style="font-size: 0.7rem;">v1.0.0</small>
-            </div>
         </aside>
 
         <!-- Main Content Area -->
