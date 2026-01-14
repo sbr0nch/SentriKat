@@ -5825,21 +5825,115 @@ async function saveIntegration() {
             throw new Error('Invalid response from server');
         }
 
-        // Close modal
+        // Close create modal
         bootstrap.Modal.getInstance(document.getElementById('createIntegrationModal')).hide();
 
-        // Show API key for agent type
-        if (type === 'agent') {
-            showToast(`Integration created! API Key: ${integration.api_key}`, 'success', 10000);
-        } else {
-            showToast('Integration created successfully', 'success');
-        }
+        // Show API key in a proper modal (enterprise-style)
+        showApiKeyModal(integration);
 
         loadIntegrations();
 
     } catch (error) {
         showToast('Error: ' + error.message, 'danger');
     }
+}
+
+function showApiKeyModal(integration) {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('apiKeyModal');
+    if (existingModal) existingModal.remove();
+
+    const modalHtml = `
+        <div class="modal fade" id="apiKeyModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header bg-success text-white">
+                        <h5 class="modal-title">
+                            <i class="bi bi-check-circle me-2"></i>Integration Created Successfully
+                        </h5>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-warning mb-4">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            <strong>Important:</strong> Save this API key now. For security reasons, it will not be displayed again.
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">Integration Name</label>
+                            <div class="form-control bg-light">${escapeHtml(integration.name)}</div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">API Key</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace bg-light"
+                                       id="apiKeyValue" value="${escapeHtml(integration.api_key)}" readonly>
+                                <button class="btn btn-outline-primary" type="button" onclick="copyApiKey()">
+                                    <i class="bi bi-clipboard me-1"></i>Copy
+                                </button>
+                            </div>
+                            <small class="text-muted">Use this key in the X-API-Key header for API requests</small>
+                        </div>
+
+                        ${integration.integration_type === 'agent' ? `
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="bi bi-download me-2"></i>Download Agent Scripts</h6>
+                                <p class="card-text small text-muted">
+                                    Download pre-configured agent scripts with your API key embedded:
+                                </p>
+                                <div class="d-flex gap-2">
+                                    <a href="/api/agents/script/windows?api_key=${encodeURIComponent(integration.api_key)}"
+                                       class="btn btn-outline-primary btn-sm" download>
+                                        <i class="bi bi-windows me-1"></i>Windows PowerShell
+                                    </a>
+                                    <a href="/api/agents/script/linux?api_key=${encodeURIComponent(integration.api_key)}"
+                                       class="btn btn-outline-primary btn-sm" download>
+                                        <i class="bi bi-ubuntu me-1"></i>Linux Bash
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        <div class="card border-info">
+                            <div class="card-body">
+                                <h6 class="card-title text-info"><i class="bi bi-info-circle me-2"></i>Usage Example</h6>
+                                <pre class="bg-dark text-light p-3 rounded mb-0" style="font-size: 0.85em;"><code>curl -X POST ${window.location.origin}/api/import \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${escapeHtml(integration.api_key)}" \\
+  -d '{"software": [{"vendor": "Microsoft", "product": "Office", "version": "365"}]}'</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            <i class="bi bi-check me-1"></i>I've Saved the Key
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    const modal = new bootstrap.Modal(document.getElementById('apiKeyModal'));
+    modal.show();
+}
+
+function copyApiKey() {
+    const apiKeyInput = document.getElementById('apiKeyValue');
+    apiKeyInput.select();
+    apiKeyInput.setSelectionRange(0, 99999); // For mobile
+
+    navigator.clipboard.writeText(apiKeyInput.value).then(() => {
+        showToast('API key copied to clipboard', 'success');
+    }).catch(() => {
+        // Fallback for older browsers
+        document.execCommand('copy');
+        showToast('API key copied to clipboard', 'success');
+    });
 }
 
 async function syncIntegration(integrationId) {
