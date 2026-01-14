@@ -149,7 +149,7 @@ class EmailAlertManager:
             return {'status': 'skipped', 'reason': 'No matches meet alert criteria'}
 
         # Build email
-        subject = f"🚨 SentriKat Alert: {len(filtered_matches)} Critical Vulnerabilities Detected"
+        subject = f"SentriKat Alert: {len(filtered_matches)} Critical Vulnerabilities Detected"
         body = EmailAlertManager._build_alert_email_html(organization, filtered_matches)
 
         # Send email
@@ -494,7 +494,7 @@ class EmailAlertManager:
                 server.login(smtp_config['username'], smtp_config['password'])
 
             server.quit()
-            return {'success': True, 'message': '✓ SMTP connection successful'}
+            return {'success': True, 'message': 'SMTP connection successful'}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
@@ -741,26 +741,13 @@ def _build_user_invite_email_html(user, organization):
 
             <div class="features">
                 <h3 style="color: #1e40af; margin-bottom: 15px;">What you can do with SentriKat:</h3>
-                <div class="feature">
-                    <div class="feature-icon">✓</div>
-                    <div>Monitor CISA KEV (Known Exploited Vulnerabilities) affecting your products</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">✓</div>
-                    <div>Track and acknowledge critical vulnerabilities in real-time</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">✓</div>
-                    <div>Receive automated email alerts for critical threats</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">✓</div>
-                    <div>Filter and prioritize vulnerabilities by severity and impact</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">✓</div>
-                    <div>Share vulnerability views with stakeholders</div>
-                </div>
+                <ul style="color: #374151; padding-left: 20px;">
+                    <li style="margin-bottom: 8px;">Monitor CISA KEV (Known Exploited Vulnerabilities) affecting your products</li>
+                    <li style="margin-bottom: 8px;">Track and acknowledge critical vulnerabilities in real-time</li>
+                    <li style="margin-bottom: 8px;">Receive automated email alerts for critical threats</li>
+                    <li style="margin-bottom: 8px;">Filter and prioritize vulnerabilities by severity and impact</li>
+                    <li>Share vulnerability views with stakeholders</li>
+                </ul>
             </div>
 
             <p style="margin-top: 30px; color: #6b7280; font-size: 14px;">
@@ -865,7 +852,6 @@ def _build_user_status_email_html(user, organization, is_blocked, blocked_by_use
 
     if is_blocked:
         status_color = "#dc2626"
-        status_icon = "🚫"
         status_text = "Account Blocked"
         message = """
             <p>Your SentriKat account has been <strong style="color: #dc2626;">blocked</strong> by an administrator.</p>
@@ -874,7 +860,6 @@ def _build_user_status_email_html(user, organization, is_blocked, blocked_by_use
         """
     else:
         status_color = "#16a34a"
-        status_icon = "✅"
         status_text = "Account Unblocked"
         message = """
             <p>Your SentriKat account has been <strong style="color: #16a34a;">unblocked</strong> and restored.</p>
@@ -890,9 +875,8 @@ def _build_user_status_email_html(user, organization, is_blocked, blocked_by_use
 </head>
 <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
     <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-        <div style="background: {status_color}; padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
-            <div style="font-size: 48px; margin-bottom: 10px;">{status_icon}</div>
-            <h1 style="color: white; margin: 0; font-size: 24px;">{status_text}</h1>
+        <div style="background: {status_color}; padding: 24px 30px; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 22px;">{status_text}</h1>
         </div>
 
         <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
@@ -1019,8 +1003,7 @@ def _build_role_change_email_html(user, organization, old_role, new_role, change
 
     is_promotion = _role_level(new_role) > _role_level(old_role)
     status_color = "#10b981" if is_promotion else "#f59e0b"  # Green for promotion, amber for demotion
-    status_icon = "⬆️" if is_promotion else "⬇️"
-    status_text = "Promoted" if is_promotion else "Changed"
+    status_text = "Role Updated" if is_promotion else "Role Changed"
 
     html = f"""
 <!DOCTYPE html>
@@ -1031,9 +1014,9 @@ def _build_role_change_email_html(user, organization, old_role, new_role, change
 </head>
 <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
     <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, {status_color} 0%, {status_color}dd 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 24px;">{status_icon} Role {status_text}</h1>
-            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">Your permissions have been updated</p>
+        <div style="background: {status_color}; padding: 24px 30px; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 22px;">{status_text}</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">Your permissions have been updated</p>
         </div>
 
         <div style="background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
@@ -1186,9 +1169,8 @@ def _build_2fa_reset_email_html(user, organization, reset_by_username=None):
 </head>
 <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
     <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-        <div style="background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
-            <div style="font-size: 48px; margin-bottom: 10px;">🔐</div>
-            <h1 style="color: white; margin: 0; font-size: 24px;">Two-Factor Authentication Reset</h1>
+        <div style="background: #7c3aed; padding: 24px 30px; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 22px;">Two-Factor Authentication Reset</h1>
         </div>
 
         <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
@@ -1196,7 +1178,7 @@ def _build_2fa_reset_email_html(user, organization, reset_by_username=None):
 
             <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
                 <p style="margin: 0; color: #92400e; font-weight: 600;">
-                    ⚠️ Your two-factor authentication has been reset by an administrator.
+                    Your two-factor authentication has been reset by an administrator.
                 </p>
             </div>
 
@@ -1225,7 +1207,7 @@ def _build_2fa_reset_email_html(user, organization, reset_by_username=None):
             </div>
 
             <p style="color: #dc2626; font-size: 14px; font-weight: 600;">
-                🔒 Security Recommendation: Set up 2FA again as soon as possible to protect your account.
+                Security Recommendation: Set up 2FA again as soon as possible to protect your account.
             </p>
 
             <div style="text-align: center; margin: 30px 0;">
@@ -1335,9 +1317,8 @@ def _build_password_change_forced_email_html(user, organization, forced_by_usern
 </head>
 <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
     <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-        <div style="background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
-            <div style="font-size: 48px; margin-bottom: 10px;">🔑</div>
-            <h1 style="color: white; margin: 0; font-size: 24px;">Password Change Required</h1>
+        <div style="background: #ea580c; padding: 24px 30px; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 22px;">Password Change Required</h1>
         </div>
 
         <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
@@ -1345,7 +1326,7 @@ def _build_password_change_forced_email_html(user, organization, forced_by_usern
 
             <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
                 <p style="margin: 0; color: #92400e; font-weight: 600;">
-                    ⚠️ An administrator has required you to change your password.
+                    An administrator has required you to change your password.
                 </p>
             </div>
 
@@ -1450,7 +1431,7 @@ def send_agent_offline_alert(offline_agents, stale_agents):
 
     # Build email
     total_agents = len(offline_agents) + len(stale_agents)
-    subject = f"⚠️ SentriKat Alert: {total_agents} Agent(s) Offline"
+    subject = f"SentriKat Alert: {total_agents} Agent(s) Offline"
     html_body = _build_agent_offline_email_html(offline_agents, stale_agents)
 
     try:
@@ -1518,17 +1499,16 @@ def _build_agent_offline_email_html(offline_agents, stale_agents):
 </head>
 <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
     <div style="max-width: 700px; margin: 0 auto; padding: 40px 20px;">
-        <div style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
-            <div style="font-size: 48px; margin-bottom: 10px;">🖥️</div>
-            <h1 style="color: white; margin: 0; font-size: 24px;">Agent Status Alert</h1>
-            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">{len(offline_agents) + len(stale_agents)} agent(s) require attention</p>
+        <div style="background: #dc2626; padding: 24px 30px; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 22px;">Agent Status Alert</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">{len(offline_agents) + len(stale_agents)} agent(s) require attention</p>
         </div>
 
         <div style="background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
 
             <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
                 <p style="margin: 0; color: #991b1b; font-weight: 600;">
-                    ⚠️ The following discovery agents have stopped reporting:
+                    The following discovery agents have stopped reporting:
                 </p>
                 <p style="margin: 8px 0 0 0; color: #7f1d1d; font-size: 14px;">
                     This may indicate a service failure, network issue, or system shutdown.
