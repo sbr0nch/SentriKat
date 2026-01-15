@@ -5102,6 +5102,24 @@ function formatDate(dateStr) {
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+function formatRelativeTime(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffSec < 60) return 'Just now';
+    if (diffMin < 60) return `${diffMin} min ago`;
+    if (diffHour < 24) return `${diffHour}h ago`;
+    if (diffDay < 7) return `${diffDay}d ago`;
+    if (diffDay < 30) return `${Math.floor(diffDay / 7)}w ago`;
+    return formatDate(dateStr);
+}
+
 // ============================================================================
 // INSTALLATION ID HELPER
 // ============================================================================
@@ -5401,30 +5419,50 @@ async function loadAssets(page = 1) {
         if (assets.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center py-4 text-muted">
+                    <td colspan="8" class="text-center py-4 text-muted">
                         <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
-                        <p class="mt-2 mb-0">No assets discovered</p>
-                        <p class="small">Assets will appear here when agents report their inventory</p>
+                        <p class="mt-2 mb-0">No endpoints discovered</p>
+                        <p class="small">Endpoints will appear here when agents report their inventory</p>
                     </td>
                 </tr>
             `;
             if (paginationEl) paginationEl.innerHTML = '';
         } else {
-            tbody.innerHTML = assets.map(asset => `
+            tbody.innerHTML = assets.map(asset => {
+                // Status badge with color
+                const statusBadges = {
+                    'online': '<span class="badge bg-success"><i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>Online</span>',
+                    'offline': '<span class="badge bg-secondary"><i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>Offline</span>',
+                    'stale': '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>Stale</span>',
+                    'decommissioned': '<span class="badge bg-dark"><i class="bi bi-x-circle me-1"></i>Decommissioned</span>'
+                };
+                const statusBadge = statusBadges[asset.status] || `<span class="badge bg-secondary">${asset.status || 'Unknown'}</span>`;
+
+                // Vulnerability badge
+                const vulnCount = asset.total_vulnerabilities || asset.vulnerable_products_count || 0;
+                const vulnBadge = vulnCount > 0 ? `<span class="badge bg-danger ms-1" title="${vulnCount} vulnerabilities">${vulnCount} CVEs</span>` : '';
+
+                // Last seen time with relative formatting
+                const lastSeen = asset.last_checkin || asset.last_inventory_at;
+                const lastSeenDisplay = lastSeen ? formatRelativeTime(lastSeen) : '<span class="text-muted">Never</span>';
+
+                return `
                 <tr>
                     <td>
                         <a href="#" onclick="showAssetDetails(${asset.id}); return false;" class="fw-semibold text-decoration-none">
                             ${escapeHtml(asset.hostname)}
                         </a>
+                        ${asset.environment ? `<br><small class="text-muted">${escapeHtml(asset.environment)}</small>` : ''}
                     </td>
                     <td><code>${escapeHtml(asset.ip_address || '-')}</code></td>
                     <td>${escapeHtml(asset.os_name || '-')} ${escapeHtml(asset.os_version || '')}</td>
                     <td>${escapeHtml(asset.organization_name || 'Unknown')}</td>
                     <td>
-                        <span class="badge bg-primary">${asset.product_count || 0} products</span>
-                        ${asset.vulnerable_count > 0 ? `<span class="badge bg-danger ms-1">${asset.vulnerable_count} vulnerable</span>` : ''}
+                        <span class="badge bg-primary">${asset.product_count || 0}</span>
+                        ${vulnBadge}
                     </td>
-                    <td>${asset.last_seen ? formatDate(asset.last_seen) : '<span class="text-muted">Never</span>'}</td>
+                    <td>${statusBadge}</td>
+                    <td>${lastSeenDisplay}</td>
                     <td>
                         <button class="btn btn-outline-primary btn-sm" onclick="showAssetDetails(${asset.id})" title="View details">
                             <i class="bi bi-eye"></i>
@@ -5434,7 +5472,7 @@ async function loadAssets(page = 1) {
                         </button>
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
 
             // Build pagination
             if (paginationEl && pages > 1) {

@@ -809,6 +809,111 @@ def delete_asset(asset_id):
     })
 
 
+@agent_bp.route('/api/assets/<int:asset_id>', methods=['PUT', 'PATCH'])
+def update_asset(asset_id):
+    """
+    Update asset details.
+
+    Editable fields:
+    - description, notes, tags
+    - criticality (critical, high, medium, low)
+    - environment (production, staging, development, test)
+    - owner, group_name
+    - status (online, offline, stale, decommissioned)
+    - active (boolean)
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    asset = Asset.query.get_or_404(asset_id)
+
+    # Check permission (requires manager or above)
+    if not user.is_super_admin():
+        user_org = user.org_memberships.filter_by(organization_id=asset.organization_id).first()
+        if not user_org or user_org.role not in ['org_admin', 'manager']:
+            return jsonify({'error': 'Manager access required'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Update allowed fields
+    allowed_fields = [
+        'description', 'notes', 'criticality', 'environment',
+        'owner', 'group_name', 'status', 'active', 'asset_type'
+    ]
+
+    updated_fields = []
+    for field in allowed_fields:
+        if field in data:
+            # Validate criticality
+            if field == 'criticality' and data[field] not in ['critical', 'high', 'medium', 'low']:
+                return jsonify({'error': f'Invalid criticality: {data[field]}'}), 400
+            # Validate environment
+            if field == 'environment' and data[field] and data[field] not in ['production', 'staging', 'development', 'test']:
+                return jsonify({'error': f'Invalid environment: {data[field]}'}), 400
+            # Validate status
+            if field == 'status' and data[field] not in ['online', 'offline', 'stale', 'decommissioned']:
+                return jsonify({'error': f'Invalid status: {data[field]}'}), 400
+
+            setattr(asset, field, data[field])
+            updated_fields.append(field)
+
+    # Handle tags specially (accepts array)
+    if 'tags' in data:
+        asset.set_tags(data['tags'])
+        updated_fields.append('tags')
+
+    if not updated_fields:
+        return jsonify({'error': 'No valid fields to update'}), 400
+
+    db.session.commit()
+    logger.info(f"Asset {asset.hostname} updated by {user.username}: {updated_fields}")
+
+    return jsonify({
+        'status': 'success',
+        'message': f'Asset {asset.hostname} updated',
+        'updated_fields': updated_fields,
+        'asset': asset.to_dict()
+    })
+
+
+@agent_bp.route('/api/assets/groups', methods=['GET'])
+def list_asset_groups():
+    """List all unique asset groups/environments for filtering."""
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Build query based on permissions
+    if user.is_super_admin():
+        query = Asset.query
+    else:
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = Asset.query.filter(Asset.organization_id.in_(user_org_ids))
+
+    # Get distinct groups and environments
+    groups = db.session.query(Asset.group_name).filter(
+        Asset.group_name.isnot(None),
+        Asset.id.in_([a.id for a in query.all()])
+    ).distinct().all()
+
+    environments = db.session.query(Asset.environment).filter(
+        Asset.environment.isnot(None),
+        Asset.id.in_([a.id for a in query.all()])
+    ).distinct().all()
+
+    return jsonify({
+        'groups': [g[0] for g in groups if g[0]],
+        'environments': [e[0] for e in environments if e[0]]
+    })
+
+
 # ============================================================================
 # Agent API Key Management
 # ============================================================================

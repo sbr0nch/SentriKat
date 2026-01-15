@@ -1068,10 +1068,22 @@ class Asset(db.Model):
 
     # Status
     active = db.Column(db.Boolean, default=True, index=True)
-    status = db.Column(db.String(20), default='online')  # online, offline, unknown, decommissioned
+    status = db.Column(db.String(20), default='online')  # online, offline, stale, decommissioned
+
+    # Classification & Management
+    criticality = db.Column(db.String(20), default='medium')  # critical, high, medium, low
+    environment = db.Column(db.String(50), nullable=True)  # production, staging, development, test
+    owner = db.Column(db.String(200), nullable=True)  # Contact/owner for this endpoint
+    group_name = db.Column(db.String(100), nullable=True, index=True)  # Group/role (web-servers, databases, etc.)
+
+    # Cached vulnerability stats (updated by CVE scan)
+    vulnerable_products_count = db.Column(db.Integer, default=0)  # Products with matching CVEs
+    total_vulnerabilities = db.Column(db.Integer, default=0)  # Total CVEs affecting this endpoint
+    last_vuln_scan_at = db.Column(db.DateTime, nullable=True)  # When vulnerabilities were last calculated
 
     # Additional info
     description = db.Column(db.Text, nullable=True)
+    notes = db.Column(db.Text, nullable=True)  # Admin notes
     tags = db.Column(db.Text, nullable=True)  # JSON array of tags
     metadata_json = db.Column(db.Text, nullable=True)  # JSON for custom fields
 
@@ -1118,6 +1130,7 @@ class Asset(db.Model):
         result = {
             'id': self.id,
             'organization_id': self.organization_id,
+            'organization_name': self.organization.display_name if self.organization else None,
             'hostname': self.hostname,
             'ip_address': self.ip_address,
             'fqdn': self.fqdn,
@@ -1131,7 +1144,18 @@ class Asset(db.Model):
             'last_inventory_at': self.last_inventory_at.isoformat() if self.last_inventory_at else None,
             'active': self.active,
             'status': self.status,
+            # Classification & Management
+            'criticality': self.criticality,
+            'environment': self.environment,
+            'owner': self.owner,
+            'group_name': self.group_name,
+            # Vulnerability stats
+            'vulnerable_products_count': self.vulnerable_products_count,
+            'total_vulnerabilities': self.total_vulnerabilities,
+            'last_vuln_scan_at': self.last_vuln_scan_at.isoformat() if self.last_vuln_scan_at else None,
+            # Additional info
             'description': self.description,
+            'notes': self.notes,
             'tags': self.get_tags(),
             'metadata': self.get_metadata(),
             'created_at': self.created_at.isoformat() if self.created_at else None,

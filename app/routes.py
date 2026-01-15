@@ -259,7 +259,7 @@ def get_products():
                 product_organizations.c.organization_id == org_id,
                 Product.organization_id == org_id
             )
-        ).distinct()
+        )
 
         logger.info(f"get_products: filtered to org {org_id}")
 
@@ -278,6 +278,7 @@ def get_products():
                     Product.keywords.ilike(term_pattern)
                 )
             )
+        logger.info(f"get_products: search terms={search_terms}")
 
     # Apply criticality filter
     if criticality and criticality in ['critical', 'high', 'medium', 'low']:
@@ -289,8 +290,8 @@ def get_products():
     elif status == 'inactive':
         query = query.filter(Product.active == False)
 
-    # Order by vendor, product name
-    query = query.order_by(Product.vendor, Product.product_name)
+    # Ensure no duplicates from join and order by vendor, product name
+    query = query.distinct().order_by(Product.vendor, Product.product_name)
 
     # If pagination requested, return paginated result
     if page:
