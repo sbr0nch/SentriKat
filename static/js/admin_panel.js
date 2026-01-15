@@ -4748,27 +4748,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Load agent keys when tab is shown
-    const agentsTab = document.getElementById('agents-tab');
-    if (agentsTab) {
-        agentsTab.addEventListener('shown.bs.tab', function() {
-            if (!agentKeysLoaded) {
-                loadAgentKeys();
-            }
-        });
-    }
-
-    // Load assets when tab is shown
-    const assetsTab = document.getElementById('assets-tab');
-    if (assetsTab) {
-        assetsTab.addEventListener('shown.bs.tab', function() {
-            if (!assetsLoaded) {
-                loadAssets();
-            }
-        });
-    }
-
-    // Load integrations data when tab is shown
+    // Load integrations data when main tab is shown
     const integrationsTab = document.getElementById('integrations-tab');
     if (integrationsTab) {
         integrationsTab.addEventListener('shown.bs.tab', function() {
@@ -4776,6 +4756,23 @@ document.addEventListener('DOMContentLoaded', function() {
             loadIntegrations();
             loadDiscoveryAgents();
             loadImportQueueCount();
+            loadAgentKeys();
+            loadAssets();
+        });
+    }
+
+    // Integrations sub-tab handlers
+    const agentKeysSubTab = document.getElementById('agent-keys-tab');
+    if (agentKeysSubTab) {
+        agentKeysSubTab.addEventListener('shown.bs.tab', function() {
+            loadAgentKeys();
+        });
+    }
+
+    const assetsSubTab = document.getElementById('assets-tab');
+    if (assetsSubTab) {
+        assetsSubTab.addEventListener('shown.bs.tab', function() {
+            loadAssets();
         });
     }
 });
@@ -6474,8 +6471,6 @@ function handleUrlHash() {
         'ldapUsers': 'ldap-users-tab',
         'ldapGroups': 'ldap-groups-tab',
         'license': 'license-tab',
-        'agents': 'agents-tab',
-        'assets': 'assets-tab',
         'integrations': 'integrations-tab'
     };
 

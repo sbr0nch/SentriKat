@@ -50,18 +50,6 @@
             </button>
         </li>
         {% endif %}
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="agents-tab" data-bs-toggle="tab" data-bs-target="#agents" type="button">
-                <i class="bi bi-hdd-network me-2"></i>Agent Keys
-                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="assets-tab" data-bs-toggle="tab" data-bs-target="#assets" type="button">
-                <i class="bi bi-pc-display me-2"></i>Assets
-                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
-            </button>
-        </li>
     </ul>
 
     <div class="tab-content" id="adminTabsContent">
@@ -519,8 +507,18 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="agent-keys-tab" data-bs-toggle="pill" data-bs-target="#agentKeys" type="button">
+                        <i class="bi bi-key me-2"></i>Agent Keys
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
                     <button class="nav-link" id="discovery-agents-tab" data-bs-toggle="pill" data-bs-target="#discoveryAgents" type="button">
-                        <i class="bi bi-pc-display me-2"></i>Discovery Agents
+                        <i class="bi bi-terminal me-2"></i>Agent Scripts
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="assets-tab" data-bs-toggle="pill" data-bs-target="#assetsPane" type="button">
+                        <i class="bi bi-pc-display me-2"></i>Assets
                     </button>
                 </li>
             </ul>
@@ -685,6 +683,100 @@
                                         </tr>
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Agent Keys Sub-Tab -->
+                <div class="tab-pane fade" id="agentKeys" role="tabpanel">
+                    <div class="alert alert-info mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>Agent API Keys</strong> allow remote agents to authenticate and report software inventory. Each key can be scoped to a specific organization.
+                    </div>
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-key-fill me-2"></i>Agent API Keys</span>
+                            <button class="btn btn-primary btn-sm" onclick="showCreateAgentKeyModal()">
+                                <i class="bi bi-plus-lg me-1"></i>Create API Key
+                            </button>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0" id="agentKeysTable">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Organization</th>
+                                            <th>Created</th>
+                                            <th>Last Used</th>
+                                            <th>Usage</th>
+                                            <th>Expires</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="agentKeysTableBody">
+                                        <tr>
+                                            <td colspan="7" class="text-center py-4">
+                                                <div class="spinner-border spinner-border-sm text-primary"></div>
+                                                <span class="ms-2">Loading agent keys...</span>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Assets Sub-Tab -->
+                <div class="tab-pane fade" id="assetsPane" role="tabpanel">
+                    <div class="alert alert-info mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>Assets</strong> are servers and workstations discovered through agent inventory reporting. View installed software and vulnerabilities per asset.
+                    </div>
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-pc-display me-2"></i>Discovered Assets</span>
+                            <div class="d-flex gap-2">
+                                <input type="text" class="form-control form-control-sm" id="assetSearchInput" placeholder="Search assets..." style="width: 200px;" onkeyup="if(event.key==='Enter') loadAssets()">
+                                <button class="btn btn-outline-secondary btn-sm" onclick="loadAssets()">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0" id="assetsTable">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Hostname</th>
+                                            <th>IP Address</th>
+                                            <th>OS</th>
+                                            <th>Organization</th>
+                                            <th>Products</th>
+                                            <th>Last Seen</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="assetsTableBody">
+                                        <tr>
+                                            <td colspan="7" class="text-center py-4">
+                                                <div class="spinner-border spinner-border-sm text-primary"></div>
+                                                <span class="ms-2">Loading assets...</span>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <small class="text-muted" id="assetsCount">Loading...</small>
+                                <nav aria-label="Assets pagination">
+                                    <ul class="pagination pagination-sm mb-0" id="assetsPagination">
+                                    </ul>
+                                </nav>
                             </div>
                         </div>
                     </div>
@@ -1888,100 +1980,6 @@
                     </div>
                 </div>
                 {% endif %}
-            </div>
-        </div>
-
-        <!-- Agent Keys Tab -->
-        <div class="tab-pane fade" id="agents" role="tabpanel">
-            <div class="alert alert-light border mb-3 small">
-                <i class="bi bi-info-circle me-1"></i>
-                <strong>Agent API Keys</strong> allow remote agents to report software inventory from your servers. Each key can be scoped to a specific organization and has usage limits.
-            </div>
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-key-fill me-2"></i>Agent API Keys</span>
-                    <button class="btn btn-primary" onclick="showCreateAgentKeyModal()">
-                        <i class="bi bi-plus-lg me-1"></i>Create API Key
-                    </button>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0" id="agentKeysTable">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Organization</th>
-                                    <th>Created</th>
-                                    <th>Last Used</th>
-                                    <th>Usage</th>
-                                    <th>Expires</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="agentKeysTableBody">
-                                <tr>
-                                    <td colspan="7" class="text-center py-4">
-                                        <div class="spinner-border spinner-border-sm text-primary"></div>
-                                        <span class="ms-2">Loading agent keys...</span>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Assets Tab -->
-        <div class="tab-pane fade" id="assets" role="tabpanel">
-            <div class="alert alert-light border mb-3 small">
-                <i class="bi bi-info-circle me-1"></i>
-                <strong>Assets</strong> are servers and workstations discovered through agent inventory reporting. View installed software and potential vulnerabilities on each asset.
-            </div>
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-pc-display me-2"></i>Discovered Assets</span>
-                    <div class="d-flex gap-2">
-                        <input type="text" class="form-control form-control-sm" id="assetSearchInput" placeholder="Search assets..." style="width: 200px;" onkeyup="if(event.key==='Enter') loadAssets()">
-                        <button class="btn btn-outline-secondary btn-sm" onclick="loadAssets()">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0" id="assetsTable">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Hostname</th>
-                                    <th>IP Address</th>
-                                    <th>OS</th>
-                                    <th>Organization</th>
-                                    <th>Products</th>
-                                    <th>Last Seen</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="assetsTableBody">
-                                <tr>
-                                    <td colspan="7" class="text-center py-4">
-                                        <div class="spinner-border spinner-border-sm text-primary"></div>
-                                        <span class="ms-2">Loading assets...</span>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="card-footer">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <small class="text-muted" id="assetsCount">Loading...</small>
-                        <nav aria-label="Assets pagination">
-                            <ul class="pagination pagination-sm mb-0" id="assetsPagination">
-                            </ul>
-                        </nav>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
