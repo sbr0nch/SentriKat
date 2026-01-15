@@ -1791,6 +1791,10 @@
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Integrations</div>
+                    <a href="#" onclick="switchToAdminTab('integrations'); return false;" class="sidebar-link">
+                        <i class="bi bi-plug"></i>
+                        <span>Connectors</span>
+                    </a>
                     <a href="#" onclick="switchToAdminTab('agents'); return false;" class="sidebar-link">
                         <i class="bi bi-hdd-network"></i>
                         <span>Agent Keys</span>

@@ -52,7 +52,7 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
@@ -63,6 +63,7 @@ def create_app(config_class=Config):
     app.register_blueprint(licensing.license_bp)
     app.register_blueprint(cpe_api.bp)
     app.register_blueprint(agent_api.agent_bp)
+    app.register_blueprint(integrations_api.bp)
 
     # Make current user and branding available in all templates
     @app.context_processor
