@@ -789,10 +789,10 @@
             <!-- Settings Sub-Tabs -->
             <ul class="nav nav-pills mb-4" id="settingsTabs" role="tablist">
                 {% if current_user and current_user.is_super_admin() %}
+                {% if license and license.is_professional() %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="ldap-settings-tab" data-bs-toggle="pill" data-bs-target="#ldapSettings" type="button">
                         <i class="bi bi-diagram-3 me-2"></i>LDAP / Active Directory
-                        {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -800,6 +800,13 @@
                         <i class="bi bi-envelope me-2"></i>Global SMTP
                     </button>
                 </li>
+                {% else %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="smtp-settings-tab" data-bs-toggle="pill" data-bs-target="#smtpSettings" type="button">
+                        <i class="bi bi-envelope me-2"></i>Global SMTP
+                    </button>
+                </li>
+                {% endif %}
                 {% else %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="smtp-settings-tab" data-bs-toggle="pill" data-bs-target="#smtpSettings" type="button">
@@ -823,18 +830,18 @@
                         <i class="bi bi-shield-lock me-2"></i>Security
                     </button>
                 </li>
+                {% if license and license.is_professional() %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="notifications-settings-tab" data-bs-toggle="pill" data-bs-target="#notificationsSettings" type="button">
                         <i class="bi bi-bell me-2"></i>Notifications
-                        {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="branding-settings-tab" data-bs-toggle="pill" data-bs-target="#brandingSettings" type="button">
                         <i class="bi bi-palette me-2"></i>Branding
-                        {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
                     </button>
                 </li>
+                {% endif %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="retention-settings-tab" data-bs-toggle="pill" data-bs-target="#retentionSettings" type="button">
                         <i class="bi bi-archive me-2"></i>Data Retention
@@ -854,8 +861,8 @@
             </ul>
 
             <div class="tab-content" id="settingsTabContent">
-                {% if current_user and current_user.is_super_admin() %}
-                <!-- LDAP Settings (Super Admin Only) -->
+                {% if current_user and current_user.is_super_admin() and license and license.is_professional() %}
+                <!-- LDAP Settings (Super Admin + Professional License Only) -->
                 <div class="tab-pane fade show active" id="ldapSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
@@ -1001,7 +1008,7 @@
                 {% endif %}
 
                 <!-- Global SMTP Settings -->
-                <div class="tab-pane fade {% if not current_user or not current_user.is_super_admin() %}show active{% endif %}" id="smtpSettings" role="tabpanel">
+                <div class="tab-pane fade {% if not current_user or not current_user.is_super_admin() or not license or not license.is_professional() %}show active{% endif %}" id="smtpSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
                             <i class="bi bi-envelope me-2"></i>Global SMTP Configuration
@@ -1387,7 +1394,8 @@
                     </div>
                 </div>
 
-                <!-- Notifications Settings -->
+                {% if license and license.is_professional() %}
+                <!-- Notifications Settings (Professional License Only) -->
                 <div class="tab-pane fade" id="notificationsSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
@@ -1611,6 +1619,7 @@
                         </div>
                     </div>
                 </div>
+                {% endif %}
 
                 <!-- Data Retention Settings -->
                 <div class="tab-pane fade" id="retentionSettings" role="tabpanel">
