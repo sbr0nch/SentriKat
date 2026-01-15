@@ -4832,7 +4832,13 @@ function applyLicenseRestrictions() {
     // ========================================
     // LDAP Features - requires 'ldap' license
     // ========================================
-    if (!hasFeature('ldap')) {
+    if (hasFeature('ldap')) {
+        // SHOW LDAP tabs when user has license (they start hidden)
+        const ldapUsersTab = document.getElementById('ldap-users-tab-item');
+        const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+        if (ldapUsersTab) ldapUsersTab.style.display = '';
+        if (ldapGroupsTab) ldapGroupsTab.style.display = '';
+    } else {
         // Hide LDAP tabs completely for Community
         const ldapUsersTab = document.getElementById('ldap-users-tab-item');
         const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
