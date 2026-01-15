@@ -172,8 +172,9 @@ def queue_inventory_job(organization, data):
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error queueing inventory job: {e}", exc_info=True)
-        return jsonify({'error': f'Failed to queue inventory: {str(e)}'}), 500
+        logger.error(f"Error queueing inventory job for {hostname}: {e}", exc_info=True)
+        # Return 400 instead of 500 for database errors to match what client sees
+        return jsonify({'error': f'Failed to queue inventory: {str(e)}'}), 400
 
 
 def process_inventory_job(job):
@@ -344,13 +345,16 @@ def report_inventory():
     data = request.get_json()
 
     if not data:
+        logger.warning(f"Agent inventory failed: No JSON body from {request.remote_addr}")
         return jsonify({'error': 'JSON body required'}), 400
 
     hostname = data.get('hostname')
     if not hostname:
+        logger.warning(f"Agent inventory failed: No hostname in payload from {request.remote_addr}")
         return jsonify({'error': 'hostname is required'}), 400
 
     products = data.get('products', [])
+    logger.info(f"Agent inventory: {hostname} sending {len(products)} products")
 
     # Check if batch should be processed asynchronously
     if len(products) >= ASYNC_BATCH_THRESHOLD:
