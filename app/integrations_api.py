@@ -1148,6 +1148,9 @@ try {{
 
 Write-Host ""
 Write-Host "Agent completed successfully!" -ForegroundColor Green
+Write-Host ""
+Write-Host "Press any key to exit..." -ForegroundColor Cyan
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 '''
 
     return Response(

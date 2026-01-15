@@ -767,28 +767,45 @@ def remove_product_organization(product_id, org_id):
 @login_required
 def get_vulnerabilities():
     """Get vulnerabilities with optional filters for current organization"""
-    # Get current organization
-    org_id = session.get('organization_id')
-    if not org_id:
-        default_org = Organization.query.filter_by(name='default').first()
-        org_id = default_org.id if default_org else None
+    try:
+        # Get current organization
+        org_id = session.get('organization_id')
+        if not org_id:
+            default_org = Organization.query.filter_by(name='default').first()
+            org_id = default_org.id if default_org else None
 
-    filters = {
-        'organization_id': org_id,
-        'product_id': request.args.get('product_id', type=int),
-        'cve_id': request.args.get('cve_id'),
-        'vendor': request.args.get('vendor'),
-        'product': request.args.get('product'),
-        'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
-        'acknowledged': request.args.get('acknowledged')
-    }
+        filters = {
+            'organization_id': org_id,
+            'product_id': request.args.get('product_id', type=int),
+            'cve_id': request.args.get('cve_id'),
+            'vendor': request.args.get('vendor'),
+            'product': request.args.get('product'),
+            'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
+            'acknowledged': request.args.get('acknowledged')
+        }
 
-    # Remove None values
-    filters = {k: v for k, v in filters.items() if v is not None and v != ''}
+        # Remove None values
+        filters = {k: v for k, v in filters.items() if v is not None and v != ''}
 
-    matches = get_filtered_vulnerabilities(filters)
+        matches = get_filtered_vulnerabilities(filters)
 
-    return jsonify([m.to_dict() for m in matches])
+        # Safely convert to dict with error handling
+        results = []
+        for m in matches:
+            try:
+                results.append(m.to_dict())
+            except Exception as e:
+                logger.error(f"Error converting match {m.id} to dict: {e}")
+                # Include minimal info for failed items
+                results.append({
+                    'id': m.id,
+                    'error': 'Failed to load full details'
+                })
+
+        return jsonify(results)
+    except Exception as e:
+        logger.error(f"Error getting vulnerabilities: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/vulnerabilities/stats', methods=['GET'])
 @login_required
