@@ -1282,3 +1282,68 @@ class AgentApiKey(db.Model):
             'is_valid': self.is_valid()
         }
         return result
+
+
+class InventoryJob(db.Model):
+    """
+    Background job queue for processing large inventory reports.
+    Allows agents to quickly submit inventory and let the system process it async.
+    """
+    __tablename__ = 'inventory_jobs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+
+    # Job details
+    job_type = db.Column(db.String(50), default='inventory')  # inventory, sync, import
+    status = db.Column(db.String(20), default='pending', index=True)  # pending, processing, completed, failed
+    priority = db.Column(db.Integer, default=5)  # 1=highest, 10=lowest
+
+    # Payload (JSON)
+    payload = db.Column(db.Text, nullable=True)  # JSON with inventory data
+    total_items = db.Column(db.Integer, default=0)  # Total items to process
+
+    # Results
+    items_processed = db.Column(db.Integer, default=0)
+    items_created = db.Column(db.Integer, default=0)
+    items_updated = db.Column(db.Integer, default=0)
+    items_failed = db.Column(db.Integer, default=0)
+    error_message = db.Column(db.Text, nullable=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('inventory_jobs', lazy='dynamic'))
+    asset = db.relationship('Asset', backref=db.backref('inventory_jobs', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'asset_id': self.asset_id,
+            'job_type': self.job_type,
+            'status': self.status,
+            'priority': self.priority,
+            'total_items': self.total_items,
+            'items_processed': self.items_processed,
+            'items_created': self.items_created,
+            'items_updated': self.items_updated,
+            'items_failed': self.items_failed,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'progress_percent': round((self.items_processed / self.total_items * 100), 1) if self.total_items > 0 else 0
+        }
+
+    @staticmethod
+    def get_next_pending():
+        """Get the next pending job to process, ordered by priority and creation time."""
+        return InventoryJob.query.filter_by(status='pending').order_by(
+            InventoryJob.priority.asc(),
+            InventoryJob.created_at.asc()
+        ).first()

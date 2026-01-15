@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
 from app import db, csrf
-from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog
+from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
@@ -837,6 +837,201 @@ def get_vulnerability_stats():
         'medium_count': priority_counts['medium'],
         'low_count': priority_counts['low']
     })
+
+
+@bp.route('/api/products/aggregated', methods=['GET'])
+@login_required
+def get_aggregated_product_view():
+    """
+    Get aggregated view of products across assets, grouped by product and version.
+    Shows how many servers have each version of each product.
+
+    Example output:
+    {
+        "products": [
+            {
+                "product_id": 1,
+                "vendor": "nginx",
+                "product_name": "nginx",
+                "versions": [
+                    {"version": "1.24.0", "asset_count": 30, "vulnerable": true, "cve_count": 5},
+                    {"version": "1.25.0", "asset_count": 20, "vulnerable": false, "cve_count": 0}
+                ],
+                "total_assets": 50
+            }
+        ]
+    }
+    """
+    from sqlalchemy import func
+
+    # Get current user's organizations
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Build base query for installations accessible to user
+    if current_user.is_super_admin():
+        org_filter = True  # No filter
+    else:
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        org_filter = Asset.organization_id.in_(user_org_ids)
+
+    # Get filter parameters
+    vulnerable_only = request.args.get('vulnerable_only', 'false').lower() == 'true'
+    search = request.args.get('search', '')
+    product_id = request.args.get('product_id', type=int)
+
+    # Aggregate: group by product_id and version, count assets
+    query = db.session.query(
+        ProductInstallation.product_id,
+        ProductInstallation.version,
+        func.count(ProductInstallation.asset_id.distinct()).label('asset_count'),
+        func.sum(db.case((ProductInstallation.is_vulnerable == True, 1), else_=0)).label('vulnerable_count'),
+        func.max(ProductInstallation.vulnerability_count).label('max_cve_count')
+    ).join(
+        Asset, ProductInstallation.asset_id == Asset.id
+    ).join(
+        Product, ProductInstallation.product_id == Product.id
+    )
+
+    # Apply organization filter
+    if org_filter is not True:
+        query = query.filter(org_filter)
+
+    # Apply search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                Product.vendor.ilike(search_term),
+                Product.product_name.ilike(search_term)
+            )
+        )
+
+    # Filter by specific product
+    if product_id:
+        query = query.filter(ProductInstallation.product_id == product_id)
+
+    # Group by product and version
+    query = query.group_by(
+        ProductInstallation.product_id,
+        ProductInstallation.version
+    )
+
+    results = query.all()
+
+    # Organize by product
+    products_map = {}
+    for row in results:
+        pid = row.product_id
+        if pid not in products_map:
+            product = Product.query.get(pid)
+            products_map[pid] = {
+                'product_id': pid,
+                'vendor': product.vendor,
+                'product_name': product.product_name,
+                'versions': [],
+                'total_assets': 0,
+                'has_vulnerabilities': False
+            }
+
+        version_info = {
+            'version': row.version or 'Unknown',
+            'asset_count': row.asset_count,
+            'vulnerable': row.vulnerable_count > 0,
+            'cve_count': row.max_cve_count or 0
+        }
+
+        products_map[pid]['versions'].append(version_info)
+        products_map[pid]['total_assets'] += row.asset_count
+
+        if version_info['vulnerable']:
+            products_map[pid]['has_vulnerabilities'] = True
+
+    # Convert to list and sort versions
+    products_list = list(products_map.values())
+    for product in products_list:
+        # Sort versions by asset count descending
+        product['versions'].sort(key=lambda v: v['asset_count'], reverse=True)
+
+    # Filter vulnerable only
+    if vulnerable_only:
+        products_list = [p for p in products_list if p['has_vulnerabilities']]
+
+    # Sort products by total assets descending
+    products_list.sort(key=lambda p: p['total_assets'], reverse=True)
+
+    # Pagination
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 50, type=int), 200)
+    start = (page - 1) * per_page
+    end = start + per_page
+
+    return jsonify({
+        'products': products_list[start:end],
+        'total': len(products_list),
+        'page': page,
+        'per_page': per_page,
+        'pages': (len(products_list) + per_page - 1) // per_page
+    })
+
+
+@bp.route('/api/products/<int:product_id>/installations', methods=['GET'])
+@login_required
+def get_product_installations(product_id):
+    """
+    Get all installations of a product, showing which assets have which versions.
+    """
+    product = Product.query.get_or_404(product_id)
+
+    # Check access
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not current_user.is_super_admin():
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+
+        if not any(oid in user_org_ids for oid in product_org_ids):
+            return jsonify({'error': 'Access denied'}), 403
+
+    # Get installations with asset info
+    installations = ProductInstallation.query.filter_by(product_id=product_id).all()
+
+    result = []
+    for inst in installations:
+        asset = Asset.query.get(inst.asset_id)
+        if asset:
+            result.append({
+                'installation_id': inst.id,
+                'asset_id': asset.id,
+                'hostname': asset.hostname,
+                'ip_address': asset.ip_address,
+                'os_name': asset.os_name,
+                'os_version': asset.os_version,
+                'version': inst.version,
+                'install_path': inst.install_path,
+                'is_vulnerable': inst.is_vulnerable,
+                'vulnerability_count': inst.vulnerability_count,
+                'detected_by': inst.detected_by,
+                'discovered_at': inst.discovered_at.isoformat() if inst.discovered_at else None,
+                'last_seen_at': inst.last_seen_at.isoformat() if inst.last_seen_at else None
+            })
+
+    # Sort by hostname
+    result.sort(key=lambda x: x['hostname'])
+
+    return jsonify({
+        'product': {
+            'id': product.id,
+            'vendor': product.vendor,
+            'product_name': product.product_name
+        },
+        'installations': result,
+        'total': len(result)
+    })
+
 
 @bp.route('/api/matches/<int:match_id>/acknowledge', methods=['POST'])
 @login_required
