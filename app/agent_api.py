@@ -658,83 +658,106 @@ def admin_list_jobs():
 @limiter.limit("100/minute")
 def list_assets():
     """List all assets for the organization."""
-    from app.auth import get_current_user, login_required_api
+    from app.auth import get_current_user
 
-    user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
+    try:
+        user = get_current_user()
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
 
-    # Get organization filter
-    org_id = request.args.get('organization_id', type=int)
+        # Get organization filter
+        org_id = request.args.get('organization_id', type=int)
 
-    # Build query
-    query = Asset.query
+        # Build query
+        query = Asset.query
 
-    # Filter by organization based on user role
-    if user.is_super_admin():
-        if org_id:
-            query = query.filter_by(organization_id=org_id)
-    else:
-        # Non-super-admins can only see their organization's assets
-        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
-        if not user_org_ids:
-            # User has no organization memberships - return empty result
-            return jsonify({
-                'assets': [],
-                'total': 0,
-                'page': 1,
-                'per_page': 50,
-                'pages': 0
-            })
-        if org_id and org_id in user_org_ids:
-            query = query.filter_by(organization_id=org_id)
+        # Filter by organization based on user role
+        if user.is_super_admin():
+            if org_id:
+                query = query.filter_by(organization_id=org_id)
         else:
-            query = query.filter(Asset.organization_id.in_(user_org_ids))
+            # Non-super-admins can only see their organization's assets
+            try:
+                user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+            except Exception as e:
+                logger.warning(f"Error getting org memberships for user {user.id}: {e}")
+                user_org_ids = []
 
-    # Additional filters
-    status = request.args.get('status')
-    if status:
-        query = query.filter_by(status=status)
+            if not user_org_ids:
+                # User has no organization memberships - return empty result
+                return jsonify({
+                    'assets': [],
+                    'total': 0,
+                    'page': 1,
+                    'per_page': 50,
+                    'pages': 0
+                })
+            if org_id and org_id in user_org_ids:
+                query = query.filter_by(organization_id=org_id)
+            else:
+                query = query.filter(Asset.organization_id.in_(user_org_ids))
 
-    active = request.args.get('active')
-    if active is not None:
-        query = query.filter_by(active=active.lower() == 'true')
+        # Additional filters
+        status = request.args.get('status')
+        if status:
+            query = query.filter_by(status=status)
 
-    search = request.args.get('search')
-    if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            db.or_(
-                Asset.hostname.ilike(search_term),
-                Asset.ip_address.ilike(search_term),
-                Asset.fqdn.ilike(search_term)
+        active = request.args.get('active')
+        if active is not None:
+            query = query.filter_by(active=active.lower() == 'true')
+
+        search = request.args.get('search')
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                db.or_(
+                    Asset.hostname.ilike(search_term),
+                    Asset.ip_address.ilike(search_term),
+                    Asset.fqdn.ilike(search_term)
+                )
             )
-        )
 
-    # Pagination
-    page = request.args.get('page', 1, type=int)
-    per_page = min(request.args.get('per_page', 50, type=int), 100)
+        # Pagination
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 100)
 
-    # Order by
-    order = request.args.get('order', 'hostname')
-    direction = request.args.get('direction', 'asc')
+        # Order by
+        order = request.args.get('order', 'hostname')
+        direction = request.args.get('direction', 'asc')
 
-    if hasattr(Asset, order):
-        order_col = getattr(Asset, order)
-        if direction == 'desc':
-            order_col = order_col.desc()
-        query = query.order_by(order_col)
+        if hasattr(Asset, order):
+            order_col = getattr(Asset, order)
+            if direction == 'desc':
+                order_col = order_col.desc()
+            query = query.order_by(order_col)
 
-    # Execute
-    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        # Execute
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    return jsonify({
-        'assets': [a.to_dict() for a in pagination.items],
-        'total': pagination.total,
-        'page': page,
-        'per_page': per_page,
-        'pages': pagination.pages
-    })
+        # Safely convert assets to dict
+        assets_list = []
+        for asset in pagination.items:
+            try:
+                assets_list.append(asset.to_dict())
+            except Exception as e:
+                logger.error(f"Error converting asset {asset.id} to dict: {e}")
+                assets_list.append({
+                    'id': asset.id,
+                    'hostname': asset.hostname or 'Unknown',
+                    'error': 'Failed to load full details'
+                })
+
+        return jsonify({
+            'assets': assets_list,
+            'total': pagination.total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pagination.pages
+        })
+
+    except Exception as e:
+        logger.error(f"Error in list_assets: {e}", exc_info=True)
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['GET'])
