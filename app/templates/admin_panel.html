@@ -493,39 +493,191 @@
 
         <!-- Integrations Tab -->
         <div class="tab-pane fade" id="integrations" role="tabpanel">
-            <!-- Integrations Sub-Tabs -->
+            <!-- Integrations Sub-Tabs (Redesigned) -->
             <ul class="nav nav-pills mb-4" id="integrationsTabs" role="tablist">
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="import-queue-tab" data-bs-toggle="pill" data-bs-target="#importQueue" type="button">
+                    <button class="nav-link active" id="integrations-overview-tab" data-bs-toggle="pill" data-bs-target="#integrationsOverview" type="button">
+                        <i class="bi bi-diagram-3 me-2"></i>Overview
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="import-queue-tab" data-bs-toggle="pill" data-bs-target="#importQueue" type="button">
                         <i class="bi bi-inbox me-2"></i>Import Queue
                         <span class="badge bg-primary ms-1" id="importQueueCount">0</span>
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="connectors-tab" data-bs-toggle="pill" data-bs-target="#connectors" type="button">
-                        <i class="bi bi-plug me-2"></i>Connectors
+                    <button class="nav-link" id="pull-sources-tab" data-bs-toggle="pill" data-bs-target="#pullSources" type="button">
+                        <i class="bi bi-cloud-download me-2"></i>Pull Sources
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="agent-keys-tab" data-bs-toggle="pill" data-bs-target="#agentKeys" type="button">
-                        <i class="bi bi-key me-2"></i>Agent Keys
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="discovery-agents-tab" data-bs-toggle="pill" data-bs-target="#discoveryAgents" type="button">
-                        <i class="bi bi-terminal me-2"></i>Agent Scripts
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="assets-tab" data-bs-toggle="pill" data-bs-target="#assetsPane" type="button">
-                        <i class="bi bi-pc-display me-2"></i>Assets
+                    <button class="nav-link" id="push-agents-tab" data-bs-toggle="pill" data-bs-target="#pushAgents" type="button">
+                        <i class="bi bi-cloud-upload me-2"></i>Push Agents
                     </button>
                 </li>
             </ul>
 
             <div class="tab-content" id="integrationsTabContent">
+                <!-- Overview Sub-Tab (NEW) -->
+                <div class="tab-pane fade show active" id="integrationsOverview" role="tabpanel">
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <div class="card border-0 bg-light">
+                                <div class="card-body">
+                                    <h5 class="card-title mb-3"><i class="bi bi-lightbulb me-2 text-warning"></i>How Integrations Work</h5>
+                                    <div class="row align-items-center">
+                                        <!-- Pull Sources -->
+                                        <div class="col-md-3 text-center mb-3 mb-md-0">
+                                            <div class="p-3 bg-white rounded shadow-sm">
+                                                <i class="bi bi-cloud-download text-primary" style="font-size: 2rem;"></i>
+                                                <h6 class="mt-2 mb-1">Pull Sources</h6>
+                                                <small class="text-muted">PDQ, SCCM, Intune</small>
+                                            </div>
+                                        </div>
+                                        <!-- Arrow -->
+                                        <div class="col-md-1 text-center d-none d-md-block">
+                                            <i class="bi bi-arrow-right text-secondary" style="font-size: 1.5rem;"></i>
+                                        </div>
+                                        <!-- SentriKat -->
+                                        <div class="col-md-4 text-center mb-3 mb-md-0">
+                                            <div class="p-3 bg-primary text-white rounded shadow">
+                                                <i class="bi bi-shield-check" style="font-size: 2rem;"></i>
+                                                <h6 class="mt-2 mb-1">SentriKat</h6>
+                                                <small>Import Queue &rarr; Products</small>
+                                            </div>
+                                        </div>
+                                        <!-- Arrow -->
+                                        <div class="col-md-1 text-center d-none d-md-block">
+                                            <i class="bi bi-arrow-left text-secondary" style="font-size: 1.5rem;"></i>
+                                        </div>
+                                        <!-- Push Agents -->
+                                        <div class="col-md-3 text-center">
+                                            <div class="p-3 bg-white rounded shadow-sm">
+                                                <i class="bi bi-cloud-upload text-success" style="font-size: 2rem;"></i>
+                                                <h6 class="mt-2 mb-1">Push Agents</h6>
+                                                <small class="text-muted">Windows/Linux endpoints</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stats Cards -->
+                    <div class="row mb-4" id="integrationStatsRow">
+                        <div class="col-md-3">
+                            <div class="card h-100 border-start border-primary border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted mb-1">Pull Sources</h6>
+                                            <h3 class="mb-0" id="statPullSources">-</h3>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="bi bi-cloud-download text-primary" style="font-size: 2rem; opacity: 0.5;"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">External inventory systems</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card h-100 border-start border-success border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted mb-1">Push Agents</h6>
+                                            <h3 class="mb-0"><span id="statEndpointsOnline">-</span><small class="text-muted fs-6">/<span id="statEndpointsTotal">-</span></small></h3>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="bi bi-pc-display text-success" style="font-size: 2rem; opacity: 0.5;"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">Online / Total endpoints</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card h-100 border-start border-warning border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted mb-1">Import Queue</h6>
+                                            <h3 class="mb-0" id="statPendingImports">-</h3>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="bi bi-inbox text-warning" style="font-size: 2rem; opacity: 0.5;"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">Pending review</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card h-100 border-start border-info border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted mb-1">Recent Activity</h6>
+                                            <h3 class="mb-0" id="statRecentCheckins">-</h3>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="bi bi-activity text-info" style="font-size: 2rem; opacity: 0.5;"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">Check-ins last 24h</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-primary text-white">
+                                    <i class="bi bi-cloud-download me-2"></i>Pull Sources
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted mb-3">Connect to existing software inventory systems. SentriKat will fetch and import your software catalog automatically.</p>
+                                    <div class="d-flex flex-wrap gap-2 mb-3">
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-box me-1"></i>PDQ Inventory</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-microsoft me-1"></i>SCCM</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-cloud me-1"></i>Intune</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-hdd-network me-1"></i>Lansweeper</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-braces me-1"></i>REST API</span>
+                                    </div>
+                                    <button class="btn btn-primary btn-sm" onclick="document.getElementById('pull-sources-tab').click()">
+                                        <i class="bi bi-gear me-1"></i>Configure Pull Sources
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-success text-white">
+                                    <i class="bi bi-cloud-upload me-2"></i>Push Agents
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted mb-3">Deploy lightweight agents on servers and workstations. Agents report installed software directly to SentriKat.</p>
+                                    <div class="d-flex flex-wrap gap-2 mb-3">
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-windows me-1"></i>Windows</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-ubuntu me-1"></i>Linux</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-terminal me-1"></i>PowerShell/Bash</span>
+                                    </div>
+                                    <button class="btn btn-success btn-sm" onclick="document.getElementById('push-agents-tab').click()">
+                                        <i class="bi bi-download me-1"></i>Deploy Agents
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Import Queue Sub-Tab -->
-                <div class="tab-pane fade show active" id="importQueue" role="tabpanel">
+                <div class="tab-pane fade" id="importQueue" role="tabpanel">
                     <div class="alert alert-info mb-3">
                         <i class="bi bi-info-circle me-2"></i>
                         Software discovered from integrations and agents appears here for review before being added to your product inventory.
@@ -583,18 +735,18 @@
                     </div>
                 </div>
 
-                <!-- Connectors Sub-Tab -->
-                <div class="tab-pane fade" id="connectors" role="tabpanel">
+                <!-- Pull Sources Sub-Tab (formerly Connectors) -->
+                <div class="tab-pane fade" id="pullSources" role="tabpanel">
                     <div class="alert alert-info mb-3">
                         <i class="bi bi-info-circle me-2"></i>
-                        Connect to external software inventory systems (PDQ, SCCM, Intune, etc.) to automatically import your software list.
+                        <strong>Pull Sources</strong> connect to external software inventory systems (PDQ, SCCM, Intune, etc.). SentriKat fetches data from these systems automatically.
                     </div>
 
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-plug me-2"></i>Integration Connectors</span>
+                            <span><i class="bi bi-cloud-download me-2"></i>Pull Sources</span>
                             <button class="btn btn-primary btn-sm" onclick="showCreateIntegrationModal()">
-                                <i class="bi bi-plus-circle me-1"></i>Add Integration
+                                <i class="bi bi-plus-circle me-1"></i>Add Pull Source
                             </button>
                         </div>
                         <div class="card-body p-0">
@@ -624,106 +776,39 @@
                     </div>
                 </div>
 
-                <!-- Discovery Agents Sub-Tab -->
-                <div class="tab-pane fade" id="discoveryAgents" role="tabpanel">
-                    <div class="alert alert-info mb-3">
-                        <i class="bi bi-info-circle me-2"></i>
-                        Deploy lightweight agents on Windows/Linux endpoints to automatically discover installed software.
+                <!-- Push Agents Sub-Tab (Unified: API Keys + Scripts + Assets) -->
+                <div class="tab-pane fade" id="pushAgents" role="tabpanel">
+                    <!-- Workflow Steps -->
+                    <div class="alert alert-light border mb-4">
+                        <div class="row text-center">
+                            <div class="col-md-4">
+                                <div class="d-flex align-items-center justify-content-center">
+                                    <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 18px;">1</span>
+                                    <strong>Create API Key</strong>
+                                </div>
+                                <small class="text-muted">For agent authentication</small>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="d-flex align-items-center justify-content-center">
+                                    <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 18px;">2</span>
+                                    <strong>Download & Deploy</strong>
+                                </div>
+                                <small class="text-muted">Windows/Linux script</small>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="d-flex align-items-center justify-content-center">
+                                    <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 18px;">3</span>
+                                    <strong>Monitor Endpoints</strong>
+                                </div>
+                                <small class="text-muted">View connected assets</small>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- API Key for Script -->
+                    <!-- Step 1: API Keys -->
                     <div class="card mb-4">
-                        <div class="card-header">
-                            <i class="bi bi-key me-2"></i>API Key for Agent Script
-                        </div>
-                        <div class="card-body">
-                            <div class="row g-3">
-                                <div class="col-md-4">
-                                    <label class="form-label fw-semibold">Organization</label>
-                                    <select class="form-select" id="agentScriptOrg">
-                                        <option value="">Select organization...</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-8">
-                                    <label class="form-label fw-semibold">API Key <small class="text-muted">(paste an existing key or generate new)</small></label>
-                                    <div class="input-group">
-                                        <input type="text" class="form-control font-monospace" id="agentScriptApiKey" placeholder="sk_...">
-                                        <button class="btn btn-outline-success" type="button" onclick="generateAndSetAgentKey()" title="Generate new API key">
-                                            <i class="bi bi-plus-lg me-1"></i>Generate New
-                                        </button>
-                                    </div>
-                                    <small class="form-text text-muted">This key will be embedded in the downloaded script</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="row mb-4">
-                        <div class="col-md-6">
-                            <div class="card h-100">
-                                <div class="card-body">
-                                    <h5 class="card-title"><i class="bi bi-windows me-2 text-primary"></i>Windows Agent</h5>
-                                    <p class="card-text small text-muted">PowerShell script that reads installed programs from registry and reports to SentriKat.</p>
-                                    <button class="btn btn-primary btn-sm" onclick="downloadWindowsAgent()">
-                                        <i class="bi bi-download me-1"></i>Download Script
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="card h-100">
-                                <div class="card-body">
-                                    <h5 class="card-title"><i class="bi bi-ubuntu me-2 text-warning"></i>Linux Agent</h5>
-                                    <p class="card-text small text-muted">Bash script that reads packages from dpkg/rpm/snap and reports to SentriKat.</p>
-                                    <button class="btn btn-primary btn-sm" onclick="downloadLinuxAgent()">
-                                        <i class="bi bi-download me-1"></i>Download Script
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="bi bi-pc-display me-2"></i>Registered Agents
-                        </div>
-                        <div class="card-body p-0">
-                            <div class="table-responsive">
-                                <table class="table table-hover mb-0">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th>Hostname</th>
-                                            <th>OS</th>
-                                            <th>Organization</th>
-                                            <th>Last Seen</th>
-                                            <th>Software Count</th>
-                                            <th style="width: 100px;">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="discoveryAgentsTable">
-                                        <tr>
-                                            <td colspan="6" class="text-center py-4 text-muted">
-                                                <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
-                                                <p class="mb-0 mt-2">No agents registered yet</p>
-                                                <small>Create an agent integration and deploy the script to get started</small>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Agent Keys Sub-Tab -->
-                <div class="tab-pane fade" id="agentKeys" role="tabpanel">
-                    <div class="alert alert-info mb-3">
-                        <i class="bi bi-info-circle me-2"></i>
-                        <strong>Agent API Keys</strong> allow remote agents to authenticate and report software inventory. Each key can be scoped to a specific organization.
-                    </div>
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-key-fill me-2"></i>Agent API Keys</span>
+                        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                            <span><span class="badge bg-primary me-2">1</span><i class="bi bi-key-fill me-2"></i>API Keys</span>
                             <button class="btn btn-primary btn-sm" onclick="showCreateAgentKeyModal()">
                                 <i class="bi bi-plus-lg me-1"></i>Create API Key
                             </button>
@@ -735,16 +820,15 @@
                                         <tr>
                                             <th>Name</th>
                                             <th>Organization</th>
-                                            <th>Created</th>
                                             <th>Last Used</th>
                                             <th>Usage</th>
                                             <th>Expires</th>
-                                            <th>Actions</th>
+                                            <th style="width: 180px;">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="agentKeysTableBody">
                                         <tr>
-                                            <td colspan="7" class="text-center py-4">
+                                            <td colspan="6" class="text-center py-4">
                                                 <div class="spinner-border spinner-border-sm text-primary"></div>
                                                 <span class="ms-2">Loading agent keys...</span>
                                             </td>
@@ -754,20 +838,74 @@
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Assets Sub-Tab -->
-                <div class="tab-pane fade" id="assetsPane" role="tabpanel">
-                    <div class="alert alert-info mb-3">
-                        <i class="bi bi-info-circle me-2"></i>
-                        <strong>Assets</strong> are servers and workstations discovered through agent inventory reporting. View installed software and vulnerabilities per asset.
+                    <!-- Step 2: Download Scripts -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-white">
+                            <span class="badge bg-primary me-2">2</span><i class="bi bi-download me-2"></i>Download Agent Script
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label fw-semibold">Organization</label>
+                                    <select class="form-select" id="agentScriptOrg">
+                                        <option value="">Select organization...</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label fw-semibold">API Key <small class="text-muted">(select from above or generate new)</small></label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control font-monospace" id="agentScriptApiKey" placeholder="sk_agent_...">
+                                        <button class="btn btn-outline-success" type="button" onclick="generateAndSetAgentKey()" title="Generate new API key for this organization">
+                                            <i class="bi bi-plus-lg me-1"></i>Generate New
+                                        </button>
+                                    </div>
+                                    <small class="form-text text-muted">The key will be embedded in the downloaded script - ready to deploy!</small>
+                                </div>
+                            </div>
+                            <hr class="my-3">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card border-primary h-100">
+                                        <div class="card-body text-center">
+                                            <i class="bi bi-windows text-primary" style="font-size: 2.5rem;"></i>
+                                            <h6 class="mt-2 mb-1">Windows Agent</h6>
+                                            <p class="small text-muted mb-3">PowerShell script for Windows servers/workstations</p>
+                                            <button class="btn btn-primary" onclick="downloadWindowsAgent()">
+                                                <i class="bi bi-download me-1"></i>Download .ps1
+                                            </button>
+                                            <div class="mt-2">
+                                                <small class="text-muted">Deploy via GPO, SCCM, Intune, or Task Scheduler</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card border-success h-100">
+                                        <div class="card-body text-center">
+                                            <i class="bi bi-ubuntu text-success" style="font-size: 2.5rem;"></i>
+                                            <h6 class="mt-2 mb-1">Linux Agent</h6>
+                                            <p class="small text-muted mb-3">Bash script for Linux servers (dpkg/rpm/snap)</p>
+                                            <button class="btn btn-success" onclick="downloadLinuxAgent()">
+                                                <i class="bi bi-download me-1"></i>Download .sh
+                                            </button>
+                                            <div class="mt-2">
+                                                <small class="text-muted">Deploy via Ansible, Puppet, Chef, or cron</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
+
+                    <!-- Step 3: Connected Endpoints -->
                     <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-pc-display me-2"></i>Discovered Assets</span>
+                        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                            <span><span class="badge bg-primary me-2">3</span><i class="bi bi-pc-display me-2"></i>Connected Endpoints</span>
                             <div class="d-flex gap-2">
-                                <input type="text" class="form-control form-control-sm" id="assetSearchInput" placeholder="Search assets..." style="width: 200px;" onkeyup="if(event.key==='Enter') loadAssets()">
-                                <button class="btn btn-outline-secondary btn-sm" onclick="loadAssets()">
+                                <input type="text" class="form-control form-control-sm" id="assetSearchInput" placeholder="Search endpoints..." style="width: 200px;" onkeyup="if(event.key==='Enter') loadAssets()">
+                                <button class="btn btn-outline-secondary btn-sm" onclick="loadAssets()" title="Refresh">
                                     <i class="bi bi-arrow-clockwise"></i>
                                 </button>
                             </div>
@@ -782,15 +920,16 @@
                                             <th>OS</th>
                                             <th>Organization</th>
                                             <th>Products</th>
+                                            <th>Status</th>
                                             <th>Last Seen</th>
-                                            <th>Actions</th>
+                                            <th style="width: 100px;">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="assetsTableBody">
                                         <tr>
-                                            <td colspan="7" class="text-center py-4">
+                                            <td colspan="8" class="text-center py-4">
                                                 <div class="spinner-border spinner-border-sm text-primary"></div>
-                                                <span class="ms-2">Loading assets...</span>
+                                                <span class="ms-2">Loading endpoints...</span>
                                             </td>
                                         </tr>
                                     </tbody>

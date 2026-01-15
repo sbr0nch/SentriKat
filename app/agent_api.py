@@ -926,3 +926,213 @@ def delete_agent_key(key_id):
         'status': 'success',
         'message': f'API key {name} deleted'
     })
+
+
+# ============================================================================
+# Maintenance & Cleanup Endpoints
+# ============================================================================
+
+@agent_bp.route('/api/admin/maintenance/stats', methods=['GET'])
+def get_maintenance_stats():
+    """Get statistics about stale/orphaned data."""
+    from app.auth import get_current_user
+    from app.maintenance import get_maintenance_stats as get_stats
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    try:
+        stats = get_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting maintenance stats: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@agent_bp.route('/api/admin/maintenance/cleanup', methods=['POST'])
+def run_maintenance_cleanup():
+    """
+    Run maintenance cleanup tasks.
+
+    Request body (all optional):
+    {
+        "dry_run": false,
+        "installation_stale_days": 30,
+        "asset_stale_days": 14,
+        "asset_remove_days": 90,
+        "import_queue_keep_days": 30
+    }
+    """
+    from app.auth import get_current_user
+    from app.maintenance import run_full_maintenance
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    data = request.get_json() or {}
+    dry_run = data.get('dry_run', False)
+
+    settings = {
+        'installation_stale_days': data.get('installation_stale_days'),
+        'asset_stale_days': data.get('asset_stale_days'),
+        'asset_remove_days': data.get('asset_remove_days'),
+        'import_queue_keep_days': data.get('import_queue_keep_days')
+    }
+    # Remove None values
+    settings = {k: v for k, v in settings.items() if v is not None}
+
+    try:
+        result = run_full_maintenance(dry_run=dry_run, settings=settings)
+        logger.info(f"Maintenance run by {user.username}: {result.to_dict()}")
+        return jsonify(result.to_dict())
+    except Exception as e:
+        logger.error(f"Error running maintenance: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@agent_bp.route('/api/admin/products/<int:product_id>/versions', methods=['GET'])
+def get_product_versions(product_id):
+    """
+    Get version summary for a product across all assets.
+
+    Shows which versions are deployed where - useful for understanding
+    version spread before CVE assessment.
+    """
+    from app.auth import get_current_user
+    from app.maintenance import get_product_version_summary
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    product = Product.query.get_or_404(product_id)
+
+    # Check permission
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        product_org_ids = [o.id for o in product.organizations.all()]
+        if not any(oid in user_org_ids for oid in product_org_ids):
+            return jsonify({'error': 'Access denied'}), 403
+
+    try:
+        versions = get_product_version_summary(product_id)
+        return jsonify({
+            'product_id': product_id,
+            'product_name': f"{product.vendor} {product.product_name}",
+            'tracked_version': product.version,
+            'versions': versions,
+            'total_installations': sum(v['count'] for v in versions)
+        })
+    except Exception as e:
+        logger.error(f"Error getting product versions: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Integration Summary Endpoint (for Overview tab)
+# ============================================================================
+
+@agent_bp.route('/api/integrations/summary', methods=['GET'])
+def get_integrations_summary():
+    """
+    Get summary of all integrations for the Overview tab.
+
+    Returns counts and status of:
+    - Pull sources (connectors)
+    - Push agents (agent keys + endpoints)
+    - Import queue
+    """
+    from app.auth import get_current_user
+    from app.integrations_models import Integration, ImportQueue
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    try:
+        # Get organization filter
+        if user.is_super_admin():
+            org_filter = None
+        else:
+            org_ids = [m.organization_id for m in user.org_memberships.all()]
+            org_filter = org_ids
+
+        # Pull sources (non-agent integrations)
+        pull_query = Integration.query.filter(
+            Integration.is_active == True,
+            Integration.integration_type != 'agent'
+        )
+        if org_filter:
+            pull_query = pull_query.filter(Integration.organization_id.in_(org_filter))
+        pull_sources = pull_query.count()
+
+        # Agent integrations
+        agent_query = Integration.query.filter(
+            Integration.is_active == True,
+            Integration.integration_type == 'agent'
+        )
+        if org_filter:
+            agent_query = agent_query.filter(Integration.organization_id.in_(org_filter))
+        agent_integrations = agent_query.count()
+
+        # Agent API keys
+        key_query = AgentApiKey.query.filter(AgentApiKey.active == True)
+        if org_filter:
+            key_query = key_query.filter(AgentApiKey.organization_id.in_(org_filter))
+        agent_keys = key_query.count()
+
+        # Assets (endpoints)
+        asset_query = Asset.query.filter(Asset.active == True)
+        if org_filter:
+            asset_query = asset_query.filter(Asset.organization_id.in_(org_filter))
+        total_assets = asset_query.count()
+        online_assets = asset_query.filter(Asset.status == 'online').count()
+
+        # Import queue
+        queue_query = ImportQueue.query.filter(ImportQueue.status == 'pending')
+        if org_filter:
+            queue_query = queue_query.filter(ImportQueue.organization_id.in_(org_filter))
+        pending_imports = queue_query.count()
+
+        # Recent activity
+        from datetime import timedelta
+        one_day_ago = datetime.utcnow() - timedelta(days=1)
+
+        recent_checkins = Asset.query.filter(
+            Asset.last_checkin > one_day_ago
+        )
+        if org_filter:
+            recent_checkins = recent_checkins.filter(Asset.organization_id.in_(org_filter))
+        recent_checkins_count = recent_checkins.count()
+
+        return jsonify({
+            'pull_sources': {
+                'total': pull_sources,
+                'label': 'Pull Sources',
+                'description': 'External systems SentriKat fetches data from'
+            },
+            'push_agents': {
+                'api_keys': agent_keys,
+                'endpoints': total_assets,
+                'online': online_assets,
+                'label': 'Push Agents',
+                'description': 'Agents deployed on endpoints pushing data to SentriKat'
+            },
+            'import_queue': {
+                'pending': pending_imports,
+                'label': 'Import Queue',
+                'description': 'Software pending review before adding to Products'
+            },
+            'activity': {
+                'recent_checkins': recent_checkins_count,
+                'label': 'Last 24 Hours',
+                'description': 'Endpoints that checked in recently'
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting integrations summary: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+

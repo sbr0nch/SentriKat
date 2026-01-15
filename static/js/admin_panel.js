@@ -4752,34 +4752,38 @@ document.addEventListener('DOMContentLoaded', function() {
     const integrationsTab = document.getElementById('integrations-tab');
     if (integrationsTab) {
         integrationsTab.addEventListener('shown.bs.tab', function() {
-            loadImportQueue();
-            loadIntegrations();
-            loadDiscoveryAgents();
+            loadIntegrationsSummary();
             loadImportQueueCount();
-            loadAgentKeys();
-            loadAssets();
         });
     }
 
-    // Integrations sub-tab handlers
-    const agentKeysSubTab = document.getElementById('agent-keys-tab');
-    if (agentKeysSubTab) {
-        agentKeysSubTab.addEventListener('shown.bs.tab', function() {
-            loadAgentKeys();
+    // Integrations sub-tab handlers (new unified structure)
+    const overviewSubTab = document.getElementById('integrations-overview-tab');
+    if (overviewSubTab) {
+        overviewSubTab.addEventListener('shown.bs.tab', function() {
+            loadIntegrationsSummary();
         });
     }
 
-    const discoveryAgentsSubTab = document.getElementById('discovery-agents-tab');
-    if (discoveryAgentsSubTab) {
-        discoveryAgentsSubTab.addEventListener('shown.bs.tab', function() {
+    const importQueueSubTab = document.getElementById('import-queue-tab');
+    if (importQueueSubTab) {
+        importQueueSubTab.addEventListener('shown.bs.tab', function() {
+            loadImportQueue();
+        });
+    }
+
+    const pullSourcesSubTab = document.getElementById('pull-sources-tab');
+    if (pullSourcesSubTab) {
+        pullSourcesSubTab.addEventListener('shown.bs.tab', function() {
+            loadIntegrations();
+        });
+    }
+
+    const pushAgentsSubTab = document.getElementById('push-agents-tab');
+    if (pushAgentsSubTab) {
+        pushAgentsSubTab.addEventListener('shown.bs.tab', function() {
+            loadAgentKeys();
             loadAgentScriptOrganizations();
-            loadDiscoveryAgents();
-        });
-    }
-
-    const assetsSubTab = document.getElementById('assets-tab');
-    if (assetsSubTab) {
-        assetsSubTab.addEventListener('shown.bs.tab', function() {
             loadAssets();
         });
     }
@@ -5890,7 +5894,42 @@ async function bulkRejectQueue() {
 }
 
 // ============================================================================
-// INTEGRATIONS - Connectors
+// INTEGRATIONS - Overview Summary
+// ============================================================================
+
+async function loadIntegrationsSummary() {
+    try {
+        const response = await fetch('/api/integrations/summary');
+        if (!response.ok) {
+            console.warn('Could not load integrations summary');
+            return;
+        }
+
+        const data = await response.json();
+
+        // Update stats cards
+        const pullSources = document.getElementById('statPullSources');
+        if (pullSources) pullSources.textContent = data.pull_sources?.total || 0;
+
+        const endpointsOnline = document.getElementById('statEndpointsOnline');
+        if (endpointsOnline) endpointsOnline.textContent = data.push_agents?.online || 0;
+
+        const endpointsTotal = document.getElementById('statEndpointsTotal');
+        if (endpointsTotal) endpointsTotal.textContent = data.push_agents?.endpoints || 0;
+
+        const pendingImports = document.getElementById('statPendingImports');
+        if (pendingImports) pendingImports.textContent = data.import_queue?.pending || 0;
+
+        const recentCheckins = document.getElementById('statRecentCheckins');
+        if (recentCheckins) recentCheckins.textContent = data.activity?.recent_checkins || 0;
+
+    } catch (error) {
+        console.error('Error loading integrations summary:', error);
+    }
+}
+
+// ============================================================================
+// INTEGRATIONS - Pull Sources (formerly Connectors)
 // ============================================================================
 
 async function loadIntegrations() {
