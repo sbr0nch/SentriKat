@@ -5355,6 +5355,38 @@ function copyAgentKey() {
     copyTextToClipboard(key);
 }
 
+/**
+ * Download agent script with the API key embedded from the "Key Created" modal.
+ * This is called when user clicks download in the modal where we have the full key.
+ */
+async function downloadAgentFromModal(platform) {
+    const keyInput = document.getElementById('newAgentKeyValue');
+    if (!keyInput || !keyInput.value) {
+        showToast('No API key found', 'warning');
+        return;
+    }
+
+    const apiKey = keyInput.value;
+    showToast(`Downloading ${platform === 'windows' ? 'Windows' : 'Linux'} agent with embedded key...`, 'info');
+
+    try {
+        const url = `/api/agents/script/${platform}?api_key=${encodeURIComponent(apiKey)}`;
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`Failed to download: ${response.status}`);
+        }
+
+        const script = await response.text();
+        const filename = platform === 'windows' ? 'sentrikat-agent.ps1' : 'sentrikat-agent.sh';
+        downloadScript(filename, script);
+
+        showToast(`${platform === 'windows' ? 'Windows' : 'Linux'} agent downloaded with API key embedded!`, 'success');
+    } catch (error) {
+        showToast(`Error downloading agent: ${error.message}`, 'danger');
+    }
+}
+
 function copyTextToClipboard(text) {
     // Try modern clipboard API first (requires HTTPS or localhost)
     if (navigator.clipboard && window.isSecureContext) {

@@ -1018,8 +1018,17 @@ if ([string]::IsNullOrEmpty($ApiKey)) {
 # ================================================
 # Deploy via GPO, SCCM, Intune, or run manually with Task Scheduler
 #
-# For persistent monitoring, schedule this script to run periodically:
-#   Task Scheduler -> Create Task -> Trigger: Daily/Hourly
+# INSTALLATION (for scheduled inventory):
+#   1. Save this script to: C:\\SentriKat\\sentrikat-agent.ps1
+#   2. Create scheduled task:
+#      schtasks /create /tn "SentriKat Agent" /tr "powershell -ExecutionPolicy Bypass -File C:\\SentriKat\\sentrikat-agent.ps1" /sc hourly /ru SYSTEM
+#
+# UNINSTALL:
+#   1. Remove the scheduled task:
+#      schtasks /delete /tn "SentriKat Agent" /f
+#   2. Delete the script:
+#      Remove-Item -Path "C:\\SentriKat" -Recurse -Force
+#   3. (Optional) Remove endpoint from SentriKat Admin Panel > Endpoints
 #
 # Requirements: PowerShell 5.1+, Windows 7/Server 2008 R2 or later
 # ================================================
@@ -1177,9 +1186,21 @@ fi
 # ================================================
 # SentriKat Discovery Agent for Linux
 # ================================================
-# Deploy via Ansible, Puppet, Chef, or add to cron for persistent monitoring:
-#   crontab -e
-#   0 */4 * * * /path/to/sentrikat-agent.sh >> /var/log/sentrikat-agent.log 2>&1
+# Deploy via Ansible, Puppet, Chef, or add to cron for persistent monitoring.
+#
+# INSTALLATION:
+#   sudo mkdir -p /opt/sentrikat
+#   sudo mv sentrikat-agent.sh /opt/sentrikat/
+#   sudo chmod +x /opt/sentrikat/sentrikat-agent.sh
+#   # Add to cron (runs every 4 hours):
+#   (crontab -l 2>/dev/null; echo "0 */4 * * * /opt/sentrikat/sentrikat-agent.sh >> /var/log/sentrikat-agent.log 2>&1") | crontab -
+#
+# UNINSTALL:
+#   # Remove cron entry:
+#   crontab -l | grep -v sentrikat-agent | crontab -
+#   # Delete the agent:
+#   sudo rm -rf /opt/sentrikat /var/log/sentrikat-agent.log
+#   # (Optional) Remove endpoint from SentriKat Admin Panel > Endpoints
 #
 # Requirements: bash, curl
 # ================================================

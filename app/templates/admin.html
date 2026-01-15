@@ -2033,16 +2033,23 @@
                     const versionCount = versions.length;
                     const productId = `nvd_${vendorKey}_${productKey}`.replace(/[^a-zA-Z0-9_]/g, '_');
 
+                    // Create clear full product name: "Vendor - Product Name"
+                    const fullProductName = `${formattedVendor} - ${displayName}`;
+
+                    // Get version hint for context
+                    const versionHint = versions.length > 0 ? versions[0] : '';
+
                     html += `
                         <div class="nvd-product-group" id="${productId}">
                             <div class="p-2 border-bottom nvd-result-item" style="cursor: pointer;"
                                  onclick="toggleVersionPicker('${productId}', '${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(displayName)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})">
-                                <div class="d-flex justify-content-between align-items-center">
+                                <div class="d-flex justify-content-between align-items-start">
                                     <div>
-                                        <span class="badge bg-secondary me-2">${escapeHtml(formattedVendor)}</span>
-                                        <strong>${escapeHtml(displayName)}</strong>
+                                        <div class="fw-bold text-primary">${escapeHtml(fullProductName)}</div>
+                                        <small class="text-muted font-monospace">cpe:${escapeHtml(vendorKey)}:${escapeHtml(productKey)}</small>
+                                        ${versionHint ? `<small class="text-muted ms-2">(e.g. ${escapeHtml(versionHint)})</small>` : ''}
                                     </div>
-                                    <span class="badge bg-light text-dark"><i class="bi bi-chevron-down"></i> ${versionCount} ver</span>
+                                    <span class="badge bg-primary"><i class="bi bi-chevron-down"></i> ${versionCount} ver</span>
                                 </div>
                             </div>
                             <div class="version-picker bg-light p-2" style="display: none;">
@@ -2126,13 +2133,17 @@
 
         const versionStr = version || '*';
 
+        // Format vendor name for display
+        const formattedVendor = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
         // Set hidden CPE fields
         document.getElementById('cpeVendor').value = vendor;
         document.getElementById('cpeProduct').value = product;
         document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:${versionStr}:*:*:*:*:*:*:*`;
 
-        // Show selected product card with version
-        document.getElementById('nvdSelectedName').textContent = displayName;
+        // Show selected product card with full vendor - product name
+        const fullSelectedName = `${formattedVendor} - ${displayName}`;
+        document.getElementById('nvdSelectedName').textContent = fullSelectedName;
         const versionBadge = document.getElementById('nvdSelectedVersion');
         versionBadge.textContent = version ? `v${version}` : 'All versions';
         versionBadge.className = version ? 'badge bg-primary ms-1' : 'badge bg-secondary ms-1';

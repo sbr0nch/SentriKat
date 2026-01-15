@@ -2152,9 +2152,21 @@
                         </button>
                     </div>
                 </div>
-                <div class="card bg-light">
-                    <div class="card-body py-2">
-                        <small><strong>Usage:</strong> Include this key in the <code>X-Agent-Key</code> HTTP header when calling the agent API.</small>
+                <!-- Download agents with embedded key -->
+                <div class="card border-primary mt-3">
+                    <div class="card-header bg-primary text-white py-2">
+                        <i class="bi bi-download me-2"></i>Download Agent with Embedded Key
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-3">Download a ready-to-run agent script with this API key already embedded:</p>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-outline-primary flex-fill" onclick="downloadAgentFromModal('windows')">
+                                <i class="bi bi-windows me-2"></i>Windows Agent
+                            </button>
+                            <button type="button" class="btn btn-outline-success flex-fill" onclick="downloadAgentFromModal('linux')">
+                                <i class="bi bi-ubuntu me-2"></i>Linux Agent
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

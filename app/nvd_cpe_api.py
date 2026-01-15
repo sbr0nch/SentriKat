@@ -352,22 +352,45 @@ def search_cpe_grouped(
     text_terms = [t for t in all_terms if not t.isdigit() and not re.match(r'^\d+\.\d+', t)]
     version_hints = [t for t in all_terms if t.isdigit() or re.match(r'^\d+\.?\d*', t)]
 
-    def is_relevant_match(vendor: str, product: str, title: str) -> bool:
+    def calculate_relevance_score(vendor: str, product: str, title: str) -> int:
         """
-        Check if this CPE entry is relevant to the search terms.
-        ALL text terms must match vendor or product name (not target_sw or refs).
+        Calculate relevance score for a CPE entry.
+        Higher scores mean better matches.
+        Returns -1 if entry should be filtered out.
         """
         # Normalize strings for comparison
         vendor_lower = (vendor or '').lower().replace('_', ' ')
         product_lower = (product or '').lower().replace('_', ' ')
         combined = f"{vendor_lower} {product_lower}"
 
+        score = 0
+
         # ALL text terms must match vendor or product (stricter filter)
         for term in text_terms:
             if term not in combined:
-                return False
+                return -1  # Filter out - doesn't match
+            score += 10  # Base score for matching
 
-        return True
+        # Bonus: version hints matching in product name (e.g., "windows 11" -> windows_11)
+        # This helps "Windows 11" score higher than "Windows Media Player" when searching "windows 11"
+        for hint in version_hints:
+            if hint in product_lower:
+                score += 20  # Big bonus for number in product name
+            elif hint in vendor_lower:
+                score += 5
+
+        # Bonus: exact product name match
+        for term in text_terms:
+            if term == product_lower:
+                score += 15
+            elif product_lower.startswith(term):
+                score += 8
+
+        return score
+
+    def is_relevant_match(vendor: str, product: str, title: str) -> bool:
+        """Check if entry passes relevance threshold."""
+        return calculate_relevance_score(vendor, product, title) >= 0
 
     for entry in raw_results:
         vendor = entry.get('vendor') or 'unknown'
@@ -375,9 +398,10 @@ def search_cpe_grouped(
         version = entry.get('version')
         title = entry.get('title', '')
 
-        # Filter out irrelevant results (where keyword matched target_sw, refs, etc.)
-        if not is_relevant_match(vendor, product, title):
-            continue
+        # Calculate relevance score
+        score = calculate_relevance_score(vendor, product, title)
+        if score < 0:
+            continue  # Filter out irrelevant results
 
         # Initialize vendor if not exists
         if vendor not in grouped:
@@ -407,8 +431,13 @@ def search_cpe_grouped(
                 'versions': [],
                 'cpe_vendor': vendor,
                 'cpe_product': product,
-                'title': title
+                'title': title,
+                'relevance_score': score  # Store relevance score
             }
+        else:
+            # Update score if this entry has higher relevance
+            if score > grouped[vendor]['products'][product].get('relevance_score', 0):
+                grouped[vendor]['products'][product]['relevance_score'] = score
 
         # Add version if not already present
         if version and version != '*' and version not in grouped[vendor]['products'][product]['versions']:
@@ -422,6 +451,29 @@ def search_cpe_grouped(
                 key=lambda v: _version_sort_key(v),
                 reverse=True
             )[:20]  # Limit to 20 most recent versions
+
+    # Sort vendors and products by relevance score (highest first)
+    sorted_grouped = {}
+    for vendor_key in grouped:
+        vendor_data = grouped[vendor_key]
+        # Sort products by relevance score
+        sorted_products = dict(sorted(
+            vendor_data['products'].items(),
+            key=lambda x: x[1].get('relevance_score', 0),
+            reverse=True
+        ))
+        sorted_grouped[vendor_key] = {
+            'display_name': vendor_data['display_name'],
+            'products': sorted_products,
+            'max_score': max((p.get('relevance_score', 0) for p in sorted_products.values()), default=0)
+        }
+
+    # Sort vendors by their highest product score
+    grouped = dict(sorted(
+        sorted_grouped.items(),
+        key=lambda x: x[1].get('max_score', 0),
+        reverse=True
+    ))
 
     return grouped
 
