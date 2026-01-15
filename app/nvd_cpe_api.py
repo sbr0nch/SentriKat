@@ -346,11 +346,33 @@ def search_cpe_grouped(
 
     grouped: Dict[str, Dict[str, Any]] = {}
 
+    # Split search terms for relevance filtering
+    search_terms = [term.lower().replace('_', ' ') for term in keyword.split()]
+
+    def is_relevant_match(vendor: str, product: str, title: str) -> bool:
+        """Check if this CPE entry is relevant to the search terms."""
+        # Normalize strings for comparison
+        vendor_lower = (vendor or '').lower().replace('_', ' ')
+        product_lower = (product or '').lower().replace('_', ' ')
+        title_lower = (title or '').lower()
+
+        # Check if ANY search term matches vendor, product, or title
+        for term in search_terms:
+            if (term in vendor_lower or
+                term in product_lower or
+                term in title_lower.split()[:5]):  # Only check first 5 words of title
+                return True
+        return False
+
     for entry in raw_results:
         vendor = entry.get('vendor') or 'unknown'
         product = entry.get('product') or 'unknown'
         version = entry.get('version')
         title = entry.get('title', '')
+
+        # Filter out irrelevant results (where keyword matched target_sw, refs, etc.)
+        if not is_relevant_match(vendor, product, title):
+            continue
 
         # Initialize vendor if not exists
         if vendor not in grouped:

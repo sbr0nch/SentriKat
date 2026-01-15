@@ -1787,7 +1787,8 @@
                 </div>
                 {% endif %}
 
-                <!-- Integrations (visible for admins) -->
+                <!-- Integrations (visible for admins with Professional license) -->
+                {% if license and license.is_professional() %}
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Integrations</div>
@@ -1796,6 +1797,7 @@
                         <span>Integrations</span>
                     </a>
                 </div>
+                {% endif %}
                 {% endif %}
             </nav>
 
