@@ -2161,8 +2161,7 @@
         const productInput = document.getElementById('productName');
         const versionInput = document.getElementById('version');
 
-        // Format for display (capitalize words, replace underscores)
-        const formattedVendor = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        // Format product for display (capitalize words, replace underscores)
         const formattedProduct = product.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
         vendorInput.value = formattedVendor;
