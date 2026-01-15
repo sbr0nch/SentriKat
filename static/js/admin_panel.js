@@ -5183,34 +5183,43 @@ async function loadAgentKeys() {
             throw new Error(`HTTP ${response.status}`);
         }
         const data = await response.json();
-        const keys = data.keys || [];
+        const keys = data.api_keys || [];
 
         if (keys.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center py-4 text-muted">
+                    <td colspan="6" class="text-center py-4 text-muted">
                         <i class="bi bi-key" style="font-size: 2rem;"></i>
                         <p class="mt-2 mb-0">No agent API keys configured</p>
-                        <p class="small">Create an API key to allow agents to report inventory</p>
+                        <p class="small">Create an API key to download agents with embedded authentication</p>
                     </td>
                 </tr>
             `;
         } else {
             tbody.innerHTML = keys.map(key => `
                 <tr>
-                    <td><strong>${escapeHtml(key.name)}</strong></td>
-                    <td>${escapeHtml(key.organization_name || 'Unknown')}</td>
-                    <td>${formatDate(key.created_at)}</td>
-                    <td>${key.last_used_at ? formatDate(key.last_used_at) : '<span class="text-muted">Never</span>'}</td>
                     <td>
-                        <span class="badge bg-secondary">${key.usage_count || 0} uses</span>
-                        ${key.max_assets > 0 ? `<span class="badge bg-info ms-1">${key.asset_count || 0}/${key.max_assets} assets</span>` : ''}
+                        <strong>${escapeHtml(key.name)}</strong>
+                        <br><small class="text-muted font-monospace">${escapeHtml(key.key_prefix || '')}...</small>
                     </td>
-                    <td>${key.expires_at ? formatDate(key.expires_at) : '<span class="text-muted">Never</span>'}</td>
+                    <td>${escapeHtml(key.organization_name || 'Unknown')}</td>
+                    <td>${key.last_used_at ? formatRelativeTime(key.last_used_at) : '<span class="text-muted">Never</span>'}</td>
                     <td>
-                        <button class="btn btn-outline-danger btn-sm" onclick="deleteAgentKey(${key.id}, '${escapeHtml(key.name)}')" title="Delete key">
-                            <i class="bi bi-trash"></i>
-                        </button>
+                        <span class="badge bg-secondary">${key.usage_count || 0}</span>
+                    </td>
+                    <td>${key.expires_at ? formatDate(key.expires_at) : '<span class="text-muted">-</span>'}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-primary" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'windows')" title="Download Windows Agent">
+                                <i class="bi bi-windows"></i>
+                            </button>
+                            <button class="btn btn-outline-success" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'linux')" title="Download Linux Agent">
+                                <i class="bi bi-ubuntu"></i>
+                            </button>
+                            <button class="btn btn-outline-danger" onclick="deleteAgentKey(${key.id}, '${escapeHtml(key.name)}')" title="Delete key">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
                     </td>
                 </tr>
             `).join('');
@@ -5220,7 +5229,7 @@ async function loadAgentKeys() {
         console.error('Error loading agent keys:', error);
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="text-center py-4 text-danger">
+                <td colspan="6" class="text-center py-4 text-danger">
                     <i class="bi bi-exclamation-triangle"></i>
                     <span class="ms-2">Error loading agent keys: ${error.message}</span>
                 </td>
@@ -5343,14 +5352,19 @@ function copyAgentKey() {
     if (!keyInput) return;
 
     const key = keyInput.value;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(key).then(() => {
-            showToast('API key copied to clipboard', 'success');
+    copyTextToClipboard(key);
+}
+
+function copyTextToClipboard(text) {
+    // Try modern clipboard API first (requires HTTPS or localhost)
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('Copied to clipboard!', 'success');
         }).catch(() => {
-            fallbackCopyText(key);
+            fallbackCopyText(text);
         });
     } else {
-        fallbackCopyText(key);
+        fallbackCopyText(text);
     }
 }
 
@@ -5358,16 +5372,50 @@ function fallbackCopyText(text) {
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    textarea.setAttribute('readonly', '');
     document.body.appendChild(textarea);
     textarea.select();
+    textarea.setSelectionRange(0, 99999); // For mobile
     try {
-        document.execCommand('copy');
-        showToast('API key copied to clipboard', 'success');
+        const success = document.execCommand('copy');
+        if (success) {
+            showToast('Copied to clipboard!', 'success');
+        } else {
+            showToast('Copy failed. Please select and copy manually (Ctrl+C)', 'warning');
+        }
     } catch (e) {
-        showToast('Failed to copy. Please copy manually.', 'warning');
+        showToast('Copy failed. Please select and copy manually (Ctrl+C)', 'warning');
     }
     document.body.removeChild(textarea);
+}
+
+/**
+ * Download agent script with a specific API key embedded
+ * Called from the API keys table download buttons
+ */
+async function downloadAgentWithKey(keyPrefix, platform) {
+    // We need to get the full key - but we only have the prefix
+    // Show a message that they need to use the key shown when created
+    showToast(`Downloading ${platform === 'windows' ? 'Windows' : 'Linux'} agent script...`, 'info');
+
+    try {
+        const url = `/api/agents/script/${platform}`;
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`Failed to download: ${response.status}`);
+        }
+
+        const script = await response.text();
+        const filename = platform === 'windows' ? 'sentrikat-agent.ps1' : 'sentrikat-agent.sh';
+        downloadScript(filename, script);
+
+        showToast(`Agent script downloaded! Replace YOUR_API_KEY with the key shown when created.`, 'success');
+    } catch (error) {
+        showToast(`Error downloading agent: ${error.message}`, 'danger');
+    }
 }
 
 // ============================================================================

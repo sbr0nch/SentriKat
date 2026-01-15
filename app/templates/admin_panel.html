@@ -781,37 +781,11 @@
 
                 <!-- Push Agents Sub-Tab (Unified: API Keys + Scripts + Assets) -->
                 <div class="tab-pane fade" id="pushAgents" role="tabpanel">
-                    <!-- Workflow Steps -->
-                    <div class="alert alert-light border mb-4">
-                        <div class="row text-center">
-                            <div class="col-md-4">
-                                <div class="d-flex align-items-center justify-content-center">
-                                    <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 18px;">1</span>
-                                    <strong>Create API Key</strong>
-                                </div>
-                                <small class="text-muted">For agent authentication</small>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="d-flex align-items-center justify-content-center">
-                                    <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 18px;">2</span>
-                                    <strong>Download & Deploy</strong>
-                                </div>
-                                <small class="text-muted">Windows/Linux script</small>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="d-flex align-items-center justify-content-center">
-                                    <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 18px;">3</span>
-                                    <strong>Monitor Endpoints</strong>
-                                </div>
-                                <small class="text-muted">View connected assets</small>
-                            </div>
-                        </div>
-                    </div>
 
-                    <!-- Step 1: API Keys -->
+                    <!-- API Keys & Agent Downloads -->
                     <div class="card mb-4">
                         <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                            <span><span class="badge bg-primary me-2">1</span><i class="bi bi-key-fill me-2"></i>API Keys</span>
+                            <span><i class="bi bi-key-fill me-2"></i>API Keys</span>
                             <button class="btn btn-primary btn-sm" onclick="showCreateAgentKeyModal()">
                                 <i class="bi bi-plus-lg me-1"></i>Create API Key
                             </button>
@@ -821,12 +795,12 @@
                                 <table class="table table-hover mb-0" id="agentKeysTable">
                                     <thead class="table-light">
                                         <tr>
-                                            <th>Name</th>
+                                            <th>Name / Key Prefix</th>
                                             <th>Organization</th>
                                             <th>Last Used</th>
                                             <th>Usage</th>
                                             <th>Expires</th>
-                                            <th style="width: 180px;">Actions</th>
+                                            <th style="width: 150px;">Download / Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="agentKeysTableBody">
@@ -840,72 +814,18 @@
                                 </table>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Step 2: Download Scripts -->
-                    <div class="card mb-4">
-                        <div class="card-header bg-white">
-                            <span class="badge bg-primary me-2">2</span><i class="bi bi-download me-2"></i>Download Agent Script
-                        </div>
-                        <div class="card-body">
-                            <div class="row g-3 mb-3">
-                                <div class="col-md-4">
-                                    <label class="form-label fw-semibold">Organization</label>
-                                    <select class="form-select" id="agentScriptOrg">
-                                        <option value="">Select organization...</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-8">
-                                    <label class="form-label fw-semibold">API Key <small class="text-muted">(select from above or generate new)</small></label>
-                                    <div class="input-group">
-                                        <input type="text" class="form-control font-monospace" id="agentScriptApiKey" placeholder="sk_agent_...">
-                                        <button class="btn btn-outline-success" type="button" onclick="generateAndSetAgentKey()" title="Generate new API key for this organization">
-                                            <i class="bi bi-plus-lg me-1"></i>Generate New
-                                        </button>
-                                    </div>
-                                    <small class="form-text text-muted">The key will be embedded in the downloaded script - ready to deploy!</small>
-                                </div>
-                            </div>
-                            <hr class="my-3">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="card border-primary h-100">
-                                        <div class="card-body text-center">
-                                            <i class="bi bi-windows text-primary" style="font-size: 2.5rem;"></i>
-                                            <h6 class="mt-2 mb-1">Windows Agent</h6>
-                                            <p class="small text-muted mb-3">PowerShell script for Windows servers/workstations</p>
-                                            <button class="btn btn-primary" onclick="downloadWindowsAgent()">
-                                                <i class="bi bi-download me-1"></i>Download .ps1
-                                            </button>
-                                            <div class="mt-2">
-                                                <small class="text-muted">Deploy via GPO, SCCM, Intune, or Task Scheduler</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="card border-success h-100">
-                                        <div class="card-body text-center">
-                                            <i class="bi bi-ubuntu text-success" style="font-size: 2.5rem;"></i>
-                                            <h6 class="mt-2 mb-1">Linux Agent</h6>
-                                            <p class="small text-muted mb-3">Bash script for Linux servers (dpkg/rpm/snap)</p>
-                                            <button class="btn btn-success" onclick="downloadLinuxAgent()">
-                                                <i class="bi bi-download me-1"></i>Download .sh
-                                            </button>
-                                            <div class="mt-2">
-                                                <small class="text-muted">Deploy via Ansible, Puppet, Chef, or cron</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                        <div class="card-footer bg-light small">
+                            <i class="bi bi-info-circle me-1"></i>
+                            <strong>How it works:</strong> Create an API key, copy it when shown, then use the
+                            <i class="bi bi-windows text-primary"></i> / <i class="bi bi-ubuntu text-success"></i>
+                            buttons to download agents. Paste the API key in the script before deploying.
                         </div>
                     </div>
 
-                    <!-- Step 3: Connected Endpoints -->
+                    <!-- Connected Endpoints -->
                     <div class="card">
                         <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                            <span><span class="badge bg-primary me-2">3</span><i class="bi bi-pc-display me-2"></i>Connected Endpoints</span>
+                            <span><i class="bi bi-pc-display me-2"></i>Connected Endpoints</span>
                             <div class="d-flex gap-2">
                                 <input type="text" class="form-control form-control-sm" id="assetSearchInput" placeholder="Search endpoints..." style="width: 200px;" onkeyup="if(event.key==='Enter') loadAssets()">
                                 <button class="btn btn-outline-secondary btn-sm" onclick="loadAssets()" title="Refresh">
