@@ -263,17 +263,21 @@ def get_products():
 
         logger.info(f"get_products: filtered to org {org_id}")
 
-    # Apply search filter
+    # Apply search filter - split into words and require ALL to match
     if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            db.or_(
-                Product.vendor.ilike(search_term),
-                Product.product_name.ilike(search_term),
-                Product.version.ilike(search_term),
-                Product.keywords.ilike(search_term)
+        # Split search into individual terms
+        search_terms = search.split()
+        for term in search_terms:
+            term_pattern = f"%{term}%"
+            # Each term must match at least one field
+            query = query.filter(
+                db.or_(
+                    Product.vendor.ilike(term_pattern),
+                    Product.product_name.ilike(term_pattern),
+                    Product.version.ilike(term_pattern),
+                    Product.keywords.ilike(term_pattern)
+                )
             )
-        )
 
     # Apply criticality filter
     if criticality and criticality in ['critical', 'high', 'medium', 'low']:

@@ -631,13 +631,40 @@
                         Deploy lightweight agents on Windows/Linux endpoints to automatically discover installed software.
                     </div>
 
+                    <!-- API Key for Script -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <i class="bi bi-key me-2"></i>API Key for Agent Script
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label fw-semibold">Organization</label>
+                                    <select class="form-select" id="agentScriptOrg">
+                                        <option value="">Select organization...</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label fw-semibold">API Key <small class="text-muted">(paste an existing key or generate new)</small></label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control font-monospace" id="agentScriptApiKey" placeholder="sk_...">
+                                        <button class="btn btn-outline-success" type="button" onclick="generateAndSetAgentKey()" title="Generate new API key">
+                                            <i class="bi bi-plus-lg me-1"></i>Generate New
+                                        </button>
+                                    </div>
+                                    <small class="form-text text-muted">This key will be embedded in the downloaded script</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="row mb-4">
                         <div class="col-md-6">
                             <div class="card h-100">
                                 <div class="card-body">
                                     <h5 class="card-title"><i class="bi bi-windows me-2 text-primary"></i>Windows Agent</h5>
                                     <p class="card-text small text-muted">PowerShell script that reads installed programs from registry and reports to SentriKat.</p>
-                                    <button class="btn btn-outline-primary btn-sm" onclick="downloadWindowsAgent()">
+                                    <button class="btn btn-primary btn-sm" onclick="downloadWindowsAgent()">
                                         <i class="bi bi-download me-1"></i>Download Script
                                     </button>
                                 </div>
@@ -648,7 +675,7 @@
                                 <div class="card-body">
                                     <h5 class="card-title"><i class="bi bi-ubuntu me-2 text-warning"></i>Linux Agent</h5>
                                     <p class="card-text small text-muted">Bash script that reads packages from dpkg/rpm/snap and reports to SentriKat.</p>
-                                    <button class="btn btn-outline-primary btn-sm" onclick="downloadLinuxAgent()">
+                                    <button class="btn btn-primary btn-sm" onclick="downloadLinuxAgent()">
                                         <i class="bi bi-download me-1"></i>Download Script
                                     </button>
                                 </div>

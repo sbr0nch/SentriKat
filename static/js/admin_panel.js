@@ -4769,6 +4769,14 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const discoveryAgentsSubTab = document.getElementById('discovery-agents-tab');
+    if (discoveryAgentsSubTab) {
+        discoveryAgentsSubTab.addEventListener('shown.bs.tab', function() {
+            loadAgentScriptOrganizations();
+            loadDiscoveryAgents();
+        });
+    }
+
     const assetsSubTab = document.getElementById('assets-tab');
     if (assetsSubTab) {
         assetsSubTab.addEventListener('shown.bs.tab', function() {
@@ -6291,21 +6299,88 @@ async function deleteDiscoveryAgent(agentId) {
     }
 }
 
-function downloadWindowsAgent() {
-    // Generate and download PowerShell script
-    const apiUrl = window.location.origin;
-    const script = `# SentriKat Windows Discovery Agent
-# Run as Administrator
-# Usage: .\\sentrikat-agent.ps1 -ApiKey "your-agent-api-key"
-#
-# IMPORTANT: Use an Agent API Key (from Integrations > Agent Keys tab)
-#            NOT a Connector API key!
+// Load organizations for agent script dropdown
+async function loadAgentScriptOrganizations() {
+    const orgSelect = document.getElementById('agentScriptOrg');
+    if (!orgSelect) return;
 
-param(
+    try {
+        const response = await fetch('/api/organizations');
+        const orgs = await response.json();
+        orgSelect.innerHTML = '<option value="">Select organization...</option>' +
+            orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
+    } catch (error) {
+        console.error('Error loading organizations:', error);
+    }
+}
+
+// Generate a new agent API key and set it in the input
+async function generateAndSetAgentKey() {
+    const orgSelect = document.getElementById('agentScriptOrg');
+    const keyInput = document.getElementById('agentScriptApiKey');
+
+    const orgId = orgSelect?.value;
+    if (!orgId) {
+        showToast('Please select an organization first', 'warning');
+        return;
+    }
+
+    const orgName = orgSelect.options[orgSelect.selectedIndex].text;
+    const keyName = `Agent Script - ${new Date().toLocaleDateString()}`;
+
+    try {
+        const response = await fetch('/api/agent-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                organization_id: parseInt(orgId),
+                name: keyName
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to create key');
+        }
+
+        const data = await response.json();
+        keyInput.value = data.api_key;
+        showToast(`API Key created for ${orgName}. Now download the script!`, 'success');
+
+        // Also refresh the agent keys list
+        loadAgentKeys();
+
+    } catch (error) {
+        showToast('Error creating API key: ' + error.message, 'danger');
+    }
+}
+
+function downloadWindowsAgent() {
+    const apiUrl = window.location.origin;
+    const embeddedKey = document.getElementById('agentScriptApiKey')?.value?.trim() || '';
+
+    // If key is provided, embed it; otherwise make it a required parameter
+    const paramSection = embeddedKey ? `param(
+    [string]$ApiKey = "${embeddedKey}",
+    [string]$ApiUrl = "${apiUrl}"
+)` : `param(
     [Parameter(Mandatory=$true)]
     [string]$ApiKey,
     [string]$ApiUrl = "${apiUrl}"
-)
+)`;
+
+    const keyNote = embeddedKey ?
+        `# API Key is embedded - ready to run!` :
+        `# Usage: .\\sentrikat-agent.ps1 -ApiKey "your-agent-api-key"
+#
+# IMPORTANT: Use an Agent API Key (from Integrations > Agent Keys tab)
+#            NOT a Connector API key!`;
+
+    const script = `# SentriKat Windows Discovery Agent
+# Run as Administrator
+${keyNote}
+
+${paramSection}
 
 $ErrorActionPreference = "Stop"
 
@@ -6417,17 +6492,28 @@ $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 
 function downloadLinuxAgent() {
     const apiUrl = window.location.origin;
-    const script = `#!/bin/bash
-# SentriKat Linux Discovery Agent
-# Usage: ./sentrikat-agent.sh <agent-api-key>
+    const embeddedKey = document.getElementById('agentScriptApiKey')?.value?.trim() || '';
+
+    const keyNote = embeddedKey ?
+        `# API Key is embedded - ready to run!` :
+        `# Usage: ./sentrikat-agent.sh <agent-api-key>
 #
 # IMPORTANT: Use an Agent API Key (from Integrations > Agent Keys tab)
-#            NOT a Connector API key!
+#            NOT a Connector API key!`;
+
+    const keySetup = embeddedKey ?
+        `API_KEY="${embeddedKey}"
+API_URL="\${1:-${apiUrl}}"` :
+        `API_KEY="\${1:?Usage: $0 <agent-api-key>}"
+API_URL="\${2:-${apiUrl}}"`;
+
+    const script = `#!/bin/bash
+# SentriKat Linux Discovery Agent
+${keyNote}
 
 set -e
 
-API_KEY="\${1:?Usage: $0 <agent-api-key>}"
-API_URL="\${2:-${apiUrl}}"
+${keySetup}
 
 echo ""
 echo "========================================"
