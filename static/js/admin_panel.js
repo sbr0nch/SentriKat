@@ -6355,278 +6355,44 @@ async function generateAndSetAgentKey() {
     }
 }
 
-function downloadWindowsAgent() {
-    const apiUrl = window.location.origin;
-    const embeddedKey = document.getElementById('agentScriptApiKey')?.value?.trim() || '';
+async function downloadWindowsAgent() {
+    const apiKey = document.getElementById('agentScriptApiKey')?.value?.trim() || '';
 
-    // If key is provided, embed it; otherwise make it a required parameter
-    const paramSection = embeddedKey ? `param(
-    [string]$ApiKey = "${embeddedKey}",
-    [string]$ApiUrl = "${apiUrl}"
-)` : `param(
-    [Parameter(Mandatory=$true)]
-    [string]$ApiKey,
-    [string]$ApiUrl = "${apiUrl}"
-)`;
+    try {
+        // Fetch script from server with embedded API key
+        const url = `/api/agents/script/windows${apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : ''}`;
+        const response = await fetch(url);
 
-    const keyNote = embeddedKey ?
-        `# API Key is embedded - ready to run!` :
-        `# Usage: .\\sentrikat-agent.ps1 -ApiKey "your-agent-api-key"
-#
-# IMPORTANT: Use an Agent API Key (from Integrations > Agent Keys tab)
-#            NOT a Connector API key!`;
-
-    const script = `# SentriKat Windows Discovery Agent
-# Run as Administrator
-${keyNote}
-
-${paramSection}
-
-$ErrorActionPreference = "Stop"
-
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  SentriKat Windows Discovery Agent" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
-
-# Get hostname and OS info
-$hostname = $env:COMPUTERNAME
-$os = Get-CimInstance Win32_OperatingSystem
-$osName = "Windows"
-$osVersion = $os.Caption
-$agentId = (Get-CimInstance Win32_ComputerSystemProduct).UUID
-$ipAddress = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress
-
-Write-Host "Hostname:   $hostname"
-Write-Host "IP Address: $ipAddress"
-Write-Host "OS:         $osVersion"
-Write-Host "Agent ID:   $agentId"
-Write-Host ""
-
-# Get installed software from registry
-Write-Host "Scanning installed software..." -ForegroundColor Yellow
-$products = @()
-$regPaths = @(
-    "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
-    "HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*"
-)
-
-foreach ($path in $regPaths) {
-    Get-ItemProperty $path -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | ForEach-Object {
-        $products += @{
-            vendor = if ($_.Publisher) { $_.Publisher } else { "Unknown" }
-            product = $_.DisplayName
-            version = if ($_.DisplayVersion) { $_.DisplayVersion } else { "" }
-            path = if ($_.InstallLocation) { $_.InstallLocation } else { "" }
+        if (!response.ok) {
+            throw new Error(`Failed to download script: ${response.status}`);
         }
+
+        const script = await response.text();
+        downloadScript('sentrikat-agent.ps1', script);
+    } catch (error) {
+        console.error('Error downloading Windows agent:', error);
+        showToast('Failed to download agent script: ' + error.message, 'danger');
     }
 }
 
-# Remove duplicates by product name
-$products = $products | Sort-Object { $_.product } -Unique
+async function downloadLinuxAgent() {
+    const apiKey = document.getElementById('agentScriptApiKey')?.value?.trim() || '';
 
-Write-Host "Found $($products.Count) installed applications" -ForegroundColor Green
-Write-Host ""
+    try {
+        // Fetch script from server with embedded API key
+        const url = `/api/agents/script/linux${apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : ''}`;
+        const response = await fetch(url);
 
-# Build payload matching SentriKat API format
-$body = @{
-    hostname = $hostname
-    ip_address = $ipAddress
-    os = @{
-        name = $osName
-        version = $osVersion
+        if (!response.ok) {
+            throw new Error(`Failed to download script: ${response.status}`);
+        }
+
+        const script = await response.text();
+        downloadScript('sentrikat-agent.sh', script);
+    } catch (error) {
+        console.error('Error downloading Linux agent:', error);
+        showToast('Failed to download agent script: ' + error.message, 'danger');
     }
-    agent = @{
-        id = $agentId
-        version = "1.0.0"
-    }
-    products = $products
-} | ConvertTo-Json -Depth 4 -Compress
-
-$headers = @{
-    "X-Agent-Key" = $ApiKey
-    "Content-Type" = "application/json"
-}
-
-Write-Host "Sending inventory to SentriKat ($ApiUrl)..." -ForegroundColor Yellow
-
-try {
-    $response = Invoke-RestMethod -Uri "$ApiUrl/api/agent/inventory" -Method POST -Headers $headers -Body $body
-    Write-Host ""
-    Write-Host "SUCCESS!" -ForegroundColor Green
-    Write-Host "----------------------------------------"
-    Write-Host "Asset ID:             $($response.asset_id)"
-    Write-Host "Products Created:     $($response.products_created)"
-    Write-Host "Products Updated:     $($response.products_updated)"
-    Write-Host "Installations Created: $($response.installations_created)"
-    Write-Host "Installations Updated: $($response.installations_updated)"
-    Write-Host "----------------------------------------"
-} catch {
-    Write-Host ""
-    Write-Host "ERROR!" -ForegroundColor Red
-    Write-Host "----------------------------------------"
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    if ($_.Exception.Response) {
-        try {
-            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-            $responseBody = $reader.ReadToEnd()
-            Write-Host "Server Response: $responseBody" -ForegroundColor Red
-        } catch {}
-    }
-    Write-Host ""
-    Write-Host "Common issues:" -ForegroundColor Yellow
-    Write-Host "  - Invalid API key (use Agent API Key, not Connector key)"
-    Write-Host "  - Server URL incorrect"
-    Write-Host "  - Network/firewall blocking connection"
-    Write-Host "----------------------------------------"
-}
-
-Write-Host ""
-Write-Host "Press any key to exit..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-`;
-
-    downloadScript('sentrikat-agent.ps1', script);
-}
-
-function downloadLinuxAgent() {
-    const apiUrl = window.location.origin;
-    const embeddedKey = document.getElementById('agentScriptApiKey')?.value?.trim() || '';
-
-    const keyNote = embeddedKey ?
-        `# API Key is embedded - ready to run!` :
-        `# Usage: ./sentrikat-agent.sh <agent-api-key>
-#
-# IMPORTANT: Use an Agent API Key (from Integrations > Agent Keys tab)
-#            NOT a Connector API key!`;
-
-    const keySetup = embeddedKey ?
-        `API_KEY="${embeddedKey}"
-API_URL="\${1:-${apiUrl}}"` :
-        `API_KEY="\${1:?Usage: $0 <agent-api-key>}"
-API_URL="\${2:-${apiUrl}}"`;
-
-    const script = `#!/bin/bash
-# SentriKat Linux Discovery Agent
-${keyNote}
-
-set -e
-
-${keySetup}
-
-echo ""
-echo "========================================"
-echo "  SentriKat Linux Discovery Agent"
-echo "========================================"
-echo ""
-
-# Get system info
-HOSTNAME=$(hostname)
-IP_ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
-OS_NAME="Linux"
-OS_VERSION=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2 || echo "Linux")
-KERNEL=$(uname -r)
-AGENT_ID=$(cat /etc/machine-id 2>/dev/null || hostname)
-
-echo "Hostname:   $HOSTNAME"
-echo "IP Address: $IP_ADDRESS"
-echo "OS:         $OS_VERSION"
-echo "Kernel:     $KERNEL"
-echo "Agent ID:   $AGENT_ID"
-echo ""
-
-# Collect software from various package managers
-echo "Scanning installed software..."
-PRODUCTS_FILE=$(mktemp)
-
-# dpkg (Debian/Ubuntu)
-if command -v dpkg &> /dev/null; then
-    dpkg-query -W -f='\${Package}|\${Version}|dpkg\\n' 2>/dev/null | while IFS='|' read pkg ver src; do
-        echo "{\\"vendor\\":\\"$src\\",\\"product\\":\\"$pkg\\",\\"version\\":\\"$ver\\"},"
-    done >> "$PRODUCTS_FILE"
-fi
-
-# rpm (RHEL/CentOS/Fedora)
-if command -v rpm &> /dev/null; then
-    rpm -qa --queryformat '%{NAME}|%{VERSION}|%{VENDOR}\\n' 2>/dev/null | while IFS='|' read pkg ver vendor; do
-        vendor=\${vendor:-(none)}
-        [ "$vendor" = "(none)" ] && vendor="rpm"
-        echo "{\\"vendor\\":\\"$vendor\\",\\"product\\":\\"$pkg\\",\\"version\\":\\"$ver\\"},"
-    done >> "$PRODUCTS_FILE"
-fi
-
-# snap
-if command -v snap &> /dev/null; then
-    snap list 2>/dev/null | tail -n +2 | while read name ver rest; do
-        echo "{\\"vendor\\":\\"snap\\",\\"product\\":\\"$name\\",\\"version\\":\\"$ver\\"},"
-    done >> "$PRODUCTS_FILE"
-fi
-
-# Build products array (remove trailing comma)
-if [ -s "$PRODUCTS_FILE" ]; then
-    PRODUCTS="[$(sed '\$s/,$//' "$PRODUCTS_FILE" | tr '\\n' ' ')]"
-    COUNT=$(wc -l < "$PRODUCTS_FILE")
-else
-    PRODUCTS="[]"
-    COUNT=0
-fi
-rm -f "$PRODUCTS_FILE"
-
-echo "Found $COUNT installed packages"
-echo ""
-
-# Build JSON payload
-PAYLOAD=$(cat <<EOFPAYLOAD
-{
-    "hostname": "$HOSTNAME",
-    "ip_address": "$IP_ADDRESS",
-    "os": {
-        "name": "$OS_NAME",
-        "version": "$OS_VERSION",
-        "kernel": "$KERNEL"
-    },
-    "agent": {
-        "id": "$AGENT_ID",
-        "version": "1.0.0"
-    },
-    "products": $PRODUCTS
-}
-EOFPAYLOAD
-)
-
-echo "Sending inventory to SentriKat ($API_URL)..."
-
-# Send to SentriKat
-RESPONSE=$(curl -s -w "\\n%{http_code}" -X POST "$API_URL/api/agent/inventory" \\
-    -H "X-Agent-Key: $API_KEY" \\
-    -H "Content-Type: application/json" \\
-    -d "$PAYLOAD")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-BODY=$(echo "$RESPONSE" | sed '\$d')
-
-echo ""
-if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-    echo "SUCCESS!"
-    echo "----------------------------------------"
-    echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\\"Asset ID: {d.get('asset_id')}\\"); print(f\\"Products Created: {d.get('products_created', 0)}\\"); print(f\\"Products Updated: {d.get('products_updated', 0)}\\"); print(f\\"Installations Created: {d.get('installations_created', 0)}\\"); print(f\\"Installations Updated: {d.get('installations_updated', 0)}\\")" 2>/dev/null || echo "$BODY"
-    echo "----------------------------------------"
-else
-    echo "ERROR! (HTTP $HTTP_CODE)"
-    echo "----------------------------------------"
-    echo "$BODY"
-    echo ""
-    echo "Common issues:"
-    echo "  - Invalid API key (use Agent API Key, not Connector key)"
-    echo "  - Server URL incorrect"
-    echo "  - Network/firewall blocking connection"
-    echo "----------------------------------------"
-    exit 1
-fi
-`;
-
-    downloadScript('sentrikat-agent.sh', script);
 }
 
 function downloadScript(filename, content) {

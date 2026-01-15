@@ -8,7 +8,7 @@ Provides:
 4. Agent Management - Register and manage discovery agents
 """
 
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify, session, Response
 from datetime import datetime
 import secrets
 import uuid
@@ -967,3 +967,331 @@ def delete_agent(agent_id):
     agent.is_active = False
     db.session.commit()
     return jsonify({'success': True})
+
+
+# ============================================================================
+# Agent Script Downloads (Server-Generated)
+# ============================================================================
+
+@bp.route('/api/agents/script/windows', methods=['GET'])
+@login_required
+def download_windows_agent():
+    """Download Windows PowerShell agent script with embedded API key."""
+    api_key = request.args.get('api_key', '')
+    base_url = request.url_root.rstrip('/')
+
+    # Build validation section based on whether key is embedded
+    if api_key and api_key != 'YOUR_API_KEY_HERE':
+        key_section = f'''[string]$ApiKey = "{api_key}",'''
+        validation = ''
+    else:
+        key_section = '''[Parameter(Mandatory=$true)]
+    [string]$ApiKey,'''
+        validation = '''
+# Validate API key
+if ([string]::IsNullOrEmpty($ApiKey)) {
+    Write-Error "Please provide a valid API key. Get one from Admin Panel > Integrations > Agent Keys"
+    exit 1
+}
+'''
+
+    script = f'''# SentriKat Discovery Agent for Windows
+# ================================================
+# Deploy via GPO, SCCM, Intune, or run manually with Task Scheduler
+#
+# For persistent monitoring, schedule this script to run periodically:
+#   Task Scheduler -> Create Task -> Trigger: Daily/Hourly
+#
+# Requirements: PowerShell 5.1+, Windows 7/Server 2008 R2 or later
+# ================================================
+
+param(
+    {key_section}
+    [string]$SentriKatUrl = "{base_url}"
+)
+{validation}
+$ErrorActionPreference = "Stop"
+
+# Get system information
+$Hostname = $env:COMPUTERNAME
+$OSInfo = Get-CimInstance Win32_OperatingSystem
+$OSVersion = $OSInfo.Caption
+$OSArch = if ([Environment]::Is64BitOperatingSystem) {{ "x64" }} else {{ "x86" }}
+$AgentId = (Get-CimInstance Win32_ComputerSystemProduct).UUID
+$IPAddress = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {{ $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' }} | Select-Object -First 1).IPAddress
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  SentriKat Windows Discovery Agent" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "Hostname:   $Hostname"
+Write-Host "IP Address: $IPAddress"
+Write-Host "OS:         $OSVersion ($OSArch)"
+Write-Host "Agent ID:   $AgentId"
+Write-Host ""
+
+# Collect installed software
+Write-Host "Scanning installed software..." -ForegroundColor Yellow
+$Products = @()
+$Seen = @{{}}
+
+function Add-Software {{
+    param($Publisher, $Name, $Version, $Path)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {{ return }}
+
+    $Key = "$($Name.ToLower())"
+    if ($Seen.ContainsKey($Key)) {{ return }}
+    $Seen[$Key] = $true
+
+    $script:Products += @{{
+        vendor = if ($Publisher) {{ $Publisher }} else {{ "Unknown" }}
+        product = $Name
+        version = if ($Version) {{ $Version }} else {{ "" }}
+        path = if ($Path) {{ $Path }} else {{ "" }}
+    }}
+}}
+
+# From registry (64-bit)
+Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion -Path $_.InstallLocation
+}}
+
+# From registry (32-bit on 64-bit OS)
+Get-ItemProperty "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion -Path $_.InstallLocation
+}}
+
+# Current user software
+Get-ItemProperty "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
+    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion -Path $_.InstallLocation
+}}
+
+Write-Host "Found $($Products.Count) unique software items" -ForegroundColor Green
+Write-Host ""
+
+# Build payload
+$Body = @{{
+    hostname = $Hostname
+    ip_address = $IPAddress
+    os = @{{
+        name = "Windows"
+        version = $OSVersion
+    }}
+    agent = @{{
+        id = $AgentId
+        version = "1.0.0"
+    }}
+    products = $Products
+}} | ConvertTo-Json -Depth 4 -Compress
+
+# Report to SentriKat
+Write-Host "Sending inventory to SentriKat..." -ForegroundColor Yellow
+
+try {{
+    $Response = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/inventory" `
+        -Method POST `
+        -Body $Body `
+        -ContentType "application/json" `
+        -Headers @{{"X-Agent-Key" = $ApiKey}} `
+        -ErrorAction Stop
+
+    Write-Host ""
+    Write-Host "SUCCESS!" -ForegroundColor Green
+    Write-Host "----------------------------------------"
+    Write-Host "Asset ID:             $($Response.asset_id)"
+    Write-Host "Products Created:     $($Response.products_created)"
+    Write-Host "Products Updated:     $($Response.products_updated)"
+    Write-Host "Installations Created: $($Response.installations_created)"
+    Write-Host "Installations Updated: $($Response.installations_updated)"
+    Write-Host "----------------------------------------"
+}} catch {{
+    Write-Host ""
+    Write-Host "ERROR!" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    if ($_.Exception.Response) {{
+        try {{
+            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+            Write-Host "Server Response: $($reader.ReadToEnd())" -ForegroundColor Red
+        }} catch {{}}
+    }}
+    exit 1
+}}
+
+Write-Host ""
+Write-Host "Agent completed successfully!" -ForegroundColor Green
+'''
+
+    return Response(
+        script,
+        mimetype='text/plain',
+        headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-windows.ps1'}
+    )
+
+
+@bp.route('/api/agents/script/linux', methods=['GET'])
+@login_required
+def download_linux_agent():
+    """Download Linux Bash agent script with embedded API key."""
+    api_key = request.args.get('api_key', '')
+    base_url = request.url_root.rstrip('/')
+
+    # Build key section based on whether embedded
+    if api_key and api_key != 'YOUR_API_KEY_HERE':
+        key_section = f'''API_KEY="{api_key}"
+API_URL="${{1:-{base_url}}}"'''
+        validation = ''
+    else:
+        key_section = f'''API_KEY="${{1:?Usage: $0 <api-key>}}"
+API_URL="${{2:-{base_url}}}"'''
+        validation = '''
+# Validate API key
+if [ -z "$API_KEY" ]; then
+    echo "ERROR: Please provide a valid API key"
+    echo "Get one from Admin Panel > Integrations > Agent Keys"
+    exit 1
+fi
+'''
+
+    script = f'''#!/bin/bash
+# ================================================
+# SentriKat Discovery Agent for Linux
+# ================================================
+# Deploy via Ansible, Puppet, Chef, or add to cron for persistent monitoring:
+#   crontab -e
+#   0 */4 * * * /path/to/sentrikat-agent.sh >> /var/log/sentrikat-agent.log 2>&1
+#
+# Requirements: bash, curl
+# ================================================
+
+set -e
+
+{key_section}
+{validation}
+# Get system information
+HOSTNAME=$(hostname)
+IP_ADDRESS=$(hostname -I 2>/dev/null | awk '{{print $1}}' || echo "")
+OS_NAME="Linux"
+OS_VERSION=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2 || uname -sr)
+KERNEL=$(uname -r)
+AGENT_ID=$(cat /etc/machine-id 2>/dev/null || hostname)
+
+echo ""
+echo "========================================"
+echo "  SentriKat Linux Discovery Agent"
+echo "========================================"
+echo "Hostname:   $HOSTNAME"
+echo "IP Address: $IP_ADDRESS"
+echo "OS:         $OS_VERSION"
+echo "Kernel:     $KERNEL"
+echo "Agent ID:   $AGENT_ID"
+echo ""
+
+# Collect installed software
+echo "Scanning installed software..."
+PRODUCTS_FILE=$(mktemp)
+trap "rm -f $PRODUCTS_FILE" EXIT
+
+# dpkg (Debian/Ubuntu)
+if command -v dpkg-query &> /dev/null; then
+    dpkg-query -W -f='${{Package}}|${{Version}}|dpkg\\n' 2>/dev/null | while IFS='|' read pkg ver src; do
+        [ -n "$pkg" ] && echo "{{\\"vendor\\":\\"$src\\",\\"product\\":\\"$pkg\\",\\"version\\":\\"$ver\\"}},"
+    done >> "$PRODUCTS_FILE"
+fi
+
+# rpm (RHEL/CentOS/Fedora)
+if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
+    rpm -qa --queryformat '%{{NAME}}|%{{VERSION}}|%{{VENDOR}}\\n' 2>/dev/null | while IFS='|' read pkg ver vendor; do
+        [ -n "$pkg" ] && echo "{{\\"vendor\\":\\"${{vendor:-rpm}}\\",\\"product\\":\\"$pkg\\",\\"version\\":\\"$ver\\"}},"
+    done >> "$PRODUCTS_FILE"
+fi
+
+# snap
+if command -v snap &> /dev/null; then
+    snap list 2>/dev/null | tail -n +2 | while read name ver rest; do
+        [ -n "$name" ] && echo "{{\\"vendor\\":\\"snap\\",\\"product\\":\\"$name\\",\\"version\\":\\"$ver\\"}},"
+    done >> "$PRODUCTS_FILE"
+fi
+
+# flatpak
+if command -v flatpak &> /dev/null; then
+    flatpak list --columns=name,version 2>/dev/null | while read name ver; do
+        [ -n "$name" ] && echo "{{\\"vendor\\":\\"flatpak\\",\\"product\\":\\"$name\\",\\"version\\":\\"$ver\\"}},"
+    done >> "$PRODUCTS_FILE"
+fi
+
+# Build products array
+if [ -s "$PRODUCTS_FILE" ]; then
+    PRODUCTS="[$(sed '$s/,$//' "$PRODUCTS_FILE" | tr '\\n' ' ')]"
+    COUNT=$(wc -l < "$PRODUCTS_FILE")
+else
+    PRODUCTS="[]"
+    COUNT=0
+fi
+
+echo "Found $COUNT installed packages"
+echo ""
+
+# Build JSON payload
+PAYLOAD=$(cat <<EOFPAYLOAD
+{{
+    "hostname": "$HOSTNAME",
+    "ip_address": "$IP_ADDRESS",
+    "os": {{
+        "name": "$OS_NAME",
+        "version": "$OS_VERSION",
+        "kernel": "$KERNEL"
+    }},
+    "agent": {{
+        "id": "$AGENT_ID",
+        "version": "1.0.0"
+    }},
+    "products": $PRODUCTS
+}}
+EOFPAYLOAD
+)
+
+echo "Sending inventory to SentriKat..."
+
+# Send to SentriKat
+RESPONSE=$(curl -s -w "\\n%{{http_code}}" -X POST "$API_URL/api/agent/inventory" \\
+    -H "X-Agent-Key: $API_KEY" \\
+    -H "Content-Type: application/json" \\
+    -d "$PAYLOAD")
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+echo ""
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+    echo "SUCCESS!"
+    echo "----------------------------------------"
+    echo "$BODY" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    print(f\\"Asset ID: {{d.get('asset_id')}}\\")
+    print(f\\"Products Created: {{d.get('products_created', 0)}}\\")
+    print(f\\"Products Updated: {{d.get('products_updated', 0)}}\\")
+    print(f\\"Installations Created: {{d.get('installations_created', 0)}}\\")
+    print(f\\"Installations Updated: {{d.get('installations_updated', 0)}}\\")
+except:
+    print(sys.stdin.read())
+" 2>/dev/null || echo "$BODY"
+    echo "----------------------------------------"
+else
+    echo "ERROR! (HTTP $HTTP_CODE)"
+    echo "----------------------------------------"
+    echo "$BODY"
+    exit 1
+fi
+
+echo ""
+echo "Agent completed successfully!"
+'''
+
+    return Response(
+        script,
+        mimetype='text/plain',
+        headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-linux.sh'}
+    )
