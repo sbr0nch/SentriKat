@@ -677,6 +677,15 @@ def list_assets():
     else:
         # Non-super-admins can only see their organization's assets
         user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if not user_org_ids:
+            # User has no organization memberships - return empty result
+            return jsonify({
+                'assets': [],
+                'total': 0,
+                'page': 1,
+                'per_page': 50,
+                'pages': 0
+            })
         if org_id and org_id in user_org_ids:
             query = query.filter_by(organization_id=org_id)
         else:

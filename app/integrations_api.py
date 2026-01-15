@@ -14,12 +14,13 @@ import secrets
 import uuid
 from functools import wraps
 
-from app import db
+from app import db, csrf
 from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User
 from app.auth import admin_required, login_required
 
 bp = Blueprint('integrations', __name__)
+csrf.exempt(bp)  # API endpoints use session auth, not CSRF tokens
 
 
 # ============================================================================

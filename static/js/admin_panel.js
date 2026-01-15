@@ -4827,10 +4827,10 @@ function applyLicenseRestrictions() {
         if (ldapUsersTab) ldapUsersTab.style.display = 'none';
         if (ldapGroupsTab) ldapGroupsTab.style.display = 'none';
 
-        // Add upgrade notice to LDAP settings section
+        // Hide LDAP settings section completely
         const ldapSettingsPane = document.getElementById('ldapSettings');
         if (ldapSettingsPane) {
-            ldapSettingsPane.innerHTML = createPremiumUpgradeNotice('LDAP Authentication', 'ldap');
+            ldapSettingsPane.style.display = 'none';
         }
     }
 
@@ -4838,16 +4838,10 @@ function applyLicenseRestrictions() {
     // Backup & Restore - requires 'backup_restore' license
     // ========================================
     if (!hasFeature('backup_restore')) {
-        // Find and replace the Backup & Restore card content
+        // Hide the Backup & Restore card completely
         const backupCard = document.getElementById('backupRestoreCard');
         if (backupCard) {
-            backupCard.innerHTML = `
-                <div class="card-header">
-                    <i class="bi bi-cloud-download me-2"></i>Backup & Restore
-                    <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
-                </div>
-                ${createPremiumUpgradeNotice('Backup & Restore', 'backup_restore')}
-            `;
+            backupCard.style.display = 'none';
         }
     }
 
@@ -4855,18 +4849,10 @@ function applyLicenseRestrictions() {
     // Email Alerts / Webhooks - requires 'email_alerts' license
     // ========================================
     if (!hasFeature('email_alerts')) {
+        // Hide notifications settings completely
         const notificationsPane = document.getElementById('notificationsSettings');
         if (notificationsPane) {
-            // Replace notifications settings with upgrade notice
-            notificationsPane.innerHTML = `
-                <div class="card">
-                    <div class="card-header">
-                        <i class="bi bi-bell me-2"></i>Notification Integrations
-                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
-                    </div>
-                    ${createPremiumUpgradeNotice('Email Alerts & Webhooks', 'email_alerts')}
-                </div>
-            `;
+            notificationsPane.style.display = 'none';
         }
 
         // Also hide the org webhook tab in organization modal
@@ -4880,18 +4866,10 @@ function applyLicenseRestrictions() {
     // White Label / Branding - requires 'white_label' license
     // ========================================
     if (!hasFeature('white_label')) {
+        // Hide branding settings completely
         const brandingPane = document.getElementById('brandingSettings');
         if (brandingPane) {
-            // Replace branding settings with upgrade notice
-            brandingPane.innerHTML = `
-                <div class="card">
-                    <div class="card-header">
-                        <i class="bi bi-palette me-2"></i>Branding & White Label
-                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
-                    </div>
-                    ${createPremiumUpgradeNotice('Branding & White Label', 'white_label')}
-                </div>
-            `;
+            brandingPane.style.display = 'none';
         }
     }
 
@@ -4903,27 +4881,6 @@ function applyLicenseRestrictions() {
         emailAlertsEnabled: hasFeature('email_alerts'),
         whiteLabelEnabled: hasFeature('white_label')
     });
-}
-
-/**
- * Create a premium upgrade notice HTML for a locked feature
- */
-function createPremiumUpgradeNotice(featureName, featureKey) {
-    return `
-        <div class="card-body">
-            <div class="text-center py-4">
-                <i class="bi bi-lock-fill display-3 text-muted mb-3"></i>
-                <h5 class="text-muted">${featureName}</h5>
-                <p class="text-muted mb-3">
-                    This feature requires a <strong>Professional license</strong>.
-                </p>
-                <div class="alert alert-light border d-inline-block">
-                    <i class="bi bi-stars me-2 text-warning"></i>
-                    Upgrade to Professional to unlock ${featureName.toLowerCase()} and more advanced features.
-                </div>
-            </div>
-        </div>
-    `;
 }
 
 /**
@@ -6206,12 +6163,31 @@ async function showIntegrationApiKey(integrationId) {
         const integration = await response.json();
 
         if (integration.api_key) {
-            alert(`API Key for ${integration.name}:\\n\\n${integration.api_key}`);
+            document.getElementById('viewApiKeyTitle').textContent = `API Key - ${integration.name}`;
+            document.getElementById('viewApiKeyValue').value = integration.api_key;
+            const modal = new bootstrap.Modal(document.getElementById('viewApiKeyModal'));
+            modal.show();
         } else {
             showToast('No API key available', 'info');
         }
     } catch (error) {
         showToast('Error loading integration', 'danger');
+    }
+}
+
+function copyViewedApiKey() {
+    const keyInput = document.getElementById('viewApiKeyValue');
+    if (!keyInput) return;
+
+    const key = keyInput.value;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(key).then(() => {
+            showToast('API key copied to clipboard', 'success');
+        }).catch(() => {
+            fallbackCopyText(key);
+        });
+    } else {
+        fallbackCopyText(key);
     }
 }
 
@@ -6450,49 +6426,86 @@ function downloadScript(filename, content) {
 }
 
 // ============================================================================
-// URL HASH HANDLING - Switch to tab based on URL hash
+// URL HASH HANDLING & TAB PERSISTENCE
 // ============================================================================
 
 /**
+ * Map of hash values to tab button IDs
+ */
+const adminTabMap = {
+    'users': 'users-tab',
+    'organizations': 'organizations-tab',
+    'settings': 'settings-tab',
+    'ldapUsers': 'ldap-users-tab',
+    'ldapGroups': 'ldap-groups-tab',
+    'license': 'license-tab',
+    'integrations': 'integrations-tab'
+};
+
+/**
+ * Save current admin tab to localStorage for persistence
+ */
+function saveCurrentAdminTab(tabName) {
+    try {
+        localStorage.setItem('adminCurrentTab', tabName);
+    } catch (e) {
+        console.warn('Could not save tab to localStorage:', e);
+    }
+}
+
+/**
+ * Get saved admin tab from localStorage
+ */
+function getSavedAdminTab() {
+    try {
+        return localStorage.getItem('adminCurrentTab');
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
  * Handle URL hash to switch to the correct tab on page load
- * Supports: #users, #organizations, #settings, #ldapUsers, #ldapGroups, #license, #agents, #assets
+ * Falls back to localStorage if no hash is present
  */
 function handleUrlHash() {
     const hash = window.location.hash.substring(1); // Remove the '#'
-    if (!hash) return;
 
-    console.log('URL hash detected:', hash);
+    // Use hash if present, otherwise check localStorage
+    const tabName = hash || getSavedAdminTab();
+    if (!tabName) return;
 
-    // Map of hash values to tab button IDs
-    const tabMap = {
-        'users': 'users-tab',
-        'organizations': 'organizations-tab',
-        'settings': 'settings-tab',
-        'ldapUsers': 'ldap-users-tab',
-        'ldapGroups': 'ldap-groups-tab',
-        'license': 'license-tab',
-        'integrations': 'integrations-tab'
-    };
+    console.log('Switching to tab:', tabName, hash ? '(from URL)' : '(from localStorage)');
 
-    const tabButtonId = tabMap[hash];
+    const tabButtonId = adminTabMap[tabName];
     if (tabButtonId) {
         const tabButton = document.getElementById(tabButtonId);
         if (tabButton) {
-            console.log('Switching to tab:', tabButtonId);
             // Use Bootstrap's Tab API to switch tabs
             const tab = new bootstrap.Tab(tabButton);
             tab.show();
+            // Save to localStorage
+            saveCurrentAdminTab(tabName);
         } else {
             console.warn('Tab button not found:', tabButtonId);
         }
     }
 }
 
-// Initialize hash handling when DOM is ready
+// Initialize hash handling and tab persistence when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-    // Handle URL hash on page load
+    // Handle URL hash on page load (or restore from localStorage)
     handleUrlHash();
 
     // Also handle hash changes (e.g., if user clicks back button)
     window.addEventListener('hashchange', handleUrlHash);
+
+    // Save tab to localStorage whenever a main tab is clicked
+    document.querySelectorAll('#adminTabs .nav-link').forEach(tabButton => {
+        tabButton.addEventListener('shown.bs.tab', function(e) {
+            // Extract tab name from button ID (e.g., 'integrations-tab' -> 'integrations')
+            const tabName = e.target.id.replace('-tab', '');
+            saveCurrentAdminTab(tabName);
+        });
+    });
 });

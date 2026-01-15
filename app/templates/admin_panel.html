@@ -2068,6 +2068,39 @@
     </div>
 </div>
 
+<!-- View API Key Modal (generic for integrations) -->
+<div class="modal fade" id="viewApiKeyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-key me-2"></i><span id="viewApiKeyTitle">API Key</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">API Key</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control font-monospace bg-light" id="viewApiKeyValue" readonly>
+                        <button class="btn btn-outline-secondary" type="button" onclick="copyViewedApiKey()">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                <div class="card bg-light">
+                    <div class="card-body py-2">
+                        <small><strong>Usage:</strong> Include this key in the appropriate HTTP header when calling the API.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Asset Details Modal -->
 <div class="modal fade" id="assetDetailsModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
