@@ -176,13 +176,14 @@ def setup_logging(app):
     perf_logger.propagate = False
 
     # ========================================
-    # Console Handler (for development)
+    # Console Handler (for Docker logging)
     # ========================================
-    if app.debug:
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.DEBUG)
-        console_handler.setFormatter(detailed_formatter)
-        root_logger.addHandler(console_handler)
+    # Always output to stdout/stderr so docker-compose logs can capture
+    import sys
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.DEBUG if app.debug else logging.INFO)
+    console_handler.setFormatter(detailed_formatter)
+    root_logger.addHandler(console_handler)
 
     # Log startup
     app.logger.info(f"Logging configured. Log directory: {log_dir}")

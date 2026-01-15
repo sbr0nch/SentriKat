@@ -1010,6 +1010,9 @@ def download_windows_agent():
 # Validate API key
 if ([string]::IsNullOrEmpty($ApiKey)) {
     Write-Error "Please provide a valid API key. Get one from Admin Panel > Integrations > Agent Keys"
+    Write-Host ""
+    Write-Host "Press any key to exit..." -ForegroundColor Cyan
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit 1
 }
 '''
@@ -1143,6 +1146,9 @@ try {{
             Write-Host "Server Response: $($reader.ReadToEnd())" -ForegroundColor Red
         }} catch {{}}
     }}
+    Write-Host ""
+    Write-Host "Press any key to exit..." -ForegroundColor Cyan
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit 1
 }}
 

@@ -53,6 +53,7 @@ def get_agent_api_key():
     """
     api_key = request.headers.get('X-Agent-Key')
     if not api_key:
+        logger.warning(f"Agent auth failed: No X-Agent-Key header from {request.remote_addr}")
         return None, None
 
     # Hash the key and look it up
@@ -60,9 +61,11 @@ def get_agent_api_key():
     agent_key = AgentApiKey.query.filter_by(key_hash=key_hash).first()
 
     if not agent_key:
+        logger.warning(f"Agent auth failed: Invalid API key from {request.remote_addr}")
         return None, None
 
     if not agent_key.is_valid():
+        logger.warning(f"Agent auth failed: Expired/inactive key '{agent_key.name}' from {request.remote_addr}")
         return None, None
 
     # Update usage stats
@@ -336,6 +339,7 @@ def report_inventory():
         ]
     }
     """
+    logger.info(f"Agent inventory request received from {request.remote_addr}")
     organization = request.organization
     data = request.get_json()
 
