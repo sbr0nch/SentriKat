@@ -347,22 +347,27 @@ def search_cpe_grouped(
     grouped: Dict[str, Dict[str, Any]] = {}
 
     # Split search terms for relevance filtering
-    search_terms = [term.lower().replace('_', ' ') for term in keyword.split()]
+    # Separate text terms from version-like terms (numbers)
+    all_terms = [term.lower().replace('_', ' ') for term in keyword.split()]
+    text_terms = [t for t in all_terms if not t.isdigit() and not re.match(r'^\d+\.\d+', t)]
+    version_hints = [t for t in all_terms if t.isdigit() or re.match(r'^\d+\.?\d*', t)]
 
     def is_relevant_match(vendor: str, product: str, title: str) -> bool:
-        """Check if this CPE entry is relevant to the search terms."""
+        """
+        Check if this CPE entry is relevant to the search terms.
+        ALL text terms must match vendor or product name (not target_sw or refs).
+        """
         # Normalize strings for comparison
         vendor_lower = (vendor or '').lower().replace('_', ' ')
         product_lower = (product or '').lower().replace('_', ' ')
-        title_lower = (title or '').lower()
+        combined = f"{vendor_lower} {product_lower}"
 
-        # Check if ANY search term matches vendor, product, or title
-        for term in search_terms:
-            if (term in vendor_lower or
-                term in product_lower or
-                term in title_lower.split()[:5]):  # Only check first 5 words of title
-                return True
-        return False
+        # ALL text terms must match vendor or product (stricter filter)
+        for term in text_terms:
+            if term not in combined:
+                return False
+
+        return True
 
     for entry in raw_results:
         vendor = entry.get('vendor') or 'unknown'

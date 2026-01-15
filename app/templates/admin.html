@@ -175,149 +175,103 @@
                     <input type="hidden" id="cpeUri">
 
                     <!-- Step 1: Find Product -->
-                    <div class="mb-4">
-                        <div class="d-flex align-items-center mb-3">
+                    <div class="mb-3">
+                        <div class="d-flex align-items-center mb-2">
                             <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 16px;">1</span>
                             <h6 class="mb-0 fw-bold">Find Your Product</h6>
-                            <span class="badge bg-success ms-2">Recommended</span>
                         </div>
 
                         <!-- NVD Search -->
-                        <div class="input-group mb-2">
+                        <div class="input-group mb-1">
                             <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
                             <input type="text" class="form-control" id="nvdSearchInput"
-                                   placeholder="Search NVD database (e.g., 'apache tomcat', 'microsoft windows')..."
-                                   oninput="debounceNVDSearch()">
-                            <button class="btn btn-outline-primary" type="button" onclick="performNVDSearchNow()">
+                                   placeholder="Search (e.g., 'apache tomcat', 'windows server')..."
+                                   oninput="debounceNVDSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();performNVDSearchNow();}">
+                            <button class="btn btn-primary" type="button" onclick="performNVDSearchNow()">
                                 Search
                             </button>
                         </div>
-                        <small class="text-muted">
-                            <i class="bi bi-database me-1"></i>Search 800,000+ products from NIST National Vulnerability Database for accurate CPE matching
-                        </small>
 
-                        <!-- Rate Limit Warning (shown when no NVD API key configured) -->
-                        <div id="nvdRateLimitWarning" class="alert alert-warning alert-sm py-1 px-2 mt-2 mb-0 small" style="display: none;">
-                            <i class="bi bi-exclamation-triangle me-1"></i>
-                            <strong>Rate limited:</strong> Searches are slower without NVD API key.
-                            <a href="/admin_panel#sync-settings" class="alert-link">Configure API key</a> for faster searches (free).
-                        </div>
+                        <div id="nvdSearchStatus" class="small text-muted mt-1" style="display: none;"></div>
 
-                        <div id="nvdSearchStatus" class="small text-muted mt-2" style="display: none;"></div>
-
-                        <!-- Search Results -->
-                        <div id="nvdResultsList" class="border rounded mt-2" style="max-height: 250px; overflow-y: auto; display: none;">
+                        <!-- Search Results with inline version selection -->
+                        <div id="nvdResultsList" class="border rounded mt-2" style="max-height: 300px; overflow-y: auto; display: none;">
                             <!-- NVD Results populated here -->
                         </div>
 
-                        <!-- Selected Product Display -->
-                        <div id="nvdSelectedProduct" class="alert alert-success mt-3 mb-0" style="display: none;">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <div>
-                                    <div class="fw-bold mb-1">
-                                        <i class="bi bi-check-circle-fill me-1"></i>
-                                        <span id="nvdSelectedName"></span>
+                        <!-- Selected Product Display with Version -->
+                        <div id="nvdSelectedProduct" class="card bg-success bg-opacity-10 border-success mt-2 mb-0" style="display: none;">
+                            <div class="card-body py-2">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-check-circle-fill text-success me-1"></i>
+                                        <strong id="nvdSelectedName"></strong>
+                                        <span id="nvdSelectedVersion" class="badge bg-primary ms-1"></span>
                                     </div>
-                                    <small class="text-muted d-block">
-                                        CPE Identifier: <code id="nvdSelectedCpe" class="user-select-all"></code>
-                                    </small>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearNVDSelection()">
+                                        <i class="bi bi-x"></i> Change
+                                    </button>
                                 </div>
-                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearNVDSelection()">
-                                    <i class="bi bi-x"></i> Clear
-                                </button>
+                                <small class="text-muted" id="nvdSelectedCpe"></small>
                             </div>
                         </div>
 
                         <!-- Or Manual Entry Toggle -->
-                        <div class="text-center my-3" id="manualEntryToggle">
-                            <span class="text-muted">- or -</span>
-                            <button type="button" class="btn btn-link btn-sm" onclick="toggleManualEntry()">
-                                Enter product details manually
-                            </button>
+                        <div class="text-center mt-2" id="manualEntryToggle">
+                            <small class="text-muted">- or -</small>
+                            <a href="#" class="small" onclick="toggleManualEntry(); return false;">Enter manually</a>
                         </div>
                     </div>
 
-                    <!-- Step 2: Product Details -->
-                    <div class="mb-4" id="productDetailsSection">
-                        <div class="d-flex align-items-center mb-3">
-                            <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 16px;">2</span>
-                            <h6 class="mb-0 fw-bold">Product Details</h6>
-                        </div>
-
-                        <div class="row g-3">
-                            <!-- Vendor - Required -->
+                    <!-- Step 2: Product Details (hidden fields for manual entry) -->
+                    <div id="manualFieldsSection" style="display: none;">
+                        <div class="row g-2 mb-3">
                             <div class="col-md-6">
-                                <label for="vendor" class="form-label">
-                                    Vendor <span class="text-danger">*</span>
-                                </label>
-                                <input type="text" class="form-control" id="vendor" required
+                                <label for="vendor" class="form-label small">Vendor <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control form-control-sm" id="vendor" required
                                        placeholder="e.g., Microsoft, Cisco, Apache">
                             </div>
-
-                            <!-- Product Name - Required -->
                             <div class="col-md-6">
-                                <label for="productName" class="form-label">
-                                    Product Name <span class="text-danger">*</span>
-                                </label>
-                                <input type="text" class="form-control" id="productName" required
+                                <label for="productName" class="form-label small">Product <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control form-control-sm" id="productName" required
                                        placeholder="e.g., Windows Server, IOS, Tomcat">
                             </div>
-
-                            <!-- Version - Optional with explanation -->
-                            <div class="col-md-6">
-                                <label for="version" class="form-label">
-                                    Version <span class="text-muted small">(optional)</span>
-                                </label>
-                                <div class="input-group">
-                                    <input type="text" class="form-control" id="version"
-                                           placeholder="Leave empty for ALL versions"
-                                           list="versionSuggestions">
-                                    <datalist id="versionSuggestions"></datalist>
-                                    <button class="btn btn-outline-secondary" type="button" id="loadVersionsBtn"
-                                            onclick="loadVersionsFromNVD()" title="Load versions from NVD" style="display: none;">
-                                        <i class="bi bi-arrow-repeat"></i>
-                                    </button>
-                                </div>
-                                <small class="form-text text-muted">
-                                    Empty = matches ALL versions | Specific = matches only that version
-                                </small>
-                            </div>
-
-                            <!-- Organization - Optional -->
-                            <div class="col-md-6">
-                                <label for="productOrganization" class="form-label">
-                                    Organization <span class="text-muted small">(optional)</span>
-                                </label>
-                                <select class="form-select" id="productOrganization">
-                                    <option value="">Loading organizations...</option>
-                                </select>
-                            </div>
-
-                            <!-- Criticality - Required -->
-                            <div class="col-md-6">
-                                <label for="criticality" class="form-label">
-                                    Criticality <span class="text-danger">*</span>
-                                </label>
-                                <select class="form-select" id="criticality" required>
-                                    <option value="critical">Critical - Mission Critical</option>
-                                    <option value="high">High - Important Systems</option>
-                                    <option value="medium" selected>Medium - Standard</option>
-                                    <option value="low">Low - Non-Critical</option>
-                                </select>
-                            </div>
-
-                            <!-- Active Toggle -->
-                            <div class="col-md-6">
-                                <label class="form-label">Status</label>
-                                <div class="form-check form-switch">
-                                    <input type="checkbox" class="form-check-input" id="active" checked>
-                                    <label class="form-check-label" for="active">
-                                        Active - track vulnerabilities
-                                    </label>
-                                </div>
+                            <div class="col-12">
+                                <label for="version" class="form-label small">Version <span class="text-muted">(optional)</span></label>
+                                <input type="text" class="form-control form-control-sm" id="version"
+                                       placeholder="Leave empty for ALL versions" list="versionSuggestions">
+                                <datalist id="versionSuggestions"></datalist>
                             </div>
                         </div>
                     </div>
+
+                    <!-- Settings (always visible) -->
+                    <div class="mb-3" id="productSettingsSection">
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 16px;">2</span>
+                            <h6 class="mb-0 fw-bold">Settings</h6>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <label for="productOrganization" class="form-label small">Organization</label>
+                                <select class="form-select form-select-sm" id="productOrganization">
+                                    <option value="">All / Global</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="criticality" class="form-label small">Criticality</label>
+                                <select class="form-select form-select-sm" id="criticality" required>
+                                    <option value="critical">Critical</option>
+                                    <option value="high">High</option>
+                                    <option value="medium" selected>Medium</option>
+                                    <option value="low">Low</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Hidden toggle for active status -->
+                    <input type="hidden" id="active" value="true">
 
                     <!-- Advanced Options (Collapsed by Default) -->
                     <div class="border-top pt-3">
@@ -2077,16 +2031,22 @@
                     const versions = productData.versions || [];
                     const displayName = productData.display_name || productData.title || productKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     const versionCount = versions.length;
+                    const productId = `nvd_${vendorKey}_${productKey}`.replace(/[^a-zA-Z0-9_]/g, '_');
 
                     html += `
-                        <div class="p-2 border-bottom nvd-result-item" style="cursor: pointer;"
-                             onclick="selectNVDProduct('${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(formattedVendor)} - ${escapeHtml(displayName)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <span class="badge bg-secondary me-2">${escapeHtml(formattedVendor)}</span>
-                                    <strong>${escapeHtml(displayName)}</strong>
+                        <div class="nvd-product-group" id="${productId}">
+                            <div class="p-2 border-bottom nvd-result-item" style="cursor: pointer;"
+                                 onclick="toggleVersionPicker('${productId}', '${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(displayName)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <span class="badge bg-secondary me-2">${escapeHtml(formattedVendor)}</span>
+                                        <strong>${escapeHtml(displayName)}</strong>
+                                    </div>
+                                    <span class="badge bg-light text-dark"><i class="bi bi-chevron-down"></i> ${versionCount} ver</span>
                                 </div>
-                                <span class="badge bg-light text-dark">${versionCount} versions</span>
+                            </div>
+                            <div class="version-picker bg-light p-2" style="display: none;">
+                                <!-- Versions populated on click -->
                             </div>
                         </div>
                     `;
@@ -2109,18 +2069,74 @@
         }
     }
 
-    function selectNVDProduct(vendor, product, displayName, versions) {
+    let currentExpandedProduct = null;
+
+    function toggleVersionPicker(productId, vendor, product, displayName, versions) {
+        const group = document.getElementById(productId);
+        const picker = group.querySelector('.version-picker');
+
+        // Close any other open picker
+        if (currentExpandedProduct && currentExpandedProduct !== productId) {
+            const prevGroup = document.getElementById(currentExpandedProduct);
+            if (prevGroup) {
+                prevGroup.querySelector('.version-picker').style.display = 'none';
+            }
+        }
+
+        // Toggle current picker
+        if (picker.style.display === 'none') {
+            // Build version buttons
+            let html = `
+                <div class="mb-1"><small class="text-muted fw-bold">Select version:</small></div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button type="button" class="btn btn-sm btn-outline-primary"
+                            onclick="selectNVDProduct('${escapeHtml(vendor)}', '${escapeHtml(product)}', '${escapeHtml(displayName)}', '')">
+                        <i class="bi bi-asterisk"></i> All Versions
+                    </button>
+            `;
+
+            // Show up to 15 most recent versions
+            const showVersions = versions.slice(0, 15);
+            for (const ver of showVersions) {
+                html += `
+                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                            onclick="selectNVDProduct('${escapeHtml(vendor)}', '${escapeHtml(product)}', '${escapeHtml(displayName)}', '${escapeHtml(ver)}')">
+                        ${escapeHtml(ver)}
+                    </button>
+                `;
+            }
+
+            if (versions.length > 15) {
+                html += `<span class="badge bg-light text-muted align-self-center">+${versions.length - 15} more</span>`;
+            }
+
+            html += '</div>';
+            picker.innerHTML = html;
+            picker.style.display = 'block';
+            currentExpandedProduct = productId;
+        } else {
+            picker.style.display = 'none';
+            currentExpandedProduct = null;
+        }
+    }
+
+    function selectNVDProduct(vendor, product, displayName, version) {
         nvdSelectedVendor = vendor;
         nvdSelectedProduct = product;
+
+        const versionStr = version || '*';
 
         // Set hidden CPE fields
         document.getElementById('cpeVendor').value = vendor;
         document.getElementById('cpeProduct').value = product;
-        document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:*:*:*:*:*:*:*:*`;
+        document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:${versionStr}:*:*:*:*:*:*:*`;
 
-        // Show selected product card
+        // Show selected product card with version
         document.getElementById('nvdSelectedName').textContent = displayName;
-        document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${vendor}:${product}:*`;
+        const versionBadge = document.getElementById('nvdSelectedVersion');
+        versionBadge.textContent = version ? `v${version}` : 'All versions';
+        versionBadge.className = version ? 'badge bg-primary ms-1' : 'badge bg-secondary ms-1';
+        document.getElementById('nvdSelectedCpe').textContent = `CPE: ${vendor}:${product}:${versionStr}`;
         document.getElementById('nvdSelectedProduct').style.display = 'block';
 
         // Hide search results and manual entry toggle
@@ -2132,6 +2148,7 @@
         // Auto-fill vendor and product name fields
         const vendorInput = document.getElementById('vendor');
         const productInput = document.getElementById('productName');
+        const versionInput = document.getElementById('version');
 
         // Format for display (capitalize words, replace underscores)
         const formattedVendor = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -2139,21 +2156,20 @@
 
         vendorInput.value = formattedVendor;
         productInput.value = formattedProduct;
-
-        // Populate version suggestions
-        if (versions && versions.length > 0) {
-            const datalist = document.getElementById('versionSuggestions');
-            datalist.innerHTML = versions.map(v => `<option value="${escapeHtml(v)}">`).join('');
-            document.getElementById('loadVersionsBtn').style.display = 'inline-block';
-        }
+        versionInput.value = version || '';
 
         // Update CPE status in advanced options
-        document.getElementById('cpeSelectedInfo').style.display = 'block';
-        document.getElementById('cpeDisplayUri').textContent = `${vendor}:${product}`;
-        document.getElementById('cpeNotLinkedInfo').style.display = 'none';
-        document.getElementById('clearCpeBtn').style.display = 'inline-block';
+        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
+        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
+        const cpeDisplayUri = document.getElementById('cpeDisplayUri');
+        const clearCpeBtn = document.getElementById('clearCpeBtn');
 
-        showToast(`Selected: ${displayName}`, 'success');
+        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'block';
+        if (cpeDisplayUri) cpeDisplayUri.textContent = `${vendor}:${product}`;
+        if (cpeNotLinkedInfo) cpeNotLinkedInfo.style.display = 'none';
+        if (clearCpeBtn) clearCpeBtn.style.display = 'inline-block';
+
+        currentExpandedProduct = null;
     }
 
     function clearNVDSelection() {
@@ -2169,33 +2185,49 @@
         document.getElementById('nvdSelectedProduct').style.display = 'none';
         document.getElementById('nvdSelectedName').textContent = '';
         document.getElementById('nvdSelectedCpe').textContent = '';
+        const versionBadge = document.getElementById('nvdSelectedVersion');
+        if (versionBadge) versionBadge.textContent = '';
 
         // Clear form fields
         document.getElementById('vendor').value = '';
         document.getElementById('productName').value = '';
         document.getElementById('version').value = '';
-        document.getElementById('versionSuggestions').innerHTML = '';
-        document.getElementById('loadVersionsBtn').style.display = 'none';
+        const versionSuggestions = document.getElementById('versionSuggestions');
+        if (versionSuggestions) versionSuggestions.innerHTML = '';
+        const loadVersionsBtn = document.getElementById('loadVersionsBtn');
+        if (loadVersionsBtn) loadVersionsBtn.style.display = 'none';
 
         // Reset CPE status in advanced options
-        document.getElementById('cpeSelectedInfo').style.display = 'none';
-        document.getElementById('cpeNotLinkedInfo').style.display = 'block';
-        document.getElementById('clearCpeBtn').style.display = 'none';
+        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
+        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
+        const clearCpeBtn = document.getElementById('clearCpeBtn');
+        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'none';
+        if (cpeNotLinkedInfo) cpeNotLinkedInfo.style.display = 'block';
+        if (clearCpeBtn) clearCpeBtn.style.display = 'none';
 
-        // Clear search
-        document.getElementById('nvdSearchInput').value = '';
-        document.getElementById('nvdSearchStatus').style.display = 'none';
-        document.getElementById('nvdResultsList').style.display = 'none';
+        // Show search input and results (don't clear, let user refine)
+        document.getElementById('nvdSearchStatus').style.display = 'block';
+        document.getElementById('nvdResultsList').style.display = 'block';
+
+        // Hide manual fields section
+        const manualFields = document.getElementById('manualFieldsSection');
+        if (manualFields) manualFields.style.display = 'none';
 
         // Show manual entry toggle again
         const toggle = document.getElementById('manualEntryToggle');
         if (toggle) toggle.style.display = 'block';
+
+        currentExpandedProduct = null;
     }
 
     function toggleManualEntry() {
-        // Hide the toggle button and focus on vendor field
+        // Hide the toggle button
         const toggle = document.getElementById('manualEntryToggle');
         if (toggle) toggle.style.display = 'none';
+
+        // Show manual fields section
+        const manualFields = document.getElementById('manualFieldsSection');
+        if (manualFields) manualFields.style.display = 'block';
 
         // Focus on the vendor field for manual entry
         const vendorInput = document.getElementById('vendor');
