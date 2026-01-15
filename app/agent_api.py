@@ -21,6 +21,7 @@ from app import db, csrf, limiter
 from app.models import (
     Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob
 )
+from app.licensing import requires_professional, get_license
 import json
 
 # Threshold for async processing (queued instead of immediate)
@@ -919,6 +920,7 @@ def list_asset_groups():
 # ============================================================================
 
 @agent_bp.route('/api/agent-keys', methods=['GET'])
+@requires_professional('Agent Keys')
 def list_agent_keys():
     """List agent API keys for organization."""
     from app.auth import get_current_user
@@ -952,6 +954,7 @@ def list_agent_keys():
 
 
 @agent_bp.route('/api/agent-keys', methods=['POST'])
+@requires_professional('Agent Keys')
 def create_agent_key():
     """Create a new agent API key."""
     from app.auth import get_current_user
@@ -1005,6 +1008,7 @@ def create_agent_key():
 
 
 @agent_bp.route('/api/agent-keys/<int:key_id>', methods=['DELETE'])
+@requires_professional('Agent Keys')
 def delete_agent_key(key_id):
     """Delete an agent API key."""
     from app.auth import get_current_user
@@ -1140,6 +1144,7 @@ def get_product_versions(product_id):
 # ============================================================================
 
 @agent_bp.route('/api/integrations/summary', methods=['GET'])
+@requires_professional('Integrations')
 def get_integrations_summary():
     """
     Get summary of all integrations for the Overview tab.

@@ -37,12 +37,14 @@
                 <i class="bi bi-building me-2"></i>Organizations
             </button>
         </li>
+        {% if license and license.is_professional() %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button">
                 <i class="bi bi-plug me-2"></i>Integrations
                 <span class="badge bg-secondary ms-1" id="importQueueBadge" style="display: none;">0</span>
             </button>
         </li>
+        {% endif %}
         {% if current_user and current_user.is_super_admin() %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
@@ -491,7 +493,8 @@
             </div>
         </div>
 
-        <!-- Integrations Tab -->
+        {% if license and license.is_professional() %}
+        <!-- Integrations Tab (PRO Feature) -->
         <div class="tab-pane fade" id="integrations" role="tabpanel">
             <!-- Integrations Sub-Tabs (Redesigned) -->
             <ul class="nav nav-pills mb-4" id="integrationsTabs" role="tablist">
@@ -949,6 +952,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
         <!-- Settings Tab -->
         <div class="tab-pane fade" id="settings" role="tabpanel">

@@ -18,6 +18,7 @@ from app import db, csrf
 from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User
 from app.auth import admin_required, login_required
+from app.licensing import requires_professional
 
 bp = Blueprint('integrations', __name__)
 csrf.exempt(bp)  # API endpoints use session auth, not CSRF tokens
@@ -354,6 +355,7 @@ def create_product_from_queue(queue_item):
 
 @bp.route('/api/import/queue', methods=['GET'])
 @login_required
+@requires_professional('Integrations')
 def get_import_queue():
     """Get pending import queue items."""
     status = request.args.get('status', 'pending')
@@ -382,6 +384,7 @@ def get_import_queue():
 
 @bp.route('/api/import/queue/count', methods=['GET'])
 @login_required
+@requires_professional('Integrations')
 def get_import_queue_count():
     """Get count of pending import queue items."""
     pending_count = ImportQueue.query.filter_by(status='pending').count()
@@ -390,6 +393,7 @@ def get_import_queue_count():
 
 @bp.route('/api/import/queue/<int:item_id>', methods=['GET'])
 @login_required
+@requires_professional('Integrations')
 def get_queue_item(item_id):
     """Get a specific queue item."""
     item = ImportQueue.query.get_or_404(item_id)
@@ -398,6 +402,7 @@ def get_queue_item(item_id):
 
 @bp.route('/api/import/queue/<int:item_id>', methods=['PUT'])
 @login_required
+@requires_professional('Integrations')
 def update_queue_item(item_id):
     """Update a queue item (change version, org, criticality)."""
     item = ImportQueue.query.get_or_404(item_id)
@@ -423,6 +428,7 @@ def update_queue_item(item_id):
 
 @bp.route('/api/import/queue/<int:item_id>/approve', methods=['POST'])
 @login_required
+@requires_professional('Integrations')
 def approve_queue_item(item_id):
     """Approve a queue item and create the product."""
     item = ImportQueue.query.get_or_404(item_id)
@@ -469,6 +475,7 @@ def approve_queue_item(item_id):
 
 @bp.route('/api/import/queue/<int:item_id>/reject', methods=['POST'])
 @login_required
+@requires_professional('Integrations')
 def reject_queue_item(item_id):
     """Reject/ignore a queue item."""
     item = ImportQueue.query.get_or_404(item_id)
@@ -487,6 +494,7 @@ def reject_queue_item(item_id):
 
 @bp.route('/api/import/queue/bulk', methods=['POST'])
 @login_required
+@requires_professional('Integrations')
 def bulk_process_queue():
     """Bulk approve or reject queue items."""
     data = request.get_json()
@@ -552,6 +560,7 @@ def bulk_process_queue():
 
 @bp.route('/api/integrations', methods=['GET'])
 @admin_required
+@requires_professional('Integrations')
 def get_integrations():
     """Get all integrations."""
     integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
@@ -560,6 +569,7 @@ def get_integrations():
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['GET'])
 @admin_required
+@requires_professional('Integrations')
 def get_integration(integration_id):
     """Get a specific integration."""
     integration = Integration.query.get_or_404(integration_id)
@@ -569,6 +579,7 @@ def get_integration(integration_id):
 
 @bp.route('/api/integrations', methods=['POST'])
 @admin_required
+@requires_professional('Integrations')
 def create_integration():
     """Create a new integration."""
     data = request.get_json()
@@ -616,6 +627,7 @@ def create_integration():
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['PUT'])
 @admin_required
+@requires_professional('Integrations')
 def update_integration(integration_id):
     """Update an integration."""
     integration = Integration.query.get_or_404(integration_id)
@@ -646,6 +658,7 @@ def update_integration(integration_id):
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['DELETE'])
 @admin_required
+@requires_professional('Integrations')
 def delete_integration(integration_id):
     """Delete (deactivate) an integration."""
     integration = Integration.query.get_or_404(integration_id)
@@ -658,6 +671,7 @@ def delete_integration(integration_id):
 
 @bp.route('/api/integrations/<int:integration_id>/regenerate-key', methods=['POST'])
 @admin_required
+@requires_professional('Integrations')
 def regenerate_api_key(integration_id):
     """Regenerate API key for an integration."""
     integration = Integration.query.get_or_404(integration_id)
@@ -673,6 +687,7 @@ def regenerate_api_key(integration_id):
 
 @bp.route('/api/integrations/<int:integration_id>/test', methods=['POST'])
 @admin_required
+@requires_professional('Integrations')
 def test_integration(integration_id):
     """Test connection to an integration."""
     integration = Integration.query.get_or_404(integration_id)
@@ -698,6 +713,7 @@ def test_integration(integration_id):
 
 @bp.route('/api/integrations/<int:integration_id>/sync', methods=['POST'])
 @admin_required
+@requires_professional('Integrations')
 def trigger_sync(integration_id):
     """Manually trigger a sync for a pull integration."""
     integration = Integration.query.get_or_404(integration_id)
@@ -945,6 +961,7 @@ def process_software_import(integration, data):
 
 @bp.route('/api/agents', methods=['GET'])
 @admin_required
+@requires_professional('Integrations')
 def get_agents():
     """Get all registered agents."""
     integration_id = request.args.get('integration_id', type=int)
@@ -961,6 +978,7 @@ def get_agents():
 
 @bp.route('/api/agents/<int:agent_id>', methods=['DELETE'])
 @admin_required
+@requires_professional('Integrations')
 def delete_agent(agent_id):
     """Delete (deactivate) an agent."""
     agent = AgentRegistration.query.get_or_404(agent_id)
@@ -975,6 +993,7 @@ def delete_agent(agent_id):
 
 @bp.route('/api/agents/script/windows', methods=['GET'])
 @login_required
+@requires_professional('Integrations')
 def download_windows_agent():
     """Download Windows PowerShell agent script with embedded API key."""
     api_key = request.args.get('api_key', '')
@@ -1131,6 +1150,7 @@ Write-Host "Agent completed successfully!" -ForegroundColor Green
 
 @bp.route('/api/agents/script/linux', methods=['GET'])
 @login_required
+@requires_professional('Integrations')
 def download_linux_agent():
     """Download Linux Bash agent script with embedded API key."""
     api_key = request.args.get('api_key', '')
