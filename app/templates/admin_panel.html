@@ -535,7 +535,7 @@
                                             <div class="p-3 bg-white rounded shadow-sm">
                                                 <i class="bi bi-cloud-download text-primary" style="font-size: 2rem;"></i>
                                                 <h6 class="mt-2 mb-1">Pull Sources</h6>
-                                                <small class="text-muted">PDQ, SCCM, Intune</small>
+                                                <small class="text-muted">REST API sources</small>
                                             </div>
                                         </div>
                                         <!-- Arrow -->
@@ -646,11 +646,9 @@
                                 <div class="card-body">
                                     <p class="text-muted mb-3">Connect to existing software inventory systems. SentriKat will fetch and import your software catalog automatically.</p>
                                     <div class="d-flex flex-wrap gap-2 mb-3">
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-box me-1"></i>PDQ Inventory</span>
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-microsoft me-1"></i>SCCM</span>
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-cloud me-1"></i>Intune</span>
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-hdd-network me-1"></i>Lansweeper</span>
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-braces me-1"></i>REST API</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-braces me-1"></i>Any REST API</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-box me-1"></i>Inventory Systems</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-hdd-network me-1"></i>Asset Management</span>
                                     </div>
                                     <button class="btn btn-primary btn-sm" onclick="document.getElementById('pull-sources-tab').click()">
                                         <i class="bi bi-gear me-1"></i>Configure Pull Sources
@@ -753,7 +751,7 @@
                 <div class="tab-pane fade" id="pullSources" role="tabpanel">
                     <div class="alert alert-info mb-3">
                         <i class="bi bi-info-circle me-2"></i>
-                        <strong>Pull Sources</strong> connect to external software inventory systems (PDQ, SCCM, Intune, etc.). SentriKat fetches data from these systems automatically.
+                        <strong>Pull Sources</strong> connect to external software inventory systems via REST API. Configure the URL, authentication, and field mappings to match your source system.
                     </div>
 
                     <div class="card">

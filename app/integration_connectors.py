@@ -5,10 +5,8 @@ Each connector implements:
 - test_connection(): Verify connectivity
 - fetch_software(): Retrieve software list
 
-Supported systems:
-- PDQ Inventory (REST API)
-- Generic REST API (configurable)
-- CSV Import (file upload)
+The Generic REST connector can be configured to work with any REST API
+that returns a JSON array of software items.
 """
 
 import requests
@@ -43,22 +41,59 @@ class BaseConnector:
 
 class GenericRestConnector(BaseConnector):
     """
-    Generic REST API connector.
+    Generic REST API connector - works with any REST API.
 
     Configuration:
     {
         "api_url": "https://inventory.example.com/api/software",
         "api_key": "secret",
-        "auth_type": "header",  // "header", "basic", "bearer"
+        "auth_type": "header",  // "header", "basic", "bearer", "none"
         "auth_header": "X-API-Key",  // Header name for auth_type=header
         "username": "",  // For auth_type=basic
         "password": "",  // For auth_type=basic
         "method": "GET",
-        "response_path": "data.software",  // JSON path to software array
-        "vendor_field": "vendor",  // Field name for vendor
-        "product_field": "name",  // Field name for product
-        "version_field": "version",  // Field name for version
-        "verify_ssl": true
+        "response_path": "data.software",  // JSON path to software array (dot notation)
+        "vendor_field": "vendor",  // Field name for vendor in response
+        "product_field": "name",  // Field name for product in response
+        "version_field": "version",  // Field name for version in response
+        "verify_ssl": true,
+        "timeout": 30,
+        "custom_headers": {}  // Optional additional headers
+    }
+
+    Example configurations for common systems:
+
+    # PDQ Inventory
+    {
+        "api_url": "https://pdq.example.com/api/v1/applications",
+        "api_key": "your-api-key",
+        "auth_type": "bearer",
+        "response_path": "applications",
+        "vendor_field": "publisher",
+        "product_field": "name",
+        "version_field": "version"
+    }
+
+    # Generic inventory system
+    {
+        "api_url": "https://inventory.example.com/api/software",
+        "api_key": "your-api-key",
+        "auth_type": "header",
+        "auth_header": "X-API-Key",
+        "response_path": "data",
+        "vendor_field": "vendor",
+        "product_field": "product_name",
+        "version_field": "version"
+    }
+
+    # SentriKat Test Endpoint (for testing)
+    {
+        "api_url": "http://localhost:5000/api/test/mock-software",
+        "auth_type": "none",
+        "response_path": "software",
+        "vendor_field": "vendor",
+        "product_field": "product",
+        "version_field": "version"
     }
     """
 
@@ -69,16 +104,54 @@ class GenericRestConnector(BaseConnector):
 
         try:
             response = self._make_request(api_url)
+
+            # Check if response is valid JSON
+            try:
+                data = response.json()
+            except json.JSONDecodeError:
+                return {
+                    'success': False,
+                    'error': f'Invalid JSON response (HTTP {response.status_code})'
+                }
+
             return {
                 'success': True,
-                'message': f'Connected successfully (HTTP {response.status_code})'
+                'message': f'Connected successfully (HTTP {response.status_code})',
+                'preview': self._get_preview(data)
             }
         except requests.exceptions.ConnectionError as e:
             return {'success': False, 'error': f'Connection failed: {str(e)}'}
         except requests.exceptions.Timeout:
             return {'success': False, 'error': 'Connection timed out'}
+        except requests.exceptions.HTTPError as e:
+            return {'success': False, 'error': f'HTTP error: {e.response.status_code}'}
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+    def _get_preview(self, data: Any) -> Dict[str, Any]:
+        """Get a preview of the data structure for debugging."""
+        response_path = self.config.get('response_path', '')
+
+        # Navigate to the software array
+        preview_data = data
+        if response_path:
+            for key in response_path.split('.'):
+                if key and isinstance(preview_data, dict):
+                    preview_data = preview_data.get(key, [])
+
+        if isinstance(preview_data, list):
+            return {
+                'type': 'array',
+                'count': len(preview_data),
+                'sample': preview_data[0] if preview_data else None
+            }
+        elif isinstance(preview_data, dict):
+            return {
+                'type': 'object',
+                'keys': list(preview_data.keys())[:10]
+            }
+        else:
+            return {'type': type(preview_data).__name__}
 
     def fetch_software(self) -> List[Dict[str, Any]]:
         api_url = self.config.get('api_url')
@@ -98,7 +171,10 @@ class GenericRestConnector(BaseConnector):
                     data = data.get(key, [])
 
         if not isinstance(data, list):
-            raise ConnectorError(f'Expected array at response path, got {type(data).__name__}')
+            raise ConnectorError(
+                f'Expected array at response path "{response_path}", '
+                f'got {type(data).__name__}. Check your response_path configuration.'
+            )
 
         # Map fields to standard format
         vendor_field = self.config.get('vendor_field', 'vendor')
@@ -108,22 +184,37 @@ class GenericRestConnector(BaseConnector):
         software_list = []
         for item in data:
             if isinstance(item, dict):
+                vendor = item.get(vendor_field, '')
+                product = item.get(product_field, '')
+                version = item.get(version_field, '')
+
+                # Skip items without required fields
+                if not vendor or not product:
+                    continue
+
                 software_list.append({
-                    'vendor': item.get(vendor_field, ''),
-                    'product': item.get(product_field, ''),
-                    'version': item.get(version_field, '')
+                    'vendor': str(vendor).strip(),
+                    'product': str(product).strip(),
+                    'version': str(version).strip() if version else ''
                 })
 
+        logger.info(f"Fetched {len(software_list)} software items from {api_url}")
         return software_list
 
     def _make_request(self, url: str) -> requests.Response:
         """Make authenticated HTTP request."""
-        headers = {}
+        headers = {'Accept': 'application/json'}
         auth = None
 
         auth_type = self.config.get('auth_type', 'header')
         verify_ssl = self.config.get('verify_ssl', True)
         method = self.config.get('method', 'GET').upper()
+        timeout = self.config.get('timeout', 30)
+
+        # Add custom headers if configured
+        custom_headers = self.config.get('custom_headers', {})
+        if isinstance(custom_headers, dict):
+            headers.update(custom_headers)
 
         if auth_type == 'header':
             header_name = self.config.get('auth_header', 'X-API-Key')
@@ -142,268 +233,21 @@ class GenericRestConnector(BaseConnector):
             if username:
                 auth = (username, password)
 
+        # auth_type == 'none' - no authentication added
+
         return requests.request(
             method,
             url,
             headers=headers,
             auth=auth,
             verify=verify_ssl,
-            timeout=30
+            timeout=timeout
         )
 
 
-class PDQConnector(BaseConnector):
-    """
-    PDQ Inventory connector.
-
-    Configuration:
-    {
-        "api_url": "https://pdq.example.com",
-        "api_key": "secret"
-    }
-
-    Note: PDQ Inventory's REST API availability depends on version.
-    This connector is a template - adjust based on your PDQ setup.
-    """
-
-    def test_connection(self) -> Dict[str, Any]:
-        api_url = self.config.get('api_url', '').rstrip('/')
-        api_key = self.config.get('api_key', '')
-
-        if not api_url:
-            return {'success': False, 'error': 'API URL not configured'}
-
-        try:
-            # PDQ API test endpoint (adjust based on your PDQ version)
-            response = requests.get(
-                f'{api_url}/api/v1/computers',
-                headers={'Authorization': f'Bearer {api_key}'},
-                verify=self.config.get('verify_ssl', True),
-                timeout=10
-            )
-
-            if response.status_code == 401:
-                return {'success': False, 'error': 'Invalid API key'}
-            elif response.status_code == 404:
-                return {'success': False, 'error': 'API endpoint not found - check PDQ version'}
-
-            response.raise_for_status()
-            return {'success': True, 'message': 'Connected to PDQ Inventory'}
-
-        except requests.exceptions.ConnectionError:
-            return {'success': False, 'error': 'Cannot connect to PDQ server'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-
-    def fetch_software(self) -> List[Dict[str, Any]]:
-        api_url = self.config.get('api_url', '').rstrip('/')
-        api_key = self.config.get('api_key', '')
-
-        if not api_url:
-            raise ConnectorError('API URL not configured')
-
-        # Fetch software from PDQ
-        # Note: Actual endpoint depends on PDQ version
-        response = requests.get(
-            f'{api_url}/api/v1/applications',
-            headers={'Authorization': f'Bearer {api_key}'},
-            verify=self.config.get('verify_ssl', True),
-            timeout=60
-        )
-        response.raise_for_status()
-
-        data = response.json()
-        applications = data.get('applications', data) if isinstance(data, dict) else data
-
-        software_list = []
-        seen = set()
-
-        for app in applications:
-            vendor = app.get('publisher', app.get('vendor', 'Unknown'))
-            name = app.get('name', app.get('displayName', ''))
-            version = app.get('version', '')
-
-            # Deduplicate
-            key = (vendor.lower(), name.lower())
-            if key in seen or not name:
-                continue
-            seen.add(key)
-
-            software_list.append({
-                'vendor': vendor,
-                'product': name,
-                'version': version,
-                'install_count': app.get('installCount', app.get('computerCount', 0))
-            })
-
-        return software_list
-
-
-class SCCMConnector(BaseConnector):
-    """
-    Microsoft SCCM/ConfigMgr connector.
-
-    Configuration:
-    {
-        "api_url": "https://sccm.example.com/AdminService",
-        "username": "domain\\user",
-        "password": "secret"
-    }
-
-    Uses the SCCM AdminService REST API.
-    """
-
-    def test_connection(self) -> Dict[str, Any]:
-        api_url = self.config.get('api_url', '').rstrip('/')
-
-        if not api_url:
-            return {'success': False, 'error': 'API URL not configured'}
-
-        try:
-            response = requests.get(
-                f'{api_url}/v1.0/Device',
-                auth=(self.config.get('username', ''), self.config.get('password', '')),
-                verify=self.config.get('verify_ssl', True),
-                timeout=10
-            )
-
-            if response.status_code == 401:
-                return {'success': False, 'error': 'Authentication failed'}
-
-            response.raise_for_status()
-            return {'success': True, 'message': 'Connected to SCCM'}
-
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-
-    def fetch_software(self) -> List[Dict[str, Any]]:
-        api_url = self.config.get('api_url', '').rstrip('/')
-
-        if not api_url:
-            raise ConnectorError('API URL not configured')
-
-        # Fetch software inventory
-        response = requests.get(
-            f'{api_url}/v1.0/SoftwareInventory',
-            auth=(self.config.get('username', ''), self.config.get('password', '')),
-            verify=self.config.get('verify_ssl', True),
-            timeout=60
-        )
-        response.raise_for_status()
-
-        data = response.json()
-        items = data.get('value', data) if isinstance(data, dict) else data
-
-        software_list = []
-        seen = set()
-
-        for item in items:
-            vendor = item.get('Publisher', item.get('CompanyName', 'Unknown'))
-            name = item.get('ProductName', item.get('DisplayName', ''))
-            version = item.get('ProductVersion', '')
-
-            key = (vendor.lower(), name.lower())
-            if key in seen or not name:
-                continue
-            seen.add(key)
-
-            software_list.append({
-                'vendor': vendor,
-                'product': name,
-                'version': version
-            })
-
-        return software_list
-
-
-class IntuneConnector(BaseConnector):
-    """
-    Microsoft Intune connector via Graph API.
-
-    Configuration:
-    {
-        "tenant_id": "xxx-xxx",
-        "client_id": "xxx-xxx",
-        "client_secret": "secret"
-    }
-    """
-
-    def _get_token(self) -> str:
-        """Get OAuth token from Azure AD."""
-        tenant_id = self.config.get('tenant_id')
-        client_id = self.config.get('client_id')
-        client_secret = self.config.get('client_secret')
-
-        if not all([tenant_id, client_id, client_secret]):
-            raise ConnectorError('Missing Azure AD credentials')
-
-        response = requests.post(
-            f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token',
-            data={
-                'client_id': client_id,
-                'client_secret': client_secret,
-                'scope': 'https://graph.microsoft.com/.default',
-                'grant_type': 'client_credentials'
-            },
-            timeout=10
-        )
-        response.raise_for_status()
-        return response.json()['access_token']
-
-    def test_connection(self) -> Dict[str, Any]:
-        try:
-            token = self._get_token()
-            response = requests.get(
-                'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices',
-                headers={'Authorization': f'Bearer {token}'},
-                timeout=10
-            )
-            response.raise_for_status()
-            return {'success': True, 'message': 'Connected to Microsoft Intune'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-
-    def fetch_software(self) -> List[Dict[str, Any]]:
-        token = self._get_token()
-
-        # Get detected apps
-        response = requests.get(
-            'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps',
-            headers={'Authorization': f'Bearer {token}'},
-            timeout=60
-        )
-        response.raise_for_status()
-
-        data = response.json()
-        apps = data.get('value', [])
-
-        software_list = []
-        for app in apps:
-            name = app.get('displayName', '')
-            version = app.get('version', '')
-
-            # Intune doesn't always have vendor info
-            # Try to extract from name or use placeholder
-            vendor = app.get('publisher', 'Unknown')
-
-            if name:
-                software_list.append({
-                    'vendor': vendor,
-                    'product': name,
-                    'version': version,
-                    'install_count': app.get('deviceCount', 0)
-                })
-
-        return software_list
-
-
-# Connector registry
+# Connector registry - only generic_rest is available
 CONNECTORS = {
-    'pdq': PDQConnector,
-    'sccm': SCCMConnector,
-    'intune': IntuneConnector,
     'generic_rest': GenericRestConnector,
-    'lansweeper': GenericRestConnector,  # Uses generic REST with custom config
 }
 
 

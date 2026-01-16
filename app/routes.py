@@ -97,6 +97,74 @@ def get_status():
         }), 500
 
 
+@bp.route('/api/test/mock-software', methods=['GET'])
+def mock_software_endpoint():
+    """
+    Mock software inventory endpoint for testing Pull Source connectors.
+
+    Returns sample software data in a configurable format.
+    Use this to test Generic REST connector configuration before connecting
+    to real external systems.
+
+    Query params:
+    - count: Number of items to return (default: 10, max: 100)
+    - format: Response format - 'flat' or 'nested' (default: nested)
+
+    Example usage:
+    - URL: http://localhost:5000/api/test/mock-software
+    - response_path: "software"
+    - vendor_field: "vendor"
+    - product_field: "product"
+    - version_field: "version"
+    """
+    count = min(request.args.get('count', 10, type=int), 100)
+    format_type = request.args.get('format', 'nested')
+
+    # Sample software data representing common enterprise software
+    sample_software = [
+        {"vendor": "Microsoft", "product": "Office 365", "version": "16.0.14326"},
+        {"vendor": "Microsoft", "product": "Visual Studio Code", "version": "1.85.0"},
+        {"vendor": "Microsoft", "product": "Edge", "version": "120.0.2210.91"},
+        {"vendor": "Google", "product": "Chrome", "version": "120.0.6099.109"},
+        {"vendor": "Mozilla", "product": "Firefox", "version": "121.0"},
+        {"vendor": "Adobe", "product": "Acrobat Reader DC", "version": "23.008.20470"},
+        {"vendor": "Adobe", "product": "Creative Cloud", "version": "6.0.0.571"},
+        {"vendor": "Oracle", "product": "Java Runtime Environment", "version": "8u391"},
+        {"vendor": "Oracle", "product": "VirtualBox", "version": "7.0.12"},
+        {"vendor": "Python Software Foundation", "product": "Python", "version": "3.11.7"},
+        {"vendor": "Node.js Foundation", "product": "Node.js", "version": "20.10.0"},
+        {"vendor": "Docker", "product": "Docker Desktop", "version": "4.26.1"},
+        {"vendor": "Git", "product": "Git for Windows", "version": "2.43.0"},
+        {"vendor": "Slack Technologies", "product": "Slack", "version": "4.35.126"},
+        {"vendor": "Zoom Video Communications", "product": "Zoom", "version": "5.17.0"},
+        {"vendor": "7-Zip", "product": "7-Zip", "version": "23.01"},
+        {"vendor": "Notepad++", "product": "Notepad++", "version": "8.6.2"},
+        {"vendor": "VideoLAN", "product": "VLC media player", "version": "3.0.20"},
+        {"vendor": "WinSCP", "product": "WinSCP", "version": "6.1.2"},
+        {"vendor": "PuTTY", "product": "PuTTY", "version": "0.80"},
+    ]
+
+    # Return requested number of items (cycling if needed)
+    result_items = []
+    for i in range(count):
+        item = sample_software[i % len(sample_software)].copy()
+        if i >= len(sample_software):
+            # Add suffix to make unique if cycling
+            item["version"] = f"{item['version']}.{i // len(sample_software)}"
+        result_items.append(item)
+
+    if format_type == 'flat':
+        # Flat array response
+        return jsonify(result_items)
+    else:
+        # Nested response (default)
+        return jsonify({
+            "status": "success",
+            "count": len(result_items),
+            "software": result_items
+        })
+
+
 def validate_email(email):
     """Validate email format"""
     if not email:

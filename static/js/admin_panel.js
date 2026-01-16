@@ -6328,13 +6328,8 @@ async function loadIntegrationsSummary() {
 // ============================================================================
 
 const pullSourcesTypeLabels = {
-    'pdq': 'PDQ Inventory',
-    'sccm': 'Microsoft SCCM',
-    'intune': 'Microsoft Intune',
-    'lansweeper': 'Lansweeper',
     'generic_rest': 'REST API',
-    'agent': 'Discovery Agent',
-    'csv': 'CSV Import'
+    'agent': 'Discovery Agent'
 };
 
 function sortPullSources(field) {
@@ -6513,51 +6508,117 @@ async function loadIntegrations() {
 }
 
 function showCreateIntegrationModal() {
-    const typeOptions = [
-        { value: 'agent', label: 'Discovery Agent (for endpoint deployment)' },
-        { value: 'generic_rest', label: 'Generic REST API' },
-        { value: 'pdq', label: 'PDQ Inventory' },
-        { value: 'sccm', label: 'Microsoft SCCM' },
-        { value: 'intune', label: 'Microsoft Intune' }
-    ];
-
     const modalHtml = `
         <div class="modal fade" id="createIntegrationModal" tabindex="-1">
-            <div class="modal-dialog">
+            <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-plug me-2"></i>Create Integration</h5>
+                        <h5 class="modal-title"><i class="bi bi-plug me-2"></i>Create Pull Source</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="mb-3">
-                            <label class="form-label">Name</label>
-                            <input type="text" class="form-control" id="integrationName" placeholder="My PDQ Integration">
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>REST API Connector</strong> - Connect to any external system that provides a JSON REST API.
+                            Configure the URL, authentication, and field mappings to match your source system.
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Type</label>
-                            <select class="form-select" id="integrationType" onchange="updateIntegrationFields()">
-                                ${typeOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Default Organization</label>
-                            <select class="form-select" id="integrationOrg">
-                                <option value="">None (assign per-item)</option>
-                                ${organizations.map(o => `<option value="${o.id}">${escapeHtml(o.display_name || o.name)}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <div class="form-check">
-                                <input type="checkbox" class="form-check-input" id="integrationAutoApprove">
-                                <label class="form-check-label">Auto-approve imported items</label>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Name <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="integrationName" placeholder="My Inventory System">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Default Organization</label>
+                                    <select class="form-select" id="integrationOrg">
+                                        <option value="">None (assign per-item)</option>
+                                        ${organizations.map(o => `<option value="${o.id}">${escapeHtml(o.display_name || o.name)}</option>`).join('')}
+                                    </select>
+                                </div>
                             </div>
                         </div>
-                        <div id="integrationConfigFields"></div>
+                        <hr>
+                        <h6 class="text-muted mb-3"><i class="bi bi-link-45deg me-2"></i>Connection Settings</h6>
+                        <div class="mb-3">
+                            <label class="form-label">API URL <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="configApiUrl" placeholder="https://inventory.example.com/api/software">
+                            <div class="form-text">
+                                <strong>Test locally:</strong> Use <code>/api/test/mock-software</code> to test with sample data
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Authentication Type</label>
+                                    <select class="form-select" id="configAuthType">
+                                        <option value="none">None</option>
+                                        <option value="header" selected>API Key (Header)</option>
+                                        <option value="bearer">Bearer Token</option>
+                                        <option value="basic">Basic Auth</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3" id="authHeaderField">
+                                    <label class="form-label">Header Name</label>
+                                    <input type="text" class="form-control" id="configAuthHeader" value="X-API-Key" placeholder="X-API-Key">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row" id="authCredentialsRow">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label" id="authFieldLabel">API Key</label>
+                                    <input type="password" class="form-control" id="configApiKey" placeholder="Your API key">
+                                </div>
+                            </div>
+                            <div class="col-md-6" id="basicAuthPasswordField" style="display: none;">
+                                <div class="mb-3">
+                                    <label class="form-label">Password</label>
+                                    <input type="password" class="form-control" id="configPassword">
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <h6 class="text-muted mb-3"><i class="bi bi-braces me-2"></i>Response Mapping</h6>
+                        <div class="mb-3">
+                            <label class="form-label">Response Path</label>
+                            <input type="text" class="form-control" id="configResponsePath" placeholder="software" value="software">
+                            <div class="form-text">JSON path to the software array (e.g., <code>data.items</code> or <code>software</code>). Leave empty if root is array.</div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Vendor Field</label>
+                                    <input type="text" class="form-control" id="configVendorField" value="vendor" placeholder="vendor">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Product Field</label>
+                                    <input type="text" class="form-control" id="configProductField" value="product" placeholder="product">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Version Field</label>
+                                    <input type="text" class="form-control" id="configVersionField" value="version" placeholder="version">
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="integrationAutoApprove">
+                            <label class="form-check-label">Auto-approve imported items (skip Import Queue)</label>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" onclick="saveIntegration()">Create</button>
+                        <button type="button" class="btn btn-primary" onclick="saveIntegration()">
+                            <i class="bi bi-plus-circle me-1"></i>Create Pull Source
+                        </button>
                     </div>
                 </div>
             </div>
@@ -6569,70 +6630,36 @@ function showCreateIntegrationModal() {
 
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
+    // Handle auth type change
+    document.getElementById('configAuthType').addEventListener('change', function() {
+        const authType = this.value;
+        const headerField = document.getElementById('authHeaderField');
+        const credentialsRow = document.getElementById('authCredentialsRow');
+        const passwordField = document.getElementById('basicAuthPasswordField');
+        const fieldLabel = document.getElementById('authFieldLabel');
+
+        if (authType === 'none') {
+            headerField.style.display = 'none';
+            credentialsRow.style.display = 'none';
+        } else if (authType === 'basic') {
+            headerField.style.display = 'none';
+            credentialsRow.style.display = 'flex';
+            passwordField.style.display = 'block';
+            fieldLabel.textContent = 'Username';
+        } else {
+            headerField.style.display = authType === 'header' ? 'block' : 'none';
+            credentialsRow.style.display = 'flex';
+            passwordField.style.display = 'none';
+            fieldLabel.textContent = authType === 'bearer' ? 'Bearer Token' : 'API Key';
+        }
+    });
+
     const modal = new bootstrap.Modal(document.getElementById('createIntegrationModal'));
     modal.show();
-
-    updateIntegrationFields();
-}
-
-function updateIntegrationFields() {
-    const type = document.getElementById('integrationType').value;
-    const container = document.getElementById('integrationConfigFields');
-
-    let fieldsHtml = '';
-
-    if (type === 'generic_rest') {
-        fieldsHtml = `
-            <div class="mb-3">
-                <label class="form-label">API URL</label>
-                <input type="text" class="form-control" id="configApiUrl" placeholder="https://inventory.example.com/api/software">
-            </div>
-            <div class="mb-3">
-                <label class="form-label">API Key</label>
-                <input type="password" class="form-control" id="configApiKey" placeholder="Your API key">
-            </div>
-        `;
-    } else if (type === 'pdq') {
-        fieldsHtml = `
-            <div class="mb-3">
-                <label class="form-label">PDQ Server URL</label>
-                <input type="text" class="form-control" id="configApiUrl" placeholder="https://pdq.example.com">
-            </div>
-            <div class="mb-3">
-                <label class="form-label">API Key</label>
-                <input type="password" class="form-control" id="configApiKey">
-            </div>
-        `;
-    } else if (type === 'intune') {
-        fieldsHtml = `
-            <div class="mb-3">
-                <label class="form-label">Tenant ID</label>
-                <input type="text" class="form-control" id="configTenantId">
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Client ID</label>
-                <input type="text" class="form-control" id="configClientId">
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Client Secret</label>
-                <input type="password" class="form-control" id="configClientSecret">
-            </div>
-        `;
-    } else if (type === 'agent') {
-        fieldsHtml = `
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle me-2"></i>
-                After creating this integration, you'll get an API key to use with the discovery agent scripts.
-            </div>
-        `;
-    }
-
-    container.innerHTML = fieldsHtml;
 }
 
 async function saveIntegration() {
     const name = document.getElementById('integrationName').value.trim();
-    const type = document.getElementById('integrationType').value;
     const orgId = document.getElementById('integrationOrg').value;
     const autoApprove = document.getElementById('integrationAutoApprove').checked;
 
@@ -6641,16 +6668,26 @@ async function saveIntegration() {
         return;
     }
 
-    const config = {};
-
-    if (type === 'generic_rest' || type === 'pdq') {
-        config.api_url = document.getElementById('configApiUrl')?.value || '';
-        config.api_key = document.getElementById('configApiKey')?.value || '';
-    } else if (type === 'intune') {
-        config.tenant_id = document.getElementById('configTenantId')?.value || '';
-        config.client_id = document.getElementById('configClientId')?.value || '';
-        config.client_secret = document.getElementById('configClientSecret')?.value || '';
+    const apiUrl = document.getElementById('configApiUrl')?.value.trim() || '';
+    if (!apiUrl) {
+        showToast('Please enter an API URL', 'warning');
+        return;
     }
+
+    // Build configuration object
+    const config = {
+        api_url: apiUrl,
+        auth_type: document.getElementById('configAuthType')?.value || 'none',
+        auth_header: document.getElementById('configAuthHeader')?.value || 'X-API-Key',
+        api_key: document.getElementById('configApiKey')?.value || '',
+        username: document.getElementById('configApiKey')?.value || '',  // Reuse field for basic auth
+        password: document.getElementById('configPassword')?.value || '',
+        response_path: document.getElementById('configResponsePath')?.value || '',
+        vendor_field: document.getElementById('configVendorField')?.value || 'vendor',
+        product_field: document.getElementById('configProductField')?.value || 'product',
+        version_field: document.getElementById('configVersionField')?.value || 'version',
+        verify_ssl: true
+    };
 
     try {
         const response = await fetch('/api/integrations', {
@@ -6658,7 +6695,7 @@ async function saveIntegration() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name,
-                integration_type: type,
+                integration_type: 'generic_rest',
                 organization_id: orgId ? parseInt(orgId) : null,
                 auto_approve: autoApprove,
                 config: config
@@ -6673,13 +6710,7 @@ async function saveIntegration() {
         const integration = await response.json();
 
         bootstrap.Modal.getInstance(document.getElementById('createIntegrationModal')).hide();
-
-        if (integration.api_key) {
-            alert(`Integration created!\\n\\nAPI Key: ${integration.api_key}\\n\\nSave this key - you won't see it again!`);
-        } else {
-            showToast('Integration created successfully', 'success');
-        }
-
+        showToast('Pull Source created successfully', 'success');
         loadIntegrations();
 
     } catch (error) {
