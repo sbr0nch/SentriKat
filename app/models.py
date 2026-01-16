@@ -491,7 +491,7 @@ class VulnerabilityMatch(db.Model):
 
     def calculate_effective_priority(self):
         """
-        Calculate effective priority combining CVE severity with product criticality.
+        Calculate effective priority combining CVE severity with product criticality and age.
 
         The key insight: Product criticality determines how IMPORTANT the CVE is for YOU.
         - A critical CVE on a dev laptop (low criticality) = Low priority for you
@@ -505,8 +505,17 @@ class VulnerabilityMatch(db.Model):
         Medium      | High     | Medium | Medium | Low
         Low         | Medium   | Low    | Low    | Low
 
+        Age Factor (applied after matrix calculation):
+        - CVEs > 2 years old: demote by 2 levels (unless ransomware or due soon)
+        - CVEs > 1 year old: demote by 1 level (unless ransomware or due soon)
+        - CVEs < 90 days old: no demotion
+
+        This reflects reality: very old CVEs that haven't been exploited yet are lower risk
+        than recent vulnerabilities being actively discovered/exploited.
+
         Special rules:
-        - Ransomware-related CVEs are always elevated by one level
+        - Ransomware-related CVEs are NEVER demoted by age (actively exploited)
+        - Due within 30 days = NEVER demoted by age (still urgent)
         - Due within 7 days on critical product = always Critical
         """
         vuln_priority = self.vulnerability.calculate_priority()
@@ -541,6 +550,27 @@ class VulnerabilityMatch(db.Model):
         # 3. Medium product with critical/high CVE = at least medium (don't demote too much)
         if prod_level == 2 and vuln_level >= 3:
             effective_level = max(effective_level, 2)
+
+        # 4. AGE FACTOR: Demote old CVEs (unless they have urgent attributes)
+        # Skip age demotion if:
+        # - Ransomware-related (actively exploited, always dangerous)
+        # - Due within 30 days (still has urgency)
+        is_ransomware = self.vulnerability.known_ransomware
+        has_urgent_due = False
+        if self.vulnerability.due_date:
+            days_until_due = (self.vulnerability.due_date - date.today()).days
+            has_urgent_due = days_until_due <= 30
+
+        if not is_ransomware and not has_urgent_due and self.vulnerability.date_added:
+            days_old = (date.today() - self.vulnerability.date_added).days
+
+            if days_old > 730:  # > 2 years old
+                # Demote by 2 levels (but not below low)
+                effective_level = max(effective_level - 2, 1)
+            elif days_old > 365:  # > 1 year old
+                # Demote by 1 level (but not below low)
+                effective_level = max(effective_level - 1, 1)
+            # < 1 year: no age-based demotion
 
         return level_names.get(effective_level, 'medium')
 

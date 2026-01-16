@@ -332,6 +332,17 @@
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <span><i class="bi bi-shield-exclamation me-2"></i>Matched Vulnerabilities (<span id="vulnCount">0</span>)</span>
             <div class="d-flex align-items-center gap-3">
+                <!-- View Mode Toggle -->
+                <div class="btn-group btn-group-sm" role="group" aria-label="View mode">
+                    <input type="radio" class="btn-check" name="viewMode" id="viewPerProduct" value="per-product" checked>
+                    <label class="btn btn-outline-secondary" for="viewPerProduct" title="Show each CVE-product match separately">
+                        <i class="bi bi-list-ul"></i> Per Product
+                    </label>
+                    <input type="radio" class="btn-check" name="viewMode" id="viewGrouped" value="grouped">
+                    <label class="btn btn-outline-secondary" for="viewGrouped" title="Group by CVE ID with affected products listed">
+                        <i class="bi bi-collection"></i> Grouped
+                    </label>
+                </div>
                 <!-- Export Report Dropdown -->
                 <div class="dropdown">
                     <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Export Report">
@@ -690,9 +701,11 @@
     });
 
     let currentVulnerabilities = [];
+    let currentGroupedVulnerabilities = [];
     let selectedVulns = new Set();
     let currentPage = 1;
     let pageSize = 15;
+    let viewMode = 'per-product'; // 'per-product' or 'grouped'
 
     function changePageSize() {
         const select = document.getElementById('pageSize');
@@ -1661,5 +1674,237 @@
 
     // Load shared view on page load if token present
     loadSharedView();
+
+    // View mode toggle handler
+    document.querySelectorAll('input[name="viewMode"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            viewMode = this.value;
+            currentPage = 1;
+            if (viewMode === 'grouped') {
+                loadGroupedVulnerabilities();
+            } else {
+                loadVulnerabilities();
+            }
+        });
+    });
+
+    // Load grouped vulnerabilities from API
+    async function loadGroupedVulnerabilities() {
+        showLoading();
+        const container = document.getElementById('vulnerabilitiesContainer');
+        selectedVulns.clear();
+        updateBulkActions();
+
+        try {
+            const params = new URLSearchParams();
+            const cve = document.getElementById('filterCVE').value;
+            const ransomware = document.getElementById('filterRansomware').checked;
+            const unack = document.getElementById('filterUnack').checked;
+            const priority = document.getElementById('filterPriority').value;
+
+            if (cve) params.append('search', cve);
+            if (ransomware) params.append('ransomware_only', 'true');
+            if (unack) params.append('acknowledged', 'false');
+            if (priority) params.append('priority', priority);
+            params.append('page', currentPage);
+            params.append('per_page', pageSize === Infinity ? 100 : pageSize);
+
+            const response = await fetch(`/api/vulnerabilities/grouped?${params}`);
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                throw new Error(`Server error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            currentGroupedVulnerabilities = data.items;
+
+            document.getElementById('vulnCount').textContent = data.total;
+            renderGroupedPage(data);
+        } catch (error) {
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${error.message}
+                </div>
+            `;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function renderGroupedPage(data) {
+        const container = document.getElementById('vulnerabilitiesContainer');
+
+        if (data.items.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-shield-check text-success" style="font-size: 4rem;"></i>
+                    <h4 class="mt-3">No Vulnerabilities Found</h4>
+                    <p class="text-muted">No matches found with the current filter criteria.</p>
+                </div>
+            `;
+            document.getElementById('paginationControls').style.display = 'none';
+            return;
+        }
+
+        container.innerHTML = data.items.map(group => createGroupedCVECard(group)).join('');
+
+        // Update pagination
+        const paginationControls = document.getElementById('paginationControls');
+        const paginationInfo = document.getElementById('paginationInfo');
+        const paginationNav = document.getElementById('paginationNav');
+
+        if (data.pages > 1) {
+            paginationControls.style.display = 'flex';
+            const start = (data.page - 1) * data.per_page + 1;
+            const end = Math.min(data.page * data.per_page, data.total);
+            paginationInfo.textContent = `Showing ${start}-${end} of ${data.total} CVEs`;
+
+            let navHtml = '';
+            navHtml += `<li class="page-item ${data.page === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="goToGroupedPage(${data.page - 1}); return false;">&laquo;</a>
+            </li>`;
+
+            const startPage = Math.max(1, data.page - 2);
+            const endPage = Math.min(data.pages, data.page + 2);
+
+            if (startPage > 1) {
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToGroupedPage(1); return false;">1</a></li>`;
+                if (startPage > 2) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                navHtml += `<li class="page-item ${i === data.page ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="goToGroupedPage(${i}); return false;">${i}</a>
+                </li>`;
+            }
+
+            if (endPage < data.pages) {
+                if (endPage < data.pages - 1) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToGroupedPage(${data.pages}); return false;">${data.pages}</a></li>`;
+            }
+
+            navHtml += `<li class="page-item ${data.page === data.pages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="goToGroupedPage(${data.page + 1}); return false;">&raquo;</a>
+            </li>`;
+
+            paginationNav.innerHTML = navHtml;
+        } else {
+            paginationControls.style.display = 'none';
+        }
+    }
+
+    function goToGroupedPage(page) {
+        currentPage = page;
+        loadGroupedVulnerabilities();
+        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function createGroupedCVECard(group) {
+        const vuln = group.vulnerability;
+        const priority = group.highest_priority;
+
+        const ransomwareBadge = vuln.known_ransomware ?
+            '<span class="badge badge-critical"><i class="bi bi-shield-exclamation"></i> Ransomware</span>' : '';
+        const priorityBadge = `<span class="badge ${getPriorityBadgeClass(priority)}"><i class="bi ${getPriorityIcon(priority)}"></i> ${priority.toUpperCase()} Priority</span>`;
+
+        const severityBadge = vuln.severity ?
+            `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}"><i class="bi bi-graph-up"></i> CVSS: ${vuln.severity} ${vuln.cvss_score ? `(${vuln.cvss_score})` : ''}</span>` :
+            '<span class="badge bg-secondary"><i class="bi bi-question-circle"></i> No CVSS</span>';
+
+        // Build affected products list
+        const productsHtml = group.affected_products.map(prod => {
+            const prodPriorityBadge = `<span class="badge ${getPriorityBadgeClass(prod.effective_priority)} badge-sm">${prod.effective_priority}</span>`;
+            const ackIcon = prod.acknowledged ?
+                '<i class="bi bi-check-circle-fill text-success" title="Acknowledged"></i>' :
+                '<i class="bi bi-circle text-warning" title="Needs Review"></i>';
+            return `
+                <div class="d-flex align-items-center justify-content-between py-1 border-bottom">
+                    <div>
+                        ${ackIcon}
+                        <strong class="ms-2">${prod.vendor}</strong> - ${prod.product_name}
+                        <span class="badge bg-light text-dark ms-1">${prod.criticality} criticality</span>
+                    </div>
+                    <div>
+                        ${prodPriorityBadge}
+                        ${!prod.acknowledged ?
+                            `<button class="btn btn-sm btn-outline-success ms-2" onclick="acknowledgeMatch(${prod.match_id})" title="Acknowledge">
+                                <i class="bi bi-check"></i>
+                            </button>` :
+                            `<button class="btn btn-sm btn-outline-secondary ms-2" onclick="unacknowledgeMatch(${prod.match_id})" title="Unacknowledge">
+                                <i class="bi bi-arrow-counterclockwise"></i>
+                            </button>`
+                        }
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="card vuln-card mb-3" style="border-left: 4px solid ${getPriorityColor(priority)};">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h5 class="card-title mb-2">
+                                <span class="badge bg-dark">${vuln.cve_id}</span>
+                                ${vuln.vulnerability_name}
+                            </h5>
+                            <div class="mb-2">
+                                ${priorityBadge}
+                                ${severityBadge}
+                                ${ransomwareBadge}
+                                <span class="badge bg-info">
+                                    <i class="bi bi-box-seam"></i> ${group.product_count} product${group.product_count > 1 ? 's' : ''} affected
+                                </span>
+                                <span class="badge ${group.unacknowledged_count > 0 ? 'bg-warning text-dark' : 'bg-success'}">
+                                    ${group.unacknowledged_count > 0 ? `${group.unacknowledged_count} need review` : 'All acknowledged'}
+                                </span>
+                                <span class="badge bg-secondary">
+                                    <i class="bi bi-calendar3"></i> ${formatDate(vuln.date_added)} (${vuln.days_old} days ago)
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <small class="text-muted fw-semibold">DESCRIPTION</small>
+                        <p class="mb-0">${vuln.short_description}</p>
+                    </div>
+
+                    <div class="mb-3">
+                        <small class="text-muted fw-semibold">REQUIRED ACTION</small>
+                        <p class="mb-0 fw-medium text-danger">${vuln.required_action}</p>
+                    </div>
+
+                    <div class="mb-2">
+                        <small class="text-muted fw-semibold d-flex justify-content-between align-items-center">
+                            AFFECTED PRODUCTS IN YOUR INVENTORY
+                            <button class="btn btn-sm btn-link p-0" type="button" data-bs-toggle="collapse" data-bs-target="#products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}" aria-expanded="true">
+                                <i class="bi bi-chevron-down"></i> Toggle
+                            </button>
+                        </small>
+                        <div class="collapse show" id="products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}">
+                            <div class="border rounded p-2 bg-light mt-1">
+                                ${productsHtml}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="btn-group" role="group">
+                        <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank"
+                           class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-box-arrow-up-right"></i> View in NVD
+                        </a>
+                        <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
+                            <i class="bi bi-share"></i> Share
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
 </script>
 {% endblock %}

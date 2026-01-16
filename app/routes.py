@@ -684,6 +684,95 @@ def delete_product(product_id):
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@bp.route('/api/products/bulk-update-criticality', methods=['POST'])
+@manager_required
+def bulk_update_product_criticality():
+    """
+    Bulk update criticality for multiple products.
+
+    Request body:
+    {
+        "product_ids": [1, 2, 3, ...],
+        "criticality": "high"  // critical, high, medium, low
+    }
+
+    Permissions:
+    - Super Admin: Can update any product
+    - Org Admin/Manager: Can only update products in their org
+    """
+    from app.logging_config import log_audit_event
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    product_ids = data.get('product_ids', [])
+    new_criticality = data.get('criticality', '').lower()
+
+    if not product_ids:
+        return jsonify({'error': 'No products specified'}), 400
+
+    valid_criticalities = ['critical', 'high', 'medium', 'low']
+    if new_criticality not in valid_criticalities:
+        return jsonify({'error': f'Invalid criticality. Must be one of: {", ".join(valid_criticalities)}'}), 400
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user_org_id = session.get('organization_id') or current_user.organization_id
+
+    updated = 0
+    skipped = 0
+    errors = []
+
+    for product_id in product_ids:
+        try:
+            product = Product.query.get(product_id)
+            if not product:
+                skipped += 1
+                continue
+
+            # Permission check for non-super-admins
+            if not current_user.is_super_admin():
+                product_org_ids = [org.id for org in product.organizations.all()]
+                if user_org_id not in product_org_ids:
+                    skipped += 1
+                    continue
+
+            old_criticality = product.criticality
+            if old_criticality != new_criticality:
+                product.criticality = new_criticality
+                updated += 1
+
+                log_audit_event(
+                    'BULK_UPDATE_CRITICALITY',
+                    'products',
+                    product_id,
+                    old_value={'criticality': old_criticality},
+                    new_value={'criticality': new_criticality},
+                    details=f"Bulk updated {product.vendor} {product.product_name} criticality"
+                )
+            else:
+                skipped += 1
+
+        except Exception as e:
+            errors.append({'product_id': product_id, 'error': str(e)})
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+    return jsonify({
+        'success': True,
+        'updated': updated,
+        'skipped': skipped,
+        'errors': errors,
+        'message': f'Updated {updated} products to {new_criticality} criticality'
+    })
+
+
 @bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
 @login_required
 def get_product_organizations(product_id):
@@ -987,6 +1076,164 @@ def get_vulnerability_stats():
         'medium_count': priority_counts['medium'],
         'low_count': priority_counts['low']
     })
+
+
+@bp.route('/api/vulnerabilities/grouped', methods=['GET'])
+@login_required
+def get_vulnerabilities_grouped():
+    """
+    Get vulnerabilities grouped by CVE ID.
+
+    Instead of showing the same CVE multiple times (once per product),
+    this groups by CVE ID and lists affected products under each CVE.
+
+    Supports pagination and filtering:
+    - page: Page number (default: 1)
+    - per_page: Items per page (default: 25, max: 100)
+    - priority: Filter by effective priority (critical, high, medium, low)
+    - acknowledged: Filter by acknowledged status (true/false)
+    - ransomware_only: Only show ransomware-related CVEs
+    - search: Search CVE ID or description
+
+    Returns:
+    {
+        "items": [
+            {
+                "cve_id": "CVE-2024-1234",
+                "vulnerability": {...},  // Full vulnerability details
+                "highest_priority": "critical",  // Highest priority across all affected products
+                "affected_products": [
+                    {
+                        "product_id": 1,
+                        "product_name": "nginx",
+                        "vendor": "nginx",
+                        "criticality": "high",
+                        "effective_priority": "high",
+                        "acknowledged": false,
+                        "match_id": 123
+                    }
+                ],
+                "product_count": 3,
+                "unacknowledged_count": 2
+            }
+        ],
+        "total": 150,
+        "page": 1,
+        "per_page": 25,
+        "pages": 6
+    }
+    """
+    from collections import defaultdict
+
+    try:
+        # Get current organization
+        org_id = session.get('organization_id')
+        if not org_id:
+            default_org = Organization.query.filter_by(name='default').first()
+            org_id = default_org.id if default_org else None
+
+        # Build filters
+        filters = {
+            'organization_id': org_id,
+            'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
+            'acknowledged': request.args.get('acknowledged'),
+            'priority': request.args.get('priority'),
+        }
+        filters = {k: v for k, v in filters.items() if v is not None and v != ''}
+
+        # Get all matches
+        matches = get_filtered_vulnerabilities(filters)
+
+        # Group by CVE ID
+        cve_groups = defaultdict(lambda: {
+            'vulnerability': None,
+            'affected_products': [],
+            'priorities': [],
+            'unacknowledged_count': 0
+        })
+
+        for match in matches:
+            cve_id = match.vulnerability.cve_id
+            group = cve_groups[cve_id]
+
+            if not group['vulnerability']:
+                group['vulnerability'] = match.vulnerability.to_dict()
+
+            effective_priority = match.calculate_effective_priority()
+            group['priorities'].append(effective_priority)
+
+            if not match.acknowledged:
+                group['unacknowledged_count'] += 1
+
+            group['affected_products'].append({
+                'match_id': match.id,
+                'product_id': match.product.id,
+                'product_name': match.product.product_name,
+                'vendor': match.product.vendor,
+                'criticality': match.product.criticality,
+                'effective_priority': effective_priority,
+                'acknowledged': match.acknowledged,
+                'match_method': match.match_method,
+                'match_confidence': match.match_confidence
+            })
+
+        # Build results list
+        priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+        level_names = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
+
+        results = []
+        for cve_id, group in cve_groups.items():
+            # Calculate highest priority across all affected products
+            max_priority_level = max(priority_order.get(p, 2) for p in group['priorities'])
+            highest_priority = level_names.get(max_priority_level, 'medium')
+
+            results.append({
+                'cve_id': cve_id,
+                'vulnerability': group['vulnerability'],
+                'highest_priority': highest_priority,
+                'affected_products': group['affected_products'],
+                'product_count': len(group['affected_products']),
+                'unacknowledged_count': group['unacknowledged_count']
+            })
+
+        # Sort by highest priority (critical first), then by unacknowledged count
+        results.sort(key=lambda x: (-priority_order.get(x['highest_priority'], 2), -x['unacknowledged_count']))
+
+        # Apply search filter if provided
+        search = request.args.get('search', '').lower()
+        if search:
+            results = [r for r in results if
+                       search in r['cve_id'].lower() or
+                       search in (r['vulnerability'].get('vulnerability_name', '') or '').lower() or
+                       search in (r['vulnerability'].get('short_description', '') or '').lower()]
+
+        # Filter by priority if specified
+        priority_filter = request.args.get('priority')
+        if priority_filter:
+            results = [r for r in results if r['highest_priority'] == priority_filter.lower()]
+
+        # Pagination
+        page = max(int(request.args.get('page', 1)), 1)
+        per_page = min(int(request.args.get('per_page', 25)), 100)
+
+        total = len(results)
+        pages = (total + per_page - 1) // per_page if per_page > 0 else 1
+
+        start = (page - 1) * per_page
+        end = start + per_page
+        page_results = results[start:end]
+
+        return jsonify({
+            'items': page_results,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pages
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting grouped vulnerabilities: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/api/products/aggregated', methods=['GET'])
