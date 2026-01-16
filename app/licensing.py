@@ -95,7 +95,8 @@ PROFESSIONAL_FEATURES = [
     'api_access',
     'backup_restore',
     'audit_export',
-    'multi_org'
+    'multi_org',
+    'push_agents'  # Agent deployment feature
 ]
 
 
@@ -212,6 +213,9 @@ class LicenseInfo:
         self.max_users = 3
         self.max_organizations = 1
         self.max_products = 20
+        # Agent limits (from signed license - tamper-proof)
+        self.max_agents = 0  # Community = 0 agents (requires Professional)
+        self.max_agent_api_keys = 0
         self.features = []
         self.is_valid = False
         self.is_expired = False
@@ -237,12 +241,16 @@ class LicenseInfo:
             return {
                 'max_users': LICENSE_TIERS['community']['max_users'],
                 'max_organizations': LICENSE_TIERS['community']['max_organizations'],
-                'max_products': LICENSE_TIERS['community']['max_products']
+                'max_products': LICENSE_TIERS['community']['max_products'],
+                'max_agents': 0,  # Community: No agents
+                'max_agent_api_keys': 0
             }
         return {
             'max_users': self.max_users,
             'max_organizations': self.max_organizations,
-            'max_products': self.max_products
+            'max_products': self.max_products,
+            'max_agents': self.max_agents,
+            'max_agent_api_keys': self.max_agent_api_keys
         }
 
     def has_feature(self, feature):
@@ -265,7 +273,9 @@ class LicenseInfo:
         limit_map = {
             'users': effective_limits['max_users'],
             'organizations': effective_limits['max_organizations'],
-            'products': effective_limits['max_products']
+            'products': effective_limits['max_products'],
+            'agents': effective_limits['max_agents'],
+            'agent_api_keys': effective_limits['max_agent_api_keys']
         }
 
         limit = limit_map.get(limit_type, 0)
@@ -275,6 +285,8 @@ class LicenseInfo:
         if current_count >= limit:
             edition = self.get_effective_edition()
             if edition == 'community':
+                if limit_type in ['agents', 'agent_api_keys']:
+                    return False, limit, f'Push Agents require a Professional license. Upgrade to deploy agents.'
                 return False, limit, f'Community limit: {limit} {limit_type} maximum. Upgrade to Professional for unlimited.'
             return False, limit, f'License limit: {limit} {limit_type} maximum.'
 
@@ -416,7 +428,9 @@ def validate_license(license_key):
             license_info.max_users = -1
             license_info.max_organizations = -1
             license_info.max_products = -1
-            license_info.features = PROFESSIONAL_FEATURES
+            license_info.max_agents = -1  # Unlimited agents in dev mode
+            license_info.max_agent_api_keys = -1
+            license_info.features = PROFESSIONAL_FEATURES + ['push_agents']
             logger.info("Development license activated")
             return license_info
 
@@ -475,12 +489,17 @@ def validate_license(license_key):
             license_info.days_until_expiry = days_left
             license_info.is_expired = days_left < 0
 
-        # Set limits
+        # Set limits from signed payload (tamper-proof)
         tier = LICENSE_TIERS.get(license_info.edition, LICENSE_TIERS['community'])
         limits = payload.get('limits', {})
         license_info.max_users = limits.get('max_users', tier['max_users'])
         license_info.max_organizations = limits.get('max_organizations', tier['max_organizations'])
         license_info.max_products = limits.get('max_products', tier['max_products'])
+        # Agent limits - default to 0 if not in payload (backwards compatibility)
+        # Professional licenses from before agent feature will need re-issue to enable agents
+        default_agents = -1 if license_info.edition == 'professional' else 0
+        license_info.max_agents = limits.get('max_agents', default_agents)
+        license_info.max_agent_api_keys = limits.get('max_agent_api_keys', default_agents)
         license_info.features = payload.get('features', tier['features'])
 
         # CHECK HARDWARE LOCK
@@ -619,6 +638,67 @@ def check_product_limit():
     return license_info.check_limit('products', current_products)
 
 
+def check_agent_limit():
+    """
+    Check if agent (endpoint) limit is reached.
+
+    IMPORTANT: Counts agents GLOBALLY across all organizations.
+    This prevents the multi-org bypass vulnerability where users
+    create multiple organizations to get around per-org limits.
+
+    Returns: (allowed, limit, message) tuple
+    """
+    from app.models import Asset
+    license_info = get_license()
+
+    # Count ALL active agents across ALL organizations (global limit)
+    current_agents = Asset.query.filter_by(active=True).count()
+
+    return license_info.check_limit('agents', current_agents)
+
+
+def check_agent_api_key_limit():
+    """
+    Check if agent API key limit is reached.
+
+    IMPORTANT: Counts API keys GLOBALLY across all organizations.
+    This prevents the multi-org bypass vulnerability.
+
+    Returns: (allowed, limit, message) tuple
+    """
+    from app.models import AgentApiKey
+    license_info = get_license()
+
+    # Count ALL active API keys across ALL organizations (global limit)
+    current_keys = AgentApiKey.query.filter_by(active=True).count()
+
+    return license_info.check_limit('agent_api_keys', current_keys)
+
+
+def get_agent_usage():
+    """
+    Get current agent usage statistics for display.
+    Returns dict with counts and limits.
+    """
+    from app.models import Asset, AgentApiKey
+    license_info = get_license()
+    limits = license_info.get_effective_limits()
+
+    return {
+        'agents': {
+            'current': Asset.query.filter_by(active=True).count(),
+            'limit': limits['max_agents'],
+            'unlimited': limits['max_agents'] == -1
+        },
+        'api_keys': {
+            'current': AgentApiKey.query.filter_by(active=True).count(),
+            'limit': limits['max_agent_api_keys'],
+            'unlimited': limits['max_agent_api_keys'] == -1
+        },
+        'feature_enabled': 'push_agents' in license_info.features or license_info.is_professional()
+    }
+
+
 # ============================================================================
 # License API Routes
 # ============================================================================
@@ -634,7 +714,7 @@ csrf.exempt(license_bp)
 def get_license_info():
     """Get current license information"""
     from app.auth import get_current_user
-    from app.models import User, Organization, Product
+    from app.models import User, Organization, Product, Asset, AgentApiKey
 
     user = get_current_user()
     if not user:
@@ -645,8 +725,12 @@ def get_license_info():
     response['usage'] = {
         'users': User.query.filter_by(is_active=True).count(),
         'organizations': Organization.query.count(),
-        'products': Product.query.count()
+        'products': Product.query.count(),
+        'agents': Asset.query.filter_by(active=True).count(),
+        'agent_api_keys': AgentApiKey.query.filter_by(active=True).count()
     }
+    # Include agent-specific usage info
+    response['agent_usage'] = get_agent_usage()
 
     return jsonify(response)
 

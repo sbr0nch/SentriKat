@@ -1374,15 +1374,33 @@ class InventoryJob(db.Model):
 
 
 # ============================================================================
-# AGENT LICENSING - Commercial pay-per-agent licensing system
+# AGENT USAGE TRACKING - Metering and billing for pay-per-agent model
 # ============================================================================
 
 class AgentLicense(db.Model):
     """
-    Organization's agent license for pay-per-agent model.
-    Controls how many agents/assets an organization can deploy.
+    Organization's agent usage tracking for metering and billing.
 
-    License tiers:
+    IMPORTANT ARCHITECTURE NOTE:
+    This table is for USAGE TRACKING and BILLING only, NOT for enforcement.
+    Actual agent limits are enforced via the RSA-signed license system
+    in app/licensing.py (check_agent_limit function).
+
+    The limits stored here (max_agents, max_api_keys) are informational
+    and for historical billing purposes. They should NOT be used for
+    enforcement because database values can be modified by on-premise
+    customers. Use the signed license limits instead.
+
+    The signed license contains tamper-proof limits:
+    - max_agents: Global limit across all organizations
+    - max_agent_api_keys: Global limit across all organizations
+
+    This table tracks:
+    - current_agents: Current count for this org (for billing)
+    - peak_agents: Peak usage in billing period
+    - billing_cycle, billing dates: For invoicing
+
+    License tiers (informational reference):
     - trial: Limited agents, limited time
     - starter: Small teams (up to 25 agents)
     - professional: Medium deployments (up to 100 agents)

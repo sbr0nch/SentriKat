@@ -26,7 +26,7 @@ from app.models import (
     Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob,
     AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification
 )
-from app.licensing import requires_professional, get_license
+from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
 import json
 
 # Threshold for async processing (queued instead of immediate)
@@ -286,49 +286,69 @@ def validate_inventory_payload(data):
 
 def check_license_can_add_agent(organization_id, is_new_agent=True):
     """
-    Check if the organization's license allows adding a new agent.
+    Check if the license allows adding a new agent.
     Returns (allowed, message, license_info) tuple.
 
-    For pay-per-agent model:
-    - Returns False if at or over limit
-    - Returns warning message if approaching limit (>80%)
-    - Creates license if it doesn't exist (trial tier)
+    IMPORTANT: This now uses the CORE RSA-signed license system for enforcement,
+    not the database-only AgentLicense table. The limits in the signed license
+    cannot be tampered with by modifying the database.
+
+    Agent limits are GLOBAL (across all organizations) to prevent the multi-org
+    bypass vulnerability where users create multiple orgs to circumvent limits.
+
+    The AgentLicense table is now used only for usage tracking/metering.
     """
-    license_obj = AgentLicense.query.filter_by(organization_id=organization_id).first()
+    # Get license info from core system (RSA-signed, tamper-proof)
+    license_info = get_license()
+    agent_usage = get_agent_usage()
 
-    if not license_obj:
-        # Create trial license for new organizations
-        license_obj = AgentLicense(
-            organization_id=organization_id,
-            tier='trial',
-            max_agents=AgentLicense.TIER_LIMITS['trial']['max_agents'],
-            max_api_keys=AgentLicense.TIER_LIMITS['trial']['max_api_keys'],
-            status='trial',
-            trial_started_at=datetime.utcnow(),
-            trial_ends_at=datetime.utcnow() + timedelta(days=14)
-        )
-        db.session.add(license_obj)
-        db.session.flush()
-        logger.info(f"Created trial license for organization {organization_id}")
+    # Check if push_agents feature is enabled
+    if not agent_usage['feature_enabled']:
+        return False, "Push Agents require a Professional license.", {
+            'edition': license_info.get_effective_edition(),
+            'feature_enabled': False,
+            'upgrade_required': True
+        }
 
-    # Update current agent count from database
-    license_obj.update_agent_count()
-
-    # Check if can add
+    # Check GLOBAL agent limit (from signed license)
     if is_new_agent:
-        can_add, message = license_obj.can_add_agent()
+        can_add, limit, message = check_agent_limit()
         if not can_add:
-            return False, message, license_obj.to_dict()
+            return False, message, {
+                'edition': license_info.get_effective_edition(),
+                'current_agents': agent_usage['agents']['current'],
+                'max_agents': agent_usage['agents']['limit'],
+                'limit_reached': True,
+                'global_limit': True  # Indicate this is a global limit
+            }
 
-    # Check usage warning thresholds
-    usage_percent = license_obj.get_usage_percent()
+    # Update usage tracking (for metering/billing only - not enforcement)
+    try:
+        license_obj = AgentLicense.query.filter_by(organization_id=organization_id).first()
+        if license_obj:
+            license_obj.update_agent_count()
+    except Exception as e:
+        logger.warning(f"Could not update usage tracking: {e}")
+
+    # Calculate usage percentage for warnings
+    current = agent_usage['agents']['current']
+    limit = agent_usage['agents']['limit']
     warning = None
-    if usage_percent >= 90:
-        warning = f"Agent limit almost reached ({license_obj.current_agents}/{license_obj.max_agents}). Please upgrade soon."
-    elif usage_percent >= 80:
-        warning = f"Approaching agent limit ({license_obj.current_agents}/{license_obj.max_agents})."
 
-    return True, warning, license_obj.to_dict()
+    if limit != -1:  # Not unlimited
+        usage_percent = (current / limit * 100) if limit > 0 else 100
+        if usage_percent >= 90:
+            warning = f"Agent limit almost reached ({current}/{limit}). Please upgrade soon."
+        elif usage_percent >= 80:
+            warning = f"Approaching agent limit ({current}/{limit})."
+
+    return True, warning, {
+        'edition': license_info.get_effective_edition(),
+        'current_agents': current,
+        'max_agents': limit,
+        'unlimited': limit == -1,
+        'global_limit': True
+    }
 
 
 def update_usage_metrics(organization_id, is_new_agent=False, products_count=0):
@@ -1574,6 +1594,19 @@ def create_agent_key():
         user_org = user.org_memberships.filter_by(organization_id=org_id).first()
         if not user_org or user_org.role != 'org_admin':
             return jsonify({'error': 'Organization admin access required'}), 403
+
+    # CHECK GLOBAL API KEY LIMIT (from signed license - tamper-proof)
+    can_add, limit, message = check_agent_api_key_limit()
+    if not can_add:
+        agent_usage = get_agent_usage()
+        return jsonify({
+            'error': 'API key limit reached',
+            'message': message,
+            'current_keys': agent_usage['api_keys']['current'],
+            'max_keys': agent_usage['api_keys']['limit'],
+            'global_limit': True,  # Indicate this is a global limit
+            'hint': 'Please upgrade your license to create more API keys'
+        }), 403
 
     # Generate key
     raw_key = AgentApiKey.generate_key()

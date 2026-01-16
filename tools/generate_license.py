@@ -107,8 +107,9 @@ def generate_license_id():
 
 
 def create_license(customer, email, edition, installation_id, expires_at=None,
-                   max_users=None, max_organizations=None, max_products=None):
-    """Create a hardware-locked signed license key"""
+                   max_users=None, max_organizations=None, max_products=None,
+                   max_agents=None, max_agent_api_keys=None):
+    """Create a hardware-locked signed license key with agent limits"""
     try:
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import padding
@@ -150,14 +151,21 @@ def create_license(customer, email, edition, installation_id, expires_at=None,
         limits['max_users'] = max_users if max_users else -1
         limits['max_organizations'] = max_organizations if max_organizations else -1
         limits['max_products'] = max_products if max_products else -1
+        # Agent limits: Professional gets unlimited by default, but can be capped
+        limits['max_agents'] = max_agents if max_agents else -1  # -1 = unlimited
+        limits['max_agent_api_keys'] = max_agent_api_keys if max_agent_api_keys else -1
         payload['features'] = [
             'ldap', 'email_alerts', 'white_label',
-            'api_access', 'backup_restore', 'audit_export', 'multi_org'
+            'api_access', 'backup_restore', 'audit_export', 'multi_org',
+            'push_agents'  # Agent deployment feature
         ]
     else:
         limits['max_users'] = max_users if max_users else 3
         limits['max_organizations'] = max_organizations if max_organizations else 1
         limits['max_products'] = max_products if max_products else 20
+        # Community edition: No agents (requires Professional)
+        limits['max_agents'] = max_agents if max_agents else 0
+        limits['max_agent_api_keys'] = max_agent_api_keys if max_agent_api_keys else 0
         payload['features'] = []
 
     payload['limits'] = limits
@@ -224,6 +232,10 @@ Examples:
                         help='Custom max organizations limit')
     parser.add_argument('--max-products', type=int,
                         help='Custom max products limit')
+    parser.add_argument('--max-agents', type=int,
+                        help='Max agents (endpoints) that can report inventory (default: unlimited for pro, 0 for community)')
+    parser.add_argument('--max-agent-api-keys', type=int,
+                        help='Max agent API keys that can be created (default: unlimited for pro, 0 for community)')
     parser.add_argument('--output', type=str,
                         help='Output file for license key')
 
@@ -277,7 +289,9 @@ Examples:
         expires_at=expires_at,
         max_users=args.max_users,
         max_organizations=args.max_organizations,
-        max_products=args.max_products
+        max_products=args.max_products,
+        max_agents=args.max_agents,
+        max_agent_api_keys=args.max_agent_api_keys
     )
 
     # Output
@@ -296,6 +310,8 @@ Examples:
         print(f"Max Users:      {'Unlimited' if payload['limits']['max_users'] == -1 else payload['limits']['max_users']}")
         print(f"Max Orgs:       {'Unlimited' if payload['limits']['max_organizations'] == -1 else payload['limits']['max_organizations']}")
         print(f"Max Products:   {'Unlimited' if payload['limits']['max_products'] == -1 else payload['limits']['max_products']}")
+        print(f"Max Agents:     {'Unlimited' if payload['limits']['max_agents'] == -1 else payload['limits']['max_agents']}")
+        print(f"Max API Keys:   {'Unlimited' if payload['limits']['max_agent_api_keys'] == -1 else payload['limits']['max_agent_api_keys']}")
 
     print("\n" + "-" * 70)
     print("LICENSE KEY (send this to customer):")
