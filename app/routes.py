@@ -1413,7 +1413,7 @@ def acknowledge_match(match_id):
 @bp.route('/api/matches/<int:match_id>/unacknowledge', methods=['POST'])
 @login_required
 def unacknowledge_match(match_id):
-    """Unacknowledge a vulnerability match"""
+    """Unacknowledge a vulnerability match (reopen it for alerts)"""
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     match = VulnerabilityMatch.query.get_or_404(match_id)
@@ -1429,6 +1429,8 @@ def unacknowledge_match(match_id):
             return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
 
     match.acknowledged = False
+    # Reset first_alerted_at so it will be alerted again as "new"
+    match.first_alerted_at = None
     db.session.commit()
     return jsonify(match.to_dict())
 
@@ -1550,10 +1552,11 @@ def unacknowledge_by_cve(cve_id):
             'message': 'No acknowledged matches found for this CVE'
         })
 
-    # Unacknowledge all matches
+    # Unacknowledge all matches and reset first_alerted_at for re-alerting
     unacknowledged_ids = []
     for match in matches:
         match.acknowledged = False
+        match.first_alerted_at = None  # Reset so it will be alerted again as "new"
         unacknowledged_ids.append(match.id)
 
     db.session.commit()
@@ -1563,7 +1566,7 @@ def unacknowledge_by_cve(cve_id):
         'vulnerability_matches',
         vuln.id,
         new_value={'unacknowledged_count': len(unacknowledged_ids), 'cve_id': cve_id},
-        details=f"Bulk unacknowledged {len(unacknowledged_ids)} matches for {cve_id}"
+        details=f"Bulk unacknowledged {len(unacknowledged_ids)} matches for {cve_id} (will re-alert)"
     )
 
     return jsonify({

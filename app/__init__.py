@@ -12,6 +12,32 @@ migrate = Migrate()
 csrf = CSRFProtect()
 limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
 
+
+def _apply_schema_migrations(logger):
+    """Apply schema migrations for new columns (SQLite doesn't auto-add columns)"""
+    from sqlalchemy import text
+
+    # List of migrations to apply: (table_name, column_name, column_definition)
+    migrations = [
+        ('vulnerability_match', 'first_alerted_at', 'DATETIME'),
+    ]
+
+    for table_name, column_name, column_def in migrations:
+        try:
+            # Check if column exists
+            result = db.session.execute(text(f"PRAGMA table_info({table_name})"))
+            columns = [row[1] for row in result.fetchall()]
+
+            if column_name not in columns:
+                logger.info(f"Adding column {column_name} to {table_name}")
+                db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}"))
+                db.session.commit()
+                logger.info(f"Successfully added column {column_name} to {table_name}")
+        except Exception as e:
+            logger.warning(f"Could not add column {column_name} to {table_name}: {e}")
+            db.session.rollback()
+
+
 def create_app(config_class=Config):
     app = Flask(__name__,
                 static_folder='../static',
@@ -175,10 +201,13 @@ def create_app(config_class=Config):
                 logging.getLogger(__name__).info(f"Creating new database at: {db_path}")
                 db.create_all()
             else:
-                # Database exists - DON'T run create_all() to avoid issues
-                # Migrations should handle schema changes
+                # Database exists - run migrations for new columns
                 import logging
-                logging.getLogger(__name__).info(f"Using existing database at: {db_path}")
+                logger = logging.getLogger(__name__)
+                logger.info(f"Using existing database at: {db_path}")
+
+                # Apply schema migrations for new columns (SQLite doesn't auto-add columns)
+                _apply_schema_migrations(logger)
         else:
             # Non-SQLite database (PostgreSQL, etc.) - always run create_all for safety
             # In production, migrations should be used instead

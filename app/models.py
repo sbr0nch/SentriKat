@@ -482,6 +482,11 @@ class VulnerabilityMatch(db.Model):
     acknowledged = db.Column(db.Boolean, default=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Notification tracking - for "new CVE" alerts
+    # NULL = never alerted, set when first alert is sent
+    # Reset to NULL when CVE is reopened (unacknowledged) to re-alert
+    first_alerted_at = db.Column(db.DateTime, nullable=True, index=True)
+
     # Match method and confidence
     match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
     match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
