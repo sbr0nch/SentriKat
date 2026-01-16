@@ -5027,7 +5027,6 @@ function updateLicenseLoadingState(status) {
         }
     }
 }
-}
 
 /**
  * Apply UI restrictions based on license status
