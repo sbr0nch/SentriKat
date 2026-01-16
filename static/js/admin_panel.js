@@ -6440,6 +6440,9 @@ function renderPullSources() {
                             <i class="bi bi-arrow-repeat"></i>
                         </button>
                     ` : ''}
+                    <button class="btn btn-outline-secondary btn-sm me-1" onclick="showEditIntegrationModal(${int.id})" title="Edit">
+                        <i class="bi bi-pencil"></i>
+                    </button>
                     <button class="btn btn-outline-secondary btn-sm me-1" onclick="showIntegrationApiKey(${int.id})" title="View API Key">
                         <i class="bi bi-key"></i>
                     </button>
@@ -6807,6 +6810,200 @@ async function deleteIntegration(integrationId) {
         if (!response.ok) throw new Error('Failed to delete');
         showToast('Integration deleted', 'success');
         loadIntegrations();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function showEditIntegrationModal(integrationId) {
+    try {
+        const response = await fetch(`/api/integrations/${integrationId}`);
+        if (!response.ok) throw new Error('Failed to load integration');
+        const integration = await response.json();
+
+        const config = integration.config || {};
+
+        const modalHtml = `
+            <div class="modal fade" id="editIntegrationModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Edit Pull Source</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="editIntegrationId" value="${integration.id}">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="editIntegrationName" value="${escapeHtml(integration.name || '')}">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Default Organization</label>
+                                        <select class="form-select" id="editIntegrationOrg">
+                                            <option value="">None (assign per-item)</option>
+                                            ${organizations.map(o => `<option value="${o.id}" ${o.id == integration.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr>
+                            <h6 class="text-muted mb-3"><i class="bi bi-link-45deg me-2"></i>Connection Settings</h6>
+                            <div class="mb-3">
+                                <label class="form-label">API URL <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="editConfigApiUrl" value="${escapeHtml(config.api_url || '')}">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Authentication Type</label>
+                                        <select class="form-select" id="editConfigAuthType">
+                                            <option value="none" ${config.auth_type === 'none' ? 'selected' : ''}>None</option>
+                                            <option value="header" ${config.auth_type === 'header' || !config.auth_type ? 'selected' : ''}>API Key (Header)</option>
+                                            <option value="bearer" ${config.auth_type === 'bearer' ? 'selected' : ''}>Bearer Token</option>
+                                            <option value="basic" ${config.auth_type === 'basic' ? 'selected' : ''}>Basic Auth</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Header Name</label>
+                                        <input type="text" class="form-control" id="editConfigAuthHeader" value="${escapeHtml(config.auth_header || 'X-API-Key')}">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">API Key / Username</label>
+                                        <input type="password" class="form-control" id="editConfigApiKey" value="${escapeHtml(config.api_key || config.username || '')}" placeholder="Leave empty to keep current">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Password (Basic Auth)</label>
+                                        <input type="password" class="form-control" id="editConfigPassword" value="${escapeHtml(config.password || '')}" placeholder="Leave empty to keep current">
+                                    </div>
+                                </div>
+                            </div>
+                            <hr>
+                            <h6 class="text-muted mb-3"><i class="bi bi-braces me-2"></i>Response Mapping</h6>
+                            <div class="mb-3">
+                                <label class="form-label">Response Path</label>
+                                <input type="text" class="form-control" id="editConfigResponsePath" value="${escapeHtml(config.response_path || '')}" placeholder="e.g., software or data.items">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Vendor Field</label>
+                                        <input type="text" class="form-control" id="editConfigVendorField" value="${escapeHtml(config.vendor_field || 'vendor')}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Product Field</label>
+                                        <input type="text" class="form-control" id="editConfigProductField" value="${escapeHtml(config.product_field || 'product')}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Version Field</label>
+                                        <input type="text" class="form-control" id="editConfigVersionField" value="${escapeHtml(config.version_field || 'version')}">
+                                    </div>
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="editIntegrationAutoApprove" ${integration.auto_approve ? 'checked' : ''}>
+                                <label class="form-check-label">Auto-approve imported items (skip Import Queue)</label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" onclick="saveEditIntegration()">
+                                <i class="bi bi-check-circle me-1"></i>Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const existingModal = document.getElementById('editIntegrationModal');
+        if (existingModal) existingModal.remove();
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modal = new bootstrap.Modal(document.getElementById('editIntegrationModal'));
+        modal.show();
+
+    } catch (error) {
+        showToast('Error loading integration: ' + error.message, 'danger');
+    }
+}
+
+async function saveEditIntegration() {
+    const integrationId = document.getElementById('editIntegrationId').value;
+    const name = document.getElementById('editIntegrationName').value.trim();
+    const orgId = document.getElementById('editIntegrationOrg').value;
+    const autoApprove = document.getElementById('editIntegrationAutoApprove').checked;
+
+    if (!name) {
+        showToast('Please enter a name', 'warning');
+        return;
+    }
+
+    const apiUrl = document.getElementById('editConfigApiUrl')?.value.trim() || '';
+    if (!apiUrl) {
+        showToast('Please enter an API URL', 'warning');
+        return;
+    }
+
+    const config = {
+        api_url: apiUrl,
+        auth_type: document.getElementById('editConfigAuthType')?.value || 'none',
+        auth_header: document.getElementById('editConfigAuthHeader')?.value || 'X-API-Key',
+        response_path: document.getElementById('editConfigResponsePath')?.value || '',
+        vendor_field: document.getElementById('editConfigVendorField')?.value || 'vendor',
+        product_field: document.getElementById('editConfigProductField')?.value || 'product',
+        version_field: document.getElementById('editConfigVersionField')?.value || 'version',
+        verify_ssl: true
+    };
+
+    // Only include credentials if provided (to avoid overwriting with empty)
+    const apiKey = document.getElementById('editConfigApiKey')?.value;
+    const password = document.getElementById('editConfigPassword')?.value;
+    if (apiKey) {
+        config.api_key = apiKey;
+        config.username = apiKey;  // For basic auth
+    }
+    if (password) {
+        config.password = password;
+    }
+
+    try {
+        const response = await fetch(`/api/integrations/${integrationId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                organization_id: orgId ? parseInt(orgId) : null,
+                auto_approve: autoApprove,
+                config: config
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to update integration');
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('editIntegrationModal')).hide();
+        showToast('Pull Source updated successfully', 'success');
+        loadIntegrations();
+
     } catch (error) {
         showToast('Error: ' + error.message, 'danger');
     }

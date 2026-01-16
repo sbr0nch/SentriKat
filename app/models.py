@@ -491,27 +491,58 @@ class VulnerabilityMatch(db.Model):
 
     def calculate_effective_priority(self):
         """
-        Calculate effective priority combining:
-        - Product criticality
-        - Vulnerability priority
-        Returns the higher of the two
+        Calculate effective priority combining CVE severity with product criticality.
+
+        The key insight: Product criticality determines how IMPORTANT the CVE is for YOU.
+        - A critical CVE on a dev laptop (low criticality) = Low priority for you
+        - A medium CVE on a production server (critical) = High priority for you
+
+        Priority Matrix:
+        CVE\\Product | Critical | High   | Medium | Low
+        ------------|----------|--------|--------|------
+        Critical    | Critical | High   | Medium | Low
+        High        | High     | High   | Medium | Low
+        Medium      | High     | Medium | Medium | Low
+        Low         | Medium   | Low    | Low    | Low
+
+        Special rules:
+        - Ransomware-related CVEs are always elevated by one level
+        - Due within 7 days on critical product = always Critical
         """
         vuln_priority = self.vulnerability.calculate_priority()
-        product_criticality = self.product.criticality
+        product_criticality = self.product.criticality or 'medium'
 
-        priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+        priority_levels = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+        level_names = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
 
-        vuln_level = priority_order.get(vuln_priority, 2)
-        prod_level = priority_order.get(product_criticality, 2)
+        vuln_level = priority_levels.get(vuln_priority, 2)
+        prod_level = priority_levels.get(product_criticality, 2)
 
-        # Return the higher priority
-        max_level = max(vuln_level, prod_level)
+        # Calculate combined priority - product criticality caps the effective priority
+        # Critical product: can show any priority
+        # High product: max is high (critical CVEs show as high)
+        # Medium product: max is medium
+        # Low product: max is low
+        max_allowed = prod_level
+        effective_level = min(vuln_level, max_allowed)
 
-        for priority, level in priority_order.items():
-            if level == max_level:
-                return priority
+        # Special cases that can override:
 
-        return 'medium'
+        # 1. Ransomware on high+ criticality product = elevate by one
+        if self.vulnerability.known_ransomware and prod_level >= 3:
+            effective_level = min(effective_level + 1, 4)
+
+        # 2. Due within 7 days on critical product = Critical
+        if self.vulnerability.due_date and prod_level == 4:
+            days_until_due = (self.vulnerability.due_date - date.today()).days
+            if days_until_due <= 7:
+                effective_level = 4
+
+        # 3. Medium product with critical/high CVE = at least medium (don't demote too much)
+        if prod_level == 2 and vuln_level >= 3:
+            effective_level = max(effective_level, 2)
+
+        return level_names.get(effective_level, 'medium')
 
     def to_dict(self):
         vuln_dict = self.vulnerability.to_dict()
