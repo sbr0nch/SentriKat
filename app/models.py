@@ -1161,6 +1161,15 @@ class Asset(db.Model):
         self.metadata_json = json.dumps(data) if data else None
 
     def to_dict(self, include_products=False):
+        # Calculate last_seen as the most recent of last_checkin or last_inventory_at
+        last_seen = None
+        if self.last_checkin and self.last_inventory_at:
+            last_seen = max(self.last_checkin, self.last_inventory_at)
+        elif self.last_checkin:
+            last_seen = self.last_checkin
+        elif self.last_inventory_at:
+            last_seen = self.last_inventory_at
+
         result = {
             'id': self.id,
             'organization_id': self.organization_id,
@@ -1174,6 +1183,7 @@ class Asset(db.Model):
             'os_kernel': self.os_kernel,
             'agent_id': self.agent_id,
             'agent_version': self.agent_version,
+            'last_seen': last_seen.isoformat() if last_seen else None,
             'last_checkin': self.last_checkin.isoformat() if self.last_checkin else None,
             'last_inventory_at': self.last_inventory_at.isoformat() if self.last_inventory_at else None,
             'active': self.active,

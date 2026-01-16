@@ -144,14 +144,60 @@ function Save-AgentConfig {
 function Get-SystemInfo {
     $computerInfo = Get-WmiObject -Class Win32_ComputerSystem
     $osInfo = Get-WmiObject -Class Win32_OperatingSystem
-    $networkAdapter = Get-WmiObject -Class Win32_NetworkAdapterConfiguration |
-                      Where-Object { $_.IPEnabled -eq $true } |
-                      Select-Object -First 1
+
+    # Get the best IP address - prefer physical adapters with default gateway
+    $ipAddress = $null
+
+    # Get adapters with name info
+    $adaptersWithNames = Get-WmiObject -Class Win32_NetworkAdapter | Where-Object { $_.NetEnabled -eq $true }
+    $virtualAdapterPatterns = @('Virtual', 'VMware', 'VirtualBox', 'Hyper-V', 'vEthernet', 'Docker', 'WSL')
+
+    # Try to find a physical adapter with a default gateway first
+    $allAdapters = Get-WmiObject -Class Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
+
+    foreach ($adapter in $allAdapters) {
+        # Skip adapters without IP addresses
+        $adapterIp = $adapter.IPAddress | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } | Select-Object -First 1
+        if (-not $adapterIp) { continue }
+
+        # Skip Docker/WSL/VM network ranges (172.16-31.x.x, 192.168.x.x often used by VMs)
+        if ($adapterIp -match '^172\.(1[6-9]|2[0-9]|3[0-1])\.') { continue }
+        if ($adapterIp -match '^169\.254\.') { continue }  # Link-local
+
+        # Check if this is a virtual adapter by description
+        $adapterInfo = $adaptersWithNames | Where-Object { $_.Index -eq $adapter.Index }
+        $isVirtual = $false
+        if ($adapterInfo) {
+            foreach ($pattern in $virtualAdapterPatterns) {
+                if ($adapterInfo.Name -like "*$pattern*" -or $adapterInfo.Description -like "*$pattern*") {
+                    $isVirtual = $true
+                    break
+                }
+            }
+        }
+
+        # Prefer adapters with default gateway (means it's likely the main network)
+        if ($adapter.DefaultIPGateway -and -not $isVirtual) {
+            $ipAddress = $adapterIp
+            break
+        }
+
+        # Fall back to first non-virtual adapter
+        if (-not $ipAddress -and -not $isVirtual) {
+            $ipAddress = $adapterIp
+        }
+    }
+
+    # Ultimate fallback: just use first IP
+    if (-not $ipAddress) {
+        $firstAdapter = $allAdapters | Select-Object -First 1
+        $ipAddress = $firstAdapter.IPAddress | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } | Select-Object -First 1
+    }
 
     return @{
         hostname = $env:COMPUTERNAME
         fqdn = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
-        ip_address = $networkAdapter.IPAddress | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } | Select-Object -First 1
+        ip_address = $ipAddress
         os = @{
             name = "Windows"
             version = "$($osInfo.Caption) $($osInfo.Version)"

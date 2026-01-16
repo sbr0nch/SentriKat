@@ -5597,9 +5597,148 @@ async function loadAssets(page = 1) {
     }
 }
 
+// Asset Details Products Table State
+let assetProductsData = [];
+let assetProductsPage = 1;
+let assetProductsPageSize = 15;
+let assetProductsSortField = 'product';
+let assetProductsSortDir = 'asc';
+
+function sortAssetProducts(field) {
+    if (assetProductsSortField === field) {
+        assetProductsSortDir = assetProductsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        assetProductsSortField = field;
+        assetProductsSortDir = 'asc';
+    }
+    assetProductsPage = 1;
+    renderAssetProductsTable();
+}
+
+function changeAssetProductsPage(newPage) {
+    assetProductsPage = newPage;
+    renderAssetProductsTable();
+}
+
+function renderAssetProductsTable() {
+    const container = document.getElementById('assetProductsTableContainer');
+    if (!container || assetProductsData.length === 0) return;
+
+    // Sort products
+    const sortedProducts = [...assetProductsData].sort((a, b) => {
+        let aVal, bVal;
+        switch (assetProductsSortField) {
+            case 'product':
+                aVal = `${a.vendor || ''} ${a.product_name || a.name || ''}`.toLowerCase();
+                bVal = `${b.vendor || ''} ${b.product_name || b.name || ''}`.toLowerCase();
+                break;
+            case 'version':
+                aVal = (a.version || '').toLowerCase();
+                bVal = (b.version || '').toLowerCase();
+                break;
+            case 'status':
+                aVal = a.is_vulnerable ? 1 : 0;
+                bVal = b.is_vulnerable ? 1 : 0;
+                break;
+            default:
+                aVal = '';
+                bVal = '';
+        }
+        if (aVal < bVal) return assetProductsSortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return assetProductsSortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    // Paginate
+    const totalPages = Math.ceil(sortedProducts.length / assetProductsPageSize);
+    const startIdx = (assetProductsPage - 1) * assetProductsPageSize;
+    const pageProducts = sortedProducts.slice(startIdx, startIdx + assetProductsPageSize);
+
+    const getSortIcon = (field) => {
+        if (assetProductsSortField !== field) return '<i class="bi bi-chevron-expand text-muted"></i>';
+        return assetProductsSortDir === 'asc'
+            ? '<i class="bi bi-sort-up"></i>'
+            : '<i class="bi bi-sort-down"></i>';
+    };
+
+    container.innerHTML = `
+        <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light sticky-top">
+                    <tr>
+                        <th style="width: 55%; cursor: pointer;" onclick="sortAssetProducts('product')">
+                            Product ${getSortIcon('product')}
+                        </th>
+                        <th style="width: 25%; cursor: pointer;" onclick="sortAssetProducts('version')">
+                            Version ${getSortIcon('version')}
+                        </th>
+                        <th style="width: 20%; cursor: pointer;" onclick="sortAssetProducts('status')">
+                            Status ${getSortIcon('status')}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pageProducts.map(p => `
+                        <tr>
+                            <td class="text-truncate" style="max-width: 300px;" title="${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}">
+                                ${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}
+                            </td>
+                            <td><code class="small">${escapeHtml(p.version || '-')}</code></td>
+                            <td>
+                                ${p.is_vulnerable
+                                    ? '<span class="badge bg-danger">Vulnerable</span>'
+                                    : '<span class="badge bg-success">OK</span>'}
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        ${totalPages > 1 ? `
+        <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top">
+            <small class="text-muted">
+                Showing ${startIdx + 1}-${Math.min(startIdx + assetProductsPageSize, sortedProducts.length)} of ${sortedProducts.length}
+            </small>
+            <nav>
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item ${assetProductsPage === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="changeAssetProductsPage(${assetProductsPage - 1}); return false;">&laquo;</a>
+                    </li>
+                    ${Array.from({length: Math.min(5, totalPages)}, (_, i) => {
+                        let pageNum;
+                        if (totalPages <= 5) {
+                            pageNum = i + 1;
+                        } else if (assetProductsPage <= 3) {
+                            pageNum = i + 1;
+                        } else if (assetProductsPage >= totalPages - 2) {
+                            pageNum = totalPages - 4 + i;
+                        } else {
+                            pageNum = assetProductsPage - 2 + i;
+                        }
+                        return `
+                            <li class="page-item ${pageNum === assetProductsPage ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="changeAssetProductsPage(${pageNum}); return false;">${pageNum}</a>
+                            </li>
+                        `;
+                    }).join('')}
+                    <li class="page-item ${assetProductsPage === totalPages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="changeAssetProductsPage(${assetProductsPage + 1}); return false;">&raquo;</a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+        ` : ''}
+    `;
+}
+
 async function showAssetDetails(assetId) {
     const modalBody = document.getElementById('assetDetailsBody');
     if (!modalBody) return;
+
+    // Reset pagination state
+    assetProductsPage = 1;
+    assetProductsSortField = 'product';
+    assetProductsSortDir = 'asc';
 
     modalBody.innerHTML = `
         <div class="text-center py-4">
@@ -5618,32 +5757,14 @@ async function showAssetDetails(assetId) {
         }
         const asset = await response.json();
 
+        // Store products for pagination
+        assetProductsData = asset.products || [];
+
         let productsHtml = '';
-        if (asset.products && asset.products.length > 0) {
+        if (assetProductsData.length > 0) {
             productsHtml = `
-                <h6 class="mt-4 mb-3"><i class="bi bi-box me-2"></i>Installed Products (${asset.products.length})</h6>
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Product</th>
-                                <th>Version</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${asset.products.map(p => `
-                                <tr>
-                                    <td>${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}</td>
-                                    <td><code>${escapeHtml(p.version || '-')}</code></td>
-                                    <td>
-                                        ${p.is_vulnerable ? '<span class="badge bg-danger">Vulnerable</span>' : '<span class="badge bg-success">OK</span>'}
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
+                <h6 class="mt-4 mb-3"><i class="bi bi-box me-2"></i>Installed Products (${assetProductsData.length})</h6>
+                <div id="assetProductsTableContainer"></div>
             `;
         } else {
             productsHtml = '<p class="text-muted mt-4">No products reported by agent</p>';
@@ -5654,24 +5775,28 @@ async function showAssetDetails(assetId) {
                 <div class="col-md-6">
                     <h6><i class="bi bi-pc-display me-2"></i>System Information</h6>
                     <table class="table table-sm">
-                        <tr><td class="text-muted">Hostname</td><td><strong>${escapeHtml(asset.hostname)}</strong></td></tr>
+                        <tr><td class="text-muted" style="width: 100px;">Hostname</td><td><strong>${escapeHtml(asset.hostname)}</strong></td></tr>
                         <tr><td class="text-muted">IP Address</td><td><code>${escapeHtml(asset.ip_address || '-')}</code></td></tr>
                         <tr><td class="text-muted">OS</td><td>${escapeHtml(asset.os_name || '-')} ${escapeHtml(asset.os_version || '')}</td></tr>
-                        <tr><td class="text-muted">Kernel</td><td>${escapeHtml(asset.os_kernel || '-')}</td></tr>
                     </table>
                 </div>
                 <div class="col-md-6">
                     <h6><i class="bi bi-info-circle me-2"></i>Agent Information</h6>
                     <table class="table table-sm">
-                        <tr><td class="text-muted">Agent ID</td><td><code>${escapeHtml(asset.agent_id || '-')}</code></td></tr>
+                        <tr><td class="text-muted" style="width: 110px;">Agent ID</td><td><code class="small">${escapeHtml(asset.agent_id || '-')}</code></td></tr>
                         <tr><td class="text-muted">Agent Version</td><td>${escapeHtml(asset.agent_version || '-')}</td></tr>
                         <tr><td class="text-muted">Organization</td><td>${escapeHtml(asset.organization_name || 'Unknown')}</td></tr>
-                        <tr><td class="text-muted">Last Seen</td><td>${asset.last_seen ? formatDate(asset.last_seen) : 'Never'}</td></tr>
+                        <tr><td class="text-muted">Last Seen</td><td>${asset.last_seen ? formatDate(asset.last_seen) : '<span class="text-warning">Pending first report</span>'}</td></tr>
                     </table>
                 </div>
             </div>
             ${productsHtml}
         `;
+
+        // Render paginated products table if we have products
+        if (assetProductsData.length > 0) {
+            renderAssetProductsTable();
+        }
     } catch (error) {
         console.error('Error loading asset details:', error);
         modalBody.innerHTML = `
