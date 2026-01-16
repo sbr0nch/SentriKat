@@ -116,8 +116,8 @@
                             <th style="width: 40px;">
                                 <input type="checkbox" class="form-check-input" id="selectAllCheckbox" onchange="toggleSelectAll()">
                             </th>
-                            <th data-column="vendor" data-column-label="Vendor" data-sort-key="vendor" data-sort-type="string">Vendor</th>
                             <th data-column="product" data-column-label="Product" data-sort-key="product" data-sort-type="string">Product</th>
+                            <th data-column="vendor" data-column-label="Vendor" data-sort-key="vendor" data-sort-type="string">Vendor</th>
                             <th data-column="version" data-column-label="Version" data-sort-key="version" data-sort-type="string">Version</th>
                             <th data-column="organization" data-column-label="Organization" data-sort-key="organization" data-sort-type="string">Organization</th>
                             <th data-column="criticality" data-column-label="Criticality" data-sort-key="criticality" data-sort-type="priority">Criticality</th>
@@ -381,8 +381,8 @@
                                 <th style="width: 40px;">
                                     <input type="checkbox" class="form-check-input" id="catalogSelectAll" onchange="toggleCatalogSelectAll()">
                                 </th>
-                                <th>Vendor</th>
                                 <th>Product</th>
+                                <th>Vendor</th>
                                 <th>Version</th>
                                 <th>Category</th>
                             </tr>
@@ -660,8 +660,8 @@
                                        data-product-id="${product.id}"
                                        onchange="toggleProductSelect(${product.id}, this)">
                             </td>
-                            <td data-column="vendor" class="fw-semibold">${escapeHtml(product.vendor)}</td>
-                            <td data-column="product">${escapeHtml(product.product_name)}</td>
+                            <td data-column="product" class="fw-semibold">${escapeHtml(product.product_name)}</td>
+                            <td data-column="vendor">${escapeHtml(product.vendor)}</td>
                             <td data-column="version">${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
                             <td data-column="organization">${orgDisplay}</td>
                             <td data-column="criticality">${criticalityBadge}</td>
@@ -1077,8 +1077,8 @@
                                ${isChecked ? 'checked' : ''}
                                onchange="toggleCatalogSelection(${service.id}, event)">
                     </td>
-                    <td class="fw-semibold">${escapeHtml(service.vendor)}</td>
-                    <td>${escapeHtml(service.product_name)}</td>
+                    <td class="fw-semibold">${escapeHtml(service.product_name)}</td>
+                    <td>${escapeHtml(service.vendor)}</td>
                     <td onclick="event.stopPropagation();">
                         <select class="form-select form-select-sm version-select"
                                 data-catalog-id="${service.id}"
