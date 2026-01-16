@@ -13,21 +13,32 @@ Rate Limiting:
 """
 
 from flask import Blueprint, request, jsonify, current_app
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 import logging
 import threading
 import time
+import re
+import ipaddress
 
 from app import db, csrf, limiter
 from app.models import (
-    Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob
+    Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob,
+    AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification
 )
 from app.licensing import requires_professional, get_license
 import json
 
 # Threshold for async processing (queued instead of immediate)
 ASYNC_BATCH_THRESHOLD = 100
+
+# Input validation limits
+MAX_HOSTNAME_LENGTH = 255
+MAX_VENDOR_LENGTH = 200
+MAX_PRODUCT_NAME_LENGTH = 200
+MAX_VERSION_LENGTH = 100
+MAX_PATH_LENGTH = 500
+MAX_PRODUCTS_PER_REQUEST = 5000  # Absolute maximum products in single request
 
 # Background worker settings
 WORKER_CHECK_INTERVAL = 5  # seconds between job checks
@@ -53,14 +64,59 @@ def get_agent_key_for_limit():
 # Agent Authentication
 # ============================================================================
 
+def _ip_in_allowlist(ip_str, allowed_list):
+    """
+    Check if an IP address is in the allowlist.
+    Supports individual IPs and CIDR notation.
+    """
+    if not allowed_list:
+        return True  # No allowlist = allow all
+
+    try:
+        client_ip = ipaddress.ip_address(ip_str)
+
+        for allowed in allowed_list:
+            allowed = allowed.strip()
+            if not allowed:
+                continue
+
+            try:
+                # Check if it's a CIDR network
+                if '/' in allowed:
+                    network = ipaddress.ip_network(allowed, strict=False)
+                    if client_ip in network:
+                        return True
+                else:
+                    # Single IP comparison
+                    if client_ip == ipaddress.ip_address(allowed):
+                        return True
+            except ValueError:
+                # Invalid CIDR/IP in allowlist, skip
+                continue
+
+        return False
+    except ValueError:
+        # Invalid client IP
+        logger.warning(f"Invalid client IP address: {ip_str}")
+        return False
+
+
 def get_agent_api_key():
     """
     Validate agent API key from request header.
     Returns (AgentApiKey, Organization) tuple or (None, None) if invalid.
+
+    Security checks:
+    1. Key exists and is valid (active, not expired)
+    2. IP allowlist enforcement (if configured)
+    3. Updates usage statistics for metering
     """
+    source_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', '')[:500]  # Truncate for safety
+
     api_key = request.headers.get('X-Agent-Key')
     if not api_key:
-        logger.warning(f"Agent auth failed: No X-Agent-Key header from {request.remote_addr}")
+        logger.warning(f"Agent auth failed: No X-Agent-Key header from {source_ip}")
         return None, None
 
     # Hash the key and look it up
@@ -68,11 +124,45 @@ def get_agent_api_key():
     agent_key = AgentApiKey.query.filter_by(key_hash=key_hash).first()
 
     if not agent_key:
-        logger.warning(f"Agent auth failed: Invalid API key from {request.remote_addr}")
+        logger.warning(f"Agent auth failed: Invalid API key from {source_ip}")
+        # Log failed auth event
+        try:
+            # We don't know which org, so log without org context
+            pass  # Can't log without org_id
+        except Exception:
+            pass
         return None, None
 
     if not agent_key.is_valid():
-        logger.warning(f"Agent auth failed: Expired/inactive key '{agent_key.name}' from {request.remote_addr}")
+        logger.warning(f"Agent auth failed: Expired/inactive key '{agent_key.name}' from {source_ip}")
+        # Log failed auth event
+        AgentEvent.log_event(
+            organization_id=agent_key.organization_id,
+            event_type='auth_failed',
+            api_key_id=agent_key.id,
+            details={'reason': 'expired_or_inactive'},
+            source_ip=source_ip,
+            user_agent=user_agent
+        )
+        db.session.commit()
+        return None, None
+
+    # ENFORCE IP ALLOWLIST (if configured)
+    allowed_ips = agent_key.get_allowed_ips()
+    if allowed_ips and not _ip_in_allowlist(source_ip, allowed_ips):
+        logger.warning(
+            f"Agent auth failed: IP {source_ip} not in allowlist for key '{agent_key.name}'"
+        )
+        # Log blocked IP event
+        AgentEvent.log_event(
+            organization_id=agent_key.organization_id,
+            event_type='ip_blocked',
+            api_key_id=agent_key.id,
+            details={'blocked_ip': source_ip, 'allowed_ips': allowed_ips},
+            source_ip=source_ip,
+            user_agent=user_agent
+        )
+        db.session.commit()
         return None, None
 
     # Update usage stats
@@ -99,6 +189,176 @@ def agent_auth_required(f):
         request.organization = organization
         return f(*args, **kwargs)
     return decorated_function
+
+
+# ============================================================================
+# Input Validation & Sanitization
+# ============================================================================
+
+def sanitize_string(value, max_length, field_name):
+    """
+    Sanitize and validate a string input.
+    Returns (sanitized_value, error) tuple.
+    """
+    if value is None:
+        return None, None
+
+    if not isinstance(value, str):
+        return None, f"{field_name} must be a string"
+
+    # Remove control characters (except newlines/tabs which might be in paths)
+    sanitized = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', value)
+
+    # Trim whitespace
+    sanitized = sanitized.strip()
+
+    # Check length
+    if len(sanitized) > max_length:
+        return sanitized[:max_length], None  # Truncate silently
+
+    return sanitized, None
+
+
+def validate_inventory_payload(data):
+    """
+    Validate the inventory payload structure and content.
+    Returns (is_valid, errors_list) tuple.
+    """
+    errors = []
+
+    # Required fields
+    hostname = data.get('hostname')
+    if not hostname:
+        errors.append("hostname is required")
+    else:
+        hostname, err = sanitize_string(hostname, MAX_HOSTNAME_LENGTH, 'hostname')
+        if err:
+            errors.append(err)
+        elif not hostname:
+            errors.append("hostname cannot be empty")
+        # Validate hostname format (alphanumeric, hyphens, dots)
+        elif not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$', hostname):
+            errors.append("hostname contains invalid characters")
+        data['hostname'] = hostname
+
+    # Products validation
+    products = data.get('products', [])
+    if not isinstance(products, list):
+        errors.append("products must be an array")
+    elif len(products) > MAX_PRODUCTS_PER_REQUEST:
+        errors.append(f"Too many products ({len(products)}). Maximum is {MAX_PRODUCTS_PER_REQUEST}")
+    else:
+        # Validate each product
+        for i, product in enumerate(products):
+            if not isinstance(product, dict):
+                errors.append(f"products[{i}] must be an object")
+                continue
+
+            vendor = product.get('vendor')
+            product_name = product.get('product')
+
+            if vendor:
+                vendor, _ = sanitize_string(vendor, MAX_VENDOR_LENGTH, 'vendor')
+                product['vendor'] = vendor
+
+            if product_name:
+                product_name, _ = sanitize_string(product_name, MAX_PRODUCT_NAME_LENGTH, 'product')
+                product['product'] = product_name
+
+            version = product.get('version')
+            if version:
+                version, _ = sanitize_string(version, MAX_VERSION_LENGTH, 'version')
+                product['version'] = version
+
+            path = product.get('path')
+            if path:
+                path, _ = sanitize_string(path, MAX_PATH_LENGTH, 'path')
+                product['path'] = path
+
+    # Optional fields validation
+    ip_address = data.get('ip_address')
+    if ip_address:
+        ip_address, _ = sanitize_string(ip_address, 45, 'ip_address')
+        data['ip_address'] = ip_address
+
+    return len(errors) == 0, errors
+
+
+def check_license_can_add_agent(organization_id, is_new_agent=True):
+    """
+    Check if the organization's license allows adding a new agent.
+    Returns (allowed, message, license_info) tuple.
+
+    For pay-per-agent model:
+    - Returns False if at or over limit
+    - Returns warning message if approaching limit (>80%)
+    - Creates license if it doesn't exist (trial tier)
+    """
+    license_obj = AgentLicense.query.filter_by(organization_id=organization_id).first()
+
+    if not license_obj:
+        # Create trial license for new organizations
+        license_obj = AgentLicense(
+            organization_id=organization_id,
+            tier='trial',
+            max_agents=AgentLicense.TIER_LIMITS['trial']['max_agents'],
+            max_api_keys=AgentLicense.TIER_LIMITS['trial']['max_api_keys'],
+            status='trial',
+            trial_started_at=datetime.utcnow(),
+            trial_ends_at=datetime.utcnow() + timedelta(days=14)
+        )
+        db.session.add(license_obj)
+        db.session.flush()
+        logger.info(f"Created trial license for organization {organization_id}")
+
+    # Update current agent count from database
+    license_obj.update_agent_count()
+
+    # Check if can add
+    if is_new_agent:
+        can_add, message = license_obj.can_add_agent()
+        if not can_add:
+            return False, message, license_obj.to_dict()
+
+    # Check usage warning thresholds
+    usage_percent = license_obj.get_usage_percent()
+    warning = None
+    if usage_percent >= 90:
+        warning = f"Agent limit almost reached ({license_obj.current_agents}/{license_obj.max_agents}). Please upgrade soon."
+    elif usage_percent >= 80:
+        warning = f"Approaching agent limit ({license_obj.current_agents}/{license_obj.max_agents})."
+
+    return True, warning, license_obj.to_dict()
+
+
+def update_usage_metrics(organization_id, is_new_agent=False, products_count=0):
+    """
+    Update usage metrics for billing and analytics.
+    Called after successful inventory report.
+    """
+    try:
+        # Get or create today's usage record
+        usage = AgentUsageRecord.get_or_create_today(organization_id)
+
+        # Increment counters
+        usage.inventory_reports += 1
+        usage.products_discovered += products_count
+
+        if is_new_agent:
+            usage.new_agents += 1
+
+        # Update active agent count
+        license_obj = AgentLicense.query.filter_by(organization_id=organization_id).first()
+        if license_obj:
+            license_obj.update_agent_count()
+            usage.active_agents = license_obj.current_agents
+            if usage.active_agents > usage.peak_agents:
+                usage.peak_agents = usage.active_agents
+
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"Error updating usage metrics: {e}")
+        db.session.rollback()
 
 
 # ============================================================================
@@ -521,8 +781,15 @@ def report_inventory():
             }
         ]
     }
+
+    Response includes:
+    - status: success/queued/error
+    - license_warning: (if approaching limit)
+    - summary: counts of products processed
     """
-    logger.info(f"=== Agent inventory request received from {request.remote_addr} ===")
+    source_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', '')[:500]
+    logger.info(f"=== Agent inventory request received from {source_ip} ===")
 
     # Get organization from authenticated request
     organization = getattr(request, 'organization', None)
@@ -539,14 +806,19 @@ def report_inventory():
         return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
 
     if not data:
-        logger.warning(f"Agent inventory failed: No JSON body from {request.remote_addr}")
+        logger.warning(f"Agent inventory failed: No JSON body from {source_ip}")
         return jsonify({'error': 'JSON body required'}), 400
 
-    hostname = data.get('hostname')
-    if not hostname:
-        logger.warning(f"Agent inventory failed: No hostname in payload from {request.remote_addr}")
-        return jsonify({'error': 'hostname is required'}), 400
+    # VALIDATE INPUT
+    is_valid, validation_errors = validate_inventory_payload(data)
+    if not is_valid:
+        logger.warning(f"Agent inventory validation failed from {source_ip}: {validation_errors}")
+        return jsonify({
+            'error': 'Validation failed',
+            'details': validation_errors
+        }), 400
 
+    hostname = data.get('hostname')
     products = data.get('products', [])
     logger.info(f"Agent inventory: {hostname} sending {len(products)} products "
                 f"(threshold={ASYNC_BATCH_THRESHOLD})")
@@ -559,6 +831,54 @@ def report_inventory():
             'error': 'API key not associated with an organization',
             'hint': 'Ensure the API key is created for a specific organization'
         }), 400
+
+    # Check if this is a new agent (for license check)
+    agent_id = data.get('agent', {}).get('id')
+    existing_asset = None
+    if agent_id:
+        existing_asset = Asset.query.filter_by(agent_id=agent_id).first()
+    if not existing_asset:
+        existing_asset = Asset.query.filter_by(
+            organization_id=organization.id,
+            hostname=hostname
+        ).first()
+
+    is_new_agent = existing_asset is None
+
+    # CHECK LICENSE LIMITS (pay-per-agent enforcement)
+    if is_new_agent:
+        can_add, license_message, license_info = check_license_can_add_agent(
+            organization.id, is_new_agent=True
+        )
+        if not can_add:
+            logger.warning(
+                f"License limit exceeded for org {organization.id}: {license_message}"
+            )
+            # Log license exceeded event
+            AgentEvent.log_event(
+                organization_id=organization.id,
+                event_type='license_exceeded',
+                api_key_id=agent_key.id,
+                details={
+                    'hostname': hostname,
+                    'message': license_message,
+                    'license': license_info
+                },
+                source_ip=source_ip,
+                user_agent=user_agent
+            )
+            db.session.commit()
+            return jsonify({
+                'error': 'License limit exceeded',
+                'message': license_message,
+                'license': license_info,
+                'hint': 'Please upgrade your license to add more agents'
+            }), 403
+    else:
+        # Existing agent - still check license for warning
+        _, license_message, license_info = check_license_can_add_agent(
+            organization.id, is_new_agent=False
+        )
 
     # Check if batch should be processed asynchronously
     if len(products) >= ASYNC_BATCH_THRESHOLD:
@@ -666,15 +986,73 @@ def report_inventory():
                     detected_by='agent'
                 )
                 db.session.add(installation)
+                db.session.flush()  # Get installation ID for version history
                 installations_created += 1
+
+                # Record version history for new installation
+                ProductVersionHistory.record_change(
+                    installation_id=installation.id,
+                    asset_id=asset.id,
+                    product_id=product.id,
+                    old_version=None,
+                    new_version=version,
+                    detected_by='agent'
+                )
             else:
+                # Track version changes
+                old_version = installation.version
+                if old_version != version and version:
+                    ProductVersionHistory.record_change(
+                        installation_id=installation.id,
+                        asset_id=asset.id,
+                        product_id=product.id,
+                        old_version=old_version,
+                        new_version=version,
+                        detected_by='agent'
+                    )
+
                 # Update existing installation
                 installation.version = version
                 installation.install_path = product_data.get('path')
                 installation.last_seen_at = datetime.utcnow()
                 installations_updated += 1
 
+        # Log inventory event
+        AgentEvent.log_event(
+            organization_id=organization.id,
+            event_type='registered' if is_new_agent else 'inventory_reported',
+            asset_id=asset.id,
+            api_key_id=agent_key.id,
+            details={
+                'hostname': hostname,
+                'products_count': len(products),
+                'products_created': products_created,
+                'installations_created': installations_created
+            },
+            source_ip=source_ip,
+            user_agent=user_agent
+        )
+
         db.session.commit()
+
+        # Update usage metrics for billing
+        update_usage_metrics(
+            organization_id=organization.id,
+            is_new_agent=is_new_agent,
+            products_count=products_created
+        )
+
+        # Resolve any stale notifications for this asset
+        if not is_new_agent:
+            StaleAssetNotification.query.filter_by(
+                asset_id=asset.id,
+                resolved=False
+            ).update({
+                'resolved': True,
+                'resolved_at': datetime.utcnow(),
+                'resolved_by': 'agent_checkin'
+            })
+            db.session.commit()
 
         logger.info(
             f"Inventory reported for {hostname}: "
@@ -682,7 +1060,8 @@ def report_inventory():
             f"{installations_created} installations created, {installations_updated} updated"
         )
 
-        return jsonify({
+        # Build response with license warning if applicable
+        response = {
             'status': 'success',
             'asset_id': asset.id,
             'hostname': asset.hostname,
@@ -693,7 +1072,14 @@ def report_inventory():
                 'installations_updated': installations_updated,
                 'total_products': len(products)
             }
-        })
+        }
+
+        # Include license warning if approaching limit
+        if license_message:
+            response['license_warning'] = license_message
+            response['license'] = license_info
+
+        return jsonify(response)
 
     except Exception as e:
         db.session.rollback()
@@ -1459,3 +1845,407 @@ def get_integrations_summary():
         logger.error(f"Error getting integrations summary: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================================================
+# Worker Health & Status Endpoints
+# ============================================================================
+
+@agent_bp.route('/api/admin/worker-status', methods=['GET'])
+def get_worker_status():
+    """
+    Get the status of the background job worker.
+    Returns worker health, queue depth, and processing statistics.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    global _worker_thread
+
+    # Worker status
+    worker_alive = _worker_thread is not None and _worker_thread.is_alive()
+
+    # Queue statistics
+    pending_jobs = InventoryJob.query.filter_by(status='pending').count()
+    processing_jobs = InventoryJob.query.filter_by(status='processing').count()
+    completed_today = InventoryJob.query.filter(
+        InventoryJob.status == 'completed',
+        InventoryJob.completed_at >= datetime.utcnow().replace(hour=0, minute=0, second=0)
+    ).count()
+    failed_today = InventoryJob.query.filter(
+        InventoryJob.status == 'failed',
+        InventoryJob.completed_at >= datetime.utcnow().replace(hour=0, minute=0, second=0)
+    ).count()
+
+    # Get most recent job
+    latest_job = InventoryJob.query.order_by(InventoryJob.created_at.desc()).first()
+
+    return jsonify({
+        'worker': {
+            'status': 'running' if worker_alive else 'stopped',
+            'is_alive': worker_alive,
+            'check_interval_seconds': WORKER_CHECK_INTERVAL
+        },
+        'queue': {
+            'pending': pending_jobs,
+            'processing': processing_jobs,
+            'completed_today': completed_today,
+            'failed_today': failed_today
+        },
+        'latest_job': latest_job.to_dict() if latest_job else None,
+        'config': {
+            'async_threshold': ASYNC_BATCH_THRESHOLD,
+            'max_products_per_request': MAX_PRODUCTS_PER_REQUEST
+        },
+        'checked_at': datetime.utcnow().isoformat()
+    })
+
+
+@agent_bp.route('/api/admin/worker/start', methods=['POST'])
+def start_worker():
+    """Manually start the background worker."""
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    try:
+        start_background_worker(current_app._get_current_object())
+        return jsonify({
+            'status': 'success',
+            'message': 'Background worker started'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# License Management & Dashboard Endpoints
+# ============================================================================
+
+@agent_bp.route('/api/admin/licenses', methods=['GET'])
+def list_licenses():
+    """List all agent licenses (admin view)."""
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    if user.is_super_admin():
+        licenses = AgentLicense.query.all()
+    else:
+        org_ids = [m.organization_id for m in user.org_memberships.all()]
+        licenses = AgentLicense.query.filter(AgentLicense.organization_id.in_(org_ids)).all()
+
+    # Update counts for each license
+    for lic in licenses:
+        lic.update_agent_count()
+    db.session.commit()
+
+    return jsonify({
+        'licenses': [lic.to_dict() for lic in licenses]
+    })
+
+
+@agent_bp.route('/api/admin/licenses/<int:org_id>', methods=['GET'])
+def get_organization_license(org_id):
+    """Get license details for a specific organization."""
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Check permission
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if org_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    license_obj = AgentLicense.query.filter_by(organization_id=org_id).first()
+
+    if not license_obj:
+        # Create trial license if doesn't exist
+        license_obj = AgentLicense(
+            organization_id=org_id,
+            tier='trial',
+            max_agents=AgentLicense.TIER_LIMITS['trial']['max_agents'],
+            max_api_keys=AgentLicense.TIER_LIMITS['trial']['max_api_keys'],
+            status='trial',
+            trial_started_at=datetime.utcnow(),
+            trial_ends_at=datetime.utcnow() + timedelta(days=14)
+        )
+        db.session.add(license_obj)
+        db.session.commit()
+
+    # Update count
+    license_obj.update_agent_count()
+    db.session.commit()
+
+    return jsonify(license_obj.to_dict())
+
+
+@agent_bp.route('/api/admin/licenses/<int:org_id>', methods=['PUT', 'PATCH'])
+def update_license(org_id):
+    """
+    Update an organization's license (super admin only).
+    Used for upgrading tiers, adjusting limits, extending trials.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    license_obj = AgentLicense.query.filter_by(organization_id=org_id).first()
+    if not license_obj:
+        return jsonify({'error': 'License not found'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    updated_fields = []
+
+    # Update tier
+    if 'tier' in data:
+        new_tier = data['tier']
+        if new_tier in AgentLicense.TIER_LIMITS:
+            old_tier = license_obj.tier
+            license_obj.tier = new_tier
+            # Apply tier defaults if not explicitly set
+            tier_limits = AgentLicense.TIER_LIMITS[new_tier]
+            if 'max_agents' not in data:
+                license_obj.max_agents = tier_limits['max_agents']
+            if 'max_api_keys' not in data:
+                license_obj.max_api_keys = tier_limits['max_api_keys']
+            updated_fields.append(f'tier: {old_tier} -> {new_tier}')
+        else:
+            return jsonify({'error': f'Invalid tier: {new_tier}'}), 400
+
+    # Update limits
+    if 'max_agents' in data:
+        license_obj.max_agents = int(data['max_agents'])
+        updated_fields.append('max_agents')
+    if 'max_api_keys' in data:
+        license_obj.max_api_keys = int(data['max_api_keys'])
+        updated_fields.append('max_api_keys')
+
+    # Update status
+    if 'status' in data:
+        if data['status'] in ['active', 'trial', 'suspended', 'expired', 'grace_period']:
+            license_obj.status = data['status']
+            updated_fields.append('status')
+        else:
+            return jsonify({'error': f'Invalid status: {data["status"]}'}), 400
+
+    # Update billing
+    if 'billing_cycle' in data:
+        license_obj.billing_cycle = data['billing_cycle']
+        updated_fields.append('billing_cycle')
+
+    # Extend trial
+    if 'extend_trial_days' in data:
+        days = int(data['extend_trial_days'])
+        if license_obj.trial_ends_at:
+            license_obj.trial_ends_at = license_obj.trial_ends_at + timedelta(days=days)
+        else:
+            license_obj.trial_ends_at = datetime.utcnow() + timedelta(days=days)
+        updated_fields.append(f'trial extended by {days} days')
+
+    # Set grace period
+    if 'grace_period_days' in data:
+        days = int(data['grace_period_days'])
+        license_obj.grace_period_until = datetime.utcnow() + timedelta(days=days)
+        license_obj.status = 'grace_period'
+        updated_fields.append(f'grace period set for {days} days')
+
+    db.session.commit()
+    logger.info(f"License updated for org {org_id} by {user.username}: {updated_fields}")
+
+    return jsonify({
+        'status': 'success',
+        'message': f'License updated: {", ".join(updated_fields)}',
+        'license': license_obj.to_dict()
+    })
+
+
+@agent_bp.route('/api/admin/usage/<int:org_id>', methods=['GET'])
+def get_usage_history(org_id):
+    """
+    Get usage history for an organization.
+    Used for billing and analytics dashboards.
+    """
+    from app.auth import get_current_user
+    from datetime import date
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Check permission
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if org_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    # Get date range
+    days = request.args.get('days', 30, type=int)
+    start_date = date.today() - timedelta(days=days)
+
+    records = AgentUsageRecord.query.filter(
+        AgentUsageRecord.organization_id == org_id,
+        AgentUsageRecord.record_date >= start_date
+    ).order_by(AgentUsageRecord.record_date.asc()).all()
+
+    # Calculate totals
+    total_reports = sum(r.inventory_reports for r in records)
+    peak_agents = max((r.peak_agents for r in records), default=0)
+    total_new_agents = sum(r.new_agents for r in records)
+
+    return jsonify({
+        'organization_id': org_id,
+        'period_days': days,
+        'records': [r.to_dict() for r in records],
+        'summary': {
+            'total_inventory_reports': total_reports,
+            'peak_agents': peak_agents,
+            'total_new_agents': total_new_agents,
+            'average_daily_agents': round(sum(r.active_agents for r in records) / max(len(records), 1), 1)
+        }
+    })
+
+
+@agent_bp.route('/api/admin/events', methods=['GET'])
+def list_agent_events():
+    """
+    List agent events for audit trail.
+    Supports filtering by organization, event type, and date range.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Build query
+    query = AgentEvent.query
+
+    # Filter by organization
+    if user.is_super_admin():
+        org_id = request.args.get('organization_id', type=int)
+        if org_id:
+            query = query.filter_by(organization_id=org_id)
+    else:
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = query.filter(AgentEvent.organization_id.in_(user_org_ids))
+
+    # Filter by event type
+    event_type = request.args.get('event_type')
+    if event_type:
+        query = query.filter_by(event_type=event_type)
+
+    # Filter by asset
+    asset_id = request.args.get('asset_id', type=int)
+    if asset_id:
+        query = query.filter_by(asset_id=asset_id)
+
+    # Filter by date range
+    days = request.args.get('days', 7, type=int)
+    start_date = datetime.utcnow() - timedelta(days=days)
+    query = query.filter(AgentEvent.created_at >= start_date)
+
+    # Pagination
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 50, type=int), 100)
+
+    pagination = query.order_by(AgentEvent.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
+    return jsonify({
+        'events': [e.to_dict() for e in pagination.items],
+        'total': pagination.total,
+        'page': page,
+        'per_page': per_page,
+        'pages': pagination.pages
+    })
+
+
+@agent_bp.route('/api/admin/version-history', methods=['GET'])
+def list_version_history():
+    """
+    List version change history for products.
+    Useful for tracking software updates across the fleet.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    query = ProductVersionHistory.query
+
+    # Filter by organization (through asset)
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = query.join(Asset).filter(Asset.organization_id.in_(user_org_ids))
+
+    # Filter by product
+    product_id = request.args.get('product_id', type=int)
+    if product_id:
+        query = query.filter(ProductVersionHistory.product_id == product_id)
+
+    # Filter by asset
+    asset_id = request.args.get('asset_id', type=int)
+    if asset_id:
+        query = query.filter(ProductVersionHistory.asset_id == asset_id)
+
+    # Filter by change type
+    change_type = request.args.get('change_type')
+    if change_type:
+        query = query.filter(ProductVersionHistory.change_type == change_type)
+
+    # Filter by date range
+    days = request.args.get('days', 30, type=int)
+    start_date = datetime.utcnow() - timedelta(days=days)
+    query = query.filter(ProductVersionHistory.detected_at >= start_date)
+
+    # Pagination
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 50, type=int), 100)
+
+    pagination = query.order_by(ProductVersionHistory.detected_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
+    return jsonify({
+        'version_history': [vh.to_dict() for vh in pagination.items],
+        'total': pagination.total,
+        'page': page,
+        'per_page': per_page,
+        'pages': pagination.pages
+    })
+
+
+# ============================================================================
+# License Tier Definitions (for reference)
+# ============================================================================
+
+@agent_bp.route('/api/admin/license-tiers', methods=['GET'])
+def get_license_tiers():
+    """Get available license tiers and their limits."""
+    return jsonify({
+        'tiers': AgentLicense.TIER_LIMITS,
+        'description': {
+            'trial': 'Free 14-day trial with limited agents',
+            'starter': 'Small teams and single-site deployments',
+            'professional': 'Medium organizations with multiple sites',
+            'enterprise': 'Large organizations with extensive deployments',
+            'unlimited': 'Unlimited agents for enterprise customers'
+        }
+    })

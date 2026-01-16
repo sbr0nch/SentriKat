@@ -1371,3 +1371,403 @@ class InventoryJob(db.Model):
             InventoryJob.priority.asc(),
             InventoryJob.created_at.asc()
         ).first()
+
+
+# ============================================================================
+# AGENT LICENSING - Commercial pay-per-agent licensing system
+# ============================================================================
+
+class AgentLicense(db.Model):
+    """
+    Organization's agent license for pay-per-agent model.
+    Controls how many agents/assets an organization can deploy.
+
+    License tiers:
+    - trial: Limited agents, limited time
+    - starter: Small teams (up to 25 agents)
+    - professional: Medium deployments (up to 100 agents)
+    - enterprise: Large deployments (up to 500 agents)
+    - unlimited: No restrictions
+    """
+    __tablename__ = 'agent_licenses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, unique=True, index=True)
+
+    # License tier and limits
+    tier = db.Column(db.String(50), default='trial', nullable=False)  # trial, starter, professional, enterprise, unlimited
+    max_agents = db.Column(db.Integer, default=5, nullable=False)  # Max concurrent agents
+    max_api_keys = db.Column(db.Integer, default=2, nullable=False)  # Max API keys per org
+
+    # Current usage (cached, updated on agent changes)
+    current_agents = db.Column(db.Integer, default=0)  # Active agents count
+    peak_agents = db.Column(db.Integer, default=0)  # Peak usage in current period
+
+    # License status
+    status = db.Column(db.String(20), default='active', index=True)  # active, trial, suspended, expired, grace_period
+    grace_period_until = db.Column(db.DateTime, nullable=True)  # When grace period ends
+
+    # Billing information
+    billing_cycle = db.Column(db.String(20), default='monthly')  # monthly, annual
+    billing_start_date = db.Column(db.Date, nullable=True)
+    next_billing_date = db.Column(db.Date, nullable=True)
+
+    # Trial information
+    trial_started_at = db.Column(db.DateTime, nullable=True)
+    trial_ends_at = db.Column(db.DateTime, nullable=True)
+
+    # Feature flags (for tier-based features)
+    features = db.Column(db.Text, nullable=True)  # JSON: {"version_history": true, "priority_support": true}
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('agent_license', uselist=False))
+
+    # Tier definitions with limits
+    TIER_LIMITS = {
+        'trial': {'max_agents': 5, 'max_api_keys': 1, 'trial_days': 14},
+        'starter': {'max_agents': 25, 'max_api_keys': 3},
+        'professional': {'max_agents': 100, 'max_api_keys': 10},
+        'enterprise': {'max_agents': 500, 'max_api_keys': 50},
+        'unlimited': {'max_agents': 999999, 'max_api_keys': 999}
+    }
+
+    def get_features(self):
+        """Get enabled features as dict."""
+        if not self.features:
+            return {}
+        try:
+            return json.loads(self.features)
+        except:
+            return {}
+
+    def has_feature(self, feature_name):
+        """Check if a feature is enabled."""
+        features = self.get_features()
+        return features.get(feature_name, False)
+
+    def is_active(self):
+        """Check if license is active and valid."""
+        if self.status == 'expired':
+            return False
+        if self.status == 'suspended':
+            return False
+        if self.status == 'trial' and self.trial_ends_at:
+            if datetime.utcnow() > self.trial_ends_at:
+                return False
+        return True
+
+    def is_in_grace_period(self):
+        """Check if license is in grace period (over limit but allowed temporarily)."""
+        if not self.grace_period_until:
+            return False
+        return datetime.utcnow() < self.grace_period_until
+
+    def can_add_agent(self):
+        """Check if organization can add another agent."""
+        if not self.is_active():
+            return False, "License is not active"
+
+        if self.current_agents >= self.max_agents:
+            if self.is_in_grace_period():
+                return True, "In grace period - please upgrade soon"
+            return False, f"Agent limit reached ({self.current_agents}/{self.max_agents})"
+
+        return True, None
+
+    def get_usage_percent(self):
+        """Get current usage as percentage of limit."""
+        if self.max_agents == 0:
+            return 100
+        return round((self.current_agents / self.max_agents) * 100, 1)
+
+    def update_agent_count(self):
+        """Update current_agents count from database."""
+        from app.models import Asset
+        self.current_agents = Asset.query.filter_by(
+            organization_id=self.organization_id,
+            active=True
+        ).filter(Asset.status.in_(['online', 'offline'])).count()
+
+        # Update peak if needed
+        if self.current_agents > self.peak_agents:
+            self.peak_agents = self.current_agents
+
+        return self.current_agents
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'tier': self.tier,
+            'max_agents': self.max_agents,
+            'max_api_keys': self.max_api_keys,
+            'current_agents': self.current_agents,
+            'peak_agents': self.peak_agents,
+            'usage_percent': self.get_usage_percent(),
+            'status': self.status,
+            'is_active': self.is_active(),
+            'grace_period_until': self.grace_period_until.isoformat() if self.grace_period_until else None,
+            'billing_cycle': self.billing_cycle,
+            'next_billing_date': self.next_billing_date.isoformat() if self.next_billing_date else None,
+            'trial_ends_at': self.trial_ends_at.isoformat() if self.trial_ends_at else None,
+            'features': self.get_features(),
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class AgentUsageRecord(db.Model):
+    """
+    Daily usage records for billing and analytics.
+    Tracks agent count snapshots for accurate billing.
+    """
+    __tablename__ = 'agent_usage_records'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+
+    # Usage date (one record per day per org)
+    record_date = db.Column(db.Date, nullable=False, index=True)
+
+    # Counts at different points
+    active_agents = db.Column(db.Integer, default=0)  # Active agents at snapshot time
+    online_agents = db.Column(db.Integer, default=0)  # Agents that checked in today
+    new_agents = db.Column(db.Integer, default=0)  # New agents registered today
+    decommissioned_agents = db.Column(db.Integer, default=0)  # Agents decommissioned today
+
+    # Peak usage
+    peak_agents = db.Column(db.Integer, default=0)  # Peak count for the day
+
+    # Inventory stats
+    inventory_reports = db.Column(db.Integer, default=0)  # Number of inventory reports
+    products_discovered = db.Column(db.Integer, default=0)  # New products discovered
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Unique constraint: one record per org per day
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'record_date', name='uix_org_date'),
+    )
+
+    @staticmethod
+    def get_or_create_today(organization_id):
+        """Get or create today's usage record."""
+        today = date.today()
+        record = AgentUsageRecord.query.filter_by(
+            organization_id=organization_id,
+            record_date=today
+        ).first()
+
+        if not record:
+            record = AgentUsageRecord(
+                organization_id=organization_id,
+                record_date=today
+            )
+            db.session.add(record)
+            db.session.flush()
+
+        return record
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'record_date': self.record_date.isoformat() if self.record_date else None,
+            'active_agents': self.active_agents,
+            'online_agents': self.online_agents,
+            'new_agents': self.new_agents,
+            'decommissioned_agents': self.decommissioned_agents,
+            'peak_agents': self.peak_agents,
+            'inventory_reports': self.inventory_reports,
+            'products_discovered': self.products_discovered
+        }
+
+
+class AgentEvent(db.Model):
+    """
+    Audit log for agent lifecycle events.
+    Tracks all agent registrations, status changes, and decommissions.
+    Essential for billing disputes and security auditing.
+    """
+    __tablename__ = 'agent_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+    api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True)
+
+    # Event details
+    event_type = db.Column(db.String(50), nullable=False, index=True)
+    # Types: registered, inventory_reported, heartbeat, status_changed, decommissioned,
+    #        license_warning, license_exceeded, ip_blocked, auth_failed
+
+    # Event data
+    details = db.Column(db.Text, nullable=True)  # JSON with event-specific details
+    old_value = db.Column(db.String(200), nullable=True)  # For status changes
+    new_value = db.Column(db.String(200), nullable=True)
+
+    # Request context (for security audit)
+    source_ip = db.Column(db.String(45), nullable=True)
+    user_agent = db.Column(db.String(500), nullable=True)
+
+    # Timestamp
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('agent_events', lazy='dynamic'))
+    asset = db.relationship('Asset', backref=db.backref('events', lazy='dynamic'))
+    api_key = db.relationship('AgentApiKey', backref=db.backref('events', lazy='dynamic'))
+
+    def get_details(self):
+        """Get details as dict."""
+        if not self.details:
+            return {}
+        try:
+            return json.loads(self.details)
+        except:
+            return {}
+
+    @staticmethod
+    def log_event(organization_id, event_type, asset_id=None, api_key_id=None,
+                  details=None, old_value=None, new_value=None,
+                  source_ip=None, user_agent=None):
+        """Create a new event log entry."""
+        event = AgentEvent(
+            organization_id=organization_id,
+            asset_id=asset_id,
+            api_key_id=api_key_id,
+            event_type=event_type,
+            details=json.dumps(details) if details else None,
+            old_value=old_value,
+            new_value=new_value,
+            source_ip=source_ip,
+            user_agent=user_agent
+        )
+        db.session.add(event)
+        return event
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'api_key_id': self.api_key_id,
+            'event_type': self.event_type,
+            'details': self.get_details(),
+            'old_value': self.old_value,
+            'new_value': self.new_value,
+            'source_ip': self.source_ip,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class ProductVersionHistory(db.Model):
+    """
+    Tracks version changes for products installed on assets.
+    Allows tracking when software was updated/downgraded.
+    """
+    __tablename__ = 'product_version_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    installation_id = db.Column(db.Integer, db.ForeignKey('product_installations.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False, index=True)
+
+    # Version info
+    previous_version = db.Column(db.String(100), nullable=True)
+    new_version = db.Column(db.String(100), nullable=False)
+    change_type = db.Column(db.String(20), default='update')  # install, update, downgrade, reinstall
+
+    # Detection info
+    detected_by = db.Column(db.String(50), default='agent')  # agent, scan, manual
+    detected_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    installation = db.relationship('ProductInstallation', backref=db.backref('version_history', lazy='dynamic'))
+    asset = db.relationship('Asset', backref=db.backref('product_changes', lazy='dynamic'))
+    product = db.relationship('Product', backref=db.backref('version_changes', lazy='dynamic'))
+
+    @staticmethod
+    def record_change(installation_id, asset_id, product_id, old_version, new_version, detected_by='agent'):
+        """Record a version change."""
+        # Determine change type
+        if not old_version:
+            change_type = 'install'
+        elif old_version == new_version:
+            change_type = 'reinstall'
+        else:
+            # Simple version comparison (could be enhanced)
+            change_type = 'update'  # Could detect downgrade with proper version parsing
+
+        record = ProductVersionHistory(
+            installation_id=installation_id,
+            asset_id=asset_id,
+            product_id=product_id,
+            previous_version=old_version,
+            new_version=new_version,
+            change_type=change_type,
+            detected_by=detected_by
+        )
+        db.session.add(record)
+        return record
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'installation_id': self.installation_id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'product_id': self.product_id,
+            'product_name': f"{self.product.vendor} {self.product.product_name}" if self.product else None,
+            'previous_version': self.previous_version,
+            'new_version': self.new_version,
+            'change_type': self.change_type,
+            'detected_by': self.detected_by,
+            'detected_at': self.detected_at.isoformat() if self.detected_at else None
+        }
+
+
+class StaleAssetNotification(db.Model):
+    """
+    Tracks notifications sent for stale/offline agents.
+    Prevents notification spam while ensuring admins are alerted.
+    """
+    __tablename__ = 'stale_asset_notifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+
+    # Notification state
+    notification_type = db.Column(db.String(50), nullable=False)  # offline, stale, critical_offline
+    first_detected_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_notified_at = db.Column(db.DateTime, nullable=True)
+    notification_count = db.Column(db.Integer, default=0)
+
+    # Resolution
+    resolved = db.Column(db.Boolean, default=False, index=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    resolved_by = db.Column(db.String(50), nullable=True)  # auto, manual, agent_checkin
+
+    # Relationships
+    asset = db.relationship('Asset', backref=db.backref('stale_notifications', lazy='dynamic'))
+    organization = db.relationship('Organization')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'organization_id': self.organization_id,
+            'notification_type': self.notification_type,
+            'first_detected_at': self.first_detected_at.isoformat() if self.first_detected_at else None,
+            'last_notified_at': self.last_notified_at.isoformat() if self.last_notified_at else None,
+            'notification_count': self.notification_count,
+            'resolved': self.resolved,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None
+        }
