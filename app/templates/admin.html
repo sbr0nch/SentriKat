@@ -149,6 +149,7 @@
                             <th data-column="product" data-column-label="Product" data-sort-key="product" data-sort-type="string">Product</th>
                             <th data-column="vendor" data-column-label="Vendor" data-sort-key="vendor" data-sort-type="string">Vendor</th>
                             <th data-column="version" data-column-label="Version" data-sort-key="version" data-sort-type="string">Version</th>
+                            <th data-column="platform" data-column-label="Platform" data-sort-key="platform" data-sort-type="string">Platform</th>
                             <th data-column="organization" data-column-label="Organization" data-sort-key="organization" data-sort-type="string">Organization</th>
                             <th data-column="criticality" data-column-label="Criticality" data-sort-key="criticality" data-sort-type="priority">Criticality</th>
                             <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="boolean">Status</th>
@@ -157,7 +158,7 @@
                     </thead>
                     <tbody id="productsTable">
                         <tr>
-                            <td colspan="8" class="text-center py-4">
+                            <td colspan="9" class="text-center py-4">
                                 <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
@@ -736,6 +737,11 @@
                             <td data-column="product" class="fw-semibold">${escapeHtml(product.product_name)}</td>
                             <td data-column="vendor">${escapeHtml(product.vendor)}</td>
                             <td data-column="version">${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
+                            <td data-column="platform">${product.platforms && product.platforms.length > 0 ? product.platforms.map(p => {
+                                const icon = p === 'Windows' ? 'bi-windows' : (p === 'Linux' ? 'bi-ubuntu' : (p === 'macOS' ? 'bi-apple' : 'bi-pc-display'));
+                                const color = p === 'Windows' ? 'primary' : (p === 'Linux' ? 'warning' : (p === 'macOS' ? 'secondary' : 'info'));
+                                return `<span class="badge bg-${color}" title="${escapeHtml(p)}"><i class="bi ${icon}"></i></span>`;
+                            }).join(' ') : '<span class="text-muted">-</span>'}</td>
                             <td data-column="organization">${orgDisplay}</td>
                             <td data-column="criticality">${criticalityBadge}</td>
                             <td data-column="status">${statusBadge}</td>
@@ -762,7 +768,7 @@
         } catch (error) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="text-center text-danger py-4">
+                    <td colspan="9" class="text-center text-danger py-4">
                         <i class="bi bi-exclamation-triangle"></i> Error loading products: ${error.message}
                     </td>
                 </tr>

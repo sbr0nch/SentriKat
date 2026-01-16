@@ -328,6 +328,13 @@ class Product(db.Model):
         # Get effective CPE (product-level or from catalog)
         eff_cpe_vendor, eff_cpe_product, eff_cpe_uri = self.get_effective_cpe()
 
+        # Get platforms from installations (lightweight query)
+        platforms = db.session.query(ProductInstallation.detected_on_os).filter(
+            ProductInstallation.product_id == self.id,
+            ProductInstallation.detected_on_os.isnot(None)
+        ).distinct().all()
+        platform_list = sorted(set(p[0] for p in platforms if p[0]))
+
         result = {
             'id': self.id,
             'organization_id': self.organization_id,  # Legacy field
@@ -340,6 +347,7 @@ class Product(db.Model):
             'description': self.description,
             'active': self.active,
             'criticality': self.criticality,
+            'platforms': platform_list,  # OS platforms detected on (Windows, Linux, macOS)
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             # CPE fields

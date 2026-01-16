@@ -52,6 +52,75 @@ csrf.exempt(agent_bp)  # Agents use API keys, not CSRF
 
 
 # ============================================================================
+# Software Filtering - Skip irrelevant/bloatware products
+# ============================================================================
+
+# Vendors to completely skip (case-insensitive)
+SKIP_VENDORS = {
+    'microsoft corporation',  # Windows built-in components
+    'microsoft windows',
+}
+
+# Vendor+product patterns to skip (regex, case-insensitive)
+SKIP_PATTERNS = [
+    # Windows components that won't have KEV entries
+    (r'microsoft', r'(windows|update|\.net|visual c\+\+|edge webview|onedrive|teams|store|app installer)'),
+    (r'microsoft', r'(vc\+\+|vcredist|runtime|redistributable)'),
+    # Language packs and fonts
+    (r'.*', r'.*(language pack|language feature|font|handwriting|ocr|speech|text-to-speech).*'),
+    # Windows Store apps
+    (r'.*', r'.*(appx|uwp|store app|windowsapps).*'),
+    # Driver packages (usually vendor-specific, not in KEV)
+    (r'.*', r'.*(driver|device software).*'),
+    # Help files and documentation
+    (r'.*', r'.*(help|documentation|manual|readme).*'),
+]
+
+# Exact product names to skip (case-insensitive)
+SKIP_PRODUCTS = {
+    'windows installer',
+    'windows sdk',
+    'windows kits',
+    'windows software development kit',
+    'microsoft update health tools',
+    'update for windows',
+    'security update',
+    'cumulative update',
+    'feature update',
+}
+
+
+def _should_skip_software(vendor: str, product_name: str) -> bool:
+    """
+    Check if software should be skipped (not added to inventory).
+    Filters out Windows bloat and irrelevant software that won't have KEV vulnerabilities.
+
+    Returns True if the software should be skipped.
+    """
+    if not vendor or not product_name:
+        return True
+
+    vendor_lower = vendor.lower().strip()
+    product_lower = product_name.lower().strip()
+
+    # Check exact vendor skip list
+    if vendor_lower in SKIP_VENDORS:
+        return True
+
+    # Check exact product skip list
+    if product_lower in SKIP_PRODUCTS:
+        return True
+
+    # Check regex patterns
+    for vendor_pattern, product_pattern in SKIP_PATTERNS:
+        if re.match(vendor_pattern, vendor_lower, re.IGNORECASE):
+            if re.search(product_pattern, product_lower, re.IGNORECASE):
+                return True
+
+    return False
+
+
+# ============================================================================
 # Rate Limiting Functions
 # ============================================================================
 
@@ -657,6 +726,11 @@ def process_inventory_job(job):
 
                 if not vendor or not product_name:
                     items_failed += 1
+                    continue
+
+                # Skip common Windows bloat and irrelevant software
+                if _should_skip_software(vendor, product_name):
+                    items_processed += 1
                     continue
 
                 # Find or create product
