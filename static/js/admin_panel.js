@@ -5194,7 +5194,7 @@ async function loadAgentKeys() {
         if (keys.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="text-center py-4 text-muted">
+                    <td colspan="7" class="text-center py-4 text-muted">
                         <i class="bi bi-key" style="font-size: 2rem;"></i>
                         <p class="mt-2 mb-0">No agent API keys configured</p>
                         <p class="small">Create an API key to download agents with embedded authentication</p>
@@ -5209,6 +5209,11 @@ async function loadAgentKeys() {
                         <br><small class="text-muted font-monospace">${escapeHtml(key.key_prefix || '')}...</small>
                     </td>
                     <td>${escapeHtml(key.organization_name || 'Unknown')}</td>
+                    <td>
+                        ${key.auto_approve
+                            ? '<span class="badge bg-success" title="Products are added directly to inventory"><i class="bi bi-check-circle me-1"></i>Auto</span>'
+                            : '<span class="badge bg-info" title="Products go to Import Queue for review"><i class="bi bi-inbox me-1"></i>Queue</span>'}
+                    </td>
                     <td>${key.last_used_at ? formatRelativeTime(key.last_used_at) : '<span class="text-muted">Never</span>'}</td>
                     <td>
                         <span class="badge bg-secondary">${key.usage_count || 0}</span>
@@ -5235,7 +5240,7 @@ async function loadAgentKeys() {
         console.error('Error loading agent keys:', error);
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="text-center py-4 text-danger">
+                <td colspan="7" class="text-center py-4 text-danger">
                     <i class="bi bi-exclamation-triangle"></i>
                     <span class="ms-2">Error loading agent keys: ${error.message}</span>
                 </td>
@@ -5278,6 +5283,7 @@ async function createAgentKey() {
     const orgId = document.getElementById('agentKeyOrg').value;
     const maxAssets = parseInt(document.getElementById('agentKeyMaxAssets').value) || 0;
     const expiresAt = document.getElementById('agentKeyExpires').value || null;
+    const autoApprove = document.getElementById('agentKeyAutoApprove')?.checked || false;
 
     if (!name) {
         showToast('Please enter a key name', 'warning');
@@ -5297,7 +5303,8 @@ async function createAgentKey() {
                 name,
                 organization_id: parseInt(orgId),
                 max_assets: maxAssets,
-                expires_at: expiresAt
+                expires_at: expiresAt,
+                auto_approve: autoApprove
             })
         });
 

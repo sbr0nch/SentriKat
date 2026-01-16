@@ -797,6 +797,7 @@
                                         <tr>
                                             <th>Name / Key Prefix</th>
                                             <th>Organization</th>
+                                            <th>Mode</th>
                                             <th>Last Used</th>
                                             <th>Usage</th>
                                             <th>Expires</th>
@@ -805,7 +806,7 @@
                                     </thead>
                                     <tbody id="agentKeysTableBody">
                                         <tr>
-                                            <td colspan="6" class="text-center py-4">
+                                            <td colspan="7" class="text-center py-4">
                                                 <div class="spinner-border spinner-border-sm text-primary"></div>
                                                 <span class="ms-2">Loading agent keys...</span>
                                             </td>
@@ -2116,6 +2117,20 @@
                         <label for="agentKeyExpires" class="form-label fw-semibold">Expires</label>
                         <input type="date" class="form-control" id="agentKeyExpires">
                         <small class="text-muted">Leave empty for no expiration</small>
+                    </div>
+                    <hr>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="agentKeyAutoApprove">
+                            <label class="form-check-label fw-semibold" for="agentKeyAutoApprove">
+                                Auto-approve new products
+                            </label>
+                        </div>
+                        <small class="text-muted d-block mt-1">
+                            <i class="bi bi-info-circle me-1"></i>
+                            When enabled, software reported by agents using this key will be added directly to your inventory.
+                            When disabled, new products go to the Import Queue for manual review first.
+                        </small>
                     </div>
                 </form>
             </div>

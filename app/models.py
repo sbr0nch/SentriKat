@@ -1337,6 +1337,7 @@ class AgentApiKey(db.Model):
     active = db.Column(db.Boolean, default=True, index=True)
     max_assets = db.Column(db.Integer, nullable=True)  # NULL = unlimited
     allowed_ips = db.Column(db.Text, nullable=True)  # JSON array of allowed IPs/CIDRs
+    auto_approve = db.Column(db.Boolean, default=False)  # Auto-add products without Import Queue review
 
     # Usage tracking
     last_used_at = db.Column(db.DateTime, nullable=True)
@@ -1384,11 +1385,13 @@ class AgentApiKey(db.Model):
         result = {
             'id': self.id,
             'organization_id': self.organization_id,
+            'organization_name': self.organization.display_name if self.organization else None,
             'name': self.name,
             'key_prefix': self.key_prefix,
             'active': self.active,
             'max_assets': self.max_assets,
             'allowed_ips': self.get_allowed_ips(),
+            'auto_approve': self.auto_approve,
             'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
             'usage_count': self.usage_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,

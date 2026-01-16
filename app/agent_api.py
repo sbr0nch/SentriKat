@@ -1635,6 +1635,7 @@ def create_agent_key():
         key_hash=key_hash,
         key_prefix=key_prefix,
         max_assets=data.get('max_assets'),
+        auto_approve=data.get('auto_approve', False),  # Auto-add products without Import Queue
         created_by=user.id
     )
 
