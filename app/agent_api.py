@@ -109,39 +109,61 @@ def _background_job_worker(app):
     """
     Background worker thread that processes pending inventory jobs.
     Runs continuously until stop event is set.
+
+    IMPORTANT: Each iteration creates a fresh database session to avoid
+    stale connection issues (psycopg2 connection pool problems).
     """
     logger.info("Background job worker started")
 
-    with app.app_context():
-        while not _worker_stop_event.is_set():
-            try:
-                # Get next pending job
-                job = InventoryJob.get_next_pending()
+    while not _worker_stop_event.is_set():
+        try:
+            # Create fresh app context for each iteration to avoid stale connections
+            with app.app_context():
+                try:
+                    # Get next pending job
+                    job = InventoryJob.get_next_pending()
 
-                if job:
-                    logger.info(f"Background worker processing job {job.id}")
-                    try:
-                        success = process_inventory_job(job)
-                        if success:
-                            logger.info(f"Background worker completed job {job.id}")
-                        else:
-                            logger.warning(f"Background worker: job {job.id} failed")
-                    except Exception as e:
-                        logger.error(f"Background worker error processing job {job.id}: {e}", exc_info=True)
-                        # Mark job as failed
+                    if job:
+                        job_id = job.id  # Store ID before processing
+                        logger.info(f"Background worker processing job {job_id}")
                         try:
-                            job.status = 'failed'
-                            job.error_message = str(e)
-                            job.completed_at = datetime.utcnow()
-                            db.session.commit()
-                        except:
-                            db.session.rollback()
-                else:
-                    # No pending jobs, sleep before checking again
-                    _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
+                            success = process_inventory_job(job)
+                            if success:
+                                logger.info(f"Background worker completed job {job_id}")
+                            else:
+                                logger.warning(f"Background worker: job {job_id} failed")
+                        except Exception as e:
+                            logger.error(f"Background worker error processing job {job_id}: {e}", exc_info=True)
+                            # Mark job as failed - refetch to avoid stale object
+                            try:
+                                job = InventoryJob.query.get(job_id)
+                                if job:
+                                    job.status = 'failed'
+                                    job.error_message = str(e)[:500]  # Truncate long errors
+                                    job.completed_at = datetime.utcnow()
+                                    db.session.commit()
+                            except Exception as commit_err:
+                                logger.error(f"Failed to mark job {job_id} as failed: {commit_err}")
+                                db.session.rollback()
+                    else:
+                        # No pending jobs, sleep before checking again
+                        pass  # Will sleep after context exits
 
-            except Exception as e:
-                logger.error(f"Background worker unexpected error: {e}", exc_info=True)
+                finally:
+                    # Always clean up session to prevent connection leaks
+                    try:
+                        db.session.remove()
+                    except Exception:
+                        pass
+
+            # Sleep outside the app context to allow connection cleanup
+            if not _worker_stop_event.is_set():
+                _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
+
+        except Exception as e:
+            logger.error(f"Background worker unexpected error: {e}", exc_info=True)
+            # Sleep before retrying on error
+            if not _worker_stop_event.is_set():
                 _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
 
     logger.info("Background job worker stopped")
@@ -291,8 +313,13 @@ def process_inventory_job(job):
     """
     Process a queued inventory job.
     Called by background worker.
+
+    Session management:
+    - Commits in batches of 50 to avoid holding locks too long
+    - Uses explicit rollback on errors to ensure clean state
     """
-    logger.info(f"=== Processing inventory job {job.id} ===")
+    job_id = job.id  # Store ID to avoid stale reference issues
+    logger.info(f"=== Processing inventory job {job_id} ===")
 
     try:
         job.status = 'processing'
@@ -301,16 +328,20 @@ def process_inventory_job(job):
 
         payload = json.loads(job.payload)
         products = payload.get('products', [])
-        logger.info(f"Job {job.id}: Loaded {len(products)} products from payload")
+        logger.info(f"Job {job_id}: Loaded {len(products)} products from payload")
 
-        asset = Asset.query.get(job.asset_id)
-        organization = Organization.query.get(job.organization_id)
+        # Store IDs for reference
+        asset_id = job.asset_id
+        org_id = job.organization_id
 
-        logger.info(f"Job {job.id}: Asset={asset.hostname if asset else 'None'}, "
+        asset = Asset.query.get(asset_id)
+        organization = Organization.query.get(org_id)
+
+        logger.info(f"Job {job_id}: Asset={asset.hostname if asset else 'None'}, "
                     f"Org={organization.name if organization else 'None'}")
 
         if not asset:
-            logger.error(f"Job {job.id}: Asset {job.asset_id} not found")
+            logger.error(f"Job {job_id}: Asset {asset_id} not found")
             job.status = 'failed'
             job.error_message = 'Asset not found'
             job.completed_at = datetime.utcnow()
@@ -318,7 +349,7 @@ def process_inventory_job(job):
             return False
 
         if not organization:
-            logger.error(f"Job {job.id}: Organization {job.organization_id} not found")
+            logger.error(f"Job {job_id}: Organization {org_id} not found")
             job.status = 'failed'
             job.error_message = 'Organization not found'
             job.completed_at = datetime.utcnow()
@@ -330,6 +361,7 @@ def process_inventory_job(job):
         installations_created = 0
         installations_updated = 0
         items_failed = 0
+        items_processed = 0
 
         for product_data in products:
             try:
@@ -388,41 +420,65 @@ def process_inventory_job(job):
                     installation.last_seen_at = datetime.utcnow()
                     installations_updated += 1
 
-                job.items_processed += 1
+                items_processed += 1
 
-                # Commit in batches of 50
-                if job.items_processed % 50 == 0:
+                # Commit in batches of 50 to avoid holding locks too long
+                if items_processed % 50 == 0:
+                    # Update job progress before commit
+                    job.items_processed = items_processed
                     db.session.commit()
+                    logger.debug(f"Job {job_id}: Committed batch at {items_processed} items")
 
             except Exception as e:
                 items_failed += 1
-                logger.warning(f"Error processing product in job {job.id}: {e}")
+                logger.warning(f"Error processing product in job {job_id}: {e}")
+                # Rollback the failed item but continue processing
+                try:
+                    db.session.rollback()
+                    # Re-fetch objects after rollback
+                    job = InventoryJob.query.get(job_id)
+                    asset = Asset.query.get(asset_id)
+                    organization = Organization.query.get(org_id)
+                except Exception:
+                    pass
 
         # Update asset inventory timestamp
-        asset.last_inventory_at = datetime.utcnow()
+        asset = Asset.query.get(asset_id)  # Re-fetch to ensure fresh object
+        if asset:
+            asset.last_inventory_at = datetime.utcnow()
 
-        # Finalize job
-        job.status = 'completed'
-        job.completed_at = datetime.utcnow()
-        job.items_created = products_created + installations_created
-        job.items_updated = products_updated + installations_updated
-        job.items_failed = items_failed
-        db.session.commit()
+        # Finalize job - re-fetch to ensure fresh object
+        job = InventoryJob.query.get(job_id)
+        if job:
+            job.status = 'completed'
+            job.completed_at = datetime.utcnow()
+            job.items_processed = items_processed
+            job.items_created = products_created + installations_created
+            job.items_updated = products_updated + installations_updated
+            job.items_failed = items_failed
+            db.session.commit()
 
         logger.info(
-            f"Completed inventory job {job.id}: "
+            f"Completed inventory job {job_id}: "
             f"{products_created} products created, {products_updated} updated, "
             f"{installations_created} installations created, {installations_updated} updated"
         )
         return True
 
     except Exception as e:
-        db.session.rollback()
-        job.status = 'failed'
-        job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
-        db.session.commit()
-        logger.error(f"Error processing inventory job {job.id}: {e}", exc_info=True)
+        logger.error(f"Error processing inventory job {job_id}: {e}", exc_info=True)
+        try:
+            db.session.rollback()
+            # Re-fetch job and mark as failed
+            job = InventoryJob.query.get(job_id)
+            if job:
+                job.status = 'failed'
+                job.error_message = str(e)[:500]
+                job.completed_at = datetime.utcnow()
+                db.session.commit()
+        except Exception as commit_err:
+            logger.error(f"Failed to mark job {job_id} as failed: {commit_err}")
+            db.session.rollback()
         return False
 
 
