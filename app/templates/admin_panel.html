@@ -1439,7 +1439,7 @@
                     <div class="card mt-4" id="backupRestoreCard">
                         <div class="card-header">
                             <i class="bi bi-cloud-download me-2"></i>Backup & Restore
-                            <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
+                            {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>{% endif %}
                         </div>
                         <div class="card-body">
                             <div class="alert alert-warning">

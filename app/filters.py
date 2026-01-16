@@ -376,12 +376,16 @@ def rematch_all_products():
 
 def get_filtered_vulnerabilities(filters=None):
     """Get vulnerabilities filtered by various criteria"""
+    from app.models import product_organizations
+
     query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product)
 
     if filters:
-        # Filter by organization
+        # Filter by organization using multi-org relationship
         if filters.get('organization_id'):
-            query = query.filter(Product.organization_id == filters['organization_id'])
+            query = query.join(
+                product_organizations, Product.id == product_organizations.c.product_id
+            ).filter(product_organizations.c.organization_id == filters['organization_id'])
 
         # Filter by product ID
         if filters.get('product_id'):

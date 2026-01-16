@@ -506,6 +506,47 @@
         </div>
     </div>
 </div>
+
+<!-- Admin Tools Result Modal -->
+<div class="modal fade" id="adminResultModal" tabindex="-1" aria-labelledby="adminResultModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="adminResultModalLabel">
+                    <i class="bi bi-info-circle me-2" id="adminResultIcon"></i>
+                    <span id="adminResultTitle">Result</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="adminResultBody">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Admin Tools Confirm Modal -->
+<div class="modal fade" id="adminConfirmModal" tabindex="-1" aria-labelledby="adminConfirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="adminConfirmModalLabel">
+                    <i class="bi bi-question-circle me-2 text-warning"></i>
+                    <span id="adminConfirmTitle">Confirm Action</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="adminConfirmBody">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="adminConfirmOk">Proceed</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -2520,57 +2561,154 @@
         document.getElementById('matchType').value = product.match_type || 'auto';
     }
 
-    // Admin Tools Functions
-    async function applyCpeMappings() {
-        if (!confirm('Apply CPE auto-mappings to all products without CPE identifiers?\n\nThis will improve vulnerability matching accuracy.')) {
-            return;
+    // Admin Tools Modal Functions
+    function showAdminResult(title, body, type = 'success') {
+        const modal = document.getElementById('adminResultModal');
+        const icon = document.getElementById('adminResultIcon');
+        const titleEl = document.getElementById('adminResultTitle');
+        const bodyEl = document.getElementById('adminResultBody');
+
+        titleEl.textContent = title;
+        bodyEl.innerHTML = body;
+
+        // Set icon based on type
+        icon.className = 'bi me-2';
+        if (type === 'success') {
+            icon.classList.add('bi-check-circle-fill', 'text-success');
+        } else if (type === 'error') {
+            icon.classList.add('bi-exclamation-triangle-fill', 'text-danger');
+        } else {
+            icon.classList.add('bi-info-circle-fill', 'text-info');
         }
 
-        try {
-            const response = await fetch('/api/products/apply-cpe', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': document.querySelector('meta[name="csrf-token"]')?.content || ''
-                }
-            });
-            const data = await response.json();
-
-            if (data.status === 'success') {
-                alert(`CPE Mappings Applied!\n\nUpdated: ${data.updated} products\nCoverage: ${data.coverage.coverage_percent}% (${data.coverage.with_cpe}/${data.coverage.total_products})`);
-                loadProducts();
-            } else {
-                alert('Error: ' + data.message);
-            }
-        } catch (error) {
-            alert('Error applying CPE mappings: ' + error.message);
-        }
+        const bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
     }
 
-    async function rematchProducts() {
-        if (!confirm('Re-run vulnerability matching with current logic?\n\nThis will remove invalid matches and add new valid ones.')) {
-            return;
-        }
+    function showAdminConfirm(title, body, onConfirm) {
+        const modal = document.getElementById('adminConfirmModal');
+        const titleEl = document.getElementById('adminConfirmTitle');
+        const bodyEl = document.getElementById('adminConfirmBody');
+        const okBtn = document.getElementById('adminConfirmOk');
 
-        try {
-            const response = await fetch('/api/products/rematch', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': document.querySelector('meta[name="csrf-token"]')?.content || ''
+        titleEl.textContent = title;
+        bodyEl.innerHTML = body;
+
+        const bsModal = new bootstrap.Modal(modal);
+
+        // Remove old event listeners
+        const newOkBtn = okBtn.cloneNode(true);
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+
+        newOkBtn.addEventListener('click', () => {
+            bsModal.hide();
+            onConfirm();
+        });
+
+        bsModal.show();
+    }
+
+    // Admin Tools Functions
+    function applyCpeMappings() {
+        showAdminConfirm(
+            'Apply CPE Mappings',
+            `<p>This will apply CPE auto-mappings to all products without CPE identifiers.</p>
+             <p class="mb-0 text-muted"><i class="bi bi-info-circle me-1"></i>CPE mappings improve vulnerability matching accuracy by using standardized product identifiers.</p>`,
+            async () => {
+                try {
+                    const response = await fetch('/api/products/apply-cpe', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                        }
+                    });
+                    const data = await response.json();
+
+                    if (data.status === 'success') {
+                        showAdminResult('CPE Mappings Applied', `
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-check-circle-fill text-success fs-1 me-3"></i>
+                                <div>
+                                    <h5 class="mb-1">Successfully Updated</h5>
+                                    <p class="mb-0 text-muted">${data.updated} products now have CPE identifiers</p>
+                                </div>
+                            </div>
+                            <div class="bg-light rounded p-3">
+                                <div class="row text-center">
+                                    <div class="col-4">
+                                        <div class="fs-4 fw-bold text-primary">${data.coverage.total_products}</div>
+                                        <small class="text-muted">Total Products</small>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="fs-4 fw-bold text-success">${data.coverage.with_cpe}</div>
+                                        <small class="text-muted">With CPE</small>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="fs-4 fw-bold text-info">${data.coverage.coverage_percent}%</div>
+                                        <small class="text-muted">Coverage</small>
+                                    </div>
+                                </div>
+                            </div>
+                        `, 'success');
+                        loadProducts();
+                    } else {
+                        showAdminResult('Error', `<p class="text-danger">${data.message}</p>`, 'error');
+                    }
+                } catch (error) {
+                    showAdminResult('Error', `<p class="text-danger">Failed to apply CPE mappings: ${error.message}</p>`, 'error');
                 }
-            });
-            const data = await response.json();
-
-            if (data.status === 'success') {
-                alert(`Vulnerability Rematch Complete!\n\nRemoved: ${data.removed} invalid matches\nAdded: ${data.added} new matches`);
-                loadProducts();
-            } else {
-                alert('Error: ' + data.message);
             }
-        } catch (error) {
-            alert('Error rematching: ' + error.message);
-        }
+        );
+    }
+
+    function rematchProducts() {
+        showAdminConfirm(
+            'Rematch Vulnerabilities',
+            `<p>This will re-run vulnerability matching with the current logic.</p>
+             <p class="mb-0 text-muted"><i class="bi bi-info-circle me-1"></i>Invalid matches will be removed and new valid matches will be added.</p>`,
+            async () => {
+                try {
+                    const response = await fetch('/api/products/rematch', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                        }
+                    });
+                    const data = await response.json();
+
+                    if (data.status === 'success') {
+                        showAdminResult('Vulnerability Rematch Complete', `
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-arrow-repeat text-primary fs-1 me-3"></i>
+                                <div>
+                                    <h5 class="mb-1">Matching Complete</h5>
+                                    <p class="mb-0 text-muted">Vulnerability matches have been updated</p>
+                                </div>
+                            </div>
+                            <div class="bg-light rounded p-3">
+                                <div class="row text-center">
+                                    <div class="col-6">
+                                        <div class="fs-4 fw-bold text-danger">${data.removed}</div>
+                                        <small class="text-muted">Removed Invalid</small>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="fs-4 fw-bold text-success">${data.added}</div>
+                                        <small class="text-muted">Added New</small>
+                                    </div>
+                                </div>
+                            </div>
+                        `, 'success');
+                        loadProducts();
+                    } else {
+                        showAdminResult('Error', `<p class="text-danger">${data.message}</p>`, 'error');
+                    }
+                } catch (error) {
+                    showAdminResult('Error', `<p class="text-danger">Failed to rematch: ${error.message}</p>`, 'error');
+                }
+            }
+        );
     }
 
     async function showCpeCoverage() {
@@ -2579,19 +2717,48 @@
             const data = await response.json();
 
             if (data.status === 'success') {
-                let msg = `CPE Coverage Statistics\n\nTotal Products: ${data.coverage.total_products}\nWith CPE: ${data.coverage.with_cpe}\nWithout CPE: ${data.coverage.without_cpe}\nCoverage: ${data.coverage.coverage_percent}%`;
-
+                let suggestionsHtml = '';
                 if (data.suggestions.length > 0) {
-                    msg += `\n\nSuggested CPE mappings available for ${data.suggestions.length} products.`;
-                    msg += '\nUse "Apply CPE Mappings" to auto-apply these.';
+                    suggestionsHtml = `
+                        <div class="alert alert-info mt-3 mb-0">
+                            <i class="bi bi-lightbulb me-2"></i>
+                            <strong>${data.suggestions.length} products</strong> can be auto-mapped to CPE identifiers.
+                            <br><small>Use "Apply CPE Mappings" to automatically apply these.</small>
+                        </div>
+                    `;
                 }
 
-                alert(msg);
+                showAdminResult('CPE Coverage Statistics', `
+                    <div class="bg-light rounded p-3 mb-3">
+                        <div class="row text-center">
+                            <div class="col-3">
+                                <div class="fs-4 fw-bold text-primary">${data.coverage.total_products}</div>
+                                <small class="text-muted">Total</small>
+                            </div>
+                            <div class="col-3">
+                                <div class="fs-4 fw-bold text-success">${data.coverage.with_cpe}</div>
+                                <small class="text-muted">With CPE</small>
+                            </div>
+                            <div class="col-3">
+                                <div class="fs-4 fw-bold text-warning">${data.coverage.without_cpe}</div>
+                                <small class="text-muted">Without CPE</small>
+                            </div>
+                            <div class="col-3">
+                                <div class="fs-4 fw-bold text-info">${data.coverage.coverage_percent}%</div>
+                                <small class="text-muted">Coverage</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="progress" style="height: 20px;">
+                        <div class="progress-bar bg-success" style="width: ${data.coverage.coverage_percent}%">${data.coverage.coverage_percent}%</div>
+                    </div>
+                    ${suggestionsHtml}
+                `, 'info');
             } else {
-                alert('Error: ' + data.message);
+                showAdminResult('Error', `<p class="text-danger">${data.message}</p>`, 'error');
             }
         } catch (error) {
-            alert('Error getting CPE stats: ' + error.message);
+            showAdminResult('Error', `<p class="text-danger">Failed to get CPE stats: ${error.message}</p>`, 'error');
         }
     }
 

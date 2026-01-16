@@ -182,7 +182,9 @@ def admin_panel():
     - super_admin: Full access to all tabs
     - org_admin: Limited access (users in their org, LDAP, SMTP/Sync settings only)
     """
-    return render_template('admin_panel.html')
+    from app.licensing import get_license
+    license_info = get_license()
+    return render_template('admin_panel.html', license=license_info)
 
 # API Endpoints
 
@@ -811,6 +813,8 @@ def get_vulnerabilities():
 @login_required
 def get_vulnerability_stats():
     """Get vulnerability statistics with priority breakdown for current organization"""
+    from app.models import product_organizations
+
     # Get current organization
     org_id = session.get('organization_id')
     if not org_id:
@@ -819,19 +823,44 @@ def get_vulnerability_stats():
 
     total_vulns = Vulnerability.query.count()
 
-    # Filter matches by organization
-    total_matches_query = db.session.query(VulnerabilityMatch).join(Product)
-    unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).filter(VulnerabilityMatch.acknowledged == False)
-    ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).filter(Vulnerability.known_ransomware == True)
-
+    # Filter matches by organization using multi-org relationship
     if org_id:
-        total_matches_query = total_matches_query.filter(Product.organization_id == org_id)
-        unacknowledged_query = unacknowledged_query.filter(Product.organization_id == org_id)
-        ransomware_query = ransomware_query.filter(Product.organization_id == org_id)
+        # Join through product_organizations junction table
+        total_matches_query = db.session.query(VulnerabilityMatch).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(product_organizations.c.organization_id == org_id)
+
+        unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            product_organizations.c.organization_id == org_id,
+            VulnerabilityMatch.acknowledged == False
+        )
+
+        ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            product_organizations.c.organization_id == org_id,
+            Vulnerability.known_ransomware == True
+        )
+
+        products_tracked_query = db.session.query(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            product_organizations.c.organization_id == org_id,
+            Product.active == True
+        )
+    else:
+        # No org filter - show all
+        total_matches_query = db.session.query(VulnerabilityMatch).join(Product)
+        unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).filter(VulnerabilityMatch.acknowledged == False)
+        ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).filter(Vulnerability.known_ransomware == True)
+        products_tracked_query = Product.query.filter_by(active=True)
 
     total_matches = total_matches_query.count()
     unacknowledged = unacknowledged_query.count()
     ransomware = ransomware_query.count()
+    products_tracked = products_tracked_query.count()
 
     # Calculate priority-based stats
     all_matches = unacknowledged_query.all()
@@ -840,12 +869,6 @@ def get_vulnerability_stats():
     for match in all_matches:
         priority = match.calculate_effective_priority()
         priority_counts[priority] = priority_counts.get(priority, 0) + 1
-
-    # Products tracked for this org
-    products_tracked_query = Product.query.filter_by(active=True)
-    if org_id:
-        products_tracked_query = products_tracked_query.filter_by(organization_id=org_id)
-    products_tracked = products_tracked_query.count()
 
     return jsonify({
         'total_vulnerabilities': total_vulns,
