@@ -360,6 +360,72 @@ class Product(db.Model):
 
         return result
 
+
+class ProductExclusion(db.Model):
+    """
+    Products excluded from agent scanning.
+    When a product is deleted with "exclude from future scans", it's added here.
+    Agents check this list before adding products to prevent re-adding deleted items.
+    """
+    __tablename__ = 'product_exclusions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    vendor = db.Column(db.String(200), nullable=False, index=True)
+    product_name = db.Column(db.String(200), nullable=False, index=True)
+    version = db.Column(db.String(100), nullable=True)  # NULL = exclude all versions
+    reason = db.Column(db.Text, nullable=True)  # Why this was excluded
+    excluded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Unique constraint: one exclusion per vendor/product/version per org
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'vendor', 'product_name', 'version', name='unique_product_exclusion'),
+    )
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('product_exclusions', lazy='dynamic'))
+    excluded_by_user = db.relationship('User', backref='product_exclusions_created')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'vendor': self.vendor,
+            'product_name': self.product_name,
+            'version': self.version,
+            'reason': self.reason,
+            'excluded_by': self.excluded_by_user.username if self.excluded_by_user else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+    @staticmethod
+    def is_excluded(organization_id, vendor, product_name, version=None):
+        """
+        Check if a product is excluded for an organization.
+        Checks for exact match first, then version-agnostic exclusion.
+        """
+        # Check exact match with version
+        if version:
+            exact = ProductExclusion.query.filter_by(
+                organization_id=organization_id,
+                vendor=vendor,
+                product_name=product_name,
+                version=version
+            ).first()
+            if exact:
+                return True
+
+        # Check version-agnostic exclusion (version=NULL means all versions)
+        any_version = ProductExclusion.query.filter_by(
+            organization_id=organization_id,
+            vendor=vendor,
+            product_name=product_name,
+            version=None
+        ).first()
+        return any_version is not None
+
+
 class Vulnerability(db.Model):
     """CISA KEV vulnerabilities cache"""
     __tablename__ = 'vulnerabilities'
