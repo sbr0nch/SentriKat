@@ -987,25 +987,52 @@ def get_vulnerability_stats():
     ransomware = ransomware_query.count()
     products_tracked = products_tracked_query.count()
 
-    # Calculate priority-based stats
+    # Calculate priority-based stats (both CVE counts and match counts)
     all_matches = unacknowledged_query.all()
 
+    # Match counts (existing)
     priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+
+    # CVE counts (grouped by CVE ID, highest priority per CVE)
+    from collections import defaultdict
+    cve_priorities = defaultdict(list)  # cve_id -> list of priorities
+
     for match in all_matches:
         priority = match.calculate_effective_priority()
         priority_counts[priority] = priority_counts.get(priority, 0) + 1
+        cve_priorities[match.vulnerability.cve_id].append(priority)
+
+    # Calculate CVE-level priority counts (use highest priority per CVE)
+    priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+    level_names = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
+
+    cve_priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+    for cve_id, priorities in cve_priorities.items():
+        # Get highest priority for this CVE
+        max_level = max(priority_order.get(p, 2) for p in priorities)
+        highest_priority = level_names.get(max_level, 'medium')
+        cve_priority_counts[highest_priority] += 1
+
+    total_cves = len(cve_priorities)  # Unique CVE count
 
     return jsonify({
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
         'unacknowledged': unacknowledged,
+        'unacknowledged_cves': total_cves,  # NEW: unique CVE count
         'ransomware_related': ransomware,
         'products_tracked': products_tracked,
         'priority_breakdown': priority_counts,
+        'cve_priority_breakdown': cve_priority_counts,  # NEW: CVE-level counts
         'critical_count': priority_counts['critical'],
         'high_count': priority_counts['high'],
         'medium_count': priority_counts['medium'],
-        'low_count': priority_counts['low']
+        'low_count': priority_counts['low'],
+        # NEW: CVE counts for dashboard display
+        'critical_cves': cve_priority_counts['critical'],
+        'high_cves': cve_priority_counts['high'],
+        'medium_cves': cve_priority_counts['medium'],
+        'low_cves': cve_priority_counts['low']
     })
 
 
@@ -1404,6 +1431,147 @@ def unacknowledge_match(match_id):
     match.acknowledged = False
     db.session.commit()
     return jsonify(match.to_dict())
+
+
+@bp.route('/api/matches/acknowledge-by-cve/<cve_id>', methods=['POST'])
+@login_required
+def acknowledge_by_cve(cve_id):
+    """
+    Acknowledge ALL vulnerability matches for a given CVE ID.
+
+    This is the recommended way to acknowledge CVEs since one CVE typically
+    requires one fix (e.g., a Windows Update) regardless of how many
+    products/versions it affects.
+
+    Returns: { acknowledged_count: X, match_ids: [...] }
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    org_id = session.get('organization_id')
+
+    # Find the vulnerability
+    vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
+    if not vuln:
+        return jsonify({'error': f'CVE {cve_id} not found'}), 404
+
+    # Find all matches for this CVE that the user has permission to manage
+    from app.models import product_organizations
+
+    if current_user.is_super_admin():
+        # Super admin can acknowledge any match
+        matches = VulnerabilityMatch.query.filter_by(
+            vulnerability_id=vuln.id,
+            acknowledged=False
+        ).all()
+    else:
+        # Non-admin: filter by organization membership
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+
+        matches = db.session.query(VulnerabilityMatch).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            VulnerabilityMatch.vulnerability_id == vuln.id,
+            VulnerabilityMatch.acknowledged == False,
+            product_organizations.c.organization_id.in_(user_org_ids)
+        ).all()
+
+    if not matches:
+        return jsonify({
+            'acknowledged_count': 0,
+            'match_ids': [],
+            'message': 'No unacknowledged matches found for this CVE'
+        })
+
+    # Acknowledge all matches
+    acknowledged_ids = []
+    for match in matches:
+        match.acknowledged = True
+        acknowledged_ids.append(match.id)
+
+    db.session.commit()
+
+    log_audit_event(
+        'ACKNOWLEDGE_CVE',
+        'vulnerability_matches',
+        vuln.id,
+        new_value={'acknowledged_count': len(acknowledged_ids), 'cve_id': cve_id},
+        details=f"Bulk acknowledged {len(acknowledged_ids)} matches for {cve_id}"
+    )
+
+    return jsonify({
+        'acknowledged_count': len(acknowledged_ids),
+        'match_ids': acknowledged_ids,
+        'cve_id': cve_id,
+        'message': f'Acknowledged {len(acknowledged_ids)} product(s) for {cve_id}'
+    })
+
+
+@bp.route('/api/matches/unacknowledge-by-cve/<cve_id>', methods=['POST'])
+@login_required
+def unacknowledge_by_cve(cve_id):
+    """
+    Unacknowledge ALL vulnerability matches for a given CVE ID.
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Find the vulnerability
+    vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
+    if not vuln:
+        return jsonify({'error': f'CVE {cve_id} not found'}), 404
+
+    # Find all matches for this CVE that the user has permission to manage
+    from app.models import product_organizations
+
+    if current_user.is_super_admin():
+        matches = VulnerabilityMatch.query.filter_by(
+            vulnerability_id=vuln.id,
+            acknowledged=True
+        ).all()
+    else:
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+
+        matches = db.session.query(VulnerabilityMatch).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            VulnerabilityMatch.vulnerability_id == vuln.id,
+            VulnerabilityMatch.acknowledged == True,
+            product_organizations.c.organization_id.in_(user_org_ids)
+        ).all()
+
+    if not matches:
+        return jsonify({
+            'unacknowledged_count': 0,
+            'match_ids': [],
+            'message': 'No acknowledged matches found for this CVE'
+        })
+
+    # Unacknowledge all matches
+    unacknowledged_ids = []
+    for match in matches:
+        match.acknowledged = False
+        unacknowledged_ids.append(match.id)
+
+    db.session.commit()
+
+    log_audit_event(
+        'UNACKNOWLEDGE_CVE',
+        'vulnerability_matches',
+        vuln.id,
+        new_value={'unacknowledged_count': len(unacknowledged_ids), 'cve_id': cve_id},
+        details=f"Bulk unacknowledged {len(unacknowledged_ids)} matches for {cve_id}"
+    )
+
+    return jsonify({
+        'unacknowledged_count': len(unacknowledged_ids),
+        'match_ids': unacknowledged_ids,
+        'cve_id': cve_id,
+        'message': f'Unacknowledged {len(unacknowledged_ids)} product(s) for {cve_id}'
+    })
 
 @bp.route('/api/sync', methods=['POST'])
 @admin_required
