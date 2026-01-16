@@ -18,6 +18,36 @@
             </button>
         </div>
         {% endif %}
+        {% if current_user and current_user.is_super_admin() %}
+        <div class="col-auto">
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-tools me-1"></i>Admin Tools
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><h6 class="dropdown-header">Vulnerability Matching</h6></li>
+                    <li>
+                        <a class="dropdown-item" href="#" onclick="applyCpeMappings(); return false;">
+                            <i class="bi bi-link-45deg me-2"></i>Apply CPE Mappings
+                            <small class="text-muted d-block ms-4">Auto-detect CPE identifiers for better matching</small>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="#" onclick="rematchProducts(); return false;">
+                            <i class="bi bi-arrow-repeat me-2"></i>Rematch Vulnerabilities
+                            <small class="text-muted d-block ms-4">Re-run matching with current logic</small>
+                        </a>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <a class="dropdown-item" href="#" onclick="showCpeCoverage(); return false;">
+                            <i class="bi bi-bar-chart me-2"></i>CPE Coverage Stats
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
@@ -2488,6 +2518,81 @@
         }
 
         document.getElementById('matchType').value = product.match_type || 'auto';
+    }
+
+    // Admin Tools Functions
+    async function applyCpeMappings() {
+        if (!confirm('Apply CPE auto-mappings to all products without CPE identifiers?\n\nThis will improve vulnerability matching accuracy.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/products/apply-cpe', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                }
+            });
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                alert(`CPE Mappings Applied!\n\nUpdated: ${data.updated} products\nCoverage: ${data.coverage.coverage_percent}% (${data.coverage.with_cpe}/${data.coverage.total_products})`);
+                loadProducts();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        } catch (error) {
+            alert('Error applying CPE mappings: ' + error.message);
+        }
+    }
+
+    async function rematchProducts() {
+        if (!confirm('Re-run vulnerability matching with current logic?\n\nThis will remove invalid matches and add new valid ones.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/products/rematch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                }
+            });
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                alert(`Vulnerability Rematch Complete!\n\nRemoved: ${data.removed} invalid matches\nAdded: ${data.added} new matches`);
+                loadProducts();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        } catch (error) {
+            alert('Error rematching: ' + error.message);
+        }
+    }
+
+    async function showCpeCoverage() {
+        try {
+            const response = await fetch('/api/products/cpe-suggestions');
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                let msg = `CPE Coverage Statistics\n\nTotal Products: ${data.coverage.total_products}\nWith CPE: ${data.coverage.with_cpe}\nWithout CPE: ${data.coverage.without_cpe}\nCoverage: ${data.coverage.coverage_percent}%`;
+
+                if (data.suggestions.length > 0) {
+                    msg += `\n\nSuggested CPE mappings available for ${data.suggestions.length} products.`;
+                    msg += '\nUse "Apply CPE Mappings" to auto-apply these.';
+                }
+
+                alert(msg);
+            } else {
+                alert('Error: ' + data.message);
+            }
+        } catch (error) {
+            alert('Error getting CPE stats: ' + error.message);
+        }
     }
 
     document.addEventListener('DOMContentLoaded', function() {

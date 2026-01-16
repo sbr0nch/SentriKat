@@ -1221,6 +1221,55 @@ def rematch_products():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@bp.route('/api/products/apply-cpe', methods=['POST'])
+@admin_required
+def apply_cpe_mappings():
+    """
+    Apply CPE auto-mappings to products that don't have CPE identifiers.
+    This enables more precise vulnerability matching.
+
+    Permissions:
+    - Super Admin only: Can apply CPE mappings
+    """
+    from app.cpe_mapping import batch_apply_cpe_mappings, get_cpe_coverage_stats
+
+    try:
+        updated, total_without = batch_apply_cpe_mappings(commit=True)
+        stats = get_cpe_coverage_stats()
+        return jsonify({
+            'status': 'success',
+            'updated': updated,
+            'total_without_cpe_before': total_without,
+            'coverage': stats,
+            'message': f'Applied CPE to {updated} products. Coverage: {stats["coverage_percent"]}%'
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@bp.route('/api/products/cpe-suggestions', methods=['GET'])
+@admin_required
+def get_cpe_suggestions():
+    """
+    Get CPE mapping suggestions for products without CPE.
+
+    Permissions:
+    - Super Admin only: Can view CPE suggestions
+    """
+    from app.cpe_mapping import suggest_cpe_for_products, get_cpe_coverage_stats
+
+    try:
+        suggestions = suggest_cpe_for_products(limit=100)
+        stats = get_cpe_coverage_stats()
+        return jsonify({
+            'status': 'success',
+            'suggestions': suggestions,
+            'coverage': stats
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @bp.route('/api/alerts/trigger-critical', methods=['POST'])
 @admin_required
 def trigger_critical_cve_alerts():

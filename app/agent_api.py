@@ -667,6 +667,10 @@ def process_inventory_job(job):
                         active=True,
                         criticality='medium'
                     )
+                    # Auto-apply CPE mapping for better vulnerability matching
+                    from app.cpe_mapping import apply_cpe_to_product
+                    apply_cpe_to_product(product)
+
                     db.session.add(product)
                     db.session.flush()
                     products_created += 1
@@ -982,6 +986,10 @@ def report_inventory():
                     active=True,
                     criticality='medium'
                 )
+                # Auto-apply CPE mapping for better vulnerability matching
+                from app.cpe_mapping import apply_cpe_to_product
+                apply_cpe_to_product(product)
+
                 db.session.add(product)
                 db.session.flush()
                 products_created += 1
