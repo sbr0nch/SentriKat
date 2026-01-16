@@ -34,6 +34,20 @@ AGENT_ID=""
 # Logging Functions
 # ============================================================================
 
+# JSON string escaping function
+json_escape() {
+    local str="$1"
+    # Escape backslashes first, then quotes, then control characters
+    str="${str//\\/\\\\}"      # Backslash
+    str="${str//\"/\\\"}"      # Double quote
+    str="${str//$'\n'/\\n}"    # Newline
+    str="${str//$'\r'/\\r}"    # Carriage return
+    str="${str//$'\t'/\\t}"    # Tab
+    # Remove other control characters
+    str=$(echo "$str" | tr -d '\000-\011\013-\037')
+    echo "$str"
+}
+
 log() {
     local level="${1:-INFO}"
     local message="${2:-}"
@@ -140,6 +154,14 @@ get_system_info() {
 
     kernel=$(uname -r)
 
+    # Escape all values for JSON safety
+    hostname=$(json_escape "$hostname")
+    fqdn=$(json_escape "$fqdn")
+    ip_address=$(json_escape "$ip_address")
+    os_name=$(json_escape "$os_name")
+    os_version=$(json_escape "$os_version")
+    kernel=$(json_escape "$kernel")
+
     cat << EOF
 {
     "hostname": "${hostname}",
@@ -190,6 +212,9 @@ get_installed_software() {
                 linux-*|kernel-*) vendor="Linux" ;;
             esac
 
+            # Escape JSON special characters
+            name=$(json_escape "$name")
+            version=$(json_escape "$version")
             products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
         done < <(dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null)
@@ -201,6 +226,10 @@ get_installed_software() {
             [[ -z "$name" ]] && continue
             [[ "$vendor" == "(none)" ]] && vendor="Community"
 
+            # Escape JSON special characters
+            name=$(json_escape "$name")
+            version=$(json_escape "$version")
+            vendor=$(json_escape "$vendor")
             products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
         done < <(rpm -qa --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n' 2>/dev/null)
@@ -210,6 +239,8 @@ get_installed_software() {
     if command -v apk &>/dev/null; then
         while IFS='-' read -r name version; do
             [[ -z "$name" ]] && continue
+            name=$(json_escape "$name")
+            version=$(json_escape "$version")
             products+=("{\"vendor\": \"Alpine\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
         done < <(apk info -v 2>/dev/null | sed 's/-[0-9].*/-&/' | sed 's/--/-/')
@@ -219,6 +250,8 @@ get_installed_software() {
     if command -v pacman &>/dev/null; then
         while IFS=' ' read -r name version; do
             [[ -z "$name" ]] && continue
+            name=$(json_escape "$name")
+            version=$(json_escape "$version")
             products+=("{\"vendor\": \"Arch\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
         done < <(pacman -Q 2>/dev/null)
@@ -228,6 +261,8 @@ get_installed_software() {
     if command -v snap &>/dev/null; then
         while read -r name version; do
             [[ -z "$name" || "$name" == "Name" ]] && continue
+            name=$(json_escape "$name")
+            version=$(json_escape "$version")
             products+=("{\"vendor\": \"Snap\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
         done < <(snap list 2>/dev/null | awk 'NR>1 {print $1, $2}')
@@ -237,7 +272,10 @@ get_installed_software() {
     if command -v flatpak &>/dev/null; then
         while IFS=$'\t' read -r name version origin; do
             [[ -z "$name" || "$name" == "Name" ]] && continue
-            products+=("{\"vendor\": \"${origin:-Flatpak}\", \"product\": \"$name\", \"version\": \"$version\"}")
+            name=$(json_escape "$name")
+            version=$(json_escape "$version")
+            origin=$(json_escape "${origin:-Flatpak}")
+            products+=("{\"vendor\": \"$origin\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
         done < <(flatpak list --columns=name,version,origin 2>/dev/null)
     fi
@@ -272,19 +310,11 @@ send_inventory() {
 
     log_info "Sending inventory to $endpoint..."
 
-    # Build payload
+    # Build payload by inserting products into system_info JSON
+    # The system_info ends with "}" - we replace it with ", "products": [...] }"
     local payload
-    payload=$(cat << EOF
-{
-    "hostname": $(echo "$system_info" | grep -o '"hostname"[^,}]*' | head -1 | sed 's/"hostname": *//' ),
-    "fqdn": $(echo "$system_info" | grep -o '"fqdn"[^,}]*' | head -1 | sed 's/"fqdn": *//' ),
-    "ip_address": $(echo "$system_info" | grep -o '"ip_address"[^,}]*' | head -1 | sed 's/"ip_address": *//' ),
-    "os": $(echo "$system_info" | grep -o '"os"[^}]*}' | head -1 | sed 's/"os": *//' ),
-    "agent": $(echo "$system_info" | grep -o '"agent"[^}]*}' | head -1 | sed 's/"agent": *//' ),
-    "products": $products
-}
-EOF
-)
+    payload=$(echo "$system_info" | sed 's/}$//')
+    payload="${payload}, \"products\": ${products}}"
 
     # Retry logic
     local max_retries=3
