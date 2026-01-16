@@ -495,10 +495,15 @@ def ensure_worker_running():
 # Async Job Processing
 # ============================================================================
 
-def queue_inventory_job(organization, data):
+def queue_inventory_job(organization, data, api_key_id=None):
     """
     Queue a large inventory report for async processing.
     Returns immediately with job ID.
+
+    Args:
+        organization: Organization object
+        data: Inventory payload
+        api_key_id: Optional API key ID for tracking auto_approve setting
     """
     hostname = data.get('hostname')
     agent_id = data.get('agent', {}).get('id')
@@ -554,6 +559,7 @@ def queue_inventory_job(organization, data):
         job = InventoryJob(
             organization_id=organization.id,
             asset_id=asset.id,
+            api_key_id=api_key_id,  # Track which API key was used for auto_approve check
             job_type='inventory',
             status='pending',
             priority=5,
@@ -911,7 +917,7 @@ def report_inventory():
     # Check if batch should be processed asynchronously
     if len(products) >= ASYNC_BATCH_THRESHOLD:
         logger.info(f"Agent inventory: Routing to async processing for {hostname}")
-        return queue_inventory_job(organization, data)
+        return queue_inventory_job(organization, data, api_key_id=agent_key.id if agent_key else None)
 
     try:
         # Find or create asset

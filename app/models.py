@@ -1411,6 +1411,7 @@ class InventoryJob(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
     asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+    api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True, index=True)
 
     # Job details
     job_type = db.Column(db.String(50), default='inventory')  # inventory, sync, import
@@ -1436,6 +1437,7 @@ class InventoryJob(db.Model):
     # Relationships
     organization = db.relationship('Organization', backref=db.backref('inventory_jobs', lazy='dynamic'))
     asset = db.relationship('Asset', backref=db.backref('inventory_jobs', lazy='dynamic'))
+    api_key = db.relationship('AgentApiKey', backref=db.backref('inventory_jobs', lazy='dynamic'))
 
     def to_dict(self):
         return {
