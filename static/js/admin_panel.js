@@ -6757,17 +6757,38 @@ async function showIntegrationApiKey(integrationId) {
 
 function copyViewedApiKey() {
     const keyInput = document.getElementById('viewApiKeyValue');
-    if (!keyInput) return;
+    if (!keyInput || !keyInput.value) {
+        showToast('No API key to copy', 'warning');
+        return;
+    }
 
     const key = keyInput.value;
+
+    // Try selecting and using execCommand first (most reliable)
+    try {
+        keyInput.select();
+        keyInput.setSelectionRange(0, 99999);
+        const success = document.execCommand('copy');
+        if (success) {
+            showToast('API key copied to clipboard', 'success');
+            return;
+        }
+    } catch (e) {
+        console.log('execCommand copy failed, trying clipboard API');
+    }
+
+    // Try clipboard API
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(key).then(() => {
             showToast('API key copied to clipboard', 'success');
-        }).catch(() => {
-            fallbackCopyText(key);
+        }).catch((err) => {
+            console.error('Clipboard API failed:', err);
+            showToast('Copy failed. Please select the key and press Ctrl+C', 'warning');
+            keyInput.select();
         });
     } else {
-        fallbackCopyText(key);
+        showToast('Copy failed. Please select the key and press Ctrl+C', 'warning');
+        keyInput.select();
     }
 }
 

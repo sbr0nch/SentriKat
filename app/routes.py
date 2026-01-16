@@ -836,7 +836,16 @@ def remove_product_organization(product_id, org_id):
 @bp.route('/api/vulnerabilities', methods=['GET'])
 @login_required
 def get_vulnerabilities():
-    """Get vulnerabilities with optional filters for current organization"""
+    """Get vulnerabilities with optional filters for current organization.
+
+    Supports pagination:
+    - page: Page number (default: 1, use 0 or 'all' for all results)
+    - per_page: Items per page (default: 50, max: 500)
+
+    Returns:
+    - If paginated: { items: [...], total: N, page: N, per_page: N, pages: N }
+    - If page=0 or page=all: Array of all items (legacy behavior)
+    """
     try:
         # Get current organization
         org_id = session.get('organization_id')
@@ -851,7 +860,8 @@ def get_vulnerabilities():
             'vendor': request.args.get('vendor'),
             'product': request.args.get('product'),
             'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
-            'acknowledged': request.args.get('acknowledged')
+            'acknowledged': request.args.get('acknowledged'),
+            'priority': request.args.get('priority'),  # critical, high, medium, low
         }
 
         # Remove None values
@@ -859,20 +869,47 @@ def get_vulnerabilities():
 
         matches = get_filtered_vulnerabilities(filters)
 
-        # Safely convert to dict with error handling
+        # Check pagination params
+        page_param = request.args.get('page', '0')  # Default to all (legacy)
+        per_page = min(request.args.get('per_page', 50, type=int), 500)
+
+        # If page=0 or page=all, return all results (legacy behavior)
+        if page_param in ('0', 'all', ''):
+            results = []
+            for m in matches:
+                try:
+                    results.append(m.to_dict())
+                except Exception as e:
+                    logger.error(f"Error converting match {m.id} to dict: {e}")
+                    results.append({'id': m.id, 'error': 'Failed to load full details'})
+            return jsonify(results)
+
+        # Paginated response
+        page = max(int(page_param), 1)
+        total = len(matches)
+        pages = (total + per_page - 1) // per_page if per_page > 0 else 1
+
+        # Slice for current page
+        start = (page - 1) * per_page
+        end = start + per_page
+        page_matches = matches[start:end]
+
         results = []
-        for m in matches:
+        for m in page_matches:
             try:
                 results.append(m.to_dict())
             except Exception as e:
                 logger.error(f"Error converting match {m.id} to dict: {e}")
-                # Include minimal info for failed items
-                results.append({
-                    'id': m.id,
-                    'error': 'Failed to load full details'
-                })
+                results.append({'id': m.id, 'error': 'Failed to load full details'})
 
-        return jsonify(results)
+        return jsonify({
+            'items': results,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pages
+        })
+
     except Exception as e:
         logger.error(f"Error getting vulnerabilities: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500

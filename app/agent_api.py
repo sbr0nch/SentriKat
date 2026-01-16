@@ -1568,32 +1568,49 @@ def list_agent_keys():
     """List agent API keys for organization."""
     from app.auth import get_current_user
 
-    user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
+    try:
+        user = get_current_user()
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
 
-    # Check permission
-    if not user.is_super_admin():
-        # Only org admins can manage keys
-        org_id = request.args.get('organization_id', type=int)
-        if not org_id:
-            return jsonify({'error': 'organization_id required'}), 400
+        # Check permission
+        if not user.is_super_admin():
+            # Only org admins can manage keys
+            org_id = request.args.get('organization_id', type=int)
+            if not org_id:
+                return jsonify({'error': 'organization_id required'}), 400
 
-        user_org = user.org_memberships.filter_by(organization_id=org_id).first()
-        if not user_org or user_org.role != 'org_admin':
-            return jsonify({'error': 'Organization admin access required'}), 403
+            user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+            if not user_org or user_org.role != 'org_admin':
+                return jsonify({'error': 'Organization admin access required'}), 403
 
-        keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
-    else:
-        org_id = request.args.get('organization_id', type=int)
-        if org_id:
             keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
         else:
-            keys = AgentApiKey.query.all()
+            org_id = request.args.get('organization_id', type=int)
+            if org_id:
+                keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
+            else:
+                keys = AgentApiKey.query.all()
 
-    return jsonify({
-        'api_keys': [k.to_dict() for k in keys]
-    })
+        # Safely convert to dict
+        api_keys = []
+        for k in keys:
+            try:
+                api_keys.append(k.to_dict())
+            except Exception as e:
+                logger.error(f"Error converting agent key {k.id} to dict: {e}")
+                api_keys.append({
+                    'id': k.id,
+                    'name': k.name or 'Unknown',
+                    'key_prefix': k.key_prefix or '',
+                    'error': 'Failed to load full details'
+                })
+
+        return jsonify({'api_keys': api_keys})
+
+    except Exception as e:
+        logger.error(f"Error in list_agent_keys: {e}", exc_info=True)
+        return jsonify({'error': f'Failed to load agent keys: {str(e)}'}), 500
 
 
 @agent_bp.route('/api/agent-keys', methods=['POST'])
