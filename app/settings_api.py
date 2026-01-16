@@ -143,11 +143,64 @@ def get_setting_with_source(key, default=None):
         'from_env': source == 'environment'
     }
 
-def set_setting(key, value, category, description=None, is_encrypted=False):
+ALLOWED_SETTING_KEYS = {
+    # LDAP settings
+    'ldap_enabled', 'ldap_server', 'ldap_port', 'ldap_use_ssl', 'ldap_use_tls',
+    'ldap_bind_dn', 'ldap_bind_password', 'ldap_base_dn',
+    'ldap_search_filter', 'ldap_user_filter', 'ldap_group_filter',
+    'ldap_username_attr', 'ldap_username_attribute', 'ldap_email_attr', 'ldap_email_attribute',
+    'ldap_group_attribute', 'ldap_sync_enabled', 'ldap_sync_interval_hours',
+    # SMTP settings
+    'smtp_enabled', 'smtp_host', 'smtp_server', 'smtp_port', 'smtp_username', 'smtp_password',
+    'smtp_from_email', 'smtp_from_name', 'smtp_use_tls', 'smtp_use_ssl',
+    # Sync settings
+    'auto_sync_enabled', 'sync_interval', 'sync_interval_hours', 'sync_time',
+    'auto_match_enabled', 'cisa_kev_url', 'nvd_api_key',
+    # General/Proxy settings
+    'app_name', 'app_url', 'verify_ssl', 'http_proxy', 'https_proxy', 'no_proxy',
+    # Security settings
+    'session_timeout', 'session_timeout_minutes', 'max_login_attempts', 'max_failed_logins',
+    'lockout_duration', 'lockout_duration_minutes', 'require_2fa',
+    'password_min_length', 'password_require_uppercase', 'password_require_lowercase',
+    'password_require_numbers', 'password_require_special', 'password_history_count',
+    'password_expiry_days',
+    # Branding settings
+    'app_name', 'login_message', 'support_email', 'show_version', 'logo_url',
+    'branding_logo', 'branding_primary_color', 'branding_secondary_color',
+    # Notification settings
+    'slack_enabled', 'slack_webhook_url',
+    'teams_enabled', 'teams_webhook_url',
+    'generic_webhook_enabled', 'generic_webhook_url', 'generic_webhook_name',
+    'generic_webhook_format', 'generic_webhook_custom_template', 'generic_webhook_token',
+    'critical_email_enabled', 'critical_email_time', 'critical_email_max_age_days',
+    'default_alert_mode', 'default_escalation_days',
+    'notify_on_critical', 'notify_on_high', 'notify_on_new_cve', 'notify_on_ransomware',
+    'notification_digest_enabled', 'notification_digest_time',
+    # Retention settings
+    'audit_log_retention_days', 'audit_retention_days',
+    'sync_history_retention_days', 'sync_log_retention_days',
+    'session_log_retention_days',
+}
+
+
+def set_setting(key, value, category, description=None, is_encrypted=False, skip_validation=False):
     """
     Set a setting value in database.
     Encrypts the value if is_encrypted=True.
+
+    Args:
+        key: Setting key name
+        value: Setting value
+        category: Setting category
+        description: Optional description
+        is_encrypted: Whether to encrypt the value
+        skip_validation: If True, skip key validation (for internal use only)
     """
+    # Validate setting key to prevent arbitrary setting injection
+    if not skip_validation and key not in ALLOWED_SETTING_KEYS:
+        logger.warning(f"Attempted to set disallowed setting key: {key}")
+        raise ValueError(f"Setting key '{key}' is not allowed")
+
     user_id = session.get('user_id')
 
     # Encrypt the value if required

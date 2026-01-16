@@ -5470,6 +5470,28 @@ async function downloadAgentWithKey(keyPrefix, platform) {
 let assetsLoaded = false;
 let assetsPage = 1;
 const assetsPerPage = 20;
+let assetsSortColumn = 'hostname';
+let assetsSortDirection = 'asc';
+
+function sortAssets(column) {
+    if (assetsSortColumn === column) {
+        assetsSortDirection = assetsSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        assetsSortColumn = column;
+        assetsSortDirection = 'asc';
+    }
+    loadAssets(1);
+}
+
+function updateAssetsSortIndicators() {
+    document.querySelectorAll('#assetsTable th[data-sort]').forEach(th => {
+        const col = th.dataset.sort;
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (col === assetsSortColumn) {
+            th.classList.add(assetsSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+}
 
 async function loadAssets(page = 1) {
     assetsPage = page;
@@ -5492,7 +5514,9 @@ async function loadAssets(page = 1) {
     try {
         const params = new URLSearchParams({
             page: page,
-            per_page: assetsPerPage
+            per_page: assetsPerPage,
+            order: assetsSortColumn,
+            direction: assetsSortDirection
         });
         if (search) params.set('search', search);
 
@@ -5591,6 +5615,7 @@ async function loadAssets(page = 1) {
             }
         }
         assetsLoaded = true;
+        updateAssetsSortIndicators();
     } catch (error) {
         console.error('Error loading assets:', error);
         tbody.innerHTML = `
@@ -5852,6 +5877,18 @@ let selectedQueueItems = new Set();
 let integrationsList = [];
 let importQueueData = [];
 
+// Import Queue pagination/sorting state
+let importQueuePage = 1;
+let importQueuePageSize = 15;
+let importQueueSortField = 'vendor';
+let importQueueSortDir = 'asc';
+
+// Pull Sources pagination/sorting state
+let pullSourcesPage = 1;
+let pullSourcesPageSize = 15;
+let pullSourcesSortField = 'name';
+let pullSourcesSortDir = 'asc';
+
 // Load import queue count for badge
 async function loadImportQueueCount() {
     try {
@@ -5875,12 +5912,190 @@ async function loadImportQueueCount() {
     }
 }
 
+// Import Queue sorting
+function sortImportQueue(field) {
+    if (importQueueSortField === field) {
+        importQueueSortDir = importQueueSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        importQueueSortField = field;
+        importQueueSortDir = 'asc';
+    }
+    importQueuePage = 1;
+    renderImportQueue();
+}
+
+function changeImportQueuePage(newPage) {
+    importQueuePage = newPage;
+    renderImportQueue();
+}
+
+function getImportQueueSortIcon(field) {
+    if (importQueueSortField !== field) return '<i class="bi bi-chevron-expand text-muted"></i>';
+    return importQueueSortDir === 'asc' ? '<i class="bi bi-sort-up"></i>' : '<i class="bi bi-sort-down"></i>';
+}
+
+function renderImportQueue() {
+    const tbody = document.getElementById('importQueueTable');
+    const paginationContainer = document.getElementById('importQueuePagination');
+    if (!tbody) return;
+
+    if (importQueueData.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-4 text-muted">
+                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <p class="mb-0 mt-2">No items in queue</p>
+                </td>
+            </tr>
+        `;
+        if (paginationContainer) paginationContainer.innerHTML = '';
+        return;
+    }
+
+    // Sort data
+    const sortedData = [...importQueueData].sort((a, b) => {
+        let aVal, bVal;
+        switch (importQueueSortField) {
+            case 'vendor':
+                aVal = `${a.vendor || ''} ${a.product_name || ''}`.toLowerCase();
+                bVal = `${b.vendor || ''} ${b.product_name || ''}`.toLowerCase();
+                break;
+            case 'version':
+                aVal = (a.detected_version || '').toLowerCase();
+                bVal = (b.detected_version || '').toLowerCase();
+                break;
+            case 'organization':
+                aVal = (a.organization_name || '').toLowerCase();
+                bVal = (b.organization_name || '').toLowerCase();
+                break;
+            case 'criticality':
+                const critOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+                aVal = critOrder[a.criticality] ?? 4;
+                bVal = critOrder[b.criticality] ?? 4;
+                break;
+            case 'source':
+                aVal = (a.integration_name || 'zzz').toLowerCase();
+                bVal = (b.integration_name || 'zzz').toLowerCase();
+                break;
+            default:
+                aVal = '';
+                bVal = '';
+        }
+        if (aVal < bVal) return importQueueSortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return importQueueSortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    // Paginate
+    const totalPages = Math.ceil(sortedData.length / importQueuePageSize);
+    const startIdx = (importQueuePage - 1) * importQueuePageSize;
+    const pageData = sortedData.slice(startIdx, startIdx + importQueuePageSize);
+
+    tbody.innerHTML = pageData.map(item => {
+        const versions = item.available_versions || [];
+        const versionOptions = versions.length > 0
+            ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === item.selected_version ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
+            : `<option value="${escapeHtml(item.detected_version || '')}">${escapeHtml(item.detected_version || 'Any')}</option>`;
+
+        return `
+            <tr data-queue-id="${item.id}">
+                <td>
+                    <input type="checkbox" class="form-check-input queue-item-checkbox"
+                           data-queue-id="${item.id}" onchange="toggleQueueSelect(${item.id}, this)"
+                           ${item.status !== 'pending' ? 'disabled' : ''}>
+                </td>
+                <td>
+                    <div class="fw-semibold">${escapeHtml(item.vendor)}</div>
+                    <div class="text-muted small">${escapeHtml(item.product_name)}</div>
+                </td>
+                <td>
+                    ${item.status === 'pending' ? `
+                        <select class="form-select form-select-sm" style="width: 120px;"
+                                onchange="updateQueueItemVersion(${item.id}, this.value)">
+                            <option value="">Any version</option>
+                            ${versionOptions}
+                        </select>
+                    ` : `<span class="text-muted">${escapeHtml(item.selected_version || item.detected_version || 'Any')}</span>`}
+                </td>
+                <td>
+                    ${item.status === 'pending' ? `
+                        <select class="form-select form-select-sm" style="width: 140px;"
+                                onchange="updateQueueItemOrg(${item.id}, this.value)">
+                            <option value="">Select org...</option>
+                            ${organizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}
+                        </select>
+                    ` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}
+                </td>
+                <td>
+                    ${item.status === 'pending' ? `
+                        <select class="form-select form-select-sm" style="width: 100px;"
+                                onchange="updateQueueItemCriticality(${item.id}, this.value)">
+                            <option value="critical" ${item.criticality === 'critical' ? 'selected' : ''}>Critical</option>
+                            <option value="high" ${item.criticality === 'high' ? 'selected' : ''}>High</option>
+                            <option value="medium" ${item.criticality === 'medium' ? 'selected' : ''}>Medium</option>
+                            <option value="low" ${item.criticality === 'low' ? 'selected' : ''}>Low</option>
+                        </select>
+                    ` : `<span class="badge bg-${getCriticalityColor(item.criticality)}">${item.criticality || 'medium'}</span>`}
+                </td>
+                <td>
+                    <small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small>
+                </td>
+                <td>
+                    ${item.status === 'pending' ? `
+                        <button class="btn btn-success btn-sm me-1" onclick="approveQueueItem(${item.id})" title="Approve">
+                            <i class="bi bi-check"></i>
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="rejectQueueItem(${item.id})" title="Reject">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    ` : `
+                        <span class="badge bg-${item.status === 'approved' ? 'success' : 'secondary'}">${item.status}</span>
+                    `}
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // Render pagination
+    if (paginationContainer && totalPages > 1) {
+        paginationContainer.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">Showing ${startIdx + 1}-${Math.min(startIdx + importQueuePageSize, sortedData.length)} of ${sortedData.length}</small>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item ${importQueuePage === 1 ? 'disabled' : ''}">
+                            <a class="page-link" href="#" onclick="changeImportQueuePage(${importQueuePage - 1}); return false;">&laquo;</a>
+                        </li>
+                        ${Array.from({length: Math.min(5, totalPages)}, (_, i) => {
+                            let pageNum;
+                            if (totalPages <= 5) pageNum = i + 1;
+                            else if (importQueuePage <= 3) pageNum = i + 1;
+                            else if (importQueuePage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                            else pageNum = importQueuePage - 2 + i;
+                            return `<li class="page-item ${pageNum === importQueuePage ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="changeImportQueuePage(${pageNum}); return false;">${pageNum}</a>
+                            </li>`;
+                        }).join('')}
+                        <li class="page-item ${importQueuePage === totalPages ? 'disabled' : ''}">
+                            <a class="page-link" href="#" onclick="changeImportQueuePage(${importQueuePage + 1}); return false;">&raquo;</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        `;
+    } else if (paginationContainer) {
+        paginationContainer.innerHTML = sortedData.length > 0 ? `<small class="text-muted">${sortedData.length} items</small>` : '';
+    }
+}
+
 // Load import queue
 async function loadImportQueue() {
     const status = document.getElementById('queueFilterStatus')?.value || 'pending';
     const tbody = document.getElementById('importQueueTable');
 
     if (!tbody) return;
+
+    importQueuePage = 1;  // Reset to first page on filter change
 
     tbody.innerHTML = `
         <tr>
@@ -5897,83 +6112,7 @@ async function loadImportQueue() {
         const data = await response.json();
         importQueueData = data.items || [];
 
-        if (importQueueData.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center py-4 text-muted">
-                        <i class="bi bi-inbox" style="font-size: 2rem;"></i>
-                        <p class="mb-0 mt-2">No items in queue</p>
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        tbody.innerHTML = importQueueData.map(item => {
-            const versions = item.available_versions || [];
-            const versionOptions = versions.length > 0
-                ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === item.selected_version ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
-                : `<option value="${escapeHtml(item.detected_version || '')}">${escapeHtml(item.detected_version || 'Any')}</option>`;
-
-            return `
-                <tr data-queue-id="${item.id}">
-                    <td>
-                        <input type="checkbox" class="form-check-input queue-item-checkbox"
-                               data-queue-id="${item.id}" onchange="toggleQueueSelect(${item.id}, this)"
-                               ${item.status !== 'pending' ? 'disabled' : ''}>
-                    </td>
-                    <td>
-                        <div class="fw-semibold">${escapeHtml(item.vendor)}</div>
-                        <div class="text-muted small">${escapeHtml(item.product_name)}</div>
-                    </td>
-                    <td>
-                        ${item.status === 'pending' ? `
-                            <select class="form-select form-select-sm" style="width: 120px;"
-                                    onchange="updateQueueItemVersion(${item.id}, this.value)">
-                                <option value="">Any version</option>
-                                ${versionOptions}
-                            </select>
-                        ` : `<span class="text-muted">${escapeHtml(item.selected_version || item.detected_version || 'Any')}</span>`}
-                    </td>
-                    <td>
-                        ${item.status === 'pending' ? `
-                            <select class="form-select form-select-sm" style="width: 140px;"
-                                    onchange="updateQueueItemOrg(${item.id}, this.value)">
-                                <option value="">Select org...</option>
-                                ${organizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}
-                            </select>
-                        ` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}
-                    </td>
-                    <td>
-                        ${item.status === 'pending' ? `
-                            <select class="form-select form-select-sm" style="width: 100px;"
-                                    onchange="updateQueueItemCriticality(${item.id}, this.value)">
-                                <option value="critical" ${item.criticality === 'critical' ? 'selected' : ''}>Critical</option>
-                                <option value="high" ${item.criticality === 'high' ? 'selected' : ''}>High</option>
-                                <option value="medium" ${item.criticality === 'medium' ? 'selected' : ''}>Medium</option>
-                                <option value="low" ${item.criticality === 'low' ? 'selected' : ''}>Low</option>
-                            </select>
-                        ` : `<span class="badge bg-${getCriticalityColor(item.criticality)}">${item.criticality || 'medium'}</span>`}
-                    </td>
-                    <td>
-                        <small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small>
-                    </td>
-                    <td>
-                        ${item.status === 'pending' ? `
-                            <button class="btn btn-success btn-sm me-1" onclick="approveQueueItem(${item.id})" title="Approve">
-                                <i class="bi bi-check"></i>
-                            </button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="rejectQueueItem(${item.id})" title="Reject">
-                                <i class="bi bi-x"></i>
-                            </button>
-                        ` : `
-                            <span class="badge bg-${item.status === 'approved' ? 'success' : 'secondary'}">${item.status}</span>
-                        `}
-                    </td>
-                </tr>
-            `;
-        }).join('');
-
+        renderImportQueue();
         loadImportQueueCount();
 
     } catch (error) {
@@ -6188,72 +6327,179 @@ async function loadIntegrationsSummary() {
 // INTEGRATIONS - Pull Sources (formerly Connectors)
 // ============================================================================
 
+const pullSourcesTypeLabels = {
+    'pdq': 'PDQ Inventory',
+    'sccm': 'Microsoft SCCM',
+    'intune': 'Microsoft Intune',
+    'lansweeper': 'Lansweeper',
+    'generic_rest': 'REST API',
+    'agent': 'Discovery Agent',
+    'csv': 'CSV Import'
+};
+
+function sortPullSources(field) {
+    if (pullSourcesSortField === field) {
+        pullSourcesSortDir = pullSourcesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        pullSourcesSortField = field;
+        pullSourcesSortDir = 'asc';
+    }
+    pullSourcesPage = 1;
+    renderPullSources();
+}
+
+function changePullSourcesPage(newPage) {
+    pullSourcesPage = newPage;
+    renderPullSources();
+}
+
+function getPullSourcesSortIcon(field) {
+    if (pullSourcesSortField !== field) return '<i class="bi bi-chevron-expand text-muted"></i>';
+    return pullSourcesSortDir === 'asc' ? '<i class="bi bi-sort-up"></i>' : '<i class="bi bi-sort-down"></i>';
+}
+
+function renderPullSources() {
+    const tbody = document.getElementById('integrationsTable');
+    const paginationContainer = document.getElementById('pullSourcesPagination');
+    if (!tbody) return;
+
+    // Update sort icons
+    ['name', 'type', 'organization', 'last_sync', 'status'].forEach(field => {
+        const iconEl = document.getElementById(`pullSourcesSort${field.charAt(0).toUpperCase() + field.slice(1).replace('_', '')}`);
+        if (iconEl) iconEl.innerHTML = getPullSourcesSortIcon(field);
+    });
+
+    if (integrationsList.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-4 text-muted">
+                    <i class="bi bi-plug" style="font-size: 2rem;"></i>
+                    <p class="mb-0 mt-2">No integrations configured</p>
+                    <button class="btn btn-primary btn-sm mt-2" onclick="showCreateIntegrationModal()">
+                        <i class="bi bi-plus-circle me-1"></i>Add First Integration
+                    </button>
+                </td>
+            </tr>
+        `;
+        if (paginationContainer) paginationContainer.innerHTML = '';
+        return;
+    }
+
+    // Sort data
+    const sortedData = [...integrationsList].sort((a, b) => {
+        let aVal, bVal;
+        switch (pullSourcesSortField) {
+            case 'name':
+                aVal = (a.name || '').toLowerCase();
+                bVal = (b.name || '').toLowerCase();
+                break;
+            case 'type':
+                aVal = (pullSourcesTypeLabels[a.integration_type] || a.integration_type || '').toLowerCase();
+                bVal = (pullSourcesTypeLabels[b.integration_type] || b.integration_type || '').toLowerCase();
+                break;
+            case 'organization':
+                aVal = (a.organization_name || 'zzz').toLowerCase();
+                bVal = (b.organization_name || 'zzz').toLowerCase();
+                break;
+            case 'last_sync':
+                aVal = a.last_sync_at ? new Date(a.last_sync_at).getTime() : 0;
+                bVal = b.last_sync_at ? new Date(b.last_sync_at).getTime() : 0;
+                break;
+            case 'status':
+                const statusOrder = { success: 0, error: 1, failed: 1 };
+                aVal = a.last_sync_status ? (statusOrder[a.last_sync_status] ?? 2) : 3;
+                bVal = b.last_sync_status ? (statusOrder[b.last_sync_status] ?? 2) : 3;
+                break;
+            default:
+                aVal = '';
+                bVal = '';
+        }
+        if (aVal < bVal) return pullSourcesSortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return pullSourcesSortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    // Paginate
+    const totalPages = Math.ceil(sortedData.length / pullSourcesPageSize);
+    const startIdx = (pullSourcesPage - 1) * pullSourcesPageSize;
+    const pageData = sortedData.slice(startIdx, startIdx + pullSourcesPageSize);
+
+    tbody.innerHTML = pageData.map(int => {
+        const statusBadge = int.last_sync_status
+            ? `<span class="badge bg-${int.last_sync_status === 'success' ? 'success' : 'danger'}">${int.last_sync_status}</span>`
+            : '<span class="badge bg-secondary">Never synced</span>';
+
+        return `
+            <tr>
+                <td class="fw-semibold">${escapeHtml(int.name)}</td>
+                <td><span class="badge bg-info">${pullSourcesTypeLabels[int.integration_type] || int.integration_type}</span></td>
+                <td>${escapeHtml(int.organization_name || 'All')}</td>
+                <td>
+                    ${int.last_sync_at ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small>` : '-'}
+                    <br><small class="text-muted">${int.last_sync_count || 0} items</small>
+                </td>
+                <td>${statusBadge}</td>
+                <td>
+                    ${int.integration_type !== 'agent' ? `
+                        <button class="btn btn-outline-primary btn-sm me-1" onclick="syncIntegration(${int.id})" title="Sync Now">
+                            <i class="bi bi-arrow-repeat"></i>
+                        </button>
+                    ` : ''}
+                    <button class="btn btn-outline-secondary btn-sm me-1" onclick="showIntegrationApiKey(${int.id})" title="View API Key">
+                        <i class="bi bi-key"></i>
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteIntegration(${int.id})" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // Render pagination
+    if (paginationContainer && totalPages > 1) {
+        paginationContainer.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">Showing ${startIdx + 1}-${Math.min(startIdx + pullSourcesPageSize, sortedData.length)} of ${sortedData.length}</small>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item ${pullSourcesPage === 1 ? 'disabled' : ''}">
+                            <a class="page-link" href="#" onclick="changePullSourcesPage(${pullSourcesPage - 1}); return false;">&laquo;</a>
+                        </li>
+                        ${Array.from({length: Math.min(5, totalPages)}, (_, i) => {
+                            let pageNum;
+                            if (totalPages <= 5) pageNum = i + 1;
+                            else if (pullSourcesPage <= 3) pageNum = i + 1;
+                            else if (pullSourcesPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                            else pageNum = pullSourcesPage - 2 + i;
+                            return `<li class="page-item ${pageNum === pullSourcesPage ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="changePullSourcesPage(${pageNum}); return false;">${pageNum}</a>
+                            </li>`;
+                        }).join('')}
+                        <li class="page-item ${pullSourcesPage === totalPages ? 'disabled' : ''}">
+                            <a class="page-link" href="#" onclick="changePullSourcesPage(${pullSourcesPage + 1}); return false;">&raquo;</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        `;
+    } else if (paginationContainer) {
+        paginationContainer.innerHTML = sortedData.length > 0 ? `<small class="text-muted">${sortedData.length} source(s)</small>` : '';
+    }
+}
+
 async function loadIntegrations() {
     const tbody = document.getElementById('integrationsTable');
     if (!tbody) return;
+
+    pullSourcesPage = 1;  // Reset to first page on reload
 
     try {
         const response = await fetch('/api/integrations');
         if (!response.ok) throw new Error('Failed to load integrations');
 
         integrationsList = await response.json();
-
-        if (integrationsList.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="6" class="text-center py-4 text-muted">
-                        <i class="bi bi-plug" style="font-size: 2rem;"></i>
-                        <p class="mb-0 mt-2">No integrations configured</p>
-                        <button class="btn btn-primary btn-sm mt-2" onclick="showCreateIntegrationModal()">
-                            <i class="bi bi-plus-circle me-1"></i>Add First Integration
-                        </button>
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        const typeLabels = {
-            'pdq': 'PDQ Inventory',
-            'sccm': 'Microsoft SCCM',
-            'intune': 'Microsoft Intune',
-            'lansweeper': 'Lansweeper',
-            'generic_rest': 'REST API',
-            'agent': 'Discovery Agent',
-            'csv': 'CSV Import'
-        };
-
-        tbody.innerHTML = integrationsList.map(int => {
-            const statusBadge = int.last_sync_status
-                ? `<span class="badge bg-${int.last_sync_status === 'success' ? 'success' : 'danger'}">${int.last_sync_status}</span>`
-                : '<span class="badge bg-secondary">Never synced</span>';
-
-            return `
-                <tr>
-                    <td class="fw-semibold">${escapeHtml(int.name)}</td>
-                    <td><span class="badge bg-info">${typeLabels[int.integration_type] || int.integration_type}</span></td>
-                    <td>${escapeHtml(int.organization_name || 'All')}</td>
-                    <td>
-                        ${int.last_sync_at ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small>` : '-'}
-                        <br><small class="text-muted">${int.last_sync_count || 0} items</small>
-                    </td>
-                    <td>${statusBadge}</td>
-                    <td>
-                        ${int.integration_type !== 'agent' ? `
-                            <button class="btn btn-outline-primary btn-sm me-1" onclick="syncIntegration(${int.id})" title="Sync Now">
-                                <i class="bi bi-arrow-repeat"></i>
-                            </button>
-                        ` : ''}
-                        <button class="btn btn-outline-secondary btn-sm me-1" onclick="showIntegrationApiKey(${int.id})" title="View API Key">
-                            <i class="bi bi-key"></i>
-                        </button>
-                        <button class="btn btn-outline-danger btn-sm" onclick="deleteIntegration(${int.id})" title="Delete">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+        renderPullSources();
 
     } catch (error) {
         tbody.innerHTML = `

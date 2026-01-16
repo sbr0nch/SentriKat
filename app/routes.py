@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
-from app import db, csrf
+from app import db, csrf, limiter
 from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
@@ -1124,6 +1124,7 @@ def unacknowledge_match(match_id):
 
 @bp.route('/api/sync', methods=['POST'])
 @admin_required
+@limiter.limit("5/minute")
 def trigger_sync():
     """
     Manually trigger CISA KEV sync

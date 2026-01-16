@@ -1219,6 +1219,7 @@ def list_jobs():
 
 
 @agent_bp.route('/api/admin/process-jobs', methods=['POST'])
+@limiter.limit("10/minute")
 def trigger_job_processing():
     """
     Trigger processing of pending inventory jobs.
@@ -1254,6 +1255,7 @@ def trigger_job_processing():
 
 
 @agent_bp.route('/api/admin/jobs', methods=['GET'])
+@limiter.limit("60/minute")
 def admin_list_jobs():
     """List all inventory jobs (admin view)."""
     from app.auth import get_current_user
@@ -1715,6 +1717,7 @@ def get_maintenance_stats():
 
 
 @agent_bp.route('/api/admin/maintenance/cleanup', methods=['POST'])
+@limiter.limit("5/minute")
 def run_maintenance_cleanup():
     """
     Run maintenance cleanup tasks.
@@ -1960,6 +1963,7 @@ def get_worker_status():
 
 
 @agent_bp.route('/api/admin/worker/start', methods=['POST'])
+@limiter.limit("5/minute")
 def start_worker():
     """Manually start the background worker."""
     from app.auth import get_current_user
