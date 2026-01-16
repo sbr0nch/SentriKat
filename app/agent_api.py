@@ -52,70 +52,101 @@ csrf.exempt(agent_bp)  # Agents use API keys, not CSRF
 
 
 # ============================================================================
-# Software Filtering - Skip irrelevant/bloatware products
+# Software Filtering - CONSERVATIVE approach
+# Only skip items that are CLEARLY not security-relevant
+# When in doubt, DON'T skip - better to have noise than miss a vulnerability
 # ============================================================================
 
-# Vendors to completely skip (case-insensitive)
-SKIP_VENDORS = {
-    'microsoft corporation',  # Windows built-in components
-    'microsoft windows',
+# Exact product names to skip (case-insensitive) - Windows
+# These are Windows Update metadata entries, not actual software
+SKIP_PRODUCTS_WINDOWS = {
+    # Windows Update entries (not real software)
+    'update for windows',
+    'security update for windows',
+    'cumulative update for windows',
+    'feature update to windows',
+    'microsoft update health tools',
+    # Windows SDK components (dev tools, not deployed software)
+    'windows sdk addendum',
+    'windows sdk arm desktop libs',
+    'windows sdk desktop headers',
+    # Language/localization (no executable code)
+    'windows language pack',
+    'microsoft language experience pack',
 }
 
-# Vendor+product patterns to skip (regex, case-insensitive)
-SKIP_PATTERNS = [
-    # Windows components that won't have KEV entries
-    (r'microsoft', r'(windows|update|\.net|visual c\+\+|edge webview|onedrive|teams|store|app installer)'),
-    (r'microsoft', r'(vc\+\+|vcredist|runtime|redistributable)'),
-    # Language packs and fonts
-    (r'.*', r'.*(language pack|language feature|font|handwriting|ocr|speech|text-to-speech).*'),
-    # Windows Store apps
-    (r'.*', r'.*(appx|uwp|store app|windowsapps).*'),
-    # Driver packages (usually vendor-specific, not in KEV)
-    (r'.*', r'.*(driver|device software).*'),
-    # Help files and documentation
-    (r'.*', r'.*(help|documentation|manual|readme).*'),
+# Exact product names to skip (case-insensitive) - Linux
+# Package suffixes that indicate non-runtime packages
+SKIP_SUFFIXES_LINUX = [
+    '-doc',           # Documentation only
+    '-docs',          # Documentation only
+    '-man',           # Man pages only
+    '-dbg',           # Debug symbols
+    '-dbgsym',        # Debug symbols (Debian)
+    '-debuginfo',     # Debug symbols (RHEL)
+    '-debugsource',   # Debug source
+    '-locale',        # Locale data
+    '-locales',       # Locale data
+    '-l10n',          # Localization
+    '-i18n',          # Internationalization
+    '-fonts',         # Font packages
 ]
 
-# Exact product names to skip (case-insensitive)
-SKIP_PRODUCTS = {
-    'windows installer',
-    'windows sdk',
-    'windows kits',
-    'windows software development kit',
-    'microsoft update health tools',
-    'update for windows',
-    'security update',
-    'cumulative update',
-    'feature update',
-}
+# Patterns to skip - VERY SPECIFIC to avoid false negatives
+SKIP_PATTERNS = [
+    # Language packs with no executable code (must match full product name pattern)
+    r'^(microsoft )?language (pack|experience pack|feature)',
+    r'^(windows|language) (input|handwriting|ocr|speech|text.to.speech)',
+    # Font-only packages
+    r'^(microsoft|windows) (fonts?|typography)',
+    r'^fonts?-',  # Linux font packages like fonts-liberation
+    # Linux locale packages
+    r'^locales?(-all)?$',
+    r'^language-pack-',
+    r'^hunspell-',  # Spell check dictionaries
+    r'^hyphen-',    # Hyphenation dictionaries
+    r'^mythes-',    # Thesaurus data
+]
 
 
 def _should_skip_software(vendor: str, product_name: str) -> bool:
     """
     Check if software should be skipped (not added to inventory).
-    Filters out Windows bloat and irrelevant software that won't have KEV vulnerabilities.
+
+    CONSERVATIVE filtering - only skips items that are clearly not security-relevant:
+    - Documentation packages
+    - Debug symbol packages
+    - Language/locale packs (no executable code)
+    - Font packages
+    - Spell-check dictionaries
+
+    Does NOT skip:
+    - Any Microsoft product that could have vulnerabilities (Office, Exchange, etc.)
+    - .NET Framework (has had CVEs)
+    - Visual C++ Redistributables (tracks deployment, rarely has own CVEs but useful)
+    - Any third-party software
+    - Drivers (some have had CVEs)
 
     Returns True if the software should be skipped.
     """
     if not vendor or not product_name:
         return True
 
-    vendor_lower = vendor.lower().strip()
     product_lower = product_name.lower().strip()
 
-    # Check exact vendor skip list
-    if vendor_lower in SKIP_VENDORS:
+    # Check Windows exact product skip list
+    if product_lower in SKIP_PRODUCTS_WINDOWS:
         return True
 
-    # Check exact product skip list
-    if product_lower in SKIP_PRODUCTS:
-        return True
+    # Check Linux package suffixes (documentation, debug symbols, locales)
+    for suffix in SKIP_SUFFIXES_LINUX:
+        if product_lower.endswith(suffix):
+            return True
 
-    # Check regex patterns
-    for vendor_pattern, product_pattern in SKIP_PATTERNS:
-        if re.match(vendor_pattern, vendor_lower, re.IGNORECASE):
-            if re.search(product_pattern, product_lower, re.IGNORECASE):
-                return True
+    # Check regex patterns (very specific)
+    for pattern in SKIP_PATTERNS:
+        if re.match(pattern, product_lower, re.IGNORECASE):
+            return True
 
     return False
 
