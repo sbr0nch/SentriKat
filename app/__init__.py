@@ -20,6 +20,7 @@ def _apply_schema_migrations(logger, db_uri):
     # List of migrations to apply: (table_name, column_name, column_definition_sqlite, column_definition_pg)
     migrations = [
         ('vulnerability_matches', 'first_alerted_at', 'DATETIME', 'TIMESTAMP'),
+        ('agent_api_keys', 'auto_approve', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
