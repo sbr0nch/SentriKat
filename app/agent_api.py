@@ -12,10 +12,12 @@ Rate Limiting:
 - General queries: 100/minute per IP
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from functools import wraps
 import logging
+import threading
+import time
 
 from app import db, csrf, limiter
 from app.models import (
@@ -26,6 +28,11 @@ import json
 
 # Threshold for async processing (queued instead of immediate)
 ASYNC_BATCH_THRESHOLD = 100
+
+# Background worker settings
+WORKER_CHECK_INTERVAL = 5  # seconds between job checks
+_worker_thread = None
+_worker_stop_event = threading.Event()
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +102,94 @@ def agent_auth_required(f):
 
 
 # ============================================================================
+# Background Job Worker
+# ============================================================================
+
+def _background_job_worker(app):
+    """
+    Background worker thread that processes pending inventory jobs.
+    Runs continuously until stop event is set.
+    """
+    logger.info("Background job worker started")
+
+    with app.app_context():
+        while not _worker_stop_event.is_set():
+            try:
+                # Get next pending job
+                job = InventoryJob.get_next_pending()
+
+                if job:
+                    logger.info(f"Background worker processing job {job.id}")
+                    try:
+                        success = process_inventory_job(job)
+                        if success:
+                            logger.info(f"Background worker completed job {job.id}")
+                        else:
+                            logger.warning(f"Background worker: job {job.id} failed")
+                    except Exception as e:
+                        logger.error(f"Background worker error processing job {job.id}: {e}", exc_info=True)
+                        # Mark job as failed
+                        try:
+                            job.status = 'failed'
+                            job.error_message = str(e)
+                            job.completed_at = datetime.utcnow()
+                            db.session.commit()
+                        except:
+                            db.session.rollback()
+                else:
+                    # No pending jobs, sleep before checking again
+                    _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
+
+            except Exception as e:
+                logger.error(f"Background worker unexpected error: {e}", exc_info=True)
+                _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
+
+    logger.info("Background job worker stopped")
+
+
+def start_background_worker(app):
+    """Start the background job worker if not already running."""
+    global _worker_thread
+
+    if _worker_thread is not None and _worker_thread.is_alive():
+        return  # Already running
+
+    _worker_stop_event.clear()
+    _worker_thread = threading.Thread(
+        target=_background_job_worker,
+        args=(app,),
+        daemon=True,
+        name="InventoryJobWorker"
+    )
+    _worker_thread.start()
+    logger.info("Started background inventory job worker")
+
+
+def stop_background_worker():
+    """Stop the background job worker."""
+    global _worker_thread
+
+    if _worker_thread is None:
+        return
+
+    _worker_stop_event.set()
+    _worker_thread.join(timeout=10)
+    _worker_thread = None
+    logger.info("Stopped background inventory job worker")
+
+
+def ensure_worker_running():
+    """Ensure the background worker is running (call from request context)."""
+    global _worker_thread
+
+    if _worker_thread is None or not _worker_thread.is_alive():
+        try:
+            start_background_worker(current_app._get_current_object())
+        except Exception as e:
+            logger.warning(f"Could not start background worker: {e}")
+
+
+# ============================================================================
 # Async Job Processing
 # ============================================================================
 
@@ -106,17 +201,26 @@ def queue_inventory_job(organization, data):
     hostname = data.get('hostname')
     agent_id = data.get('agent', {}).get('id')
 
+    logger.info(f"queue_inventory_job called for hostname={hostname}, agent_id={agent_id}")
+
+    # Validate organization
+    if not organization:
+        logger.error(f"queue_inventory_job: organization is None for hostname={hostname}")
+        return jsonify({'error': 'Invalid organization. Check API key configuration.'}), 400
+
     try:
         # Find or create asset first (so we have asset_id for the job)
         asset = None
         if agent_id:
             asset = Asset.query.filter_by(agent_id=agent_id).first()
+            logger.debug(f"Found asset by agent_id: {asset}")
 
         if not asset:
             asset = Asset.query.filter_by(
                 organization_id=organization.id,
                 hostname=hostname
             ).first()
+            logger.debug(f"Found asset by org+hostname: {asset}")
 
         if not asset:
             asset = Asset(
@@ -125,6 +229,7 @@ def queue_inventory_job(organization, data):
             )
             db.session.add(asset)
             db.session.flush()
+            logger.info(f"Created new asset for {hostname}, id={asset.id}")
 
         # Update basic asset info immediately
         asset.ip_address = data.get('ip_address')
@@ -140,6 +245,9 @@ def queue_inventory_job(organization, data):
         asset.last_checkin = datetime.utcnow()
         asset.status = 'online'
 
+        products = data.get('products', [])
+        logger.info(f"Creating inventory job for {hostname} with {len(products)} products")
+
         # Create job with products payload
         job = InventoryJob(
             organization_id=organization.id,
@@ -148,33 +256,35 @@ def queue_inventory_job(organization, data):
             status='pending',
             priority=5,
             payload=json.dumps({
-                'products': data.get('products', []),
+                'products': products,
                 'hostname': hostname
             }),
-            total_items=len(data.get('products', []))
+            total_items=len(products)
         )
         db.session.add(job)
         db.session.commit()
 
         logger.info(
             f"Queued inventory job {job.id} for {hostname}: "
-            f"{len(data.get('products', []))} products to process"
+            f"{len(products)} products to process"
         )
+
+        # Ensure background worker is running to process the job
+        ensure_worker_running()
 
         return jsonify({
             'status': 'queued',
             'job_id': job.id,
             'asset_id': asset.id,
             'hostname': hostname,
-            'message': f'Large batch ({len(data.get("products", []))} products) queued for processing',
+            'message': f'Large batch ({len(products)} products) queued for processing',
             'check_status_url': f'/api/agent/jobs/{job.id}'
         }), 202
 
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error queueing inventory job for {hostname}: {e}", exc_info=True)
-        # Return 400 instead of 500 for database errors to match what client sees
-        return jsonify({'error': f'Failed to queue inventory: {str(e)}'}), 400
+        return jsonify({'error': f'Failed to queue inventory: {str(e)}'}), 500
 
 
 def process_inventory_job(job):
@@ -182,6 +292,8 @@ def process_inventory_job(job):
     Process a queued inventory job.
     Called by background worker.
     """
+    logger.info(f"=== Processing inventory job {job.id} ===")
+
     try:
         job.status = 'processing'
         job.started_at = datetime.utcnow()
@@ -189,12 +301,26 @@ def process_inventory_job(job):
 
         payload = json.loads(job.payload)
         products = payload.get('products', [])
+        logger.info(f"Job {job.id}: Loaded {len(products)} products from payload")
+
         asset = Asset.query.get(job.asset_id)
         organization = Organization.query.get(job.organization_id)
 
+        logger.info(f"Job {job.id}: Asset={asset.hostname if asset else 'None'}, "
+                    f"Org={organization.name if organization else 'None'}")
+
         if not asset:
+            logger.error(f"Job {job.id}: Asset {job.asset_id} not found")
             job.status = 'failed'
             job.error_message = 'Asset not found'
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
+            return False
+
+        if not organization:
+            logger.error(f"Job {job.id}: Organization {job.organization_id} not found")
+            job.status = 'failed'
+            job.error_message = 'Organization not found'
             job.completed_at = datetime.utcnow()
             db.session.commit()
             return False
@@ -340,9 +466,21 @@ def report_inventory():
         ]
     }
     """
-    logger.info(f"Agent inventory request received from {request.remote_addr}")
-    organization = request.organization
-    data = request.get_json()
+    logger.info(f"=== Agent inventory request received from {request.remote_addr} ===")
+
+    # Get organization from authenticated request
+    organization = getattr(request, 'organization', None)
+    agent_key = getattr(request, 'agent_key', None)
+
+    logger.info(f"Auth context: org={organization.name if organization else 'None'}, "
+                f"key={agent_key.name if agent_key else 'None'}")
+
+    # Parse JSON body
+    try:
+        data = request.get_json(force=True)  # force=True ignores content-type
+    except Exception as e:
+        logger.error(f"Failed to parse JSON body: {e}")
+        return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
 
     if not data:
         logger.warning(f"Agent inventory failed: No JSON body from {request.remote_addr}")
@@ -354,10 +492,21 @@ def report_inventory():
         return jsonify({'error': 'hostname is required'}), 400
 
     products = data.get('products', [])
-    logger.info(f"Agent inventory: {hostname} sending {len(products)} products")
+    logger.info(f"Agent inventory: {hostname} sending {len(products)} products "
+                f"(threshold={ASYNC_BATCH_THRESHOLD})")
+
+    # Validate organization
+    if not organization:
+        logger.error(f"Agent inventory: No organization for {hostname}. "
+                     f"API key may not be assigned to an organization.")
+        return jsonify({
+            'error': 'API key not associated with an organization',
+            'hint': 'Ensure the API key is created for a specific organization'
+        }), 400
 
     # Check if batch should be processed asynchronously
     if len(products) >= ASYNC_BATCH_THRESHOLD:
+        logger.info(f"Agent inventory: Routing to async processing for {hostname}")
         return queue_inventory_job(organization, data)
 
     try:

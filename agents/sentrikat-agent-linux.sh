@@ -1,0 +1,557 @@
+#!/bin/bash
+#
+# SentriKat Linux Agent - Software Inventory Collector
+#
+# Silent daemon agent that collects software inventory from Linux endpoints
+# and reports to a SentriKat server. Designed to run as a systemd service.
+#
+# Version: 1.0.0
+# Requires: bash, curl, jq (optional for JSON parsing)
+#
+# Usage:
+#   ./sentrikat-agent-linux.sh --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
+#   ./sentrikat-agent-linux.sh --install --server-url "https://..." --api-key "..."
+#   ./sentrikat-agent-linux.sh --uninstall
+#
+
+set -euo pipefail
+
+AGENT_VERSION="1.0.0"
+CONFIG_DIR="/etc/sentrikat"
+CONFIG_FILE="${CONFIG_DIR}/agent.conf"
+LOG_FILE="/var/log/sentrikat-agent.log"
+PID_FILE="/var/run/sentrikat-agent.pid"
+SYSTEMD_SERVICE="/etc/systemd/system/sentrikat-agent.service"
+SYSTEMD_TIMER="/etc/systemd/system/sentrikat-agent.timer"
+
+# Default settings
+SERVER_URL=""
+API_KEY=""
+INTERVAL_HOURS=4
+AGENT_ID=""
+
+# ============================================================================
+# Logging Functions
+# ============================================================================
+
+log() {
+    local level="${1:-INFO}"
+    local message="${2:-}"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # Ensure log directory exists
+    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+
+    # Rotate log if > 10MB
+    if [[ -f "$LOG_FILE" ]] && [[ $(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null) -gt 10485760 ]]; then
+        mv "$LOG_FILE" "${LOG_FILE}.old" 2>/dev/null || true
+    fi
+
+    echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
+
+    if [[ "${VERBOSE:-false}" == "true" ]]; then
+        case "$level" in
+            ERROR) echo -e "\033[31m[$timestamp] [$level] $message\033[0m" ;;
+            WARN)  echo -e "\033[33m[$timestamp] [$level] $message\033[0m" ;;
+            *)     echo "[$timestamp] [$level] $message" ;;
+        esac
+    fi
+}
+
+log_info() { log "INFO" "$1"; }
+log_warn() { log "WARN" "$1"; }
+log_error() { log "ERROR" "$1"; }
+
+# ============================================================================
+# Configuration Management
+# ============================================================================
+
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        # shellcheck source=/dev/null
+        source "$CONFIG_FILE"
+    fi
+
+    # Command line args override config file
+    [[ -n "${ARG_SERVER_URL:-}" ]] && SERVER_URL="$ARG_SERVER_URL"
+    [[ -n "${ARG_API_KEY:-}" ]] && API_KEY="$ARG_API_KEY"
+
+    # Generate agent ID if not set
+    if [[ -z "$AGENT_ID" ]]; then
+        # Try to get machine ID
+        if [[ -f /etc/machine-id ]]; then
+            AGENT_ID=$(cat /etc/machine-id)
+        elif [[ -f /var/lib/dbus/machine-id ]]; then
+            AGENT_ID=$(cat /var/lib/dbus/machine-id)
+        else
+            AGENT_ID=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
+        fi
+        save_config
+    fi
+}
+
+save_config() {
+    mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+    chmod 700 "$CONFIG_DIR"
+
+    cat > "$CONFIG_FILE" << EOF
+# SentriKat Agent Configuration
+SERVER_URL="${SERVER_URL}"
+API_KEY="${API_KEY}"
+INTERVAL_HOURS=${INTERVAL_HOURS}
+AGENT_ID="${AGENT_ID}"
+EOF
+
+    chmod 600 "$CONFIG_FILE"
+}
+
+# ============================================================================
+# System Information Collection
+# ============================================================================
+
+get_system_info() {
+    local hostname
+    local fqdn
+    local ip_address
+    local os_name
+    local os_version
+    local kernel
+
+    hostname=$(hostname -s 2>/dev/null || hostname)
+    fqdn=$(hostname -f 2>/dev/null || hostname)
+
+    # Get primary IP address
+    ip_address=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}')
+
+    # Detect OS
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck source=/dev/null
+        source /etc/os-release
+        os_name="${NAME:-Linux}"
+        os_version="${VERSION:-${VERSION_ID:-unknown}}"
+    elif [[ -f /etc/redhat-release ]]; then
+        os_name="Red Hat"
+        os_version=$(cat /etc/redhat-release)
+    else
+        os_name="Linux"
+        os_version=$(uname -r)
+    fi
+
+    kernel=$(uname -r)
+
+    cat << EOF
+{
+    "hostname": "${hostname}",
+    "fqdn": "${fqdn}",
+    "ip_address": "${ip_address}",
+    "os": {
+        "name": "${os_name}",
+        "version": "${os_version}",
+        "kernel": "${kernel}"
+    },
+    "agent": {
+        "id": "${AGENT_ID}",
+        "version": "${AGENT_VERSION}"
+    }
+}
+EOF
+}
+
+# ============================================================================
+# Software Inventory Collection
+# ============================================================================
+
+get_installed_software() {
+    log_info "Collecting software inventory..."
+
+    local products=()
+    local count=0
+
+    # Debian/Ubuntu: dpkg
+    if command -v dpkg &>/dev/null; then
+        while IFS=$'\t' read -r name version; do
+            [[ -z "$name" ]] && continue
+
+            # Extract vendor from package name or use "Debian" as fallback
+            local vendor="Debian"
+            case "$name" in
+                lib*|python*|perl*|ruby*) vendor="Community" ;;
+                apache*|httpd*) vendor="Apache" ;;
+                nginx*) vendor="Nginx" ;;
+                mysql*|mariadb*) vendor="Oracle/MariaDB" ;;
+                postgresql*|postgres*) vendor="PostgreSQL" ;;
+                redis*) vendor="Redis" ;;
+                docker*) vendor="Docker" ;;
+                openssl*|openssh*) vendor="OpenSSL/OpenSSH" ;;
+                curl*) vendor="Curl" ;;
+                git*) vendor="Git" ;;
+                vim*|nano*|emacs*) vendor="Community" ;;
+                linux-*|kernel-*) vendor="Linux" ;;
+            esac
+
+            products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\"}")
+            ((count++))
+        done < <(dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null)
+    fi
+
+    # RHEL/CentOS/Fedora: rpm
+    if command -v rpm &>/dev/null && [[ ! -f /etc/debian_version ]]; then
+        while IFS=$'\t' read -r name version vendor; do
+            [[ -z "$name" ]] && continue
+            [[ "$vendor" == "(none)" ]] && vendor="Community"
+
+            products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\"}")
+            ((count++))
+        done < <(rpm -qa --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n' 2>/dev/null)
+    fi
+
+    # Alpine: apk
+    if command -v apk &>/dev/null; then
+        while IFS='-' read -r name version; do
+            [[ -z "$name" ]] && continue
+            products+=("{\"vendor\": \"Alpine\", \"product\": \"$name\", \"version\": \"$version\"}")
+            ((count++))
+        done < <(apk info -v 2>/dev/null | sed 's/-[0-9].*/-&/' | sed 's/--/-/')
+    fi
+
+    # Arch: pacman
+    if command -v pacman &>/dev/null; then
+        while IFS=' ' read -r name version; do
+            [[ -z "$name" ]] && continue
+            products+=("{\"vendor\": \"Arch\", \"product\": \"$name\", \"version\": \"$version\"}")
+            ((count++))
+        done < <(pacman -Q 2>/dev/null)
+    fi
+
+    # Snap packages
+    if command -v snap &>/dev/null; then
+        while read -r name version; do
+            [[ -z "$name" || "$name" == "Name" ]] && continue
+            products+=("{\"vendor\": \"Snap\", \"product\": \"$name\", \"version\": \"$version\"}")
+            ((count++))
+        done < <(snap list 2>/dev/null | awk 'NR>1 {print $1, $2}')
+    fi
+
+    # Flatpak packages
+    if command -v flatpak &>/dev/null; then
+        while IFS=$'\t' read -r name version origin; do
+            [[ -z "$name" || "$name" == "Name" ]] && continue
+            products+=("{\"vendor\": \"${origin:-Flatpak}\", \"product\": \"$name\", \"version\": \"$version\"}")
+            ((count++))
+        done < <(flatpak list --columns=name,version,origin 2>/dev/null)
+    fi
+
+    log_info "Found $count software packages"
+
+    # Build JSON array
+    local json_array="["
+    local first=true
+    for product in "${products[@]}"; do
+        if [[ "$first" == "true" ]]; then
+            first=false
+        else
+            json_array+=","
+        fi
+        json_array+="$product"
+    done
+    json_array+="]"
+
+    echo "$json_array"
+}
+
+# ============================================================================
+# API Communication
+# ============================================================================
+
+send_inventory() {
+    local system_info="$1"
+    local products="$2"
+
+    local endpoint="${SERVER_URL}/api/agent/inventory"
+
+    log_info "Sending inventory to $endpoint..."
+
+    # Build payload
+    local payload
+    payload=$(cat << EOF
+{
+    "hostname": $(echo "$system_info" | grep -o '"hostname"[^,}]*' | head -1 | sed 's/"hostname": *//' ),
+    "fqdn": $(echo "$system_info" | grep -o '"fqdn"[^,}]*' | head -1 | sed 's/"fqdn": *//' ),
+    "ip_address": $(echo "$system_info" | grep -o '"ip_address"[^,}]*' | head -1 | sed 's/"ip_address": *//' ),
+    "os": $(echo "$system_info" | grep -o '"os"[^}]*}' | head -1 | sed 's/"os": *//' ),
+    "agent": $(echo "$system_info" | grep -o '"agent"[^}]*}' | head -1 | sed 's/"agent": *//' ),
+    "products": $products
+}
+EOF
+)
+
+    # Retry logic
+    local max_retries=3
+    local retry_delay=5
+
+    for ((i=1; i<=max_retries; i++)); do
+        local response
+        local http_code
+
+        response=$(curl -s -w "\n%{http_code}" -X POST "$endpoint" \
+            -H "X-Agent-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
+            --data "$payload" \
+            --max-time 120 \
+            2>&1) || true
+
+        http_code=$(echo "$response" | tail -n1)
+        local body
+        body=$(echo "$response" | sed '$d')
+
+        if [[ "$http_code" == "200" || "$http_code" == "202" ]]; then
+            log_info "Inventory sent successfully (HTTP $http_code)"
+            log_info "Response: $body"
+            return 0
+        else
+            log_warn "Attempt $i failed: HTTP $http_code - $body"
+
+            if [[ $i -lt $max_retries ]]; then
+                log_info "Retrying in $retry_delay seconds..."
+                sleep $retry_delay
+                retry_delay=$((retry_delay * 2))
+            fi
+        fi
+    done
+
+    log_error "Failed to send inventory after $max_retries attempts"
+    return 1
+}
+
+send_heartbeat() {
+    local endpoint="${SERVER_URL}/api/agent/heartbeat"
+
+    curl -s -X POST "$endpoint" \
+        -H "X-Agent-Key: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\"}" \
+        --max-time 30 >/dev/null 2>&1
+}
+
+# ============================================================================
+# Installation Functions
+# ============================================================================
+
+install_agent() {
+    log_info "Installing SentriKat agent..."
+
+    # Check for root
+    if [[ $EUID -ne 0 ]]; then
+        echo "ERROR: Installation requires root privileges"
+        exit 1
+    fi
+
+    # Save configuration
+    save_config
+
+    # Copy script to system location
+    local script_dest="/usr/local/bin/sentrikat-agent"
+    cp "$0" "$script_dest"
+    chmod 755 "$script_dest"
+
+    # Create systemd service
+    cat > "$SYSTEMD_SERVICE" << EOF
+[Unit]
+Description=SentriKat Software Inventory Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sentrikat-agent --run-once
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Create systemd timer
+    cat > "$SYSTEMD_TIMER" << EOF
+[Unit]
+Description=Run SentriKat Agent periodically
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=${INTERVAL_HOURS}h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # Enable and start timer
+    systemctl daemon-reload
+    systemctl enable --now sentrikat-agent.timer
+
+    log_info "Agent installed successfully"
+    echo "SentriKat Agent installed and scheduled to run every ${INTERVAL_HOURS} hours"
+    echo "Run 'systemctl status sentrikat-agent.timer' to check status"
+}
+
+uninstall_agent() {
+    log_info "Uninstalling SentriKat agent..."
+
+    if [[ $EUID -ne 0 ]]; then
+        echo "ERROR: Uninstallation requires root privileges"
+        exit 1
+    fi
+
+    # Stop and disable timer
+    systemctl stop sentrikat-agent.timer 2>/dev/null || true
+    systemctl disable sentrikat-agent.timer 2>/dev/null || true
+
+    # Remove systemd files
+    rm -f "$SYSTEMD_SERVICE" "$SYSTEMD_TIMER"
+    systemctl daemon-reload
+
+    # Remove script
+    rm -f /usr/local/bin/sentrikat-agent
+
+    # Optionally remove config (commented out by default)
+    # rm -rf "$CONFIG_DIR"
+
+    log_info "Agent uninstalled"
+    echo "SentriKat Agent uninstalled"
+}
+
+# ============================================================================
+# Main Execution
+# ============================================================================
+
+show_help() {
+    cat << EOF
+SentriKat Linux Agent v${AGENT_VERSION}
+
+Usage: $0 [OPTIONS]
+
+Options:
+  --server-url URL     SentriKat server URL (required)
+  --api-key KEY        Agent API key (required)
+  --interval HOURS     Scan interval in hours (default: 4)
+  --install            Install as systemd service
+  --uninstall          Uninstall agent
+  --run-once           Run inventory collection once and exit
+  --verbose            Enable verbose output
+  --help               Show this help message
+
+Examples:
+  # Run once for testing
+  $0 --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx" --verbose
+
+  # Install as service
+  sudo $0 --install --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
+
+  # Uninstall
+  sudo $0 --uninstall
+EOF
+}
+
+main() {
+    log_info "SentriKat Agent v${AGENT_VERSION} starting..."
+
+    # Load configuration
+    load_config
+
+    # Validate configuration
+    if [[ -z "$SERVER_URL" || -z "$API_KEY" ]]; then
+        log_error "SERVER_URL and API_KEY are required"
+        echo "ERROR: --server-url and --api-key are required"
+        echo "Run '$0 --help' for usage information"
+        exit 1
+    fi
+
+    # Collect and send inventory
+    local system_info
+    system_info=$(get_system_info)
+    log_info "System: $(echo "$system_info" | grep -o '"hostname"[^,]*' | head -1)"
+
+    local products
+    products=$(get_installed_software)
+
+    local product_count
+    product_count=$(echo "$products" | grep -o '"product"' | wc -l)
+
+    if [[ $product_count -eq 0 ]]; then
+        log_warn "No software found to report"
+        exit 0
+    fi
+
+    if send_inventory "$system_info" "$products"; then
+        log_info "Inventory report completed successfully"
+    else
+        log_error "Inventory report failed"
+        exit 1
+    fi
+}
+
+# Parse arguments
+INSTALL=false
+UNINSTALL=false
+RUN_ONCE=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --server-url)
+            ARG_SERVER_URL="$2"
+            shift 2
+            ;;
+        --api-key)
+            ARG_API_KEY="$2"
+            shift 2
+            ;;
+        --interval)
+            INTERVAL_HOURS="$2"
+            shift 2
+            ;;
+        --install)
+            INSTALL=true
+            shift
+            ;;
+        --uninstall)
+            UNINSTALL=true
+            shift
+            ;;
+        --run-once)
+            RUN_ONCE=true
+            shift
+            ;;
+        --verbose|-v)
+            VERBOSE=true
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# Handle actions
+if [[ "$INSTALL" == "true" ]]; then
+    load_config
+    install_agent
+    exit 0
+fi
+
+if [[ "$UNINSTALL" == "true" ]]; then
+    uninstall_agent
+    exit 0
+fi
+
+# Default: run main
+main
