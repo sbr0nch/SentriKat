@@ -1725,13 +1725,36 @@
         if (!confirmed) return;
 
         showLoading();
-        try {
-            const promises = Array.from(selectedProducts.keys()).map(productId =>
-                fetch(`/api/products/${productId}`, { method: 'DELETE' })
-            );
+        const productIds = Array.from(selectedProducts.keys());
+        let successCount = 0;
+        let failCount = 0;
 
-            await Promise.all(promises);
-            showToast(`${selectedProducts.size} product(s) deleted`, 'success');
+        try {
+            // Process in batches of 10 to avoid overwhelming the server
+            const batchSize = 10;
+            for (let i = 0; i < productIds.length; i += batchSize) {
+                const batch = productIds.slice(i, i + batchSize);
+                const results = await Promise.all(
+                    batch.map(async (productId) => {
+                        try {
+                            const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
+                            return response.ok;
+                        } catch {
+                            return false;
+                        }
+                    })
+                );
+                successCount += results.filter(r => r).length;
+                failCount += results.filter(r => !r).length;
+            }
+
+            if (failCount === 0) {
+                showToast(`${successCount} product(s) deleted successfully`, 'success');
+            } else if (successCount === 0) {
+                showToast(`Failed to delete ${failCount} product(s)`, 'danger');
+            } else {
+                showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
+            }
             clearSelection();
             loadProducts();
         } catch (error) {

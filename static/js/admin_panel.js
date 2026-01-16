@@ -214,11 +214,24 @@ async function bulkDeleteUsers() {
     if (!confirmed) return;
 
     showLoading();
+    let successCount = 0;
+    let failCount = 0;
     try {
         for (const user of selectedUsers.values()) {
-            await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+            const response = await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+            if (response.ok) {
+                successCount++;
+            } else {
+                failCount++;
+            }
         }
-        showToast(`${selectedUsers.size} user(s) deleted`, 'success');
+        if (failCount === 0) {
+            showToast(`${successCount} user(s) deleted successfully`, 'success');
+        } else if (successCount === 0) {
+            showToast(`Failed to delete ${failCount} user(s)`, 'danger');
+        } else {
+            showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
+        }
         clearUserSelection();
         loadUsers();
     } catch (error) {
@@ -354,11 +367,24 @@ async function bulkDeleteOrgs() {
     if (!confirmed) return;
 
     showLoading();
+    let successCount = 0;
+    let failCount = 0;
     try {
         for (const org of selectedOrgs.values()) {
-            await fetch(`/api/organizations/${org.id}`, { method: 'DELETE' });
+            const response = await fetch(`/api/organizations/${org.id}`, { method: 'DELETE' });
+            if (response.ok) {
+                successCount++;
+            } else {
+                failCount++;
+            }
         }
-        showToast(`${selectedOrgs.size} organization(s) deleted`, 'success');
+        if (failCount === 0) {
+            showToast(`${successCount} organization(s) deleted successfully`, 'success');
+        } else if (successCount === 0) {
+            showToast(`Failed to delete ${failCount} organization(s)`, 'danger');
+        } else {
+            showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
+        }
         clearOrgSelection();
         loadOrganizations();
     } catch (error) {
@@ -477,14 +503,26 @@ async function bulkDeleteMappings() {
     if (!confirmed) return;
 
     showLoading();
+    let successCount = 0;
+    let failCount = 0;
     try {
         for (const [mappingId, mapping] of selectedMappings) {
             const response = await fetch(`/api/ldap/groups/mappings/${mappingId}`, {
                 method: 'DELETE'
             });
-            if (!response.ok) throw new Error(`Failed to delete mapping ${mappingId}`);
+            if (response.ok) {
+                successCount++;
+            } else {
+                failCount++;
+            }
         }
-        showToast(`${selectedMappings.size} mapping(s) deleted`, 'success');
+        if (failCount === 0) {
+            showToast(`${successCount} mapping(s) deleted successfully`, 'success');
+        } else if (successCount === 0) {
+            showToast(`Failed to delete ${failCount} mapping(s)`, 'danger');
+        } else {
+            showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
+        }
         clearMappingSelection();
         loadGroupMappings();
     } catch (error) {
