@@ -13,26 +13,39 @@ csrf = CSRFProtect()
 limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
 
 
-def _apply_schema_migrations(logger):
-    """Apply schema migrations for new columns (SQLite doesn't auto-add columns)"""
+def _apply_schema_migrations(logger, db_uri):
+    """Apply schema migrations for new columns (works for SQLite and PostgreSQL)"""
     from sqlalchemy import text
 
-    # List of migrations to apply: (table_name, column_name, column_definition)
+    # List of migrations to apply: (table_name, column_name, column_definition_sqlite, column_definition_pg)
     migrations = [
-        ('vulnerability_match', 'first_alerted_at', 'DATETIME'),
+        ('vulnerability_matches', 'first_alerted_at', 'DATETIME', 'TIMESTAMP'),
     ]
 
-    for table_name, column_name, column_def in migrations:
+    is_sqlite = db_uri.startswith('sqlite')
+
+    for table_name, column_name, col_def_sqlite, col_def_pg in migrations:
         try:
-            # Check if column exists
-            result = db.session.execute(text(f"PRAGMA table_info({table_name})"))
-            columns = [row[1] for row in result.fetchall()]
+            # Check if column exists - different query for SQLite vs PostgreSQL
+            if is_sqlite:
+                result = db.session.execute(text(f"PRAGMA table_info({table_name})"))
+                columns = [row[1] for row in result.fetchall()]
+            else:
+                # PostgreSQL - use information_schema
+                result = db.session.execute(text(
+                    f"SELECT column_name FROM information_schema.columns "
+                    f"WHERE table_name = '{table_name}'"
+                ))
+                columns = [row[0] for row in result.fetchall()]
 
             if column_name not in columns:
                 logger.info(f"Adding column {column_name} to {table_name}")
-                db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}"))
+                col_def = col_def_sqlite if is_sqlite else col_def_pg
+                db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {col_def}"))
                 db.session.commit()
                 logger.info(f"Successfully added column {column_name} to {table_name}")
+            else:
+                logger.info(f"Column {column_name} already exists in {table_name}")
         except Exception as e:
             logger.warning(f"Could not add column {column_name} to {table_name}: {e}")
             db.session.rollback()
@@ -207,10 +220,17 @@ def create_app(config_class=Config):
                 logger.info(f"Using existing database at: {db_path}")
 
                 # Apply schema migrations for new columns (SQLite doesn't auto-add columns)
-                _apply_schema_migrations(logger)
+                _apply_schema_migrations(logger, db_uri)
         else:
-            # Non-SQLite database (PostgreSQL, etc.) - always run create_all for safety
-            # In production, migrations should be used instead
+            # Non-SQLite database (PostgreSQL, etc.)
+            import logging
+            logger = logging.getLogger(__name__)
+
+            # First ensure tables exist
             db.create_all()
+
+            # Then apply schema migrations for new columns
+            logger.info("Applying schema migrations for PostgreSQL...")
+            _apply_schema_migrations(logger, db_uri)
 
     return app
