@@ -700,6 +700,29 @@
         initReportFields();
     });
 
+    // Retry utility for API calls during startup
+    async function fetchWithRetry(url, options = {}, maxRetries = 3, delayMs = 800) {
+        let lastError;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, options);
+                if (response.status >= 500 && attempt < maxRetries) {
+                    console.warn(`[Retry ${attempt}/${maxRetries}] Server error ${response.status} for ${url}`);
+                    await new Promise(r => setTimeout(r, delayMs * attempt));
+                    continue;
+                }
+                return response;
+            } catch (error) {
+                lastError = error;
+                console.warn(`[Retry ${attempt}/${maxRetries}] Network error for ${url}: ${error.message}`);
+                if (attempt < maxRetries) {
+                    await new Promise(r => setTimeout(r, delayMs * attempt));
+                }
+            }
+        }
+        throw lastError || new Error(`Failed to fetch ${url} after ${maxRetries} attempts`);
+    }
+
     let currentVulnerabilities = [];
     let currentGroupedVulnerabilities = [];
     let selectedVulns = new Set();
@@ -825,7 +848,7 @@
 
     async function loadStats() {
         try {
-            const response = await fetch('/api/vulnerabilities/stats');
+            const response = await fetchWithRetry('/api/vulnerabilities/stats', {}, 4, 1000);
 
             // Check if response is OK before parsing
             if (!response.ok) {
@@ -850,7 +873,16 @@
             document.getElementById('lowCount').textContent = formatNumber(stats.low_count || 0);
         } catch (error) {
             console.error('Error loading stats:', error);
-            showToast('Failed to load statistics', 'danger');
+            // Show error in cards instead of just toast
+            document.getElementById('totalVulns').textContent = '-';
+            document.getElementById('totalMatches').textContent = '-';
+            document.getElementById('unacknowledged').textContent = '-';
+            document.getElementById('productsTracked').textContent = '-';
+            document.getElementById('criticalCount').textContent = '-';
+            document.getElementById('highCount').textContent = '-';
+            document.getElementById('mediumCount').textContent = '-';
+            document.getElementById('lowCount').textContent = '-';
+            showToast('Failed to load statistics. Try refreshing.', 'danger');
         }
     }
 
@@ -874,7 +906,7 @@
             if (ransomware) params.append('ransomware_only', 'true');
             if (unack) params.append('acknowledged', 'false');
 
-            const response = await fetch(`/api/vulnerabilities?${params}`);
+            const response = await fetchWithRetry(`/api/vulnerabilities?${params}`, {}, 3, 1000);
 
             // Check if response is OK before parsing
             if (!response.ok) {
@@ -1709,7 +1741,7 @@
             params.append('page', currentPage);
             params.append('per_page', pageSize === Infinity ? 100 : pageSize);
 
-            const response = await fetch(`/api/vulnerabilities/grouped?${params}`);
+            const response = await fetchWithRetry(`/api/vulnerabilities/grouped?${params}`, {}, 3, 1000);
 
             if (!response.ok) {
                 if (response.status === 401) {

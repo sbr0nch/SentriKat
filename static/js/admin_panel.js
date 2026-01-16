@@ -10,10 +10,83 @@ let organizations = [];
 // Global license info - loaded at page init
 window.licenseInfo = null;
 
+// Track if initial load has completed
+window.adminPanelInitialized = false;
+
 // Selection state for bulk actions
 let selectedUsers = new Map(); // Map of userId -> { id, username, is_active }
 let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
 let selectedMappings = new Map(); // Map of mappingId -> { id, group_cn, is_active }
+
+// ============================================================================
+// RETRY UTILITY - Handle startup timing issues
+// ============================================================================
+
+/**
+ * Fetch with automatic retry for transient failures
+ * Useful during app startup when API might not be ready
+ * @param {string} url - URL to fetch
+ * @param {object} options - Fetch options
+ * @param {number} maxRetries - Maximum retry attempts (default: 3)
+ * @param {number} delayMs - Initial delay between retries in ms (default: 1000)
+ * @returns {Promise<Response>}
+ */
+async function fetchWithRetry(url, options = {}, maxRetries = 3, delayMs = 1000) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+
+            // For server errors (5xx), retry
+            if (response.status >= 500 && attempt < maxRetries) {
+                console.warn(`[Retry ${attempt}/${maxRetries}] Server error ${response.status} for ${url}, retrying...`);
+                await sleep(delayMs * attempt);
+                continue;
+            }
+
+            return response;
+        } catch (error) {
+            lastError = error;
+            console.warn(`[Retry ${attempt}/${maxRetries}] Network error for ${url}: ${error.message}`);
+
+            if (attempt < maxRetries) {
+                await sleep(delayMs * attempt);
+            }
+        }
+    }
+
+    throw lastError || new Error(`Failed to fetch ${url} after ${maxRetries} attempts`);
+}
+
+/**
+ * Sleep helper for retry delays
+ */
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Load data with retry and update element state
+ * @param {string} elementId - Element to update on error
+ * @param {Function} loadFn - Async function to load data
+ * @param {string} errorMessage - Message to show on failure
+ */
+async function loadWithRetry(elementId, loadFn, errorMessage = 'Failed to load') {
+    const element = document.getElementById(elementId);
+
+    try {
+        await loadFn();
+    } catch (error) {
+        console.error(`Error loading ${elementId}:`, error);
+        if (element) {
+            // Check if still showing "Loading..."
+            if (element.textContent?.includes('Loading') || element.innerHTML?.includes('Loading')) {
+                element.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${errorMessage}</span>`;
+            }
+        }
+    }
+}
 
 // ============================================================================
 // BULK ACTIONS - USERS
@@ -428,8 +501,18 @@ async function bulkDeleteMappings() {
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('Admin Panel: DOMContentLoaded fired');
 
-    // Check if Bootstrap is loaded
-    if (typeof bootstrap === 'undefined') {
+    // Check if Bootstrap is loaded - retry a few times as it might still be loading
+    let bootstrapReady = false;
+    for (let i = 0; i < 10 && !bootstrapReady; i++) {
+        if (typeof bootstrap !== 'undefined') {
+            bootstrapReady = true;
+        } else {
+            console.log(`Waiting for Bootstrap... attempt ${i + 1}`);
+            await sleep(200);
+        }
+    }
+
+    if (!bootstrapReady) {
         console.error('Bootstrap is not loaded! Modals will not work.');
         showToast('Error: Bootstrap JavaScript library is not loaded. Please refresh the page.', 'danger');
         return;
@@ -437,18 +520,26 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     try {
         // Load license info first and apply UI restrictions (await to ensure restrictions apply before showing tabs)
+        // Uses retry logic internally to handle startup timing
         await loadLicenseAndApplyRestrictions();
 
-        loadUsers();
-        loadOrganizations();
+        // Load users and orgs with retry
+        loadUsersWithRetry();
+        loadOrganizationsWithRetry();
         loadOrganizationsDropdown();
         checkLdapPermissions();  // Check if user can access LDAP features (also checks license)
+
+        // Pre-load settings in background (don't wait for tab click)
+        // This ensures settings are ready when user navigates to Settings tab
+        setTimeout(() => {
+            loadAllSettings();
+        }, 500);
 
         // Tab change handlers
         const orgTab = document.getElementById('organizations-tab');
         if (orgTab) {
             orgTab.addEventListener('shown.bs.tab', function() {
-                loadOrganizations();
+                loadOrganizationsWithRetry();
             });
         } else {
             console.warn('organizations-tab element not found');
@@ -501,11 +592,47 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Load sync status immediately (doesn't require settings to be configured)
         loadSyncStatus();
 
+        window.adminPanelInitialized = true;
         console.log('Admin Panel: Initialization complete');
     } catch (error) {
         console.error('Error during admin panel initialization:', error);
+        showToast('Some components failed to load. Try refreshing the page.', 'warning');
     }
 });
+
+/**
+ * Load users with retry support
+ */
+async function loadUsersWithRetry() {
+    try {
+        await loadUsers();
+    } catch (error) {
+        console.error('Initial user load failed, retrying...', error);
+        await sleep(1000);
+        try {
+            await loadUsers();
+        } catch (retryError) {
+            console.error('User load retry failed:', retryError);
+        }
+    }
+}
+
+/**
+ * Load organizations with retry support
+ */
+async function loadOrganizationsWithRetry() {
+    try {
+        await loadOrganizations();
+    } catch (error) {
+        console.error('Initial org load failed, retrying...', error);
+        await sleep(1000);
+        try {
+            await loadOrganizations();
+        } catch (retryError) {
+            console.error('Org load retry failed:', retryError);
+        }
+    }
+}
 
 // ============================================================================
 // User Management
@@ -520,7 +647,7 @@ async function loadUsers() {
     updateUsersBulkToolbar();
 
     try {
-        const response = await fetch('/api/users');
+        const response = await fetchWithRetry('/api/users', {}, 3, 800);
 
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -1203,7 +1330,7 @@ async function loadOrganizations() {
     updateOrgsBulkToolbar();
 
     try {
-        const response = await fetch('/api/organizations');
+        const response = await fetchWithRetry('/api/organizations', {}, 3, 800);
 
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -2661,81 +2788,135 @@ async function loadAuditLogs() {
 }
 
 async function loadAllSettings() {
-    try {
-        // Load LDAP settings
-        const ldapResponse = await fetch('/api/settings/ldap');
-        if (ldapResponse.ok) {
-            const ldap = await ldapResponse.json();
-            document.getElementById('ldapEnabled').checked = ldap.ldap_enabled || false;
-            document.getElementById('ldapServer').value = ldap.ldap_server || '';
-            document.getElementById('ldapPort').value = ldap.ldap_port || 389;
-            document.getElementById('ldapBaseDN').value = ldap.ldap_base_dn || '';
-            document.getElementById('ldapBindDN').value = ldap.ldap_bind_dn || '';
-            document.getElementById('ldapSearchFilter').value = ldap.ldap_search_filter || '(sAMAccountName={username})';
-            document.getElementById('ldapUsernameAttr').value = ldap.ldap_username_attr || 'sAMAccountName';
-            document.getElementById('ldapEmailAttr').value = ldap.ldap_email_attr || 'mail';
-            document.getElementById('ldapUseTLS').checked = ldap.ldap_use_tls || false;
-            document.getElementById('ldapSyncEnabled').checked = ldap.ldap_sync_enabled || false;
-            document.getElementById('ldapSyncInterval').value = ldap.ldap_sync_interval_hours || '24';
+    console.log('Loading all settings...');
 
-            // Load last scheduled sync time
-            loadLastScheduledSync();
-        }
+    // Load settings in parallel with retry support
+    const loadPromises = [];
 
-        // Load Global SMTP settings
-        const smtpResponse = await fetch('/api/settings/smtp');
-        if (smtpResponse.ok) {
-            const smtp = await smtpResponse.json();
-            document.getElementById('globalSmtpHost').value = smtp.smtp_host || '';
-            document.getElementById('globalSmtpPort').value = smtp.smtp_port || 587;
-            document.getElementById('globalSmtpUsername').value = smtp.smtp_username || '';
-            document.getElementById('globalSmtpFromEmail').value = smtp.smtp_from_email || '';
-            document.getElementById('globalSmtpFromName').value = smtp.smtp_from_name || 'SentriKat Alerts';
-            document.getElementById('globalSmtpUseTLS').checked = smtp.smtp_use_tls !== false;
-            document.getElementById('globalSmtpUseSSL').checked = smtp.smtp_use_ssl === true;
-        }
+    // Load LDAP settings
+    loadPromises.push(
+        fetchWithRetry('/api/settings/ldap', {}, 3, 800)
+            .then(async response => {
+                if (response.ok) {
+                    const ldap = await response.json();
+                    const ldapEnabled = document.getElementById('ldapEnabled');
+                    const ldapServer = document.getElementById('ldapServer');
+                    const ldapPort = document.getElementById('ldapPort');
+                    const ldapBaseDN = document.getElementById('ldapBaseDN');
+                    const ldapBindDN = document.getElementById('ldapBindDN');
+                    const ldapSearchFilter = document.getElementById('ldapSearchFilter');
+                    const ldapUsernameAttr = document.getElementById('ldapUsernameAttr');
+                    const ldapEmailAttr = document.getElementById('ldapEmailAttr');
+                    const ldapUseTLS = document.getElementById('ldapUseTLS');
+                    const ldapSyncEnabled = document.getElementById('ldapSyncEnabled');
+                    const ldapSyncInterval = document.getElementById('ldapSyncInterval');
 
-        // Load Sync settings
-        const syncResponse = await fetch('/api/settings/sync');
-        if (syncResponse.ok) {
-            const sync = await syncResponse.json();
-            document.getElementById('autoSyncEnabled').checked = sync.auto_sync_enabled || false;
-            document.getElementById('syncInterval').value = sync.sync_interval || 'daily';
-            document.getElementById('syncTime').value = sync.sync_time || '02:00';
-            document.getElementById('cisaKevUrl').value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
-            // NVD API Key - show placeholder if configured
-            const nvdKeyInput = document.getElementById('nvdApiKey');
-            if (nvdKeyInput) {
-                nvdKeyInput.value = '';
-                nvdKeyInput.placeholder = sync.nvd_api_key_configured
-                    ? '(API key saved - leave blank to keep)'
-                    : 'Enter your NVD API key (optional)';
-            }
-        }
-        loadSyncStatus();
+                    if (ldapEnabled) ldapEnabled.checked = ldap.ldap_enabled || false;
+                    if (ldapServer) ldapServer.value = ldap.ldap_server || '';
+                    if (ldapPort) ldapPort.value = ldap.ldap_port || 389;
+                    if (ldapBaseDN) ldapBaseDN.value = ldap.ldap_base_dn || '';
+                    if (ldapBindDN) ldapBindDN.value = ldap.ldap_bind_dn || '';
+                    if (ldapSearchFilter) ldapSearchFilter.value = ldap.ldap_search_filter || '(sAMAccountName={username})';
+                    if (ldapUsernameAttr) ldapUsernameAttr.value = ldap.ldap_username_attr || 'sAMAccountName';
+                    if (ldapEmailAttr) ldapEmailAttr.value = ldap.ldap_email_attr || 'mail';
+                    if (ldapUseTLS) ldapUseTLS.checked = ldap.ldap_use_tls || false;
+                    if (ldapSyncEnabled) ldapSyncEnabled.checked = ldap.ldap_sync_enabled || false;
+                    if (ldapSyncInterval) ldapSyncInterval.value = ldap.ldap_sync_interval_hours || '24';
 
-        // Load Proxy settings
-        const generalResponse = await fetch('/api/settings/general');
-        if (generalResponse.ok) {
-            const general = await generalResponse.json();
-            const verifySSL = document.getElementById('verifySSL');
-            const httpProxy = document.getElementById('httpProxy');
-            const httpsProxy = document.getElementById('httpsProxy');
-            const noProxy = document.getElementById('noProxy');
-            if (verifySSL) verifySSL.checked = general.verify_ssl !== false;
-            if (httpProxy) httpProxy.value = general.http_proxy || '';
-            if (httpsProxy) httpsProxy.value = general.https_proxy || '';
-            if (noProxy) noProxy.value = general.no_proxy || '';
-        }
+                    loadLastScheduledSync();
+                    console.log('LDAP settings loaded');
+                }
+            })
+            .catch(err => console.error('Failed to load LDAP settings:', err))
+    );
 
-        // Load additional settings (security, branding, notifications, retention)
-        loadSecuritySettings();
-        loadBrandingSettings();
-        loadNotificationSettings();
-        loadRetentionSettings();
-    } catch (error) {
-        console.error('Error loading settings:', error);
-    }
+    // Load Global SMTP settings
+    loadPromises.push(
+        fetchWithRetry('/api/settings/smtp', {}, 3, 800)
+            .then(async response => {
+                if (response.ok) {
+                    const smtp = await response.json();
+                    const globalSmtpHost = document.getElementById('globalSmtpHost');
+                    const globalSmtpPort = document.getElementById('globalSmtpPort');
+                    const globalSmtpUsername = document.getElementById('globalSmtpUsername');
+                    const globalSmtpFromEmail = document.getElementById('globalSmtpFromEmail');
+                    const globalSmtpFromName = document.getElementById('globalSmtpFromName');
+                    const globalSmtpUseTLS = document.getElementById('globalSmtpUseTLS');
+                    const globalSmtpUseSSL = document.getElementById('globalSmtpUseSSL');
+
+                    if (globalSmtpHost) globalSmtpHost.value = smtp.smtp_host || '';
+                    if (globalSmtpPort) globalSmtpPort.value = smtp.smtp_port || 587;
+                    if (globalSmtpUsername) globalSmtpUsername.value = smtp.smtp_username || '';
+                    if (globalSmtpFromEmail) globalSmtpFromEmail.value = smtp.smtp_from_email || '';
+                    if (globalSmtpFromName) globalSmtpFromName.value = smtp.smtp_from_name || 'SentriKat Alerts';
+                    if (globalSmtpUseTLS) globalSmtpUseTLS.checked = smtp.smtp_use_tls !== false;
+                    if (globalSmtpUseSSL) globalSmtpUseSSL.checked = smtp.smtp_use_ssl === true;
+                    console.log('SMTP settings loaded');
+                }
+            })
+            .catch(err => console.error('Failed to load SMTP settings:', err))
+    );
+
+    // Load Sync settings
+    loadPromises.push(
+        fetchWithRetry('/api/settings/sync', {}, 3, 800)
+            .then(async response => {
+                if (response.ok) {
+                    const sync = await response.json();
+                    const autoSyncEnabled = document.getElementById('autoSyncEnabled');
+                    const syncInterval = document.getElementById('syncInterval');
+                    const syncTime = document.getElementById('syncTime');
+                    const cisaKevUrl = document.getElementById('cisaKevUrl');
+                    const nvdKeyInput = document.getElementById('nvdApiKey');
+
+                    if (autoSyncEnabled) autoSyncEnabled.checked = sync.auto_sync_enabled || false;
+                    if (syncInterval) syncInterval.value = sync.sync_interval || 'daily';
+                    if (syncTime) syncTime.value = sync.sync_time || '02:00';
+                    if (cisaKevUrl) cisaKevUrl.value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+                    if (nvdKeyInput) {
+                        nvdKeyInput.value = '';
+                        nvdKeyInput.placeholder = sync.nvd_api_key_configured
+                            ? '(API key saved - leave blank to keep)'
+                            : 'Enter your NVD API key (optional)';
+                    }
+                    console.log('Sync settings loaded');
+                }
+            })
+            .catch(err => console.error('Failed to load sync settings:', err))
+    );
+
+    // Load Proxy/General settings
+    loadPromises.push(
+        fetchWithRetry('/api/settings/general', {}, 3, 800)
+            .then(async response => {
+                if (response.ok) {
+                    const general = await response.json();
+                    const verifySSL = document.getElementById('verifySSL');
+                    const httpProxy = document.getElementById('httpProxy');
+                    const httpsProxy = document.getElementById('httpsProxy');
+                    const noProxy = document.getElementById('noProxy');
+                    if (verifySSL) verifySSL.checked = general.verify_ssl !== false;
+                    if (httpProxy) httpProxy.value = general.http_proxy || '';
+                    if (httpsProxy) httpsProxy.value = general.https_proxy || '';
+                    if (noProxy) noProxy.value = general.no_proxy || '';
+                    console.log('Proxy settings loaded');
+                }
+            })
+            .catch(err => console.error('Failed to load proxy settings:', err))
+    );
+
+    // Wait for all critical settings, then load additional ones
+    await Promise.allSettled(loadPromises);
+
+    loadSyncStatus();
+
+    // Load additional settings (these can fail independently)
+    loadSecuritySettings();
+    loadBrandingSettings();
+    loadNotificationSettings();
+    loadRetentionSettings();
+
+    console.log('All settings loading complete');
 }
 
 // ============================================================================
@@ -4796,23 +4977,56 @@ document.addEventListener('DOMContentLoaded', function() {
 /**
  * Load license info and apply UI restrictions for premium features
  * This is called early during page initialization
+ * Uses retry logic to handle app startup timing issues
  */
 async function loadLicenseAndApplyRestrictions() {
     try {
-        const response = await fetch('/api/license');
+        const response = await fetchWithRetry('/api/license', {}, 5, 800);
         if (!response.ok) {
-            console.warn('Failed to load license info');
+            console.warn('Failed to load license info, status:', response.status);
             window.licenseInfo = { is_professional: false, features: [] };
+            updateLicenseLoadingState('error');
             return;
         }
 
         window.licenseInfo = await response.json();
         applyLicenseRestrictions();
+        updateLicenseLoadingState('success');
 
     } catch (error) {
         console.error('Error loading license for restrictions:', error);
         window.licenseInfo = { is_professional: false, features: [] };
+        updateLicenseLoadingState('error');
     }
+}
+
+/**
+ * Update UI elements that show "Loading..." for license data
+ */
+function updateLicenseLoadingState(status) {
+    const installIdEl = document.getElementById('installationIdDisplay');
+
+    if (status === 'error') {
+        if (installIdEl && (installIdEl.value === 'Loading...' || !installIdEl.value)) {
+            installIdEl.value = 'Error loading - click License tab to retry';
+        }
+
+        const licenseDetails = document.getElementById('licenseDetails');
+        if (licenseDetails && licenseDetails.innerHTML.includes('Loading')) {
+            licenseDetails.innerHTML = `
+                <div class="alert alert-warning mb-0 py-2">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    Failed to load. <a href="#" onclick="loadLicenseInfo(); return false;">Retry</a>
+                </div>
+            `;
+        }
+
+        const licenseUsage = document.getElementById('licenseUsage');
+        if (licenseUsage && licenseUsage.innerHTML.includes('Loading')) {
+            licenseUsage.innerHTML = `<span class="text-muted">Click License tab to load</span>`;
+        }
+    }
+}
 }
 
 /**
@@ -4913,22 +5127,36 @@ function isFeatureLicensed(feature) {
 }
 
 async function loadLicenseInfo() {
+    const detailsEl = document.getElementById('licenseDetails');
+    const usageEl = document.getElementById('licenseUsage');
+
+    // Show loading state
+    if (detailsEl) detailsEl.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm"></div> Loading...</div>';
+    if (usageEl) usageEl.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm"></div> Loading...</div>';
+
     try {
-        const response = await fetch('/api/license');
+        const response = await fetchWithRetry('/api/license', {}, 3, 1000);
         if (!response.ok) {
             throw new Error('Failed to load license info');
         }
 
         const data = await response.json();
+        window.licenseInfo = data; // Update global
         displayLicenseInfo(data);
 
     } catch (error) {
         console.error('Error loading license:', error);
-        document.getElementById('licenseDetails').innerHTML = `
-            <div class="alert alert-danger mb-0">
-                <i class="bi bi-exclamation-triangle me-2"></i>Failed to load license info
-            </div>
-        `;
+        if (detailsEl) {
+            detailsEl.innerHTML = `
+                <div class="alert alert-danger mb-0">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Failed to load license info.
+                    <a href="#" onclick="loadLicenseInfo(); return false;" class="alert-link ms-2">Retry</a>
+                </div>
+            `;
+        }
+        if (usageEl) {
+            usageEl.innerHTML = `<span class="text-muted">-</span>`;
+        }
     }
 }
 
@@ -5184,7 +5412,7 @@ async function loadAgentKeys() {
     if (!tbody) return;
 
     try {
-        const response = await fetch('/api/agent-keys');
+        const response = await fetchWithRetry('/api/agent-keys', {}, 3, 800);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
@@ -6493,7 +6721,7 @@ async function loadIntegrations() {
     pullSourcesPage = 1;  // Reset to first page on reload
 
     try {
-        const response = await fetch('/api/integrations');
+        const response = await fetchWithRetry('/api/integrations', {}, 3, 800);
         if (!response.ok) throw new Error('Failed to load integrations');
 
         integrationsList = await response.json();
