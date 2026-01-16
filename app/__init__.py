@@ -21,6 +21,7 @@ def _apply_schema_migrations(logger, db_uri):
     migrations = [
         ('vulnerability_matches', 'first_alerted_at', 'DATETIME', 'TIMESTAMP'),
         ('agent_api_keys', 'auto_approve', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('inventory_jobs', 'api_key_id', 'INTEGER', 'INTEGER'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
