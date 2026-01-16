@@ -607,6 +607,8 @@ def delete_product(product_id):
 
         if current_user.is_super_admin():
             # Super admin: delete product globally
+            # Delete all related records first (foreign key constraints)
+            ProductInstallation.query.filter_by(product_id=product_id).delete()
             VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
             db.session.delete(product)
             db.session.commit()
@@ -644,6 +646,8 @@ def delete_product(product_id):
                     })
             else:
                 # Product only in this org - delete it globally
+                # Delete all related records first (foreign key constraints)
+                ProductInstallation.query.filter_by(product_id=product_id).delete()
                 VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
                 db.session.delete(product)
                 db.session.commit()
