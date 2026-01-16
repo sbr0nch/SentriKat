@@ -666,6 +666,13 @@ def process_inventory_job(job):
                 ).first()
 
                 if not product:
+                    # Check if this product is excluded (banned) for this organization
+                    from app.models import ProductExclusion
+                    if ProductExclusion.is_excluded(organization.id, vendor, product_name, version):
+                        logger.debug(f"Skipping excluded product: {vendor} {product_name} for org {organization.id}")
+                        items_processed += 1
+                        continue
+
                     product = Product(
                         vendor=vendor,
                         product_name=product_name,

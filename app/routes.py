@@ -525,6 +525,9 @@ def delete_product(product_id):
     """
     Delete a product or remove it from current organization.
 
+    Query params:
+    - exclude: If 'true', add product to exclusion list to prevent re-adding by agents
+
     Permissions:
     - Super Admin: Deletes product globally from all organizations
     - Org Admin/Manager: Removes product from their org only.
@@ -532,10 +535,14 @@ def delete_product(product_id):
       If product is only in their org, it gets deleted globally.
     """
     from app.logging_config import log_audit_event
+    from app.models import ProductExclusion
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     product = Product.query.get_or_404(product_id)
+
+    # Check if we should exclude this product from future agent scans
+    exclude_from_scans = request.args.get('exclude', 'false').lower() == 'true'
 
     # Get user's current organization
     user_org_id = session.get('organization_id') or current_user.organization_id
@@ -558,6 +565,46 @@ def delete_product(product_id):
     }
 
     try:
+        # If exclude requested, add to exclusion list for relevant orgs
+        if exclude_from_scans:
+            if current_user.is_super_admin():
+                # Exclude for all organizations this product was in
+                for org_id in product_org_ids:
+                    existing = ProductExclusion.query.filter_by(
+                        organization_id=org_id,
+                        vendor=product.vendor,
+                        product_name=product.product_name,
+                        version=None
+                    ).first()
+                    if not existing:
+                        exclusion = ProductExclusion(
+                            organization_id=org_id,
+                            vendor=product.vendor,
+                            product_name=product.product_name,
+                            version=None,  # Exclude all versions
+                            reason='Deleted by admin',
+                            excluded_by=current_user_id
+                        )
+                        db.session.add(exclusion)
+            else:
+                # Exclude only for user's organization
+                existing = ProductExclusion.query.filter_by(
+                    organization_id=user_org_id,
+                    vendor=product.vendor,
+                    product_name=product.product_name,
+                    version=None
+                ).first()
+                if not existing:
+                    exclusion = ProductExclusion(
+                        organization_id=user_org_id,
+                        vendor=product.vendor,
+                        product_name=product.product_name,
+                        version=None,
+                        reason='Deleted by admin',
+                        excluded_by=current_user_id
+                    )
+                    db.session.add(exclusion)
+
         if current_user.is_super_admin():
             # Super admin: delete product globally
             VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
@@ -569,9 +616,9 @@ def delete_product(product_id):
                 'products',
                 product_id,
                 old_value=product_info,
-                details=f"Super admin deleted product {product.vendor} {product.product_name} globally"
+                details=f"Super admin deleted product {product.vendor} {product.product_name} globally" + (" (excluded from future scans)" if exclude_from_scans else "")
             )
-            return jsonify({'success': True, 'message': 'Product deleted globally'})
+            return jsonify({'success': True, 'message': 'Product deleted globally' + (' and excluded from future agent scans' if exclude_from_scans else '')})
 
         else:
             # Org admin/manager: remove from their org only
@@ -583,16 +630,17 @@ def delete_product(product_id):
                     product.organizations.remove(user_org)
                     db.session.commit()
 
+                    exclude_msg = ' and excluded from future agent scans' if exclude_from_scans else ''
                     log_audit_event(
                         'REMOVE_ORG',
                         'products',
                         product_id,
                         old_value={'organization_id': user_org_id},
-                        details=f"Removed product {product.vendor} {product.product_name} from {user_org.display_name}"
+                        details=f"Removed product {product.vendor} {product.product_name} from {user_org.display_name}" + (" (excluded)" if exclude_from_scans else "")
                     )
                     return jsonify({
                         'success': True,
-                        'message': f'Product removed from {user_org.display_name} (still exists in other organizations)'
+                        'message': f'Product removed from {user_org.display_name} (still exists in other organizations)' + exclude_msg
                     })
             else:
                 # Product only in this org - delete it globally
@@ -600,14 +648,15 @@ def delete_product(product_id):
                 db.session.delete(product)
                 db.session.commit()
 
+                exclude_msg = ' and excluded from future agent scans' if exclude_from_scans else ''
                 log_audit_event(
                     'DELETE',
                     'products',
                     product_id,
                     old_value=product_info,
-                    details=f"Deleted product {product.vendor} {product.product_name}"
+                    details=f"Deleted product {product.vendor} {product.product_name}" + (" (excluded)" if exclude_from_scans else "")
                 )
-                return jsonify({'success': True, 'message': 'Product deleted'})
+                return jsonify({'success': True, 'message': 'Product deleted' + exclude_msg})
 
         return jsonify({'success': True})
 

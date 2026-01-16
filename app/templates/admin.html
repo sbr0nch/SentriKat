@@ -652,6 +652,8 @@
     }
 
     async function loadProducts() {
+        // Clear any existing selection when reloading products
+        clearSelection();
         showLoading();
         const tbody = document.getElementById('productsTable');
 
