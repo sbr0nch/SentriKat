@@ -1066,8 +1066,26 @@ Write-Host "Scanning installed software..." -ForegroundColor Yellow
 $Products = @()
 $Seen = @{{}}
 
+# Helper function to sanitize strings for JSON
+function Sanitize-String {{
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) {{ return "" }}
+    # Remove control characters and normalize
+    $Value = $Value -replace '[\\x00-\\x1F\\x7F]', ''
+    $Value = $Value.Trim()
+    return $Value
+}}
+
 function Add-Software {{
     param($Publisher, $Name, $Version, $Path)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {{ return }}
+
+    # Sanitize all inputs
+    $Name = Sanitize-String $Name
+    $Publisher = Sanitize-String $Publisher
+    $Version = Sanitize-String $Version
+    $Path = Sanitize-String $Path
 
     if ([string]::IsNullOrWhiteSpace($Name)) {{ return }}
 
@@ -1102,7 +1120,7 @@ Write-Host "Found $($Products.Count) unique software items" -ForegroundColor Gre
 Write-Host ""
 
 # Build payload
-$Body = @{{
+$Payload = @{{
     hostname = $Hostname
     ip_address = $IPAddress
     os = @{{
@@ -1114,27 +1132,57 @@ $Body = @{{
         version = "1.0.0"
     }}
     products = $Products
-}} | ConvertTo-Json -Depth 4 -Compress
+}}
+
+# Convert to JSON with proper depth and encoding
+try {{
+    $Body = $Payload | ConvertTo-Json -Depth 10 -Compress -ErrorAction Stop
+    # Convert to UTF-8 bytes for proper encoding
+    $BodyBytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
+}} catch {{
+    Write-Host ""
+    Write-Host "ERROR: Failed to serialize JSON!" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Press any key to exit..." -ForegroundColor Cyan
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit 1
+}}
 
 # Report to SentriKat
 Write-Host "Sending inventory to SentriKat..." -ForegroundColor Yellow
+Write-Host "Payload size: $($BodyBytes.Length) bytes" -ForegroundColor Gray
 
 try {{
     $Response = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/inventory" `
         -Method POST `
-        -Body $Body `
-        -ContentType "application/json" `
+        -Body $BodyBytes `
+        -ContentType "application/json; charset=utf-8" `
         -Headers @{{"X-Agent-Key" = $ApiKey}} `
         -ErrorAction Stop
 
     Write-Host ""
     Write-Host "SUCCESS!" -ForegroundColor Green
     Write-Host "----------------------------------------"
-    Write-Host "Asset ID:             $($Response.asset_id)"
-    Write-Host "Products Created:     $($Response.products_created)"
-    Write-Host "Products Updated:     $($Response.products_updated)"
-    Write-Host "Installations Created: $($Response.installations_created)"
-    Write-Host "Installations Updated: $($Response.installations_updated)"
+    if ($Response.status -eq "queued") {{
+        # Async processing for large batches
+        Write-Host "Status:               Queued for processing" -ForegroundColor Yellow
+        Write-Host "Job ID:               $($Response.job_id)"
+        Write-Host "Asset ID:             $($Response.asset_id)"
+        Write-Host "Total Products:       $($Response.message)"
+        Write-Host ""
+        Write-Host "Large inventory queued for background processing."
+        Write-Host "Check job status at: $SentriKatUrl$($Response.check_status_url)"
+    }} else {{
+        # Sync processing result
+        Write-Host "Asset ID:             $($Response.asset_id)"
+        if ($Response.summary) {{
+            Write-Host "Products Created:     $($Response.summary.products_created)"
+            Write-Host "Products Updated:     $($Response.summary.products_updated)"
+            Write-Host "Installations Created: $($Response.summary.installations_created)"
+            Write-Host "Installations Updated: $($Response.summary.installations_updated)"
+        }}
+    }}
     Write-Host "----------------------------------------"
 }} catch {{
     Write-Host ""
