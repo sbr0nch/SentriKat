@@ -286,7 +286,35 @@ class Product(db.Model):
         cpe_vendor, cpe_product, _ = self.get_effective_cpe()
         return bool(cpe_vendor and cpe_product)
 
-    def to_dict(self):
+    def get_platform_summary(self):
+        """
+        Get a summary of which platforms this product is installed on.
+        Returns dict with platform counts and list.
+        """
+        from sqlalchemy import func
+
+        # Query installation counts by platform
+        platform_counts = db.session.query(
+            ProductInstallation.detected_on_os,
+            func.count(ProductInstallation.id)
+        ).filter(
+            ProductInstallation.product_id == self.id
+        ).group_by(
+            ProductInstallation.detected_on_os
+        ).all()
+
+        platforms = {}
+        for platform, count in platform_counts:
+            platform_name = platform or 'unknown'
+            platforms[platform_name] = count
+
+        return {
+            'platforms': platforms,
+            'platform_list': list(platforms.keys()),
+            'total_installations': sum(platforms.values())
+        }
+
+    def to_dict(self, include_platforms=False):
         # Get assigned organizations
         assigned_orgs = [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
                          for org in self.organizations.all()]
@@ -300,7 +328,7 @@ class Product(db.Model):
         # Get effective CPE (product-level or from catalog)
         eff_cpe_vendor, eff_cpe_product, eff_cpe_uri = self.get_effective_cpe()
 
-        return {
+        result = {
             'id': self.id,
             'organization_id': self.organization_id,  # Legacy field
             'organizations': assigned_orgs,  # New multi-org field
@@ -325,6 +353,12 @@ class Product(db.Model):
             'effective_cpe_uri': eff_cpe_uri,
             'has_cpe': self.has_cpe()
         }
+
+        # Optionally include platform summary (extra query)
+        if include_platforms:
+            result['platform_summary'] = self.get_platform_summary()
+
+        return result
 
 class Vulnerability(db.Model):
     """CISA KEV vulnerabilities cache"""
@@ -1191,6 +1225,7 @@ class ProductInstallation(db.Model):
     # Installation details
     install_path = db.Column(db.String(500), nullable=True)  # Where it's installed
     detected_by = db.Column(db.String(50), default='agent')  # agent, manual, scan
+    detected_on_os = db.Column(db.String(50), nullable=True, index=True)  # linux, windows, macos, etc.
 
     # Status
     is_vulnerable = db.Column(db.Boolean, default=False, index=True)  # Cached: has matching CVEs?
@@ -1209,7 +1244,50 @@ class ProductInstallation(db.Model):
         db.UniqueConstraint('asset_id', 'product_id', name='uix_asset_product'),
     )
 
+    @staticmethod
+    def normalize_os_name(os_name):
+        """
+        Normalize OS name to a standard platform category.
+        Used for filtering and display consistency.
+        """
+        if not os_name:
+            return None
+
+        os_lower = os_name.lower()
+
+        # Windows variants
+        if 'windows' in os_lower or 'win32' in os_lower or 'win64' in os_lower:
+            return 'windows'
+
+        # Linux variants
+        if any(x in os_lower for x in ['linux', 'ubuntu', 'debian', 'centos', 'rhel',
+                                        'red hat', 'fedora', 'alpine', 'arch', 'suse']):
+            return 'linux'
+
+        # macOS variants
+        if any(x in os_lower for x in ['macos', 'mac os', 'darwin', 'osx']):
+            return 'macos'
+
+        # BSD variants
+        if 'bsd' in os_lower:
+            return 'bsd'
+
+        # Unix generic
+        if 'unix' in os_lower or 'sunos' in os_lower or 'solaris' in os_lower:
+            return 'unix'
+
+        # Container/virtualization
+        if 'docker' in os_lower or 'container' in os_lower:
+            return 'container'
+
+        return 'other'
+
     def to_dict(self):
+        # Get platform from detected_on_os or derive from asset
+        platform = self.detected_on_os
+        if not platform and self.asset:
+            platform = self.normalize_os_name(self.asset.os_name)
+
         return {
             'id': self.id,
             'asset_id': self.asset_id,
@@ -1219,6 +1297,8 @@ class ProductInstallation(db.Model):
             'version': self.version,
             'install_path': self.install_path,
             'detected_by': self.detected_by,
+            'detected_on_os': self.detected_on_os,
+            'platform': platform,  # Normalized platform (linux, windows, macos, etc.)
             'is_vulnerable': self.is_vulnerable,
             'vulnerability_count': self.vulnerability_count,
             'discovered_at': self.discovered_at.isoformat() if self.discovered_at else None,

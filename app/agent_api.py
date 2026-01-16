@@ -685,12 +685,16 @@ def process_inventory_job(job):
                 ).first()
 
                 if not installation:
+                    # Normalize OS name to platform category
+                    platform = ProductInstallation.normalize_os_name(asset.os_name)
+
                     installation = ProductInstallation(
                         asset_id=asset.id,
                         product_id=product.id,
                         version=version,
                         install_path=product_data.get('path'),
-                        detected_by='agent'
+                        detected_by='agent',
+                        detected_on_os=platform  # Track which OS this came from
                     )
                     db.session.add(installation)
                     installations_created += 1
@@ -998,12 +1002,16 @@ def report_inventory():
             ).first()
 
             if not installation:
+                # Normalize OS name to platform category
+                platform = ProductInstallation.normalize_os_name(asset.os_name)
+
                 installation = ProductInstallation(
                     asset_id=asset.id,
                     product_id=product.id,
                     version=version,
                     install_path=product_data.get('path'),
-                    detected_by='agent'
+                    detected_by='agent',
+                    detected_on_os=platform  # Track which OS this came from
                 )
                 db.session.add(installation)
                 db.session.flush()  # Get installation ID for version history
