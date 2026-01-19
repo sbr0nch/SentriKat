@@ -2,7 +2,7 @@
 SentriKat Licensing System
 
 Two tiers:
-- Community (free): 3 users, 1 org, 20 products, no LDAP/alerts/API
+- Community (free): 1 user, 1 org, 50 products, no LDAP/alerts/API
 - Professional (paid): Unlimited, all features
 
 License keys are RSA-signed JSON payloads that are hardware-locked.
@@ -63,9 +63,9 @@ def get_license_public_key():
 LICENSE_TIERS = {
     'community': {
         'name': 'Community',
-        'max_users': 3,
+        'max_users': 1,
         'max_organizations': 1,
-        'max_products': 20,
+        'max_products': 50,
         'features': [],
         'powered_by_required': True
     },
@@ -210,9 +210,9 @@ class LicenseInfo:
         self.license_id = None
         self.issued_at = None
         self.expires_at = None
-        self.max_users = 3
+        self.max_users = 1
         self.max_organizations = 1
-        self.max_products = 20
+        self.max_products = 50
         # Agent limits (from signed license - tamper-proof)
         self.max_agents = 0  # Community = 0 agents (requires Professional)
         self.max_agent_api_keys = 0
