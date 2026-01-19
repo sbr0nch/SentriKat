@@ -2078,12 +2078,10 @@
                         <a href="/admin-panel#ldapUsers" class="sidebar-sublink">
                             <i class="bi bi-diagram-3"></i>
                             LDAP Users
-                            <span class="badge bg-info ms-auto">PRO</span>
                         </a>
                         <a href="/admin-panel#ldapGroups" class="sidebar-sublink">
                             <i class="bi bi-diagram-2"></i>
                             LDAP Groups
-                            <span class="badge bg-info ms-auto">PRO</span>
                         </a>
                         {% endif %}
                     </div>
@@ -2103,9 +2101,6 @@
                     <a href="/admin-panel#integrations" class="sidebar-link" data-tooltip="Integrations">
                         <i class="bi bi-plug-fill"></i>
                         <span class="link-text">Integrations</span>
-                        {% if license and license.is_professional() %}
-                        <span class="badge bg-success">PRO</span>
-                        {% endif %}
                     </a>
                 </div>
                 {% endif %}

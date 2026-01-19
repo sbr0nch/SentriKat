@@ -20,7 +20,7 @@
 
     <div class="tab-content" id="adminTabsContent">
         <!-- Users Section -->
-        <div class="tab-pane fade show active" id="users" role="tabpanel">
+        <div class="tab-pane fade" id="users" role="tabpanel">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
                     <h2 class="h4 fw-bold mb-1"><i class="bi bi-people-fill me-2"></i>Local Users</h2>
@@ -95,12 +95,9 @@
 
         <!-- LDAP Users Tab -->
         <div class="tab-pane fade" id="ldapUsers" role="tabpanel">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-3 me-2"></i>LDAP Users</h2>
-                    <p class="text-muted mb-0 small">Discover and invite users from your LDAP/Active Directory</p>
-                </div>
-                <span class="badge bg-info">PRO</span>
+            <div class="mb-4">
+                <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-3 me-2"></i>LDAP Users</h2>
+                <p class="text-muted mb-0 small">Discover and invite users from your LDAP/Active Directory</p>
             </div>
             <div class="card">
                 <div class="card-header">
@@ -238,12 +235,9 @@
 
         <!-- LDAP Groups Section -->
         <div class="tab-pane fade" id="ldapGroups" role="tabpanel">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-2 me-2"></i>LDAP Groups</h2>
-                    <p class="text-muted mb-0 small">Map LDAP/AD groups to SentriKat roles and organizations</p>
-                </div>
-                <span class="badge bg-info">PRO</span>
+            <div class="mb-4">
+                <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-2 me-2"></i>LDAP Groups</h2>
+                <p class="text-muted mb-0 small">Map LDAP/AD groups to SentriKat roles and organizations</p>
             </div>
             <div class="row">
                 <div class="col-12">
@@ -484,14 +478,11 @@
         </div>
 
         {% if license and license.is_professional() %}
-        <!-- Integrations Tab (PRO Feature) -->
+        <!-- Integrations Section -->
         <div class="tab-pane fade" id="integrations" role="tabpanel">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-plug-fill me-2"></i>Integrations</h2>
-                    <p class="text-muted mb-0 small">Agent management, API keys, and data imports</p>
-                </div>
-                <span class="badge bg-success">PRO</span>
+            <div class="mb-4">
+                <h2 class="h4 fw-bold mb-1"><i class="bi bi-plug-fill me-2"></i>Integrations</h2>
+                <p class="text-muted mb-0 small">Agent management, API keys, and data imports</p>
             </div>
             <!-- Integrations Sub-Tabs -->
             <ul class="nav nav-pills mb-4" id="integrationsTabs" role="tablist">
@@ -2990,20 +2981,45 @@
 <script>
 // Hash-based navigation for admin panel sections
 function activateTabFromHash() {
-    const hash = window.location.hash.replace('#', '');
-    if (hash) {
-        const tabButton = document.getElementById(hash + '-tab');
-        if (tabButton) {
-            // Use Bootstrap's tab API
-            const tab = new bootstrap.Tab(tabButton);
-            tab.show();
+    // Get hash from URL, default to 'users' if none
+    let hash = window.location.hash.replace('#', '') || 'users';
+
+    // Validate that the tab exists
+    const tabButton = document.getElementById(hash + '-tab');
+    if (tabButton) {
+        // Hide all tab panes first
+        document.querySelectorAll('.tab-pane').forEach(pane => {
+            pane.classList.remove('show', 'active');
+        });
+
+        // Show the target pane
+        const targetPane = document.getElementById(hash);
+        if (targetPane) {
+            targetPane.classList.add('show', 'active');
+        }
+
+        // Update active state on hidden tab buttons
+        document.querySelectorAll('#adminTabs button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        tabButton.classList.add('active');
+
+        // Scroll to top of content
+        window.scrollTo(0, 0);
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+            mainContent.scrollTop = 0;
         }
     }
 }
 
-// Activate tab on page load
+// Activate correct tab immediately when page loads
 document.addEventListener('DOMContentLoaded', function() {
+    // Run immediately
     activateTabFromHash();
+
+    // Also run after a short delay to ensure Bootstrap is ready
+    setTimeout(activateTabFromHash, 100);
 });
 
 // Handle back/forward navigation
@@ -3011,7 +3027,7 @@ window.addEventListener('hashchange', function() {
     activateTabFromHash();
 });
 
-// Update hash when tab changes (for bookmarking)
+// Handle tab clicks to update URL
 document.querySelectorAll('#adminTabs button[data-bs-toggle="tab"]').forEach(function(tabButton) {
     tabButton.addEventListener('shown.bs.tab', function(e) {
         const target = e.target.getAttribute('data-bs-target');
