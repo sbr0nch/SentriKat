@@ -682,7 +682,13 @@
                                 <i class="bi bi-x-lg me-1"></i>Reject Selected
                             </button>
                         </div>
-                        <div>
+                        <div class="d-flex gap-2 align-items-center">
+                            <select class="form-select form-select-sm d-inline-block w-auto" id="queuePerPage" onchange="loadImportQueue()">
+                                <option value="25">25 per page</option>
+                                <option value="50">50 per page</option>
+                                <option value="100">100 per page</option>
+                                <option value="200">200 per page</option>
+                            </select>
                             <select class="form-select form-select-sm d-inline-block w-auto" id="queueFilterStatus" onchange="loadImportQueue()">
                                 <option value="pending">Pending</option>
                                 <option value="approved">Approved</option>

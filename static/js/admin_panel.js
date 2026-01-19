@@ -6384,11 +6384,19 @@ function renderImportQueue() {
 // Load import queue
 async function loadImportQueue() {
     const status = document.getElementById('queueFilterStatus')?.value || 'pending';
+    const perPage = parseInt(document.getElementById('queuePerPage')?.value) || 25;
     const tbody = document.getElementById('importQueueTable');
 
     if (!tbody) return;
 
     importQueuePage = 1;  // Reset to first page on filter change
+    importQueuePageSize = perPage;  // Update page size from dropdown
+
+    // Reset select-all checkbox and clear selection
+    const selectAllCheckbox = document.getElementById('selectAllQueue');
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+    selectedQueueItems.clear();
+    updateQueueBulkButtons();
 
     tbody.innerHTML = `
         <tr>

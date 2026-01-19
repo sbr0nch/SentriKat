@@ -26,40 +26,55 @@ def _apply_schema_migrations(logger, db_uri):
 
     is_sqlite = db_uri.startswith('sqlite')
 
-    # Use a separate engine/connection for migrations to avoid session issues
+    # Use a completely isolated engine for migrations
+    # Use NullPool to avoid any connection pooling issues
+    from sqlalchemy.pool import NullPool
+    engine = None
     try:
-        engine = create_engine(db_uri)
-        with engine.connect() as conn:
-            for table_name, column_name, col_def_sqlite, col_def_pg in migrations:
-                try:
-                    # Check if column exists
-                    if is_sqlite:
-                        result = conn.execute(text(f"PRAGMA table_info({table_name})"))
-                        columns = [row[1] for row in result.fetchall()]
-                    else:
-                        result = conn.execute(text(
-                            f"SELECT column_name FROM information_schema.columns "
-                            f"WHERE table_name = '{table_name}'"
-                        ))
-                        columns = [row[0] for row in result.fetchall()]
+        engine = create_engine(
+            db_uri,
+            poolclass=NullPool,  # Don't pool connections - each connect() creates new connection
+            isolation_level="AUTOCOMMIT"  # Prevent transaction issues
+        )
 
-                    if column_name not in columns:
-                        logger.info(f"Adding column {column_name} to {table_name}")
-                        col_def = col_def_sqlite if is_sqlite else col_def_pg
-                        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {col_def}"))
-                        conn.commit()
-                        logger.info(f"Successfully added column {column_name} to {table_name}")
-                    else:
-                        logger.debug(f"Column {column_name} already exists in {table_name}")
-                except Exception as e:
-                    logger.warning(f"Could not add column {column_name} to {table_name}: {e}")
+        for table_name, column_name, col_def_sqlite, col_def_pg in migrations:
+            conn = None
+            try:
+                conn = engine.connect()
+                # Check if column exists
+                if is_sqlite:
+                    result = conn.execute(text(f"PRAGMA table_info({table_name})"))
+                    columns = [row[1] for row in result.fetchall()]
+                else:
+                    result = conn.execute(text(
+                        f"SELECT column_name FROM information_schema.columns "
+                        f"WHERE table_name = '{table_name}'"
+                    ))
+                    columns = [row[0] for row in result.fetchall()]
+
+                if column_name not in columns:
+                    logger.info(f"Adding column {column_name} to {table_name}")
+                    col_def = col_def_sqlite if is_sqlite else col_def_pg
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {col_def}"))
+                    logger.info(f"Successfully added column {column_name} to {table_name}")
+                else:
+                    logger.debug(f"Column {column_name} already exists in {table_name}")
+            except Exception as e:
+                logger.warning(f"Could not add column {column_name} to {table_name}: {e}")
+            finally:
+                if conn is not None:
                     try:
-                        conn.rollback()
-                    except:
+                        conn.close()
+                    except Exception:
                         pass
-        engine.dispose()
     except Exception as e:
         logger.warning(f"Migration error: {e}")
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
 
 
 def create_app(config_class=Config):
