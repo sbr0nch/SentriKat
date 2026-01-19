@@ -154,8 +154,12 @@ def create_app(config_class=Config):
                 branding['show_version'] = show_version.value != 'false'
             if logo_url and logo_url.value:
                 branding['logo_url'] = logo_url.value
-        except:
-            pass  # Use defaults if DB not ready
+        except Exception:
+            # Rollback to prevent session corruption on DB errors
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
 
         # Load license info
         license_info = None
@@ -167,7 +171,12 @@ def create_app(config_class=Config):
                 branding['show_powered_by'] = False
             else:
                 branding['show_powered_by'] = True
-        except:
+        except Exception:
+            # Rollback to prevent session corruption on DB errors
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
             branding['show_powered_by'] = True
 
         return dict(

@@ -3161,7 +3161,8 @@ def remove_user_organization(user_id, org_id):
 def debug_auth_status():
     """Debug endpoint to check authentication status"""
     import os
-    auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+    # Match auth.py: auth is ON by default, only disabled with DISABLE_AUTH=true
+    auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
 
     user_info = None
     if 'user_id' in session:

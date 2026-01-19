@@ -594,7 +594,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         // LDAP Users tab handler - auto-load users when tab is shown
-        const ldapUsersTab = document.getElementById('ldap-users-tab');
+        const ldapUsersTab = document.getElementById('ldapUsers-tab');
         if (ldapUsersTab) {
             ldapUsersTab.addEventListener('shown.bs.tab', function() {
                 loadLDAPUsersDefault();
@@ -602,7 +602,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         // LDAP Groups tab handler
-        const ldapGroupsTab = document.getElementById('ldap-groups-tab');
+        const ldapGroupsTab = document.getElementById('ldapGroups-tab');
         if (ldapGroupsTab) {
             ldapGroupsTab.addEventListener('shown.bs.tab', function() {
                 loadGroupMappings();
@@ -7473,8 +7473,8 @@ const adminTabMap = {
     'users': 'users-tab',
     'organizations': 'organizations-tab',
     'settings': 'settings-tab',
-    'ldapUsers': 'ldap-users-tab',
-    'ldapGroups': 'ldap-groups-tab',
+    'ldapUsers': 'ldapUsers-tab',
+    'ldapGroups': 'ldapGroups-tab',
     'license': 'license-tab',
     'integrations': 'integrations-tab'
 };
