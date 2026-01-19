@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches=None):
     """Send webhook notification for a specific organization using org settings or global fallback
 
+    Sends BATCHED notifications for NEW CVEs only (first_alerted_at IS NULL).
+    Format: "3 new CVEs: CVE-1234, CVE-5678, CVE-9012"
+
     Args:
         org: Organization object
         new_cves_count: Total new CVEs synced (global count)
@@ -21,6 +24,8 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
         matches_count: Count of product matches for this org
         matches: Optional list of VulnerabilityMatch objects to include product details
     """
+    from datetime import datetime
+
     proxies = Config.get_proxies()
     verify_ssl = Config.get_verify_ssl()
 
@@ -38,60 +43,48 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                 headers['Authorization'] = f'Bearer {webhook_token}'
                 headers['X-Auth-Token'] = webhook_token
 
-            # Build affected products list (top 5)
-            affected_products = []
+            # Filter for NEW matches only (never alerted via webhook)
+            new_matches = []
             if matches:
-                product_counts = {}
-                for match in matches:
-                    product_key = f"{match.product.vendor} {match.product.product_name}"
-                    if product_key not in product_counts:
-                        product_counts[product_key] = {'product': match.product, 'count': 0, 'cves': []}
-                    product_counts[product_key]['count'] += 1
-                    if len(product_counts[product_key]['cves']) < 3:
-                        product_counts[product_key]['cves'].append(match.vulnerability.cve_id)
+                new_matches = [m for m in matches if m.first_alerted_at is None]
 
-                # Sort by count and take top 5
-                sorted_products = sorted(product_counts.items(), key=lambda x: x[1]['count'], reverse=True)[:5]
-                for name, data in sorted_products:
-                    cve_list = ", ".join(data['cves'])
-                    if data['count'] > 3:
-                        cve_list += f" +{data['count'] - 3} more"
-                    affected_products.append(f"{name}: {cve_list}")
+            # If no new matches to alert, skip webhook
+            if not new_matches:
+                return {'org': org.name, 'success': True, 'skipped': True, 'reason': 'No new CVEs'}
 
-            # Build payload based on format
+            # Get unique CVE IDs from new matches (batched format)
+            new_cve_ids = list(dict.fromkeys([m.vulnerability.cve_id for m in new_matches]))
+            new_cve_count = len(new_cve_ids)
+
+            # Build CVE list string (show up to 5, then "+X more")
+            if new_cve_count <= 5:
+                cve_list_str = ", ".join(new_cve_ids)
+            else:
+                cve_list_str = ", ".join(new_cve_ids[:5]) + f" +{new_cve_count - 5} more"
+
+            # Build payload based on format - BATCHED message
             if webhook_format in ('slack', 'rocketchat'):
                 text = f"🔒 *SentriKat Alert for {org.display_name}*\n"
-                text += f"*{matches_count} vulnerabilities* affecting your products"
+                text += f"*{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:* {cve_list_str}"
                 if critical_count > 0:
-                    text += f" (*{critical_count} critical*)"
-                text += "\n\n"
-                if affected_products:
-                    text += "*Affected Products:*\n"
-                    for product in affected_products:
-                        text += f"• {product}\n"
+                    text += f"\n⚠️ *{critical_count} critical*"
                 payload = {"text": text}
             elif webhook_format == 'discord':
                 content = f"🔒 **SentriKat Alert for {org.display_name}**\n"
-                content += f"**{matches_count} vulnerabilities** affecting your products"
+                content += f"**{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:** {cve_list_str}"
                 if critical_count > 0:
-                    content += f" (**{critical_count} critical**)"
-                content += "\n\n"
-                if affected_products:
-                    content += "**Affected Products:**\n"
-                    for product in affected_products:
-                        content += f"• {product}\n"
+                    content += f"\n⚠️ **{critical_count} critical**"
                 payload = {"content": content}
             elif webhook_format == 'teams':
                 facts = [
-                    {"name": "Total Matches", "value": str(matches_count)},
+                    {"name": "New CVEs", "value": str(new_cve_count)},
+                    {"name": "CVE IDs", "value": cve_list_str},
                     {"name": "Critical", "value": str(critical_count)}
                 ]
-                if affected_products:
-                    facts.append({"name": "Affected Products", "value": "\n".join(affected_products[:3])})
                 payload = {
                     "@type": "MessageCard",
                     "themeColor": "dc2626" if critical_count > 0 else "1e40af",
-                    "summary": f"SentriKat: {matches_count} vulnerabilities for {org.display_name}",
+                    "summary": f"SentriKat: {new_cve_count} new CVEs for {org.display_name}",
                     "sections": [{
                         "activityTitle": f"🔒 SentriKat Alert for {org.display_name}",
                         "facts": facts
@@ -99,15 +92,23 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                 }
             else:  # custom or fallback JSON
                 payload = {
-                    "text": f"SentriKat Alert: {matches_count} vulnerabilities ({critical_count} critical) for {org.display_name}",
+                    "text": f"SentriKat Alert: {new_cve_count} new CVEs for {org.display_name}: {cve_list_str}",
                     "organization": org.display_name,
-                    "matches_count": matches_count,
-                    "critical_count": critical_count,
-                    "affected_products": affected_products
+                    "new_cve_count": new_cve_count,
+                    "cve_ids": new_cve_ids,
+                    "critical_count": critical_count
                 }
 
             response = requests.post(webhook_url, json=payload, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)
-            return {'org': org.name, 'success': response.status_code in [200, 204]}
+
+            if response.status_code in [200, 204]:
+                # Mark these matches as alerted (set first_alerted_at)
+                now = datetime.utcnow()
+                for match in new_matches:
+                    match.first_alerted_at = now
+                db.session.commit()
+
+            return {'org': org.name, 'success': response.status_code in [200, 204], 'new_cves': new_cve_count}
         except Exception as e:
             logger.error(f"Org webhook failed for {org.name}: {e}")
             return {'org': org.name, 'success': False, 'error': str(e)}
@@ -115,8 +116,15 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
     return None  # No org-specific webhook, will use global
 
 
-def send_webhook_notification(new_cves_count, critical_count, total_matches):
-    """Send notifications to configured webhooks (Slack/Teams)"""
+def send_webhook_notification(new_cves_count, critical_count, total_matches, new_cve_ids=None):
+    """Send notifications to configured webhooks (Slack/Teams)
+
+    Args:
+        new_cves_count: Number of new CVEs
+        critical_count: Number of critical CVEs
+        total_matches: Total product matches
+        new_cve_ids: Optional list of CVE IDs for batched message
+    """
     try:
         # Get webhook settings
         slack_enabled = SystemSettings.query.filter_by(key='slack_enabled').first()
@@ -126,6 +134,14 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches):
 
         results = []
 
+        # Build CVE list string if provided (batched format)
+        cve_list_str = ""
+        if new_cve_ids and len(new_cve_ids) > 0:
+            if len(new_cve_ids) <= 5:
+                cve_list_str = ", ".join(new_cve_ids)
+            else:
+                cve_list_str = ", ".join(new_cve_ids[:5]) + f" +{len(new_cve_ids) - 5} more"
+
         # Send to Slack if enabled
         if slack_enabled and slack_enabled.value == 'true' and slack_url and slack_url.value:
             try:
@@ -133,35 +149,41 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches):
                 from app.encryption import decrypt_value
                 webhook_url = decrypt_value(slack_url.value) if slack_url.value.startswith('gAAAA') else slack_url.value
 
-                payload = {
-                    "blocks": [
-                        {
-                            "type": "header",
-                            "text": {
-                                "type": "plain_text",
-                                "text": "🔒 SentriKat CVE Sync Complete",
-                                "emoji": True
+                # Use batched format if CVE IDs provided
+                if cve_list_str:
+                    payload = {
+                        "text": f"🔒 *SentriKat Alert*\n*{new_cves_count} new CVE{'s' if new_cves_count != 1 else ''}:* {cve_list_str}" + (f"\n⚠️ *{critical_count} critical*" if critical_count > 0 else "")
+                    }
+                else:
+                    payload = {
+                        "blocks": [
+                            {
+                                "type": "header",
+                                "text": {
+                                    "type": "plain_text",
+                                    "text": "🔒 SentriKat CVE Sync Complete",
+                                    "emoji": True
+                                }
+                            },
+                            {
+                                "type": "section",
+                                "fields": [
+                                    {"type": "mrkdwn", "text": f"*New CVEs:*\n{new_cves_count}"},
+                                    {"type": "mrkdwn", "text": f"*Critical:*\n{critical_count}"},
+                                    {"type": "mrkdwn", "text": f"*Product Matches:*\n{total_matches}"}
+                                ]
                             }
-                        },
-                        {
-                            "type": "section",
-                            "fields": [
-                                {"type": "mrkdwn", "text": f"*New CVEs:*\n{new_cves_count}"},
-                                {"type": "mrkdwn", "text": f"*Critical:*\n{critical_count}"},
-                                {"type": "mrkdwn", "text": f"*Product Matches:*\n{total_matches}"}
-                            ]
-                        }
-                    ]
-                }
+                        ]
+                    }
 
-                if critical_count > 0:
-                    payload["blocks"].append({
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"⚠️ *{critical_count} critical vulnerabilities* require immediate attention!"
-                        }
-                    })
+                    if critical_count > 0:
+                        payload["blocks"].append({
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"⚠️ *{critical_count} critical vulnerabilities* require immediate attention!"
+                            }
+                        })
 
                 response = requests.post(webhook_url, json=payload, timeout=10)
                 results.append({'slack': response.status_code in [200, 204]})
@@ -175,18 +197,28 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches):
                 from app.encryption import decrypt_value
                 webhook_url = decrypt_value(teams_url.value) if teams_url.value.startswith('gAAAA') else teams_url.value
 
+                # Use batched format if CVE IDs provided
+                if cve_list_str:
+                    facts = [
+                        {"name": "New CVEs", "value": str(new_cves_count)},
+                        {"name": "CVE IDs", "value": cve_list_str},
+                        {"name": "Critical", "value": str(critical_count)}
+                    ]
+                else:
+                    facts = [
+                        {"name": "New CVEs", "value": str(new_cves_count)},
+                        {"name": "Critical", "value": str(critical_count)},
+                        {"name": "Product Matches", "value": str(total_matches)}
+                    ]
+
                 payload = {
                     "@type": "MessageCard",
                     "@context": "http://schema.org/extensions",
                     "themeColor": "dc2626" if critical_count > 0 else "1e40af",
-                    "summary": f"SentriKat: {new_cves_count} new CVEs synced",
+                    "summary": f"SentriKat: {new_cves_count} new CVEs",
                     "sections": [{
-                        "activityTitle": "🔒 SentriKat CVE Sync Complete",
-                        "facts": [
-                            {"name": "New CVEs", "value": str(new_cves_count)},
-                            {"name": "Critical", "value": str(critical_count)},
-                            {"name": "Product Matches", "value": str(total_matches)}
-                        ],
+                        "activityTitle": "🔒 SentriKat Alert",
+                        "facts": facts,
                         "markdown": True
                     }]
                 }

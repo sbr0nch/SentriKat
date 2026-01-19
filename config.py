@@ -31,20 +31,26 @@ class Config:
 
     # Database URL (PostgreSQL recommended for production)
     # Format: postgresql://user:password@host:port/database
-    DATABASE_URL = os.environ.get('DATABASE_URL')
-    if DATABASE_URL:
-        SQLALCHEMY_DATABASE_URI = DATABASE_URL
-    else:
-        # Default PostgreSQL connection for Docker deployment
-        SQLALCHEMY_DATABASE_URI = os.environ.get(
-            'DATABASE_URL',
-            'postgresql://sentrikat:sentrikat@db:5432/sentrikat'
-        )
+    # MUST be set via DATABASE_URL environment variable
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
+    if not SQLALCHEMY_DATABASE_URI:
+        import warnings
+        if os.environ.get('FLASK_ENV') == 'production':
+            raise ValueError("DATABASE_URL environment variable must be set in production!")
+        warnings.warn("DATABASE_URL not set - using default Docker credentials for development only")
+        SQLALCHEMY_DATABASE_URI = 'postgresql://sentrikat:sentrikat@db:5432/sentrikat'
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_pre_ping': True,  # Verify connections before use
-        'pool_recycle': 300,    # Recycle connections every 5 minutes
+        'pool_pre_ping': True,      # Verify connections before use (handles stale connections)
+        'pool_recycle': 300,        # Recycle connections every 5 minutes
+        'pool_size': 5,             # Default pool size
+        'max_overflow': 10,         # Allow up to 10 additional connections when needed
+        'pool_timeout': 30,         # Wait up to 30s for a connection from pool
+        'connect_args': {
+            'connect_timeout': 10,  # Connection timeout
+            'options': '-c statement_timeout=60000'  # 60s query timeout
+        }
     }
 
     # =========================================================================

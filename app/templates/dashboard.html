@@ -2,6 +2,10 @@
 
 {% block title %}Dashboard - SentriKat{% endblock %}
 
+{% block breadcrumb_items %}
+<li class="breadcrumb-item active" aria-current="page">Dashboard</li>
+{% endblock %}
+
 {% block content %}
 <style>
     /* Priority Alert Cards - Compact */
@@ -155,8 +159,8 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="alert-card-label">Critical</div>
-                        <div class="alert-card-value" id="criticalCount">-</div>
-                        <small class="text-muted">Immediate action</small>
+                        <div class="alert-card-value"><span id="criticalCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="criticalCount">-</span>)</small></div>
+                        <small class="text-muted">CVEs (matches)</small>
                     </div>
                     <i class="bi bi-exclamation-octagon-fill alert-icon"></i>
                 </div>
@@ -167,8 +171,8 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="alert-card-label">High</div>
-                        <div class="alert-card-value" id="highCount">-</div>
-                        <small class="text-muted">Urgent attention</small>
+                        <div class="alert-card-value"><span id="highCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="highCount">-</span>)</small></div>
+                        <small class="text-muted">CVEs (matches)</small>
                     </div>
                     <i class="bi bi-exclamation-triangle-fill alert-icon"></i>
                 </div>
@@ -179,8 +183,8 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="alert-card-label">Medium</div>
-                        <div class="alert-card-value" id="mediumCount">-</div>
-                        <small class="text-muted">Plan remediation</small>
+                        <div class="alert-card-value"><span id="mediumCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="mediumCount">-</span>)</small></div>
+                        <small class="text-muted">CVEs (matches)</small>
                     </div>
                     <i class="bi bi-info-circle-fill alert-icon"></i>
                 </div>
@@ -191,8 +195,8 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="alert-card-label">Low</div>
-                        <div class="alert-card-value" id="lowCount">-</div>
-                        <small class="text-muted">Monitor</small>
+                        <div class="alert-card-value"><span id="lowCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="lowCount">-</span>)</small></div>
+                        <small class="text-muted">CVEs (matches)</small>
                     </div>
                     <i class="bi bi-shield-check alert-icon"></i>
                 </div>
@@ -318,7 +322,7 @@
                             <input class="form-check-input" type="checkbox" id="filterUnack">
                             <label class="form-check-label" for="filterUnack">Unacknowledged</label>
                         </div>
-                        <button type="button" class="btn btn-sm btn-primary" onclick="loadVulnerabilities()">
+                        <button type="button" class="btn btn-sm btn-primary" onclick="loadGroupedVulnerabilities()">
                             <i class="bi bi-search"></i> Apply
                         </button>
                     </div>
@@ -330,7 +334,7 @@
     <!-- Vulnerabilities List -->
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <span><i class="bi bi-shield-exclamation me-2"></i>Matched Vulnerabilities (<span id="vulnCount">0</span>)</span>
+            <span><i class="bi bi-shield-exclamation me-2"></i>Vulnerabilities (<span id="vulnCount">0</span> CVEs)</span>
             <div class="d-flex align-items-center gap-3">
                 <!-- Export Report Dropdown -->
                 <div class="dropdown">
@@ -689,7 +693,31 @@
         initReportFields();
     });
 
+    // Retry utility for API calls during startup
+    async function fetchWithRetry(url, options = {}, maxRetries = 3, delayMs = 800) {
+        let lastError;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, options);
+                if (response.status >= 500 && attempt < maxRetries) {
+                    console.warn(`[Retry ${attempt}/${maxRetries}] Server error ${response.status} for ${url}`);
+                    await new Promise(r => setTimeout(r, delayMs * attempt));
+                    continue;
+                }
+                return response;
+            } catch (error) {
+                lastError = error;
+                console.warn(`[Retry ${attempt}/${maxRetries}] Network error for ${url}: ${error.message}`);
+                if (attempt < maxRetries) {
+                    await new Promise(r => setTimeout(r, delayMs * attempt));
+                }
+            }
+        }
+        throw lastError || new Error(`Failed to fetch ${url} after ${maxRetries} attempts`);
+    }
+
     let currentVulnerabilities = [];
+    let currentGroupedVulnerabilities = [];
     let selectedVulns = new Set();
     let currentPage = 1;
     let pageSize = 15;
@@ -812,7 +840,7 @@
 
     async function loadStats() {
         try {
-            const response = await fetch('/api/vulnerabilities/stats');
+            const response = await fetchWithRetry('/api/vulnerabilities/stats', {}, 4, 1000);
 
             // Check if response is OK before parsing
             if (!response.ok) {
@@ -827,17 +855,34 @@
 
             document.getElementById('totalVulns').textContent = formatNumber(stats.total_vulnerabilities);
             document.getElementById('totalMatches').textContent = formatNumber(stats.total_matches);
-            document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged);
+            document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
             document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
 
-            // Update priority counts
+            // Update priority counts - CVE counts and match counts
+            document.getElementById('criticalCves').textContent = formatNumber(stats.critical_cves || 0);
             document.getElementById('criticalCount').textContent = formatNumber(stats.critical_count || 0);
+            document.getElementById('highCves').textContent = formatNumber(stats.high_cves || 0);
             document.getElementById('highCount').textContent = formatNumber(stats.high_count || 0);
+            document.getElementById('mediumCves').textContent = formatNumber(stats.medium_cves || 0);
             document.getElementById('mediumCount').textContent = formatNumber(stats.medium_count || 0);
+            document.getElementById('lowCves').textContent = formatNumber(stats.low_cves || 0);
             document.getElementById('lowCount').textContent = formatNumber(stats.low_count || 0);
         } catch (error) {
             console.error('Error loading stats:', error);
-            showToast('Failed to load statistics', 'danger');
+            // Show error in cards instead of just toast
+            document.getElementById('totalVulns').textContent = '-';
+            document.getElementById('totalMatches').textContent = '-';
+            document.getElementById('unacknowledged').textContent = '-';
+            document.getElementById('productsTracked').textContent = '-';
+            document.getElementById('criticalCves').textContent = '-';
+            document.getElementById('criticalCount').textContent = '-';
+            document.getElementById('highCves').textContent = '-';
+            document.getElementById('highCount').textContent = '-';
+            document.getElementById('mediumCves').textContent = '-';
+            document.getElementById('mediumCount').textContent = '-';
+            document.getElementById('lowCves').textContent = '-';
+            document.getElementById('lowCount').textContent = '-';
+            showToast('Failed to load statistics. Try refreshing.', 'danger');
         }
     }
 
@@ -861,7 +906,7 @@
             if (ransomware) params.append('ransomware_only', 'true');
             if (unack) params.append('acknowledged', 'false');
 
-            const response = await fetch(`/api/vulnerabilities?${params}`);
+            const response = await fetchWithRetry(`/api/vulnerabilities?${params}`, {}, 3, 1000);
 
             // Check if response is OK before parsing
             if (!response.ok) {
@@ -1428,11 +1473,10 @@
         if (sharedCVE) {
             // Auto-fill CVE filter and apply
             document.getElementById('filterCVE').value = sharedCVE;
-            loadVulnerabilities();
-        } else {
-            loadVulnerabilities();
         }
 
+        // Always use grouped view by default
+        loadGroupedVulnerabilities();
         loadStats();
         loadLastSync();
 
@@ -1444,22 +1488,21 @@
     document.querySelectorAll('#filterCVE, #filterVendor, #filterProduct').forEach(input => {
         input.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                loadVulnerabilities();
+                loadGroupedVulnerabilities();
             }
         });
     });
 
-    // Handle filter changes
-    document.getElementById('filterPriority').addEventListener('change', loadVulnerabilities);
-    document.getElementById('filterSeverity').addEventListener('change', loadVulnerabilities);
-    document.getElementById('filterUrgency').addEventListener('change', loadVulnerabilities);
-    document.getElementById('filterAge').addEventListener('change', loadVulnerabilities);
+    // Handle filter changes - use grouped view
+    document.getElementById('filterPriority').addEventListener('change', loadGroupedVulnerabilities);
+    document.getElementById('filterSeverity').addEventListener('change', loadGroupedVulnerabilities);
+    document.getElementById('filterUrgency').addEventListener('change', loadGroupedVulnerabilities);
+    document.getElementById('filterAge').addEventListener('change', loadGroupedVulnerabilities);
 
     // Handle sort change
     document.getElementById('sortBy').addEventListener('change', function() {
-        if (currentVulnerabilities.length > 0) {
-            sortVulnerabilities();
-            renderCurrentPage();
+        if (currentGroupedVulnerabilities.length > 0) {
+            loadGroupedVulnerabilities();
         }
     });
 
@@ -1661,5 +1704,291 @@
 
     // Load shared view on page load if token present
     loadSharedView();
+
+    // Load grouped vulnerabilities from API
+    async function loadGroupedVulnerabilities() {
+        showLoading();
+        const container = document.getElementById('vulnerabilitiesContainer');
+        selectedVulns.clear();
+        updateBulkActions();
+
+        try {
+            const params = new URLSearchParams();
+            const cve = document.getElementById('filterCVE').value;
+            const ransomware = document.getElementById('filterRansomware').checked;
+            const unack = document.getElementById('filterUnack').checked;
+            const priority = document.getElementById('filterPriority').value;
+
+            if (cve) params.append('search', cve);
+            if (ransomware) params.append('ransomware_only', 'true');
+            if (unack) params.append('acknowledged', 'false');
+            if (priority) params.append('priority', priority);
+            params.append('page', currentPage);
+            params.append('per_page', pageSize === Infinity ? 100 : pageSize);
+
+            const response = await fetchWithRetry(`/api/vulnerabilities/grouped?${params}`, {}, 3, 1000);
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                throw new Error(`Server error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            currentGroupedVulnerabilities = data.items;
+
+            document.getElementById('vulnCount').textContent = data.total;
+            renderGroupedPage(data);
+        } catch (error) {
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${error.message}
+                </div>
+            `;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function renderGroupedPage(data) {
+        const container = document.getElementById('vulnerabilitiesContainer');
+
+        if (data.items.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-shield-check text-success" style="font-size: 4rem;"></i>
+                    <h4 class="mt-3">No Vulnerabilities Found</h4>
+                    <p class="text-muted">No matches found with the current filter criteria.</p>
+                </div>
+            `;
+            document.getElementById('paginationControls').style.display = 'none';
+            return;
+        }
+
+        container.innerHTML = data.items.map(group => createGroupedCVECard(group)).join('');
+
+        // Update pagination
+        const paginationControls = document.getElementById('paginationControls');
+        const paginationInfo = document.getElementById('paginationInfo');
+        const paginationNav = document.getElementById('paginationNav');
+
+        if (data.pages > 1) {
+            paginationControls.style.display = 'flex';
+            const start = (data.page - 1) * data.per_page + 1;
+            const end = Math.min(data.page * data.per_page, data.total);
+            paginationInfo.textContent = `Showing ${start}-${end} of ${data.total} CVEs`;
+
+            let navHtml = '';
+            navHtml += `<li class="page-item ${data.page === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="goToGroupedPage(${data.page - 1}); return false;">&laquo;</a>
+            </li>`;
+
+            const startPage = Math.max(1, data.page - 2);
+            const endPage = Math.min(data.pages, data.page + 2);
+
+            if (startPage > 1) {
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToGroupedPage(1); return false;">1</a></li>`;
+                if (startPage > 2) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                navHtml += `<li class="page-item ${i === data.page ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="goToGroupedPage(${i}); return false;">${i}</a>
+                </li>`;
+            }
+
+            if (endPage < data.pages) {
+                if (endPage < data.pages - 1) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToGroupedPage(${data.pages}); return false;">${data.pages}</a></li>`;
+            }
+
+            navHtml += `<li class="page-item ${data.page === data.pages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="goToGroupedPage(${data.page + 1}); return false;">&raquo;</a>
+            </li>`;
+
+            paginationNav.innerHTML = navHtml;
+        } else {
+            paginationControls.style.display = 'none';
+        }
+    }
+
+    function goToGroupedPage(page) {
+        currentPage = page;
+        loadGroupedVulnerabilities();
+        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function createGroupedCVECard(group) {
+        const vuln = group.vulnerability;
+        const priority = group.highest_priority;
+
+        const ransomwareBadge = vuln.known_ransomware ?
+            '<span class="badge badge-critical"><i class="bi bi-shield-exclamation"></i> Ransomware</span>' : '';
+        const priorityBadge = `<span class="badge ${getPriorityBadgeClass(priority)}"><i class="bi ${getPriorityIcon(priority)}"></i> ${priority.toUpperCase()} Priority</span>`;
+
+        const severityBadge = vuln.severity ?
+            `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}"><i class="bi bi-graph-up"></i> CVSS: ${vuln.severity} ${vuln.cvss_score ? `(${vuln.cvss_score})` : ''}</span>` :
+            '<span class="badge bg-secondary"><i class="bi bi-question-circle"></i> No CVSS</span>';
+
+        // Build affected products list
+        const productsHtml = group.affected_products.map(prod => {
+            const prodPriorityBadge = `<span class="badge ${getPriorityBadgeClass(prod.effective_priority)} badge-sm">${prod.effective_priority}</span>`;
+            const ackIcon = prod.acknowledged ?
+                '<i class="bi bi-check-circle-fill text-success" title="Acknowledged"></i>' :
+                '<i class="bi bi-circle text-warning" title="Needs Review"></i>';
+            return `
+                <div class="d-flex align-items-center justify-content-between py-1 border-bottom">
+                    <div>
+                        ${ackIcon}
+                        <strong class="ms-2">${prod.vendor}</strong> - ${prod.product_name}
+                        <span class="badge bg-light text-dark ms-1">${prod.criticality} criticality</span>
+                    </div>
+                    <div>
+                        ${prodPriorityBadge}
+                        ${!prod.acknowledged ?
+                            `<button class="btn btn-sm btn-outline-success ms-2" onclick="acknowledgeMatch(${prod.match_id})" title="Acknowledge">
+                                <i class="bi bi-check"></i>
+                            </button>` :
+                            `<button class="btn btn-sm btn-outline-secondary ms-2" onclick="unacknowledgeMatch(${prod.match_id})" title="Unacknowledge">
+                                <i class="bi bi-arrow-counterclockwise"></i>
+                            </button>`
+                        }
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="card vuln-card mb-3" style="border-left: 4px solid ${getPriorityColor(priority)};">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h5 class="card-title mb-2">
+                                <span class="badge bg-dark">${vuln.cve_id}</span>
+                                ${vuln.vulnerability_name}
+                            </h5>
+                            <div class="mb-2">
+                                ${priorityBadge}
+                                ${severityBadge}
+                                ${ransomwareBadge}
+                                <span class="badge bg-info">
+                                    <i class="bi bi-box-seam"></i> ${group.product_count} product${group.product_count > 1 ? 's' : ''} affected
+                                </span>
+                                <span class="badge ${group.unacknowledged_count > 0 ? 'bg-warning text-dark' : 'bg-success'}">
+                                    ${group.unacknowledged_count > 0 ? `${group.unacknowledged_count} need review` : 'All acknowledged'}
+                                </span>
+                                <span class="badge bg-secondary">
+                                    <i class="bi bi-calendar3"></i> ${formatDate(vuln.date_added)} (${vuln.days_old} days ago)
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <small class="text-muted fw-semibold">DESCRIPTION</small>
+                        <p class="mb-0">${vuln.short_description}</p>
+                    </div>
+
+                    <div class="mb-3">
+                        <small class="text-muted fw-semibold">REQUIRED ACTION</small>
+                        <p class="mb-0 fw-medium text-danger">${vuln.required_action}</p>
+                    </div>
+
+                    <div class="mb-2">
+                        <small class="text-muted fw-semibold d-flex justify-content-between align-items-center">
+                            AFFECTED PRODUCTS IN YOUR INVENTORY
+                            <button class="btn btn-sm btn-link p-0" type="button" data-bs-toggle="collapse" data-bs-target="#products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}" aria-expanded="true">
+                                <i class="bi bi-chevron-down"></i> Toggle
+                            </button>
+                        </small>
+                        <div class="collapse show" id="products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}">
+                            <div class="border rounded p-2 bg-light mt-1">
+                                ${productsHtml}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        ${group.unacknowledged_count > 0 ?
+                            `<button class="btn btn-sm btn-success" onclick="acknowledgeCVE('${vuln.cve_id}')">
+                                <i class="bi bi-check-all"></i> Acknowledge CVE (${group.unacknowledged_count})
+                            </button>` :
+                            `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeCVE('${vuln.cve_id}')">
+                                <i class="bi bi-arrow-counterclockwise"></i> Reopen CVE
+                            </button>`
+                        }
+                        <div class="btn-group" role="group">
+                            <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank"
+                               class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-box-arrow-up-right"></i> NVD
+                            </a>
+                            <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
+                                <i class="bi bi-share"></i> Share
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Acknowledge all product matches for a CVE
+    async function acknowledgeCVE(cveId) {
+        try {
+            showLoading();
+            const response = await fetch(`/api/matches/acknowledge-by-cve/${cveId}`, { method: 'POST' });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to acknowledge CVE');
+            }
+
+            const result = await response.json();
+            showToast(`Acknowledged ${result.acknowledged_count} product(s) for ${cveId}`, 'success');
+
+            // Refresh the view
+            loadGroupedVulnerabilities();
+            loadStats();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Unacknowledge all product matches for a CVE (reopen)
+    async function unacknowledgeCVE(cveId) {
+        const confirmed = await showConfirm(
+            `Reopen ${cveId}? This will mark all affected products as unacknowledged.`,
+            'Reopen CVE',
+            'Reopen',
+            'btn-warning'
+        );
+
+        if (!confirmed) return;
+
+        try {
+            showLoading();
+            const response = await fetch(`/api/matches/unacknowledge-by-cve/${cveId}`, { method: 'POST' });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to unacknowledge CVE');
+            }
+
+            const result = await response.json();
+            showToast(`Reopened ${result.unacknowledged_count} product(s) for ${cveId}`, 'info');
+
+            // Refresh the view
+            loadGroupedVulnerabilities();
+            loadStats();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
 </script>
 {% endblock %}

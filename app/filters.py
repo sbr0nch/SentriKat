@@ -10,6 +10,38 @@ def normalize_string(s):
     return s.lower().strip()
 
 
+def extract_core_product_name(product_name):
+    """
+    Extract the core product name by removing common suffixes.
+    Examples:
+        "Mozilla Firefox (x64 en-US)" -> "mozilla firefox"
+        "7-Zip 25.01 (x64)" -> "7-zip"
+        "Notepad++ (64-bit x64)" -> "notepad++"
+        "Git" -> "git"
+    """
+    if not product_name:
+        return ''
+
+    name = product_name.lower().strip()
+
+    # Remove parenthetical suffixes (architecture, language, etc.)
+    name = re.sub(r'\s*\([^)]*\)\s*$', '', name)
+
+    # Remove version numbers at the end (e.g., "7-Zip 25.01" -> "7-Zip")
+    name = re.sub(r'\s+[\d]+\.[\d]+.*$', '', name)
+
+    # Remove common suffixes
+    suffixes_to_remove = [
+        ' x64', ' x86', ' 64-bit', ' 32-bit', ' edition',
+        ' installer', ' setup', ' portable'
+    ]
+    for suffix in suffixes_to_remove:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+
+    return name.strip()
+
+
 def check_cpe_match(vulnerability, product):
     """
     Check if a vulnerability matches a product using CPE identifiers.
@@ -115,11 +147,10 @@ def check_keyword_match(vulnerability, product):
     """
     Check if a vulnerability matches a product using keyword/vendor/product matching.
 
-    Matching logic (strict by default):
-    - If BOTH vendor AND product_name are specified: BOTH must match
-    - If only vendor is specified: vendor must match (use with caution)
-    - If only product_name is specified: product_name must match
-    - Keywords provide additional matches but should be specific
+    Matching logic:
+    - Vendor matching: bidirectional (either contains the other)
+    - Product matching: uses core product name extraction for better matching
+    - Keywords provide additional matches
 
     Returns:
         tuple: (match_reasons: list, match_method: str, match_confidence: str)
@@ -130,6 +161,9 @@ def check_keyword_match(vulnerability, product):
     prod_vendor = normalize_string(product.vendor)
     prod_name = normalize_string(product.product_name)
 
+    # Extract core product name (removes "(x64 en-US)", version numbers, etc.)
+    prod_name_core = extract_core_product_name(product.product_name)
+
     # Get additional keywords
     keywords = []
     if product.keywords:
@@ -137,32 +171,53 @@ def check_keyword_match(vulnerability, product):
 
     match_reasons = []
 
+    # Vendor matching: bidirectional (either contains the other)
+    def vendors_match(v1, v2):
+        if not v1 or not v2:
+            return False
+        return v1 in v2 or v2 in v1
+
+    # Product matching: check multiple variations
+    def products_match(prod, vuln):
+        if not prod or not vuln:
+            return False
+        # Direct containment (either direction)
+        if prod in vuln or vuln in prod:
+            return True
+        # Word-level matching: check if vuln product appears as a word in product name
+        # e.g., "firefox" should match "mozilla firefox"
+        pattern = r'\b' + re.escape(vuln) + r'\b'
+        if re.search(pattern, prod):
+            return True
+        return False
+
     # Strict matching: if both vendor AND product are specified, BOTH must match
     if prod_vendor and prod_name:
-        vendor_matches = prod_vendor in vuln_vendor
-        # Product matches if either contains the other (handles "HTTP Server" vs "Apache HTTP Server")
-        # Only compare product names, not cross-check with vendor
-        product_matches = prod_name in vuln_product or vuln_product in prod_name
+        vendor_matches = vendors_match(prod_vendor, vuln_vendor)
+
+        # Try matching with both full name and core name
+        product_matches = (
+            products_match(prod_name, vuln_product) or
+            products_match(prod_name_core, vuln_product)
+        )
 
         if vendor_matches and product_matches:
             match_reasons.append(f"Vendor+Product match: {product.vendor} - {product.product_name}")
 
     # If only vendor specified (no product name), match vendor alone
     elif prod_vendor and not prod_name:
-        if prod_vendor in vuln_vendor:
+        if vendors_match(prod_vendor, vuln_vendor):
             match_reasons.append(f"Vendor match: {product.vendor}")
 
     # If only product name specified (no vendor), match product alone
     elif prod_name and not prod_vendor:
-        if prod_name in vuln_product:
+        if products_match(prod_name, vuln_product) or products_match(prod_name_core, vuln_product):
             match_reasons.append(f"Product match: {product.product_name}")
 
     # Keywords provide additional matching (should be specific like "http server")
-    # Keywords must match as whole words, not substrings (e.g., "httpd" should NOT match "nhttpd")
+    # Keywords must match as whole words, not substrings
     for keyword in keywords:
         if keyword and len(keyword) >= 3:  # Minimum 3 chars to avoid too broad matches
-            # Use word boundary matching: keyword must be a complete word
-            # \b matches word boundaries (start/end of string, spaces, punctuation)
             pattern = r'\b' + re.escape(keyword) + r'\b'
             if re.search(pattern, vuln_product):
                 match_reasons.append(f"Keyword match: {keyword}")
@@ -321,12 +376,16 @@ def rematch_all_products():
 
 def get_filtered_vulnerabilities(filters=None):
     """Get vulnerabilities filtered by various criteria"""
+    from app.models import product_organizations
+
     query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product)
 
     if filters:
-        # Filter by organization
+        # Filter by organization using multi-org relationship
         if filters.get('organization_id'):
-            query = query.filter(Product.organization_id == filters['organization_id'])
+            query = query.join(
+                product_organizations, Product.id == product_organizations.c.product_id
+            ).filter(product_organizations.c.organization_id == filters['organization_id'])
 
         # Filter by product ID
         if filters.get('product_id'):

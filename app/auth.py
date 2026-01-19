@@ -423,6 +423,10 @@ def api_login():
     db.session.commit()
     logger.info(f"Last login updated for {username}")
 
+    # Session fixation protection: clear old session data before setting new
+    # This prevents session fixation attacks where attacker pre-creates a session
+    session.clear()
+
     # Set session as permanent (uses PERMANENT_SESSION_LIFETIME from config)
     session.permanent = True
     session['user_id'] = user.id

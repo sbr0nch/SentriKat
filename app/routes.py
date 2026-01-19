@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
-from app import db, csrf
+from app import db, csrf, limiter
 from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
@@ -96,7 +96,6 @@ def get_status():
             'version': APP_VERSION
         }), 500
 
-
 def validate_email(email):
     """Validate email format"""
     if not email:
@@ -182,7 +181,9 @@ def admin_panel():
     - super_admin: Full access to all tabs
     - org_admin: Limited access (users in their org, LDAP, SMTP/Sync settings only)
     """
-    return render_template('admin_panel.html')
+    from app.licensing import get_license
+    license_info = get_license()
+    return render_template('admin_panel.html', license=license_info)
 
 # API Endpoints
 
@@ -520,9 +521,13 @@ def update_product(product_id):
 
 @bp.route('/api/products/<int:product_id>', methods=['DELETE'])
 @manager_required
+@limiter.limit("500 per minute")  # Allow bulk delete operations
 def delete_product(product_id):
     """
     Delete a product or remove it from current organization.
+
+    Query params:
+    - exclude: If 'true', add product to exclusion list to prevent re-adding by agents
 
     Permissions:
     - Super Admin: Deletes product globally from all organizations
@@ -531,10 +536,14 @@ def delete_product(product_id):
       If product is only in their org, it gets deleted globally.
     """
     from app.logging_config import log_audit_event
+    from app.models import ProductExclusion
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     product = Product.query.get_or_404(product_id)
+
+    # Check if we should exclude this product from future agent scans
+    exclude_from_scans = request.args.get('exclude', 'false').lower() == 'true'
 
     # Get user's current organization
     user_org_id = session.get('organization_id') or current_user.organization_id
@@ -557,8 +566,50 @@ def delete_product(product_id):
     }
 
     try:
+        # If exclude requested, add to exclusion list for relevant orgs
+        if exclude_from_scans:
+            if current_user.is_super_admin():
+                # Exclude for all organizations this product was in
+                for org_id in product_org_ids:
+                    existing = ProductExclusion.query.filter_by(
+                        organization_id=org_id,
+                        vendor=product.vendor,
+                        product_name=product.product_name,
+                        version=None
+                    ).first()
+                    if not existing:
+                        exclusion = ProductExclusion(
+                            organization_id=org_id,
+                            vendor=product.vendor,
+                            product_name=product.product_name,
+                            version=None,  # Exclude all versions
+                            reason='Deleted by admin',
+                            excluded_by=current_user_id
+                        )
+                        db.session.add(exclusion)
+            else:
+                # Exclude only for user's organization
+                existing = ProductExclusion.query.filter_by(
+                    organization_id=user_org_id,
+                    vendor=product.vendor,
+                    product_name=product.product_name,
+                    version=None
+                ).first()
+                if not existing:
+                    exclusion = ProductExclusion(
+                        organization_id=user_org_id,
+                        vendor=product.vendor,
+                        product_name=product.product_name,
+                        version=None,
+                        reason='Deleted by admin',
+                        excluded_by=current_user_id
+                    )
+                    db.session.add(exclusion)
+
         if current_user.is_super_admin():
             # Super admin: delete product globally
+            # Delete all related records first (foreign key constraints)
+            ProductInstallation.query.filter_by(product_id=product_id).delete()
             VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
             db.session.delete(product)
             db.session.commit()
@@ -568,9 +619,9 @@ def delete_product(product_id):
                 'products',
                 product_id,
                 old_value=product_info,
-                details=f"Super admin deleted product {product.vendor} {product.product_name} globally"
+                details=f"Super admin deleted product {product.vendor} {product.product_name} globally" + (" (excluded from future scans)" if exclude_from_scans else "")
             )
-            return jsonify({'success': True, 'message': 'Product deleted globally'})
+            return jsonify({'success': True, 'message': 'Product deleted globally' + (' and excluded from future agent scans' if exclude_from_scans else '')})
 
         else:
             # Org admin/manager: remove from their org only
@@ -582,37 +633,130 @@ def delete_product(product_id):
                     product.organizations.remove(user_org)
                     db.session.commit()
 
+                    exclude_msg = ' and excluded from future agent scans' if exclude_from_scans else ''
                     log_audit_event(
                         'REMOVE_ORG',
                         'products',
                         product_id,
                         old_value={'organization_id': user_org_id},
-                        details=f"Removed product {product.vendor} {product.product_name} from {user_org.display_name}"
+                        details=f"Removed product {product.vendor} {product.product_name} from {user_org.display_name}" + (" (excluded)" if exclude_from_scans else "")
                     )
                     return jsonify({
                         'success': True,
-                        'message': f'Product removed from {user_org.display_name} (still exists in other organizations)'
+                        'message': f'Product removed from {user_org.display_name} (still exists in other organizations)' + exclude_msg
                     })
             else:
                 # Product only in this org - delete it globally
+                # Delete all related records first (foreign key constraints)
+                ProductInstallation.query.filter_by(product_id=product_id).delete()
                 VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
                 db.session.delete(product)
                 db.session.commit()
 
+                exclude_msg = ' and excluded from future agent scans' if exclude_from_scans else ''
                 log_audit_event(
                     'DELETE',
                     'products',
                     product_id,
                     old_value=product_info,
-                    details=f"Deleted product {product.vendor} {product.product_name}"
+                    details=f"Deleted product {product.vendor} {product.product_name}" + (" (excluded)" if exclude_from_scans else "")
                 )
-                return jsonify({'success': True, 'message': 'Product deleted'})
+                return jsonify({'success': True, 'message': 'Product deleted' + exclude_msg})
 
         return jsonify({'success': True})
 
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/products/bulk-update-criticality', methods=['POST'])
+@manager_required
+def bulk_update_product_criticality():
+    """
+    Bulk update criticality for multiple products.
+
+    Request body:
+    {
+        "product_ids": [1, 2, 3, ...],
+        "criticality": "high"  // critical, high, medium, low
+    }
+
+    Permissions:
+    - Super Admin: Can update any product
+    - Org Admin/Manager: Can only update products in their org
+    """
+    from app.logging_config import log_audit_event
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    product_ids = data.get('product_ids', [])
+    new_criticality = data.get('criticality', '').lower()
+
+    if not product_ids:
+        return jsonify({'error': 'No products specified'}), 400
+
+    valid_criticalities = ['critical', 'high', 'medium', 'low']
+    if new_criticality not in valid_criticalities:
+        return jsonify({'error': f'Invalid criticality. Must be one of: {", ".join(valid_criticalities)}'}), 400
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user_org_id = session.get('organization_id') or current_user.organization_id
+
+    updated = 0
+    skipped = 0
+    errors = []
+
+    for product_id in product_ids:
+        try:
+            product = Product.query.get(product_id)
+            if not product:
+                skipped += 1
+                continue
+
+            # Permission check for non-super-admins
+            if not current_user.is_super_admin():
+                product_org_ids = [org.id for org in product.organizations.all()]
+                if user_org_id not in product_org_ids:
+                    skipped += 1
+                    continue
+
+            old_criticality = product.criticality
+            if old_criticality != new_criticality:
+                product.criticality = new_criticality
+                updated += 1
+
+                log_audit_event(
+                    'BULK_UPDATE_CRITICALITY',
+                    'products',
+                    product_id,
+                    old_value={'criticality': old_criticality},
+                    new_value={'criticality': new_criticality},
+                    details=f"Bulk updated {product.vendor} {product.product_name} criticality"
+                )
+            else:
+                skipped += 1
+
+        except Exception as e:
+            errors.append({'product_id': product_id, 'error': str(e)})
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+    return jsonify({
+        'success': True,
+        'updated': updated,
+        'skipped': skipped,
+        'errors': errors,
+        'message': f'Updated {updated} products to {new_criticality} criticality'
+    })
+
 
 @bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
 @login_required
@@ -766,7 +910,16 @@ def remove_product_organization(product_id, org_id):
 @bp.route('/api/vulnerabilities', methods=['GET'])
 @login_required
 def get_vulnerabilities():
-    """Get vulnerabilities with optional filters for current organization"""
+    """Get vulnerabilities with optional filters for current organization.
+
+    Supports pagination:
+    - page: Page number (default: 1, use 0 or 'all' for all results)
+    - per_page: Items per page (default: 50, max: 500)
+
+    Returns:
+    - If paginated: { items: [...], total: N, page: N, per_page: N, pages: N }
+    - If page=0 or page=all: Array of all items (legacy behavior)
+    """
     try:
         # Get current organization
         org_id = session.get('organization_id')
@@ -781,7 +934,8 @@ def get_vulnerabilities():
             'vendor': request.args.get('vendor'),
             'product': request.args.get('product'),
             'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
-            'acknowledged': request.args.get('acknowledged')
+            'acknowledged': request.args.get('acknowledged'),
+            'priority': request.args.get('priority'),  # critical, high, medium, low
         }
 
         # Remove None values
@@ -789,20 +943,47 @@ def get_vulnerabilities():
 
         matches = get_filtered_vulnerabilities(filters)
 
-        # Safely convert to dict with error handling
+        # Check pagination params
+        page_param = request.args.get('page', '0')  # Default to all (legacy)
+        per_page = min(request.args.get('per_page', 50, type=int), 500)
+
+        # If page=0 or page=all, return all results (legacy behavior)
+        if page_param in ('0', 'all', ''):
+            results = []
+            for m in matches:
+                try:
+                    results.append(m.to_dict())
+                except Exception as e:
+                    logger.error(f"Error converting match {m.id} to dict: {e}")
+                    results.append({'id': m.id, 'error': 'Failed to load full details'})
+            return jsonify(results)
+
+        # Paginated response
+        page = max(int(page_param), 1)
+        total = len(matches)
+        pages = (total + per_page - 1) // per_page if per_page > 0 else 1
+
+        # Slice for current page
+        start = (page - 1) * per_page
+        end = start + per_page
+        page_matches = matches[start:end]
+
         results = []
-        for m in matches:
+        for m in page_matches:
             try:
                 results.append(m.to_dict())
             except Exception as e:
                 logger.error(f"Error converting match {m.id} to dict: {e}")
-                # Include minimal info for failed items
-                results.append({
-                    'id': m.id,
-                    'error': 'Failed to load full details'
-                })
+                results.append({'id': m.id, 'error': 'Failed to load full details'})
 
-        return jsonify(results)
+        return jsonify({
+            'items': results,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pages
+        })
+
     except Exception as e:
         logger.error(f"Error getting vulnerabilities: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
@@ -811,6 +992,8 @@ def get_vulnerabilities():
 @login_required
 def get_vulnerability_stats():
     """Get vulnerability statistics with priority breakdown for current organization"""
+    from app.models import product_organizations
+
     # Get current organization
     org_id = session.get('organization_id')
     if not org_id:
@@ -819,46 +1002,250 @@ def get_vulnerability_stats():
 
     total_vulns = Vulnerability.query.count()
 
-    # Filter matches by organization
-    total_matches_query = db.session.query(VulnerabilityMatch).join(Product)
-    unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).filter(VulnerabilityMatch.acknowledged == False)
-    ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).filter(Vulnerability.known_ransomware == True)
-
+    # Filter matches by organization using multi-org relationship
     if org_id:
-        total_matches_query = total_matches_query.filter(Product.organization_id == org_id)
-        unacknowledged_query = unacknowledged_query.filter(Product.organization_id == org_id)
-        ransomware_query = ransomware_query.filter(Product.organization_id == org_id)
+        # Join through product_organizations junction table
+        total_matches_query = db.session.query(VulnerabilityMatch).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(product_organizations.c.organization_id == org_id)
+
+        unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            product_organizations.c.organization_id == org_id,
+            VulnerabilityMatch.acknowledged == False
+        )
+
+        ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            product_organizations.c.organization_id == org_id,
+            Vulnerability.known_ransomware == True
+        )
+
+        products_tracked_query = db.session.query(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            product_organizations.c.organization_id == org_id,
+            Product.active == True
+        )
+    else:
+        # No org filter - show all
+        total_matches_query = db.session.query(VulnerabilityMatch).join(Product)
+        unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).filter(VulnerabilityMatch.acknowledged == False)
+        ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).filter(Vulnerability.known_ransomware == True)
+        products_tracked_query = Product.query.filter_by(active=True)
 
     total_matches = total_matches_query.count()
     unacknowledged = unacknowledged_query.count()
     ransomware = ransomware_query.count()
+    products_tracked = products_tracked_query.count()
 
-    # Calculate priority-based stats
+    # Calculate priority-based stats (both CVE counts and match counts)
     all_matches = unacknowledged_query.all()
 
+    # Match counts (existing)
     priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+
+    # CVE counts (grouped by CVE ID, highest priority per CVE)
+    from collections import defaultdict
+    cve_priorities = defaultdict(list)  # cve_id -> list of priorities
+
     for match in all_matches:
         priority = match.calculate_effective_priority()
         priority_counts[priority] = priority_counts.get(priority, 0) + 1
+        cve_priorities[match.vulnerability.cve_id].append(priority)
 
-    # Products tracked for this org
-    products_tracked_query = Product.query.filter_by(active=True)
-    if org_id:
-        products_tracked_query = products_tracked_query.filter_by(organization_id=org_id)
-    products_tracked = products_tracked_query.count()
+    # Calculate CVE-level priority counts (use highest priority per CVE)
+    priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+    level_names = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
+
+    cve_priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+    for cve_id, priorities in cve_priorities.items():
+        # Get highest priority for this CVE
+        max_level = max(priority_order.get(p, 2) for p in priorities)
+        highest_priority = level_names.get(max_level, 'medium')
+        cve_priority_counts[highest_priority] += 1
+
+    total_cves = len(cve_priorities)  # Unique CVE count
 
     return jsonify({
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
         'unacknowledged': unacknowledged,
+        'unacknowledged_cves': total_cves,  # NEW: unique CVE count
         'ransomware_related': ransomware,
         'products_tracked': products_tracked,
         'priority_breakdown': priority_counts,
+        'cve_priority_breakdown': cve_priority_counts,  # NEW: CVE-level counts
         'critical_count': priority_counts['critical'],
         'high_count': priority_counts['high'],
         'medium_count': priority_counts['medium'],
-        'low_count': priority_counts['low']
+        'low_count': priority_counts['low'],
+        # NEW: CVE counts for dashboard display
+        'critical_cves': cve_priority_counts['critical'],
+        'high_cves': cve_priority_counts['high'],
+        'medium_cves': cve_priority_counts['medium'],
+        'low_cves': cve_priority_counts['low']
     })
+
+
+@bp.route('/api/vulnerabilities/grouped', methods=['GET'])
+@login_required
+def get_vulnerabilities_grouped():
+    """
+    Get vulnerabilities grouped by CVE ID.
+
+    Instead of showing the same CVE multiple times (once per product),
+    this groups by CVE ID and lists affected products under each CVE.
+
+    Supports pagination and filtering:
+    - page: Page number (default: 1)
+    - per_page: Items per page (default: 25, max: 100)
+    - priority: Filter by effective priority (critical, high, medium, low)
+    - acknowledged: Filter by acknowledged status (true/false)
+    - ransomware_only: Only show ransomware-related CVEs
+    - search: Search CVE ID or description
+
+    Returns:
+    {
+        "items": [
+            {
+                "cve_id": "CVE-2024-1234",
+                "vulnerability": {...},  // Full vulnerability details
+                "highest_priority": "critical",  // Highest priority across all affected products
+                "affected_products": [
+                    {
+                        "product_id": 1,
+                        "product_name": "nginx",
+                        "vendor": "nginx",
+                        "criticality": "high",
+                        "effective_priority": "high",
+                        "acknowledged": false,
+                        "match_id": 123
+                    }
+                ],
+                "product_count": 3,
+                "unacknowledged_count": 2
+            }
+        ],
+        "total": 150,
+        "page": 1,
+        "per_page": 25,
+        "pages": 6
+    }
+    """
+    from collections import defaultdict
+
+    try:
+        # Get current organization
+        org_id = session.get('organization_id')
+        if not org_id:
+            default_org = Organization.query.filter_by(name='default').first()
+            org_id = default_org.id if default_org else None
+
+        # Build filters
+        filters = {
+            'organization_id': org_id,
+            'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
+            'acknowledged': request.args.get('acknowledged'),
+            'priority': request.args.get('priority'),
+        }
+        filters = {k: v for k, v in filters.items() if v is not None and v != ''}
+
+        # Get all matches
+        matches = get_filtered_vulnerabilities(filters)
+
+        # Group by CVE ID
+        cve_groups = defaultdict(lambda: {
+            'vulnerability': None,
+            'affected_products': [],
+            'priorities': [],
+            'unacknowledged_count': 0
+        })
+
+        for match in matches:
+            cve_id = match.vulnerability.cve_id
+            group = cve_groups[cve_id]
+
+            if not group['vulnerability']:
+                group['vulnerability'] = match.vulnerability.to_dict()
+
+            effective_priority = match.calculate_effective_priority()
+            group['priorities'].append(effective_priority)
+
+            if not match.acknowledged:
+                group['unacknowledged_count'] += 1
+
+            group['affected_products'].append({
+                'match_id': match.id,
+                'product_id': match.product.id,
+                'product_name': match.product.product_name,
+                'vendor': match.product.vendor,
+                'criticality': match.product.criticality,
+                'effective_priority': effective_priority,
+                'acknowledged': match.acknowledged,
+                'match_method': match.match_method,
+                'match_confidence': match.match_confidence
+            })
+
+        # Build results list
+        priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+        level_names = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
+
+        results = []
+        for cve_id, group in cve_groups.items():
+            # Calculate highest priority across all affected products
+            max_priority_level = max(priority_order.get(p, 2) for p in group['priorities'])
+            highest_priority = level_names.get(max_priority_level, 'medium')
+
+            results.append({
+                'cve_id': cve_id,
+                'vulnerability': group['vulnerability'],
+                'highest_priority': highest_priority,
+                'affected_products': group['affected_products'],
+                'product_count': len(group['affected_products']),
+                'unacknowledged_count': group['unacknowledged_count']
+            })
+
+        # Sort by highest priority (critical first), then by unacknowledged count
+        results.sort(key=lambda x: (-priority_order.get(x['highest_priority'], 2), -x['unacknowledged_count']))
+
+        # Apply search filter if provided
+        search = request.args.get('search', '').lower()
+        if search:
+            results = [r for r in results if
+                       search in r['cve_id'].lower() or
+                       search in (r['vulnerability'].get('vulnerability_name', '') or '').lower() or
+                       search in (r['vulnerability'].get('short_description', '') or '').lower()]
+
+        # Filter by priority if specified
+        priority_filter = request.args.get('priority')
+        if priority_filter:
+            results = [r for r in results if r['highest_priority'] == priority_filter.lower()]
+
+        # Pagination
+        page = max(int(request.args.get('page', 1)), 1)
+        per_page = min(int(request.args.get('per_page', 25)), 100)
+
+        total = len(results)
+        pages = (total + per_page - 1) // per_page if per_page > 0 else 1
+
+        start = (page - 1) * per_page
+        end = start + per_page
+        page_results = results[start:end]
+
+        return jsonify({
+            'items': page_results,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pages
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting grouped vulnerabilities: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/api/products/aggregated', methods=['GET'])
@@ -1080,7 +1467,7 @@ def acknowledge_match(match_id):
 @bp.route('/api/matches/<int:match_id>/unacknowledge', methods=['POST'])
 @login_required
 def unacknowledge_match(match_id):
-    """Unacknowledge a vulnerability match"""
+    """Unacknowledge a vulnerability match (reopen it for alerts)"""
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     match = VulnerabilityMatch.query.get_or_404(match_id)
@@ -1096,11 +1483,156 @@ def unacknowledge_match(match_id):
             return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
 
     match.acknowledged = False
+    # Reset first_alerted_at so it will be alerted again as "new"
+    match.first_alerted_at = None
     db.session.commit()
     return jsonify(match.to_dict())
 
+
+@bp.route('/api/matches/acknowledge-by-cve/<cve_id>', methods=['POST'])
+@login_required
+def acknowledge_by_cve(cve_id):
+    """
+    Acknowledge ALL vulnerability matches for a given CVE ID.
+
+    This is the recommended way to acknowledge CVEs since one CVE typically
+    requires one fix (e.g., a Windows Update) regardless of how many
+    products/versions it affects.
+
+    Returns: { acknowledged_count: X, match_ids: [...] }
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    org_id = session.get('organization_id')
+
+    # Find the vulnerability
+    vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
+    if not vuln:
+        return jsonify({'error': f'CVE {cve_id} not found'}), 404
+
+    # Find all matches for this CVE that the user has permission to manage
+    from app.models import product_organizations
+
+    if current_user.is_super_admin():
+        # Super admin can acknowledge any match
+        matches = VulnerabilityMatch.query.filter_by(
+            vulnerability_id=vuln.id,
+            acknowledged=False
+        ).all()
+    else:
+        # Non-admin: filter by organization membership
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+
+        matches = db.session.query(VulnerabilityMatch).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            VulnerabilityMatch.vulnerability_id == vuln.id,
+            VulnerabilityMatch.acknowledged == False,
+            product_organizations.c.organization_id.in_(user_org_ids)
+        ).all()
+
+    if not matches:
+        return jsonify({
+            'acknowledged_count': 0,
+            'match_ids': [],
+            'message': 'No unacknowledged matches found for this CVE'
+        })
+
+    # Acknowledge all matches
+    acknowledged_ids = []
+    for match in matches:
+        match.acknowledged = True
+        acknowledged_ids.append(match.id)
+
+    db.session.commit()
+
+    log_audit_event(
+        'ACKNOWLEDGE_CVE',
+        'vulnerability_matches',
+        vuln.id,
+        new_value={'acknowledged_count': len(acknowledged_ids), 'cve_id': cve_id},
+        details=f"Bulk acknowledged {len(acknowledged_ids)} matches for {cve_id}"
+    )
+
+    return jsonify({
+        'acknowledged_count': len(acknowledged_ids),
+        'match_ids': acknowledged_ids,
+        'cve_id': cve_id,
+        'message': f'Acknowledged {len(acknowledged_ids)} product(s) for {cve_id}'
+    })
+
+
+@bp.route('/api/matches/unacknowledge-by-cve/<cve_id>', methods=['POST'])
+@login_required
+def unacknowledge_by_cve(cve_id):
+    """
+    Unacknowledge ALL vulnerability matches for a given CVE ID.
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    # Find the vulnerability
+    vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
+    if not vuln:
+        return jsonify({'error': f'CVE {cve_id} not found'}), 404
+
+    # Find all matches for this CVE that the user has permission to manage
+    from app.models import product_organizations
+
+    if current_user.is_super_admin():
+        matches = VulnerabilityMatch.query.filter_by(
+            vulnerability_id=vuln.id,
+            acknowledged=True
+        ).all()
+    else:
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+
+        matches = db.session.query(VulnerabilityMatch).join(Product).join(
+            product_organizations, Product.id == product_organizations.c.product_id
+        ).filter(
+            VulnerabilityMatch.vulnerability_id == vuln.id,
+            VulnerabilityMatch.acknowledged == True,
+            product_organizations.c.organization_id.in_(user_org_ids)
+        ).all()
+
+    if not matches:
+        return jsonify({
+            'unacknowledged_count': 0,
+            'match_ids': [],
+            'message': 'No acknowledged matches found for this CVE'
+        })
+
+    # Unacknowledge all matches and reset first_alerted_at for re-alerting
+    unacknowledged_ids = []
+    for match in matches:
+        match.acknowledged = False
+        match.first_alerted_at = None  # Reset so it will be alerted again as "new"
+        unacknowledged_ids.append(match.id)
+
+    db.session.commit()
+
+    log_audit_event(
+        'UNACKNOWLEDGE_CVE',
+        'vulnerability_matches',
+        vuln.id,
+        new_value={'unacknowledged_count': len(unacknowledged_ids), 'cve_id': cve_id},
+        details=f"Bulk unacknowledged {len(unacknowledged_ids)} matches for {cve_id} (will re-alert)"
+    )
+
+    return jsonify({
+        'unacknowledged_count': len(unacknowledged_ids),
+        'match_ids': unacknowledged_ids,
+        'cve_id': cve_id,
+        'message': f'Unacknowledged {len(unacknowledged_ids)} product(s) for {cve_id}'
+    })
+
 @bp.route('/api/sync', methods=['POST'])
 @admin_required
+@limiter.limit("5/minute")
 def trigger_sync():
     """
     Manually trigger CISA KEV sync
@@ -1216,6 +1748,55 @@ def rematch_products():
             'removed': removed,
             'added': added,
             'message': f'Removed {removed} invalid matches, added {added} new matches'
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@bp.route('/api/products/apply-cpe', methods=['POST'])
+@admin_required
+def apply_cpe_mappings():
+    """
+    Apply CPE auto-mappings to products that don't have CPE identifiers.
+    This enables more precise vulnerability matching.
+
+    Permissions:
+    - Super Admin only: Can apply CPE mappings
+    """
+    from app.cpe_mapping import batch_apply_cpe_mappings, get_cpe_coverage_stats
+
+    try:
+        updated, total_without = batch_apply_cpe_mappings(commit=True)
+        stats = get_cpe_coverage_stats()
+        return jsonify({
+            'status': 'success',
+            'updated': updated,
+            'total_without_cpe_before': total_without,
+            'coverage': stats,
+            'message': f'Applied CPE to {updated} products. Coverage: {stats["coverage_percent"]}%'
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@bp.route('/api/products/cpe-suggestions', methods=['GET'])
+@admin_required
+def get_cpe_suggestions():
+    """
+    Get CPE mapping suggestions for products without CPE.
+
+    Permissions:
+    - Super Admin only: Can view CPE suggestions
+    """
+    from app.cpe_mapping import suggest_cpe_for_products, get_cpe_coverage_stats
+
+    try:
+        suggestions = suggest_cpe_for_products(limit=100)
+        stats = get_cpe_coverage_stats()
+        return jsonify({
+            'status': 'success',
+            'suggestions': suggestions,
+            'coverage': stats
         })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -2581,7 +3162,8 @@ def remove_user_organization(user_id, org_id):
 def debug_auth_status():
     """Debug endpoint to check authentication status"""
     import os
-    auth_enabled = os.environ.get('ENABLE_AUTH', 'false').lower() == 'true'
+    # Match auth.py: auth is ON by default, only disabled with DISABLE_AUTH=true
+    auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
 
     user_info = None
     if 'user_id' in session:

@@ -2,61 +2,31 @@
 
 {% block title %}Admin Panel - SentriKat{% endblock %}
 
+{% block breadcrumb_items %}
+<li class="breadcrumb-item active" aria-current="page">Administration</li>
+{% endblock %}
+
 {% block content %}
 <div class="fade-in">
-    <div class="row mb-4">
-        <div class="col">
-            <h1 class="display-6 fw-bold text-dark mb-2">
-                <i class="bi bi-shield-lock me-2"></i>Administration Panel
-            </h1>
-            <p class="text-muted">Manage users, organizations, and system settings</p>
-        </div>
+    <!-- Hidden tab triggers (for programmatic switching) -->
+    <div id="adminTabs" class="d-none">
+        <button id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button"></button>
+        <button id="ldapUsers-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button"></button>
+        <button id="ldapGroups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button"></button>
+        <button id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button"></button>
+        <button id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button"></button>
+        <button id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button"></button>
     </div>
 
-    <!-- Admin Tabs -->
-    <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">
-                <i class="bi bi-people me-2"></i>Users
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="ldap-users-tab-item" style="display: none;">
-            <button class="nav-link" id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button">
-                <i class="bi bi-diagram-3 me-2"></i>LDAP Users
-                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="ldap-groups-tab-item" style="display: none;">
-            <button class="nav-link" id="ldap-groups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button">
-                <i class="bi bi-diagram-2 me-2"></i>LDAP Groups
-                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button">
-                <i class="bi bi-building me-2"></i>Organizations
-            </button>
-        </li>
-        {% if license and license.is_professional() %}
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button">
-                <i class="bi bi-plug me-2"></i>Integrations
-                <span class="badge bg-secondary ms-1" id="importQueueBadge" style="display: none;">0</span>
-            </button>
-        </li>
-        {% endif %}
-        {% if current_user and current_user.is_super_admin() %}
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
-                <i class="bi bi-gear me-2"></i>Settings
-            </button>
-        </li>
-        {% endif %}
-    </ul>
-
     <div class="tab-content" id="adminTabsContent">
-        <!-- Users Tab -->
-        <div class="tab-pane fade show active" id="users" role="tabpanel">
+        <!-- Users Section -->
+        <div class="tab-pane fade" id="users" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-people-fill me-2"></i>Local Users</h2>
+                    <p class="text-muted mb-0 small">Manage local user accounts and permissions</p>
+                </div>
+            </div>
             <div class="alert alert-light border mb-3 small">
                 <i class="bi bi-info-circle me-1"></i>
                 <strong>Local users</strong> can be created manually below. <strong>LDAP users</strong> are auto-created when they first log in (if Auto-Provision is enabled in LDAP Group Mappings).
@@ -125,9 +95,13 @@
 
         <!-- LDAP Users Tab -->
         <div class="tab-pane fade" id="ldapUsers" role="tabpanel">
+            <div class="mb-4">
+                <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-3 me-2"></i>LDAP Users</h2>
+                <p class="text-muted mb-0 small">Discover and invite users from your LDAP/Active Directory</p>
+            </div>
             <div class="card">
                 <div class="card-header">
-                    <span><i class="bi bi-diagram-3 me-2"></i>LDAP User Discovery & Management</span>
+                    <span><i class="bi bi-search me-2"></i>User Discovery</span>
                 </div>
                 <div class="card-body">
                     <div class="alert alert-info">
@@ -185,8 +159,14 @@
             </div>
         </div>
 
-        <!-- Organizations Tab -->
+        <!-- Organizations Section -->
         <div class="tab-pane fade" id="organizations" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-building me-2"></i>Organizations</h2>
+                    <p class="text-muted mb-0 small">Manage tenants, departments, and team structures</p>
+                </div>
+            </div>
             <div class="alert alert-light border mb-3 small">
                 <i class="bi bi-info-circle me-1"></i>
                 <strong>Organizations</strong> are logical groups (e.g., tenants, departments, teams) that contain users and products. Each organization can have its own SMTP settings for notifications. Users are assigned to one organization, while Super Admins can access all.
@@ -253,8 +233,12 @@
             </div>
         </div>
 
-        <!-- LDAP Groups Tab -->
+        <!-- LDAP Groups Section -->
         <div class="tab-pane fade" id="ldapGroups" role="tabpanel">
+            <div class="mb-4">
+                <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-2 me-2"></i>LDAP Groups</h2>
+                <p class="text-muted mb-0 small">Map LDAP/AD groups to SentriKat roles and organizations</p>
+            </div>
             <div class="row">
                 <div class="col-12">
                     <div class="alert alert-info mb-3">
@@ -494,9 +478,13 @@
         </div>
 
         {% if license and license.is_professional() %}
-        <!-- Integrations Tab (PRO Feature) -->
+        <!-- Integrations Section -->
         <div class="tab-pane fade" id="integrations" role="tabpanel">
-            <!-- Integrations Sub-Tabs (Redesigned) -->
+            <div class="mb-4">
+                <h2 class="h4 fw-bold mb-1"><i class="bi bi-plug-fill me-2"></i>Integrations</h2>
+                <p class="text-muted mb-0 small">Agent management, API keys, and data imports</p>
+            </div>
+            <!-- Integrations Sub-Tabs -->
             <ul class="nav nav-pills mb-4" id="integrationsTabs" role="tablist">
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="integrations-overview-tab" data-bs-toggle="pill" data-bs-target="#integrationsOverview" type="button">
@@ -528,14 +516,14 @@
                         <div class="col-12">
                             <div class="card border-0 bg-light">
                                 <div class="card-body">
-                                    <h5 class="card-title mb-3"><i class="bi bi-lightbulb me-2 text-warning"></i>How Integrations Work</h5>
+                                    <h5 class="card-title mb-3"><i class="bi bi-diagram-3 me-2 text-muted"></i>How Integrations Work</h5>
                                     <div class="row align-items-center">
                                         <!-- Pull Sources -->
                                         <div class="col-md-3 text-center mb-3 mb-md-0">
-                                            <div class="p-3 bg-white rounded shadow-sm">
-                                                <i class="bi bi-cloud-download text-primary" style="font-size: 2rem;"></i>
+                                            <div class="p-3 bg-white rounded border">
+                                                <i class="bi bi-cloud-download text-muted" style="font-size: 2rem;"></i>
                                                 <h6 class="mt-2 mb-1">Pull Sources</h6>
-                                                <small class="text-muted">PDQ, SCCM, Intune</small>
+                                                <small class="text-muted">REST API sources</small>
                                             </div>
                                         </div>
                                         <!-- Arrow -->
@@ -544,10 +532,10 @@
                                         </div>
                                         <!-- SentriKat -->
                                         <div class="col-md-4 text-center mb-3 mb-md-0">
-                                            <div class="p-3 bg-primary text-white rounded shadow">
-                                                <i class="bi bi-shield-check" style="font-size: 2rem;"></i>
-                                                <h6 class="mt-2 mb-1">SentriKat</h6>
-                                                <small>Import Queue &rarr; Products</small>
+                                            <div class="p-3 bg-white rounded border border-2">
+                                                <i class="bi bi-shield-check text-dark" style="font-size: 2rem;"></i>
+                                                <h6 class="mt-2 mb-1 fw-bold">SentriKat</h6>
+                                                <small class="text-muted">Import Queue &rarr; Products</small>
                                             </div>
                                         </div>
                                         <!-- Arrow -->
@@ -556,8 +544,8 @@
                                         </div>
                                         <!-- Push Agents -->
                                         <div class="col-md-3 text-center">
-                                            <div class="p-3 bg-white rounded shadow-sm">
-                                                <i class="bi bi-cloud-upload text-success" style="font-size: 2rem;"></i>
+                                            <div class="p-3 bg-white rounded border">
+                                                <i class="bi bi-cloud-upload text-muted" style="font-size: 2rem;"></i>
                                                 <h6 class="mt-2 mb-1">Push Agents</h6>
                                                 <small class="text-muted">Windows/Linux endpoints</small>
                                             </div>
@@ -571,7 +559,7 @@
                     <!-- Stats Cards -->
                     <div class="row mb-4" id="integrationStatsRow">
                         <div class="col-md-3">
-                            <div class="card h-100 border-start border-primary border-4">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('pull-sources-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -579,7 +567,7 @@
                                             <h3 class="mb-0" id="statPullSources">-</h3>
                                         </div>
                                         <div class="align-self-center">
-                                            <i class="bi bi-cloud-download text-primary" style="font-size: 2rem; opacity: 0.5;"></i>
+                                            <i class="bi bi-cloud-download text-secondary" style="font-size: 2rem; opacity: 0.4;"></i>
                                         </div>
                                     </div>
                                     <small class="text-muted">External inventory systems</small>
@@ -587,7 +575,7 @@
                             </div>
                         </div>
                         <div class="col-md-3">
-                            <div class="card h-100 border-start border-success border-4">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('push-agents-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -595,7 +583,7 @@
                                             <h3 class="mb-0"><span id="statEndpointsOnline">-</span><small class="text-muted fs-6">/<span id="statEndpointsTotal">-</span></small></h3>
                                         </div>
                                         <div class="align-self-center">
-                                            <i class="bi bi-pc-display text-success" style="font-size: 2rem; opacity: 0.5;"></i>
+                                            <i class="bi bi-pc-display text-secondary" style="font-size: 2rem; opacity: 0.4;"></i>
                                         </div>
                                     </div>
                                     <small class="text-muted">Online / Total endpoints</small>
@@ -603,7 +591,7 @@
                             </div>
                         </div>
                         <div class="col-md-3">
-                            <div class="card h-100 border-start border-warning border-4">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('import-queue-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -611,7 +599,7 @@
                                             <h3 class="mb-0" id="statPendingImports">-</h3>
                                         </div>
                                         <div class="align-self-center">
-                                            <i class="bi bi-inbox text-warning" style="font-size: 2rem; opacity: 0.5;"></i>
+                                            <i class="bi bi-inbox text-secondary" style="font-size: 2rem; opacity: 0.4;"></i>
                                         </div>
                                     </div>
                                     <small class="text-muted">Pending review</small>
@@ -619,7 +607,7 @@
                             </div>
                         </div>
                         <div class="col-md-3">
-                            <div class="card h-100 border-start border-info border-4">
+                            <div class="card h-100">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -627,7 +615,7 @@
                                             <h3 class="mb-0" id="statRecentCheckins">-</h3>
                                         </div>
                                         <div class="align-self-center">
-                                            <i class="bi bi-activity text-info" style="font-size: 2rem; opacity: 0.5;"></i>
+                                            <i class="bi bi-activity text-secondary" style="font-size: 2rem; opacity: 0.4;"></i>
                                         </div>
                                     </div>
                                     <small class="text-muted">Check-ins last 24h</small>
@@ -640,19 +628,17 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="card">
-                                <div class="card-header bg-primary text-white">
-                                    <i class="bi bi-cloud-download me-2"></i>Pull Sources
+                                <div class="card-header bg-white">
+                                    <i class="bi bi-cloud-download me-2 text-muted"></i><strong>Pull Sources</strong>
                                 </div>
                                 <div class="card-body">
                                     <p class="text-muted mb-3">Connect to existing software inventory systems. SentriKat will fetch and import your software catalog automatically.</p>
                                     <div class="d-flex flex-wrap gap-2 mb-3">
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-box me-1"></i>PDQ Inventory</span>
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-microsoft me-1"></i>SCCM</span>
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-cloud me-1"></i>Intune</span>
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-hdd-network me-1"></i>Lansweeper</span>
-                                        <span class="badge bg-light text-dark border"><i class="bi bi-braces me-1"></i>REST API</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-braces me-1"></i>Any REST API</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-box me-1"></i>Inventory Systems</span>
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-hdd-network me-1"></i>Asset Management</span>
                                     </div>
-                                    <button class="btn btn-primary btn-sm" onclick="document.getElementById('pull-sources-tab').click()">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('pull-sources-tab').click()">
                                         <i class="bi bi-gear me-1"></i>Configure Pull Sources
                                     </button>
                                 </div>
@@ -660,8 +646,8 @@
                         </div>
                         <div class="col-md-6">
                             <div class="card">
-                                <div class="card-header bg-success text-white">
-                                    <i class="bi bi-cloud-upload me-2"></i>Push Agents
+                                <div class="card-header bg-white">
+                                    <i class="bi bi-cloud-upload me-2 text-muted"></i><strong>Push Agents</strong>
                                 </div>
                                 <div class="card-body">
                                     <p class="text-muted mb-3">Deploy lightweight agents on servers and workstations. Agents report installed software directly to SentriKat.</p>
@@ -670,7 +656,7 @@
                                         <span class="badge bg-light text-dark border"><i class="bi bi-ubuntu me-1"></i>Linux</span>
                                         <span class="badge bg-light text-dark border"><i class="bi bi-terminal me-1"></i>PowerShell/Bash</span>
                                     </div>
-                                    <button class="btn btn-success btn-sm" onclick="document.getElementById('push-agents-tab').click()">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('push-agents-tab').click()">
                                         <i class="bi bi-download me-1"></i>Deploy Agents
                                     </button>
                                 </div>
@@ -696,7 +682,13 @@
                                 <i class="bi bi-x-lg me-1"></i>Reject Selected
                             </button>
                         </div>
-                        <div>
+                        <div class="d-flex gap-2 align-items-center">
+                            <select class="form-select form-select-sm d-inline-block w-auto" id="queuePerPage" onchange="loadImportQueue()">
+                                <option value="25">25 per page</option>
+                                <option value="50">50 per page</option>
+                                <option value="100">100 per page</option>
+                                <option value="200">200 per page</option>
+                            </select>
                             <select class="form-select form-select-sm d-inline-block w-auto" id="queueFilterStatus" onchange="loadImportQueue()">
                                 <option value="pending">Pending</option>
                                 <option value="approved">Approved</option>
@@ -716,11 +708,21 @@
                                             <th style="width: 40px;">
                                                 <input type="checkbox" class="form-check-input" id="selectAllQueue" onchange="toggleSelectAllQueue()">
                                             </th>
-                                            <th>Software</th>
-                                            <th>Version</th>
-                                            <th>Organization</th>
-                                            <th>Criticality</th>
-                                            <th>Source</th>
+                                            <th style="cursor: pointer;" onclick="sortImportQueue('vendor')">
+                                                Software <span id="importQueueSortVendor"></span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="sortImportQueue('version')">
+                                                Version <span id="importQueueSortVersion"></span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="sortImportQueue('organization')">
+                                                Organization <span id="importQueueSortOrganization"></span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="sortImportQueue('criticality')">
+                                                Criticality <span id="importQueueSortCriticality"></span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="sortImportQueue('source')">
+                                                Source <span id="importQueueSortSource"></span>
+                                            </th>
                                             <th style="width: 120px;">Actions</th>
                                         </tr>
                                     </thead>
@@ -735,6 +737,7 @@
                                 </table>
                             </div>
                         </div>
+                        <div class="card-footer" id="importQueuePagination"></div>
                     </div>
                 </div>
 
@@ -742,7 +745,7 @@
                 <div class="tab-pane fade" id="pullSources" role="tabpanel">
                     <div class="alert alert-info mb-3">
                         <i class="bi bi-info-circle me-2"></i>
-                        <strong>Pull Sources</strong> connect to external software inventory systems (PDQ, SCCM, Intune, etc.). SentriKat fetches data from these systems automatically.
+                        <strong>Pull Sources</strong> connect to external software inventory systems via REST API. Configure the URL, authentication, and field mappings to match your source system.
                     </div>
 
                     <div class="card">
@@ -757,11 +760,21 @@
                                 <table class="table table-hover mb-0">
                                     <thead class="table-light">
                                         <tr>
-                                            <th>Name</th>
-                                            <th>Type</th>
-                                            <th>Organization</th>
-                                            <th>Last Sync</th>
-                                            <th>Status</th>
+                                            <th style="cursor: pointer;" onclick="sortPullSources('name')">
+                                                Name <span id="pullSourcesSortName"></span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="sortPullSources('type')">
+                                                Type <span id="pullSourcesSortType"></span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="sortPullSources('organization')">
+                                                Organization <span id="pullSourcesSortOrganization"></span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="sortPullSources('last_sync')">
+                                                Last Sync <span id="pullSourcesSortLastSync"></span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="sortPullSources('status')">
+                                                Status <span id="pullSourcesSortStatus"></span>
+                                            </th>
                                             <th style="width: 150px;">Actions</th>
                                         </tr>
                                     </thead>
@@ -776,6 +789,7 @@
                                 </table>
                             </div>
                         </div>
+                        <div class="card-footer" id="pullSourcesPagination"></div>
                     </div>
                 </div>
 
@@ -797,6 +811,7 @@
                                         <tr>
                                             <th>Name / Key Prefix</th>
                                             <th>Organization</th>
+                                            <th>Mode</th>
                                             <th>Last Used</th>
                                             <th>Usage</th>
                                             <th>Expires</th>
@@ -805,7 +820,7 @@
                                     </thead>
                                     <tbody id="agentKeysTableBody">
                                         <tr>
-                                            <td colspan="6" class="text-center py-4">
+                                            <td colspan="7" class="text-center py-4">
                                                 <div class="spinner-border spinner-border-sm text-primary"></div>
                                                 <span class="ms-2">Loading agent keys...</span>
                                             </td>
@@ -838,13 +853,13 @@
                                 <table class="table table-hover mb-0" id="assetsTable">
                                     <thead class="table-light">
                                         <tr>
-                                            <th>Hostname</th>
-                                            <th>IP Address</th>
-                                            <th>OS</th>
+                                            <th data-sort="hostname" onclick="sortAssets('hostname')" style="cursor:pointer;">Hostname <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                            <th data-sort="ip_address" onclick="sortAssets('ip_address')" style="cursor:pointer;">IP Address <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                            <th data-sort="os_name" onclick="sortAssets('os_name')" style="cursor:pointer;">OS <i class="bi bi-arrow-down-up text-muted"></i></th>
                                             <th>Organization</th>
                                             <th>Products</th>
-                                            <th>Status</th>
-                                            <th>Last Seen</th>
+                                            <th data-sort="status" onclick="sortAssets('status')" style="cursor:pointer;">Status <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                            <th data-sort="last_checkin" onclick="sortAssets('last_checkin')" style="cursor:pointer;">Last Seen <i class="bi bi-arrow-down-up text-muted"></i></th>
                                             <th style="width: 100px;">Actions</th>
                                         </tr>
                                     </thead>
@@ -876,6 +891,12 @@
 
         <!-- Settings Tab -->
         <div class="tab-pane fade" id="settings" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-gear-fill me-2"></i>System Settings</h2>
+                    <p class="text-muted mb-0 small">LDAP configuration, SMTP settings, and system options</p>
+                </div>
+            </div>
             <!-- Settings Sub-Tabs -->
             <ul class="nav nav-pills mb-4" id="settingsTabs" role="tablist">
                 {% if current_user and current_user.is_super_admin() %}
@@ -1439,7 +1460,7 @@
                     <div class="card mt-4" id="backupRestoreCard">
                         <div class="card-header">
                             <i class="bi bi-cloud-download me-2"></i>Backup & Restore
-                            <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>
+                            {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>{% endif %}
                         </div>
                         <div class="card-body">
                             <div class="alert alert-warning">
@@ -2116,6 +2137,20 @@
                         <label for="agentKeyExpires" class="form-label fw-semibold">Expires</label>
                         <input type="date" class="form-control" id="agentKeyExpires">
                         <small class="text-muted">Leave empty for no expiration</small>
+                    </div>
+                    <hr>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="agentKeyAutoApprove">
+                            <label class="form-check-label fw-semibold" for="agentKeyAutoApprove">
+                                Auto-approve new products
+                            </label>
+                        </div>
+                        <small class="text-muted d-block mt-1">
+                            <i class="bi bi-info-circle me-1"></i>
+                            When enabled, software reported by agents using this key will be added directly to your inventory.
+                            When disabled, new products go to the Import Queue for manual review first.
+                        </small>
                     </div>
                 </form>
             </div>
@@ -2949,4 +2984,86 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/admin_panel.js') }}"></script>
+<script>
+// Hash-based navigation for admin panel sections
+function activateTabFromHash() {
+    // Get hash from URL, default to 'users' if none
+    let hash = window.location.hash.replace('#', '') || 'users';
+
+    // Validate that the tab exists
+    const tabButton = document.getElementById(hash + '-tab');
+    if (tabButton) {
+        // Hide all main tab panes first (only direct children of adminTabsContent)
+        document.querySelectorAll('#adminTabsContent > .tab-pane').forEach(pane => {
+            pane.classList.remove('show', 'active');
+        });
+
+        // Show the target pane
+        const targetPane = document.getElementById(hash);
+        if (targetPane) {
+            targetPane.classList.add('show', 'active');
+
+            // If this section has inner pills (Integrations, Settings, LDAP Groups),
+            // activate the first pill and its content
+            const innerPillsNav = targetPane.querySelector('.nav-pills');
+            if (innerPillsNav) {
+                const firstPill = innerPillsNav.querySelector('.nav-link');
+                const innerTabContent = targetPane.querySelector('.tab-content');
+
+                if (firstPill && innerTabContent) {
+                    // Activate first pill button
+                    innerPillsNav.querySelectorAll('.nav-link').forEach(p => p.classList.remove('active'));
+                    firstPill.classList.add('active');
+
+                    // Show first inner tab pane
+                    innerTabContent.querySelectorAll('.tab-pane').forEach(p => {
+                        p.classList.remove('show', 'active');
+                    });
+                    const firstInnerPane = innerTabContent.querySelector('.tab-pane');
+                    if (firstInnerPane) {
+                        firstInnerPane.classList.add('show', 'active');
+                    }
+                }
+            }
+        }
+
+        // Update active state on hidden tab buttons
+        document.querySelectorAll('#adminTabs button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        tabButton.classList.add('active');
+
+        // Scroll to top of content
+        window.scrollTo(0, 0);
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+            mainContent.scrollTop = 0;
+        }
+    }
+}
+
+// Activate correct tab immediately when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Run immediately
+    activateTabFromHash();
+
+    // Also run after a short delay to ensure Bootstrap is ready
+    setTimeout(activateTabFromHash, 100);
+});
+
+// Handle back/forward navigation
+window.addEventListener('hashchange', function() {
+    activateTabFromHash();
+});
+
+// Handle tab clicks to update URL
+document.querySelectorAll('#adminTabs button[data-bs-toggle="tab"]').forEach(function(tabButton) {
+    tabButton.addEventListener('shown.bs.tab', function(e) {
+        const target = e.target.getAttribute('data-bs-target');
+        if (target) {
+            history.replaceState(null, null, target);
+        }
+    });
+});
+</script>
 {% endblock %}

@@ -10,10 +10,83 @@ let organizations = [];
 // Global license info - loaded at page init
 window.licenseInfo = null;
 
+// Track if initial load has completed
+window.adminPanelInitialized = false;
+
 // Selection state for bulk actions
 let selectedUsers = new Map(); // Map of userId -> { id, username, is_active }
 let selectedOrgs = new Map();  // Map of orgId -> { id, name, active }
 let selectedMappings = new Map(); // Map of mappingId -> { id, group_cn, is_active }
+
+// ============================================================================
+// RETRY UTILITY - Handle startup timing issues
+// ============================================================================
+
+/**
+ * Fetch with automatic retry for transient failures
+ * Useful during app startup when API might not be ready
+ * @param {string} url - URL to fetch
+ * @param {object} options - Fetch options
+ * @param {number} maxRetries - Maximum retry attempts (default: 3)
+ * @param {number} delayMs - Initial delay between retries in ms (default: 1000)
+ * @returns {Promise<Response>}
+ */
+async function fetchWithRetry(url, options = {}, maxRetries = 3, delayMs = 1000) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+
+            // For server errors (5xx), retry
+            if (response.status >= 500 && attempt < maxRetries) {
+                console.warn(`[Retry ${attempt}/${maxRetries}] Server error ${response.status} for ${url}, retrying...`);
+                await sleep(delayMs * attempt);
+                continue;
+            }
+
+            return response;
+        } catch (error) {
+            lastError = error;
+            console.warn(`[Retry ${attempt}/${maxRetries}] Network error for ${url}: ${error.message}`);
+
+            if (attempt < maxRetries) {
+                await sleep(delayMs * attempt);
+            }
+        }
+    }
+
+    throw lastError || new Error(`Failed to fetch ${url} after ${maxRetries} attempts`);
+}
+
+/**
+ * Sleep helper for retry delays
+ */
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Load data with retry and update element state
+ * @param {string} elementId - Element to update on error
+ * @param {Function} loadFn - Async function to load data
+ * @param {string} errorMessage - Message to show on failure
+ */
+async function loadWithRetry(elementId, loadFn, errorMessage = 'Failed to load') {
+    const element = document.getElementById(elementId);
+
+    try {
+        await loadFn();
+    } catch (error) {
+        console.error(`Error loading ${elementId}:`, error);
+        if (element) {
+            // Check if still showing "Loading..."
+            if (element.textContent?.includes('Loading') || element.innerHTML?.includes('Loading')) {
+                element.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${errorMessage}</span>`;
+            }
+        }
+    }
+}
 
 // ============================================================================
 // BULK ACTIONS - USERS
@@ -141,11 +214,24 @@ async function bulkDeleteUsers() {
     if (!confirmed) return;
 
     showLoading();
+    let successCount = 0;
+    let failCount = 0;
     try {
         for (const user of selectedUsers.values()) {
-            await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+            const response = await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+            if (response.ok) {
+                successCount++;
+            } else {
+                failCount++;
+            }
         }
-        showToast(`${selectedUsers.size} user(s) deleted`, 'success');
+        if (failCount === 0) {
+            showToast(`${successCount} user(s) deleted successfully`, 'success');
+        } else if (successCount === 0) {
+            showToast(`Failed to delete ${failCount} user(s)`, 'danger');
+        } else {
+            showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
+        }
         clearUserSelection();
         loadUsers();
     } catch (error) {
@@ -281,11 +367,24 @@ async function bulkDeleteOrgs() {
     if (!confirmed) return;
 
     showLoading();
+    let successCount = 0;
+    let failCount = 0;
     try {
         for (const org of selectedOrgs.values()) {
-            await fetch(`/api/organizations/${org.id}`, { method: 'DELETE' });
+            const response = await fetch(`/api/organizations/${org.id}`, { method: 'DELETE' });
+            if (response.ok) {
+                successCount++;
+            } else {
+                failCount++;
+            }
         }
-        showToast(`${selectedOrgs.size} organization(s) deleted`, 'success');
+        if (failCount === 0) {
+            showToast(`${successCount} organization(s) deleted successfully`, 'success');
+        } else if (successCount === 0) {
+            showToast(`Failed to delete ${failCount} organization(s)`, 'danger');
+        } else {
+            showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
+        }
         clearOrgSelection();
         loadOrganizations();
     } catch (error) {
@@ -404,14 +503,26 @@ async function bulkDeleteMappings() {
     if (!confirmed) return;
 
     showLoading();
+    let successCount = 0;
+    let failCount = 0;
     try {
         for (const [mappingId, mapping] of selectedMappings) {
             const response = await fetch(`/api/ldap/groups/mappings/${mappingId}`, {
                 method: 'DELETE'
             });
-            if (!response.ok) throw new Error(`Failed to delete mapping ${mappingId}`);
+            if (response.ok) {
+                successCount++;
+            } else {
+                failCount++;
+            }
         }
-        showToast(`${selectedMappings.size} mapping(s) deleted`, 'success');
+        if (failCount === 0) {
+            showToast(`${successCount} mapping(s) deleted successfully`, 'success');
+        } else if (successCount === 0) {
+            showToast(`Failed to delete ${failCount} mapping(s)`, 'danger');
+        } else {
+            showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
+        }
         clearMappingSelection();
         loadGroupMappings();
     } catch (error) {
@@ -428,8 +539,18 @@ async function bulkDeleteMappings() {
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('Admin Panel: DOMContentLoaded fired');
 
-    // Check if Bootstrap is loaded
-    if (typeof bootstrap === 'undefined') {
+    // Check if Bootstrap is loaded - retry a few times as it might still be loading
+    let bootstrapReady = false;
+    for (let i = 0; i < 10 && !bootstrapReady; i++) {
+        if (typeof bootstrap !== 'undefined') {
+            bootstrapReady = true;
+        } else {
+            console.log(`Waiting for Bootstrap... attempt ${i + 1}`);
+            await sleep(200);
+        }
+    }
+
+    if (!bootstrapReady) {
         console.error('Bootstrap is not loaded! Modals will not work.');
         showToast('Error: Bootstrap JavaScript library is not loaded. Please refresh the page.', 'danger');
         return;
@@ -437,18 +558,31 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     try {
         // Load license info first and apply UI restrictions (await to ensure restrictions apply before showing tabs)
+        // Uses retry logic internally to handle startup timing
         await loadLicenseAndApplyRestrictions();
 
-        loadUsers();
-        loadOrganizations();
+        // Load users and orgs with retry
+        loadUsersWithRetry();
+        loadOrganizationsWithRetry();
         loadOrganizationsDropdown();
         checkLdapPermissions();  // Check if user can access LDAP features (also checks license)
+
+        // Pre-load settings in background (don't wait for tab click)
+        // This ensures settings are ready when user navigates to Settings tab
+        setTimeout(() => {
+            loadAllSettings();
+        }, 500);
+
+        // Pre-load integrations summary (for Overview stats)
+        setTimeout(() => {
+            loadIntegrationsSummary();
+        }, 300);
 
         // Tab change handlers
         const orgTab = document.getElementById('organizations-tab');
         if (orgTab) {
             orgTab.addEventListener('shown.bs.tab', function() {
-                loadOrganizations();
+                loadOrganizationsWithRetry();
             });
         } else {
             console.warn('organizations-tab element not found');
@@ -465,7 +599,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         // LDAP Users tab handler - auto-load users when tab is shown
-        const ldapUsersTab = document.getElementById('ldap-users-tab');
+        const ldapUsersTab = document.getElementById('ldapUsers-tab');
         if (ldapUsersTab) {
             ldapUsersTab.addEventListener('shown.bs.tab', function() {
                 loadLDAPUsersDefault();
@@ -473,7 +607,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         // LDAP Groups tab handler
-        const ldapGroupsTab = document.getElementById('ldap-groups-tab');
+        const ldapGroupsTab = document.getElementById('ldapGroups-tab');
         if (ldapGroupsTab) {
             ldapGroupsTab.addEventListener('shown.bs.tab', function() {
                 loadGroupMappings();
@@ -501,11 +635,47 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Load sync status immediately (doesn't require settings to be configured)
         loadSyncStatus();
 
+        window.adminPanelInitialized = true;
         console.log('Admin Panel: Initialization complete');
     } catch (error) {
         console.error('Error during admin panel initialization:', error);
+        showToast('Some components failed to load. Try refreshing the page.', 'warning');
     }
 });
+
+/**
+ * Load users with retry support
+ */
+async function loadUsersWithRetry() {
+    try {
+        await loadUsers();
+    } catch (error) {
+        console.error('Initial user load failed, retrying...', error);
+        await sleep(1000);
+        try {
+            await loadUsers();
+        } catch (retryError) {
+            console.error('User load retry failed:', retryError);
+        }
+    }
+}
+
+/**
+ * Load organizations with retry support
+ */
+async function loadOrganizationsWithRetry() {
+    try {
+        await loadOrganizations();
+    } catch (error) {
+        console.error('Initial org load failed, retrying...', error);
+        await sleep(1000);
+        try {
+            await loadOrganizations();
+        } catch (retryError) {
+            console.error('Org load retry failed:', retryError);
+        }
+    }
+}
 
 // ============================================================================
 // User Management
@@ -520,7 +690,7 @@ async function loadUsers() {
     updateUsersBulkToolbar();
 
     try {
-        const response = await fetch('/api/users');
+        const response = await fetchWithRetry('/api/users', {}, 3, 800);
 
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -1203,7 +1373,7 @@ async function loadOrganizations() {
     updateOrgsBulkToolbar();
 
     try {
-        const response = await fetch('/api/organizations');
+        const response = await fetchWithRetry('/api/organizations', {}, 3, 800);
 
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -2661,81 +2831,135 @@ async function loadAuditLogs() {
 }
 
 async function loadAllSettings() {
-    try {
-        // Load LDAP settings
-        const ldapResponse = await fetch('/api/settings/ldap');
-        if (ldapResponse.ok) {
-            const ldap = await ldapResponse.json();
-            document.getElementById('ldapEnabled').checked = ldap.ldap_enabled || false;
-            document.getElementById('ldapServer').value = ldap.ldap_server || '';
-            document.getElementById('ldapPort').value = ldap.ldap_port || 389;
-            document.getElementById('ldapBaseDN').value = ldap.ldap_base_dn || '';
-            document.getElementById('ldapBindDN').value = ldap.ldap_bind_dn || '';
-            document.getElementById('ldapSearchFilter').value = ldap.ldap_search_filter || '(sAMAccountName={username})';
-            document.getElementById('ldapUsernameAttr').value = ldap.ldap_username_attr || 'sAMAccountName';
-            document.getElementById('ldapEmailAttr').value = ldap.ldap_email_attr || 'mail';
-            document.getElementById('ldapUseTLS').checked = ldap.ldap_use_tls || false;
-            document.getElementById('ldapSyncEnabled').checked = ldap.ldap_sync_enabled || false;
-            document.getElementById('ldapSyncInterval').value = ldap.ldap_sync_interval_hours || '24';
+    console.log('Loading all settings...');
 
-            // Load last scheduled sync time
-            loadLastScheduledSync();
-        }
+    // Load settings in parallel with retry support
+    const loadPromises = [];
 
-        // Load Global SMTP settings
-        const smtpResponse = await fetch('/api/settings/smtp');
-        if (smtpResponse.ok) {
-            const smtp = await smtpResponse.json();
-            document.getElementById('globalSmtpHost').value = smtp.smtp_host || '';
-            document.getElementById('globalSmtpPort').value = smtp.smtp_port || 587;
-            document.getElementById('globalSmtpUsername').value = smtp.smtp_username || '';
-            document.getElementById('globalSmtpFromEmail').value = smtp.smtp_from_email || '';
-            document.getElementById('globalSmtpFromName').value = smtp.smtp_from_name || 'SentriKat Alerts';
-            document.getElementById('globalSmtpUseTLS').checked = smtp.smtp_use_tls !== false;
-            document.getElementById('globalSmtpUseSSL').checked = smtp.smtp_use_ssl === true;
-        }
+    // Load LDAP settings
+    loadPromises.push(
+        fetchWithRetry('/api/settings/ldap', {}, 3, 800)
+            .then(async response => {
+                if (response.ok) {
+                    const ldap = await response.json();
+                    const ldapEnabled = document.getElementById('ldapEnabled');
+                    const ldapServer = document.getElementById('ldapServer');
+                    const ldapPort = document.getElementById('ldapPort');
+                    const ldapBaseDN = document.getElementById('ldapBaseDN');
+                    const ldapBindDN = document.getElementById('ldapBindDN');
+                    const ldapSearchFilter = document.getElementById('ldapSearchFilter');
+                    const ldapUsernameAttr = document.getElementById('ldapUsernameAttr');
+                    const ldapEmailAttr = document.getElementById('ldapEmailAttr');
+                    const ldapUseTLS = document.getElementById('ldapUseTLS');
+                    const ldapSyncEnabled = document.getElementById('ldapSyncEnabled');
+                    const ldapSyncInterval = document.getElementById('ldapSyncInterval');
 
-        // Load Sync settings
-        const syncResponse = await fetch('/api/settings/sync');
-        if (syncResponse.ok) {
-            const sync = await syncResponse.json();
-            document.getElementById('autoSyncEnabled').checked = sync.auto_sync_enabled || false;
-            document.getElementById('syncInterval').value = sync.sync_interval || 'daily';
-            document.getElementById('syncTime').value = sync.sync_time || '02:00';
-            document.getElementById('cisaKevUrl').value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
-            // NVD API Key - show placeholder if configured
-            const nvdKeyInput = document.getElementById('nvdApiKey');
-            if (nvdKeyInput) {
-                nvdKeyInput.value = '';
-                nvdKeyInput.placeholder = sync.nvd_api_key_configured
-                    ? '(API key saved - leave blank to keep)'
-                    : 'Enter your NVD API key (optional)';
-            }
-        }
-        loadSyncStatus();
+                    if (ldapEnabled) ldapEnabled.checked = ldap.ldap_enabled || false;
+                    if (ldapServer) ldapServer.value = ldap.ldap_server || '';
+                    if (ldapPort) ldapPort.value = ldap.ldap_port || 389;
+                    if (ldapBaseDN) ldapBaseDN.value = ldap.ldap_base_dn || '';
+                    if (ldapBindDN) ldapBindDN.value = ldap.ldap_bind_dn || '';
+                    if (ldapSearchFilter) ldapSearchFilter.value = ldap.ldap_search_filter || '(sAMAccountName={username})';
+                    if (ldapUsernameAttr) ldapUsernameAttr.value = ldap.ldap_username_attr || 'sAMAccountName';
+                    if (ldapEmailAttr) ldapEmailAttr.value = ldap.ldap_email_attr || 'mail';
+                    if (ldapUseTLS) ldapUseTLS.checked = ldap.ldap_use_tls || false;
+                    if (ldapSyncEnabled) ldapSyncEnabled.checked = ldap.ldap_sync_enabled || false;
+                    if (ldapSyncInterval) ldapSyncInterval.value = ldap.ldap_sync_interval_hours || '24';
 
-        // Load Proxy settings
-        const generalResponse = await fetch('/api/settings/general');
-        if (generalResponse.ok) {
-            const general = await generalResponse.json();
-            const verifySSL = document.getElementById('verifySSL');
-            const httpProxy = document.getElementById('httpProxy');
-            const httpsProxy = document.getElementById('httpsProxy');
-            const noProxy = document.getElementById('noProxy');
-            if (verifySSL) verifySSL.checked = general.verify_ssl !== false;
-            if (httpProxy) httpProxy.value = general.http_proxy || '';
-            if (httpsProxy) httpsProxy.value = general.https_proxy || '';
-            if (noProxy) noProxy.value = general.no_proxy || '';
-        }
+                    loadLastScheduledSync();
+                    console.log('LDAP settings loaded');
+                }
+            })
+            .catch(err => console.error('Failed to load LDAP settings:', err))
+    );
 
-        // Load additional settings (security, branding, notifications, retention)
-        loadSecuritySettings();
-        loadBrandingSettings();
-        loadNotificationSettings();
-        loadRetentionSettings();
-    } catch (error) {
-        console.error('Error loading settings:', error);
-    }
+    // Load Global SMTP settings
+    loadPromises.push(
+        fetchWithRetry('/api/settings/smtp', {}, 3, 800)
+            .then(async response => {
+                if (response.ok) {
+                    const smtp = await response.json();
+                    const globalSmtpHost = document.getElementById('globalSmtpHost');
+                    const globalSmtpPort = document.getElementById('globalSmtpPort');
+                    const globalSmtpUsername = document.getElementById('globalSmtpUsername');
+                    const globalSmtpFromEmail = document.getElementById('globalSmtpFromEmail');
+                    const globalSmtpFromName = document.getElementById('globalSmtpFromName');
+                    const globalSmtpUseTLS = document.getElementById('globalSmtpUseTLS');
+                    const globalSmtpUseSSL = document.getElementById('globalSmtpUseSSL');
+
+                    if (globalSmtpHost) globalSmtpHost.value = smtp.smtp_host || '';
+                    if (globalSmtpPort) globalSmtpPort.value = smtp.smtp_port || 587;
+                    if (globalSmtpUsername) globalSmtpUsername.value = smtp.smtp_username || '';
+                    if (globalSmtpFromEmail) globalSmtpFromEmail.value = smtp.smtp_from_email || '';
+                    if (globalSmtpFromName) globalSmtpFromName.value = smtp.smtp_from_name || 'SentriKat Alerts';
+                    if (globalSmtpUseTLS) globalSmtpUseTLS.checked = smtp.smtp_use_tls !== false;
+                    if (globalSmtpUseSSL) globalSmtpUseSSL.checked = smtp.smtp_use_ssl === true;
+                    console.log('SMTP settings loaded');
+                }
+            })
+            .catch(err => console.error('Failed to load SMTP settings:', err))
+    );
+
+    // Load Sync settings
+    loadPromises.push(
+        fetchWithRetry('/api/settings/sync', {}, 3, 800)
+            .then(async response => {
+                if (response.ok) {
+                    const sync = await response.json();
+                    const autoSyncEnabled = document.getElementById('autoSyncEnabled');
+                    const syncInterval = document.getElementById('syncInterval');
+                    const syncTime = document.getElementById('syncTime');
+                    const cisaKevUrl = document.getElementById('cisaKevUrl');
+                    const nvdKeyInput = document.getElementById('nvdApiKey');
+
+                    if (autoSyncEnabled) autoSyncEnabled.checked = sync.auto_sync_enabled || false;
+                    if (syncInterval) syncInterval.value = sync.sync_interval || 'daily';
+                    if (syncTime) syncTime.value = sync.sync_time || '02:00';
+                    if (cisaKevUrl) cisaKevUrl.value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+                    if (nvdKeyInput) {
+                        nvdKeyInput.value = '';
+                        nvdKeyInput.placeholder = sync.nvd_api_key_configured
+                            ? '(API key saved - leave blank to keep)'
+                            : 'Enter your NVD API key (optional)';
+                    }
+                    console.log('Sync settings loaded');
+                }
+            })
+            .catch(err => console.error('Failed to load sync settings:', err))
+    );
+
+    // Load Proxy/General settings
+    loadPromises.push(
+        fetchWithRetry('/api/settings/general', {}, 3, 800)
+            .then(async response => {
+                if (response.ok) {
+                    const general = await response.json();
+                    const verifySSL = document.getElementById('verifySSL');
+                    const httpProxy = document.getElementById('httpProxy');
+                    const httpsProxy = document.getElementById('httpsProxy');
+                    const noProxy = document.getElementById('noProxy');
+                    if (verifySSL) verifySSL.checked = general.verify_ssl !== false;
+                    if (httpProxy) httpProxy.value = general.http_proxy || '';
+                    if (httpsProxy) httpsProxy.value = general.https_proxy || '';
+                    if (noProxy) noProxy.value = general.no_proxy || '';
+                    console.log('Proxy settings loaded');
+                }
+            })
+            .catch(err => console.error('Failed to load proxy settings:', err))
+    );
+
+    // Wait for all critical settings, then load additional ones
+    await Promise.allSettled(loadPromises);
+
+    loadSyncStatus();
+
+    // Load additional settings (these can fail independently)
+    loadSecuritySettings();
+    loadBrandingSettings();
+    loadNotificationSettings();
+    loadRetentionSettings();
+
+    console.log('All settings loading complete');
 }
 
 // ============================================================================
@@ -4796,22 +5020,54 @@ document.addEventListener('DOMContentLoaded', function() {
 /**
  * Load license info and apply UI restrictions for premium features
  * This is called early during page initialization
+ * Uses retry logic to handle app startup timing issues
  */
 async function loadLicenseAndApplyRestrictions() {
     try {
-        const response = await fetch('/api/license');
+        const response = await fetchWithRetry('/api/license', {}, 5, 800);
         if (!response.ok) {
-            console.warn('Failed to load license info');
+            console.warn('Failed to load license info, status:', response.status);
             window.licenseInfo = { is_professional: false, features: [] };
+            updateLicenseLoadingState('error');
             return;
         }
 
         window.licenseInfo = await response.json();
         applyLicenseRestrictions();
+        updateLicenseLoadingState('success');
 
     } catch (error) {
         console.error('Error loading license for restrictions:', error);
         window.licenseInfo = { is_professional: false, features: [] };
+        updateLicenseLoadingState('error');
+    }
+}
+
+/**
+ * Update UI elements that show "Loading..." for license data
+ */
+function updateLicenseLoadingState(status) {
+    const installIdEl = document.getElementById('installationIdDisplay');
+
+    if (status === 'error') {
+        if (installIdEl && (installIdEl.value === 'Loading...' || !installIdEl.value)) {
+            installIdEl.value = 'Error loading - click License tab to retry';
+        }
+
+        const licenseDetails = document.getElementById('licenseDetails');
+        if (licenseDetails && licenseDetails.innerHTML.includes('Loading')) {
+            licenseDetails.innerHTML = `
+                <div class="alert alert-warning mb-0 py-2">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    Failed to load. <a href="#" onclick="loadLicenseInfo(); return false;">Retry</a>
+                </div>
+            `;
+        }
+
+        const licenseUsage = document.getElementById('licenseUsage');
+        if (licenseUsage && licenseUsage.innerHTML.includes('Loading')) {
+            licenseUsage.innerHTML = `<span class="text-muted">Click License tab to load</span>`;
+        }
     }
 }
 
@@ -4913,22 +5169,36 @@ function isFeatureLicensed(feature) {
 }
 
 async function loadLicenseInfo() {
+    const detailsEl = document.getElementById('licenseDetails');
+    const usageEl = document.getElementById('licenseUsage');
+
+    // Show loading state
+    if (detailsEl) detailsEl.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm"></div> Loading...</div>';
+    if (usageEl) usageEl.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm"></div> Loading...</div>';
+
     try {
-        const response = await fetch('/api/license');
+        const response = await fetchWithRetry('/api/license', {}, 3, 1000);
         if (!response.ok) {
             throw new Error('Failed to load license info');
         }
 
         const data = await response.json();
+        window.licenseInfo = data; // Update global
         displayLicenseInfo(data);
 
     } catch (error) {
         console.error('Error loading license:', error);
-        document.getElementById('licenseDetails').innerHTML = `
-            <div class="alert alert-danger mb-0">
-                <i class="bi bi-exclamation-triangle me-2"></i>Failed to load license info
-            </div>
-        `;
+        if (detailsEl) {
+            detailsEl.innerHTML = `
+                <div class="alert alert-danger mb-0">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Failed to load license info.
+                    <a href="#" onclick="loadLicenseInfo(); return false;" class="alert-link ms-2">Retry</a>
+                </div>
+            `;
+        }
+        if (usageEl) {
+            usageEl.innerHTML = `<span class="text-muted">-</span>`;
+        }
     }
 }
 
@@ -5179,12 +5449,16 @@ function fallbackCopy(inputEl) {
 
 let agentKeysLoaded = false;
 
+// Temporary storage for recently created API keys (cleared on page refresh)
+// Maps key_prefix -> full_key for re-download capability
+const recentlyCreatedKeys = new Map();
+
 async function loadAgentKeys() {
     const tbody = document.getElementById('agentKeysTableBody');
     if (!tbody) return;
 
     try {
-        const response = await fetch('/api/agent-keys');
+        const response = await fetchWithRetry('/api/agent-keys', {}, 3, 800);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
@@ -5194,7 +5468,7 @@ async function loadAgentKeys() {
         if (keys.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="text-center py-4 text-muted">
+                    <td colspan="7" class="text-center py-4 text-muted">
                         <i class="bi bi-key" style="font-size: 2rem;"></i>
                         <p class="mt-2 mb-0">No agent API keys configured</p>
                         <p class="small">Create an API key to download agents with embedded authentication</p>
@@ -5209,6 +5483,11 @@ async function loadAgentKeys() {
                         <br><small class="text-muted font-monospace">${escapeHtml(key.key_prefix || '')}...</small>
                     </td>
                     <td>${escapeHtml(key.organization_name || 'Unknown')}</td>
+                    <td>
+                        ${key.auto_approve
+                            ? '<span class="badge bg-success" title="Products are added directly to inventory"><i class="bi bi-check-circle me-1"></i>Auto</span>'
+                            : '<span class="badge bg-info" title="Products go to Import Queue for review"><i class="bi bi-inbox me-1"></i>Queue</span>'}
+                    </td>
                     <td>${key.last_used_at ? formatRelativeTime(key.last_used_at) : '<span class="text-muted">Never</span>'}</td>
                     <td>
                         <span class="badge bg-secondary">${key.usage_count || 0}</span>
@@ -5235,7 +5514,7 @@ async function loadAgentKeys() {
         console.error('Error loading agent keys:', error);
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="text-center py-4 text-danger">
+                <td colspan="7" class="text-center py-4 text-danger">
                     <i class="bi bi-exclamation-triangle"></i>
                     <span class="ms-2">Error loading agent keys: ${error.message}</span>
                 </td>
@@ -5278,6 +5557,7 @@ async function createAgentKey() {
     const orgId = document.getElementById('agentKeyOrg').value;
     const maxAssets = parseInt(document.getElementById('agentKeyMaxAssets').value) || 0;
     const expiresAt = document.getElementById('agentKeyExpires').value || null;
+    const autoApprove = document.getElementById('agentKeyAutoApprove')?.checked || false;
 
     if (!name) {
         showToast('Please enter a key name', 'warning');
@@ -5297,7 +5577,8 @@ async function createAgentKey() {
                 name,
                 organization_id: parseInt(orgId),
                 max_assets: maxAssets,
-                expires_at: expiresAt
+                expires_at: expiresAt,
+                auto_approve: autoApprove
             })
         });
 
@@ -5308,6 +5589,11 @@ async function createAgentKey() {
 
         const data = await response.json();
 
+        // Store the full key temporarily for re-download from table
+        if (data.key_prefix && data.api_key) {
+            recentlyCreatedKeys.set(data.key_prefix, data.api_key);
+        }
+
         // Hide create modal
         bootstrap.Modal.getInstance(document.getElementById('agentKeyModal')).hide();
 
@@ -5315,6 +5601,9 @@ async function createAgentKey() {
         document.getElementById('newAgentKeyValue').value = data.api_key;
         const showModal = new bootstrap.Modal(document.getElementById('showAgentKeyModal'));
         showModal.show();
+
+        // Refresh the keys table to show the new key
+        loadAgentKeys();
 
         showToast('Agent API key created successfully', 'success');
     } catch (error) {
@@ -5434,12 +5723,19 @@ function fallbackCopyText(text) {
  * Called from the API keys table download buttons
  */
 async function downloadAgentWithKey(keyPrefix, platform) {
-    // We need to get the full key - but we only have the prefix
-    // Show a message that they need to use the key shown when created
-    showToast(`Downloading ${platform === 'windows' ? 'Windows' : 'Linux'} agent script...`, 'info');
+    // Check if we have the full key stored from recent creation
+    const fullKey = recentlyCreatedKeys.get(keyPrefix);
+    const hasKey = !!fullKey;
+
+    showToast(`Downloading ${platform === 'windows' ? 'Windows' : 'Linux'} agent${hasKey ? ' with embedded key' : ''}...`, 'info');
 
     try {
-        const url = `/api/agents/script/${platform}`;
+        // If we have the full key, embed it in the download
+        let url = `/api/agents/script/${platform}`;
+        if (hasKey) {
+            url += `?api_key=${encodeURIComponent(fullKey)}`;
+        }
+
         const response = await fetch(url);
 
         if (!response.ok) {
@@ -5450,7 +5746,11 @@ async function downloadAgentWithKey(keyPrefix, platform) {
         const filename = platform === 'windows' ? 'sentrikat-agent.ps1' : 'sentrikat-agent.sh';
         downloadScript(filename, script);
 
-        showToast(`Agent script downloaded! Replace YOUR_API_KEY with the key shown when created.`, 'success');
+        if (hasKey) {
+            showToast(`${platform === 'windows' ? 'Windows' : 'Linux'} agent downloaded with API key embedded!`, 'success');
+        } else {
+            showToast(`Agent script downloaded. Replace YOUR_API_KEY with your key (only available at creation time).`, 'warning');
+        }
     } catch (error) {
         showToast(`Error downloading agent: ${error.message}`, 'danger');
     }
@@ -5463,6 +5763,28 @@ async function downloadAgentWithKey(keyPrefix, platform) {
 let assetsLoaded = false;
 let assetsPage = 1;
 const assetsPerPage = 20;
+let assetsSortColumn = 'hostname';
+let assetsSortDirection = 'asc';
+
+function sortAssets(column) {
+    if (assetsSortColumn === column) {
+        assetsSortDirection = assetsSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        assetsSortColumn = column;
+        assetsSortDirection = 'asc';
+    }
+    loadAssets(1);
+}
+
+function updateAssetsSortIndicators() {
+    document.querySelectorAll('#assetsTable th[data-sort]').forEach(th => {
+        const col = th.dataset.sort;
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (col === assetsSortColumn) {
+            th.classList.add(assetsSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+}
 
 async function loadAssets(page = 1) {
     assetsPage = page;
@@ -5485,7 +5807,9 @@ async function loadAssets(page = 1) {
     try {
         const params = new URLSearchParams({
             page: page,
-            per_page: assetsPerPage
+            per_page: assetsPerPage,
+            order: assetsSortColumn,
+            direction: assetsSortDirection
         });
         if (search) params.set('search', search);
 
@@ -5584,6 +5908,7 @@ async function loadAssets(page = 1) {
             }
         }
         assetsLoaded = true;
+        updateAssetsSortIndicators();
     } catch (error) {
         console.error('Error loading assets:', error);
         tbody.innerHTML = `
@@ -5597,9 +5922,148 @@ async function loadAssets(page = 1) {
     }
 }
 
+// Asset Details Products Table State
+let assetProductsData = [];
+let assetProductsPage = 1;
+let assetProductsPageSize = 15;
+let assetProductsSortField = 'product';
+let assetProductsSortDir = 'asc';
+
+function sortAssetProducts(field) {
+    if (assetProductsSortField === field) {
+        assetProductsSortDir = assetProductsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        assetProductsSortField = field;
+        assetProductsSortDir = 'asc';
+    }
+    assetProductsPage = 1;
+    renderAssetProductsTable();
+}
+
+function changeAssetProductsPage(newPage) {
+    assetProductsPage = newPage;
+    renderAssetProductsTable();
+}
+
+function renderAssetProductsTable() {
+    const container = document.getElementById('assetProductsTableContainer');
+    if (!container || assetProductsData.length === 0) return;
+
+    // Sort products
+    const sortedProducts = [...assetProductsData].sort((a, b) => {
+        let aVal, bVal;
+        switch (assetProductsSortField) {
+            case 'product':
+                aVal = `${a.vendor || ''} ${a.product_name || a.name || ''}`.toLowerCase();
+                bVal = `${b.vendor || ''} ${b.product_name || b.name || ''}`.toLowerCase();
+                break;
+            case 'version':
+                aVal = (a.version || '').toLowerCase();
+                bVal = (b.version || '').toLowerCase();
+                break;
+            case 'status':
+                aVal = a.is_vulnerable ? 1 : 0;
+                bVal = b.is_vulnerable ? 1 : 0;
+                break;
+            default:
+                aVal = '';
+                bVal = '';
+        }
+        if (aVal < bVal) return assetProductsSortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return assetProductsSortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    // Paginate
+    const totalPages = Math.ceil(sortedProducts.length / assetProductsPageSize);
+    const startIdx = (assetProductsPage - 1) * assetProductsPageSize;
+    const pageProducts = sortedProducts.slice(startIdx, startIdx + assetProductsPageSize);
+
+    const getSortIcon = (field) => {
+        if (assetProductsSortField !== field) return '<i class="bi bi-chevron-expand text-muted"></i>';
+        return assetProductsSortDir === 'asc'
+            ? '<i class="bi bi-sort-up"></i>'
+            : '<i class="bi bi-sort-down"></i>';
+    };
+
+    container.innerHTML = `
+        <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light sticky-top">
+                    <tr>
+                        <th style="width: 55%; cursor: pointer;" onclick="sortAssetProducts('product')">
+                            Product ${getSortIcon('product')}
+                        </th>
+                        <th style="width: 25%; cursor: pointer;" onclick="sortAssetProducts('version')">
+                            Version ${getSortIcon('version')}
+                        </th>
+                        <th style="width: 20%; cursor: pointer;" onclick="sortAssetProducts('status')">
+                            Status ${getSortIcon('status')}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pageProducts.map(p => `
+                        <tr>
+                            <td class="text-truncate" style="max-width: 300px;" title="${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}">
+                                ${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}
+                            </td>
+                            <td><code class="small">${escapeHtml(p.version || '-')}</code></td>
+                            <td>
+                                ${p.is_vulnerable
+                                    ? '<span class="badge bg-danger">Vulnerable</span>'
+                                    : '<span class="badge bg-success">OK</span>'}
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        ${totalPages > 1 ? `
+        <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top">
+            <small class="text-muted">
+                Showing ${startIdx + 1}-${Math.min(startIdx + assetProductsPageSize, sortedProducts.length)} of ${sortedProducts.length}
+            </small>
+            <nav>
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item ${assetProductsPage === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="changeAssetProductsPage(${assetProductsPage - 1}); return false;">&laquo;</a>
+                    </li>
+                    ${Array.from({length: Math.min(5, totalPages)}, (_, i) => {
+                        let pageNum;
+                        if (totalPages <= 5) {
+                            pageNum = i + 1;
+                        } else if (assetProductsPage <= 3) {
+                            pageNum = i + 1;
+                        } else if (assetProductsPage >= totalPages - 2) {
+                            pageNum = totalPages - 4 + i;
+                        } else {
+                            pageNum = assetProductsPage - 2 + i;
+                        }
+                        return `
+                            <li class="page-item ${pageNum === assetProductsPage ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="changeAssetProductsPage(${pageNum}); return false;">${pageNum}</a>
+                            </li>
+                        `;
+                    }).join('')}
+                    <li class="page-item ${assetProductsPage === totalPages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="changeAssetProductsPage(${assetProductsPage + 1}); return false;">&raquo;</a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+        ` : ''}
+    `;
+}
+
 async function showAssetDetails(assetId) {
     const modalBody = document.getElementById('assetDetailsBody');
     if (!modalBody) return;
+
+    // Reset pagination state
+    assetProductsPage = 1;
+    assetProductsSortField = 'product';
+    assetProductsSortDir = 'asc';
 
     modalBody.innerHTML = `
         <div class="text-center py-4">
@@ -5618,32 +6082,14 @@ async function showAssetDetails(assetId) {
         }
         const asset = await response.json();
 
+        // Store products for pagination
+        assetProductsData = asset.products || [];
+
         let productsHtml = '';
-        if (asset.products && asset.products.length > 0) {
+        if (assetProductsData.length > 0) {
             productsHtml = `
-                <h6 class="mt-4 mb-3"><i class="bi bi-box me-2"></i>Installed Products (${asset.products.length})</h6>
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Product</th>
-                                <th>Version</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${asset.products.map(p => `
-                                <tr>
-                                    <td>${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}</td>
-                                    <td><code>${escapeHtml(p.version || '-')}</code></td>
-                                    <td>
-                                        ${p.is_vulnerable ? '<span class="badge bg-danger">Vulnerable</span>' : '<span class="badge bg-success">OK</span>'}
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
+                <h6 class="mt-4 mb-3"><i class="bi bi-box me-2"></i>Installed Products (${assetProductsData.length})</h6>
+                <div id="assetProductsTableContainer"></div>
             `;
         } else {
             productsHtml = '<p class="text-muted mt-4">No products reported by agent</p>';
@@ -5654,24 +6100,28 @@ async function showAssetDetails(assetId) {
                 <div class="col-md-6">
                     <h6><i class="bi bi-pc-display me-2"></i>System Information</h6>
                     <table class="table table-sm">
-                        <tr><td class="text-muted">Hostname</td><td><strong>${escapeHtml(asset.hostname)}</strong></td></tr>
+                        <tr><td class="text-muted" style="width: 100px;">Hostname</td><td><strong>${escapeHtml(asset.hostname)}</strong></td></tr>
                         <tr><td class="text-muted">IP Address</td><td><code>${escapeHtml(asset.ip_address || '-')}</code></td></tr>
                         <tr><td class="text-muted">OS</td><td>${escapeHtml(asset.os_name || '-')} ${escapeHtml(asset.os_version || '')}</td></tr>
-                        <tr><td class="text-muted">Kernel</td><td>${escapeHtml(asset.os_kernel || '-')}</td></tr>
                     </table>
                 </div>
                 <div class="col-md-6">
                     <h6><i class="bi bi-info-circle me-2"></i>Agent Information</h6>
                     <table class="table table-sm">
-                        <tr><td class="text-muted">Agent ID</td><td><code>${escapeHtml(asset.agent_id || '-')}</code></td></tr>
+                        <tr><td class="text-muted" style="width: 110px;">Agent ID</td><td><code class="small">${escapeHtml(asset.agent_id || '-')}</code></td></tr>
                         <tr><td class="text-muted">Agent Version</td><td>${escapeHtml(asset.agent_version || '-')}</td></tr>
                         <tr><td class="text-muted">Organization</td><td>${escapeHtml(asset.organization_name || 'Unknown')}</td></tr>
-                        <tr><td class="text-muted">Last Seen</td><td>${asset.last_seen ? formatDate(asset.last_seen) : 'Never'}</td></tr>
+                        <tr><td class="text-muted">Last Seen</td><td>${asset.last_seen ? formatDate(asset.last_seen) : '<span class="text-warning">Pending first report</span>'}</td></tr>
                     </table>
                 </div>
             </div>
             ${productsHtml}
         `;
+
+        // Render paginated products table if we have products
+        if (assetProductsData.length > 0) {
+            renderAssetProductsTable();
+        }
     } catch (error) {
         console.error('Error loading asset details:', error);
         modalBody.innerHTML = `
@@ -5720,6 +6170,18 @@ let selectedQueueItems = new Set();
 let integrationsList = [];
 let importQueueData = [];
 
+// Import Queue pagination/sorting state
+let importQueuePage = 1;
+let importQueuePageSize = 15;
+let importQueueSortField = 'vendor';
+let importQueueSortDir = 'asc';
+
+// Pull Sources pagination/sorting state
+let pullSourcesPage = 1;
+let pullSourcesPageSize = 15;
+let pullSourcesSortField = 'name';
+let pullSourcesSortDir = 'asc';
+
 // Load import queue count for badge
 async function loadImportQueueCount() {
     try {
@@ -5743,12 +6205,198 @@ async function loadImportQueueCount() {
     }
 }
 
+// Import Queue sorting
+function sortImportQueue(field) {
+    if (importQueueSortField === field) {
+        importQueueSortDir = importQueueSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        importQueueSortField = field;
+        importQueueSortDir = 'asc';
+    }
+    importQueuePage = 1;
+    renderImportQueue();
+}
+
+function changeImportQueuePage(newPage) {
+    importQueuePage = newPage;
+    renderImportQueue();
+}
+
+function getImportQueueSortIcon(field) {
+    if (importQueueSortField !== field) return '<i class="bi bi-chevron-expand text-muted"></i>';
+    return importQueueSortDir === 'asc' ? '<i class="bi bi-sort-up"></i>' : '<i class="bi bi-sort-down"></i>';
+}
+
+function renderImportQueue() {
+    const tbody = document.getElementById('importQueueTable');
+    const paginationContainer = document.getElementById('importQueuePagination');
+    if (!tbody) return;
+
+    if (importQueueData.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-4 text-muted">
+                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <p class="mb-0 mt-2">No items in queue</p>
+                </td>
+            </tr>
+        `;
+        if (paginationContainer) paginationContainer.innerHTML = '';
+        return;
+    }
+
+    // Sort data
+    const sortedData = [...importQueueData].sort((a, b) => {
+        let aVal, bVal;
+        switch (importQueueSortField) {
+            case 'vendor':
+                aVal = `${a.vendor || ''} ${a.product_name || ''}`.toLowerCase();
+                bVal = `${b.vendor || ''} ${b.product_name || ''}`.toLowerCase();
+                break;
+            case 'version':
+                aVal = (a.detected_version || '').toLowerCase();
+                bVal = (b.detected_version || '').toLowerCase();
+                break;
+            case 'organization':
+                aVal = (a.organization_name || '').toLowerCase();
+                bVal = (b.organization_name || '').toLowerCase();
+                break;
+            case 'criticality':
+                const critOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+                aVal = critOrder[a.criticality] ?? 4;
+                bVal = critOrder[b.criticality] ?? 4;
+                break;
+            case 'source':
+                aVal = (a.integration_name || 'zzz').toLowerCase();
+                bVal = (b.integration_name || 'zzz').toLowerCase();
+                break;
+            default:
+                aVal = '';
+                bVal = '';
+        }
+        if (aVal < bVal) return importQueueSortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return importQueueSortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    // Paginate
+    const totalPages = Math.ceil(sortedData.length / importQueuePageSize);
+    const startIdx = (importQueuePage - 1) * importQueuePageSize;
+    const pageData = sortedData.slice(startIdx, startIdx + importQueuePageSize);
+
+    tbody.innerHTML = pageData.map(item => {
+        const versions = item.available_versions || [];
+        const versionOptions = versions.length > 0
+            ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === item.selected_version ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
+            : `<option value="${escapeHtml(item.detected_version || '')}">${escapeHtml(item.detected_version || 'Any')}</option>`;
+
+        return `
+            <tr data-queue-id="${item.id}">
+                <td>
+                    <input type="checkbox" class="form-check-input queue-item-checkbox"
+                           data-queue-id="${item.id}" onchange="toggleQueueSelect(${item.id}, this)"
+                           ${item.status !== 'pending' ? 'disabled' : ''}>
+                </td>
+                <td>
+                    <div class="fw-semibold">${escapeHtml(item.vendor)}</div>
+                    <div class="text-muted small">${escapeHtml(item.product_name)}</div>
+                </td>
+                <td>
+                    ${item.status === 'pending' ? `
+                        <select class="form-select form-select-sm" style="width: 120px;"
+                                onchange="updateQueueItemVersion(${item.id}, this.value)">
+                            <option value="">Any version</option>
+                            ${versionOptions}
+                        </select>
+                    ` : `<span class="text-muted">${escapeHtml(item.selected_version || item.detected_version || 'Any')}</span>`}
+                </td>
+                <td>
+                    ${item.status === 'pending' ? `
+                        <select class="form-select form-select-sm" style="width: 140px;"
+                                onchange="updateQueueItemOrg(${item.id}, this.value)">
+                            <option value="">Select org...</option>
+                            ${organizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}
+                        </select>
+                    ` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}
+                </td>
+                <td>
+                    ${item.status === 'pending' ? `
+                        <select class="form-select form-select-sm" style="width: 100px;"
+                                onchange="updateQueueItemCriticality(${item.id}, this.value)">
+                            <option value="critical" ${item.criticality === 'critical' ? 'selected' : ''}>Critical</option>
+                            <option value="high" ${item.criticality === 'high' ? 'selected' : ''}>High</option>
+                            <option value="medium" ${item.criticality === 'medium' ? 'selected' : ''}>Medium</option>
+                            <option value="low" ${item.criticality === 'low' ? 'selected' : ''}>Low</option>
+                        </select>
+                    ` : `<span class="badge bg-${getCriticalityColor(item.criticality)}">${item.criticality || 'medium'}</span>`}
+                </td>
+                <td>
+                    <small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small>
+                </td>
+                <td>
+                    ${item.status === 'pending' ? `
+                        <button class="btn btn-success btn-sm me-1" onclick="approveQueueItem(${item.id})" title="Approve">
+                            <i class="bi bi-check"></i>
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="rejectQueueItem(${item.id})" title="Reject">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    ` : `
+                        <span class="badge bg-${item.status === 'approved' ? 'success' : 'secondary'}">${item.status}</span>
+                    `}
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // Render pagination
+    if (paginationContainer && totalPages > 1) {
+        paginationContainer.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">Showing ${startIdx + 1}-${Math.min(startIdx + importQueuePageSize, sortedData.length)} of ${sortedData.length}</small>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item ${importQueuePage === 1 ? 'disabled' : ''}">
+                            <a class="page-link" href="#" onclick="changeImportQueuePage(${importQueuePage - 1}); return false;">&laquo;</a>
+                        </li>
+                        ${Array.from({length: Math.min(5, totalPages)}, (_, i) => {
+                            let pageNum;
+                            if (totalPages <= 5) pageNum = i + 1;
+                            else if (importQueuePage <= 3) pageNum = i + 1;
+                            else if (importQueuePage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                            else pageNum = importQueuePage - 2 + i;
+                            return `<li class="page-item ${pageNum === importQueuePage ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="changeImportQueuePage(${pageNum}); return false;">${pageNum}</a>
+                            </li>`;
+                        }).join('')}
+                        <li class="page-item ${importQueuePage === totalPages ? 'disabled' : ''}">
+                            <a class="page-link" href="#" onclick="changeImportQueuePage(${importQueuePage + 1}); return false;">&raquo;</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        `;
+    } else if (paginationContainer) {
+        paginationContainer.innerHTML = sortedData.length > 0 ? `<small class="text-muted">${sortedData.length} items</small>` : '';
+    }
+}
+
 // Load import queue
 async function loadImportQueue() {
     const status = document.getElementById('queueFilterStatus')?.value || 'pending';
+    const perPage = parseInt(document.getElementById('queuePerPage')?.value) || 25;
     const tbody = document.getElementById('importQueueTable');
 
     if (!tbody) return;
+
+    importQueuePage = 1;  // Reset to first page on filter change
+    importQueuePageSize = perPage;  // Update page size from dropdown
+
+    // Reset select-all checkbox and clear selection
+    const selectAllCheckbox = document.getElementById('selectAllQueue');
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+    selectedQueueItems.clear();
+    updateQueueBulkButtons();
 
     tbody.innerHTML = `
         <tr>
@@ -5765,83 +6413,7 @@ async function loadImportQueue() {
         const data = await response.json();
         importQueueData = data.items || [];
 
-        if (importQueueData.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center py-4 text-muted">
-                        <i class="bi bi-inbox" style="font-size: 2rem;"></i>
-                        <p class="mb-0 mt-2">No items in queue</p>
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        tbody.innerHTML = importQueueData.map(item => {
-            const versions = item.available_versions || [];
-            const versionOptions = versions.length > 0
-                ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === item.selected_version ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
-                : `<option value="${escapeHtml(item.detected_version || '')}">${escapeHtml(item.detected_version || 'Any')}</option>`;
-
-            return `
-                <tr data-queue-id="${item.id}">
-                    <td>
-                        <input type="checkbox" class="form-check-input queue-item-checkbox"
-                               data-queue-id="${item.id}" onchange="toggleQueueSelect(${item.id}, this)"
-                               ${item.status !== 'pending' ? 'disabled' : ''}>
-                    </td>
-                    <td>
-                        <div class="fw-semibold">${escapeHtml(item.vendor)}</div>
-                        <div class="text-muted small">${escapeHtml(item.product_name)}</div>
-                    </td>
-                    <td>
-                        ${item.status === 'pending' ? `
-                            <select class="form-select form-select-sm" style="width: 120px;"
-                                    onchange="updateQueueItemVersion(${item.id}, this.value)">
-                                <option value="">Any version</option>
-                                ${versionOptions}
-                            </select>
-                        ` : `<span class="text-muted">${escapeHtml(item.selected_version || item.detected_version || 'Any')}</span>`}
-                    </td>
-                    <td>
-                        ${item.status === 'pending' ? `
-                            <select class="form-select form-select-sm" style="width: 140px;"
-                                    onchange="updateQueueItemOrg(${item.id}, this.value)">
-                                <option value="">Select org...</option>
-                                ${organizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}
-                            </select>
-                        ` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}
-                    </td>
-                    <td>
-                        ${item.status === 'pending' ? `
-                            <select class="form-select form-select-sm" style="width: 100px;"
-                                    onchange="updateQueueItemCriticality(${item.id}, this.value)">
-                                <option value="critical" ${item.criticality === 'critical' ? 'selected' : ''}>Critical</option>
-                                <option value="high" ${item.criticality === 'high' ? 'selected' : ''}>High</option>
-                                <option value="medium" ${item.criticality === 'medium' ? 'selected' : ''}>Medium</option>
-                                <option value="low" ${item.criticality === 'low' ? 'selected' : ''}>Low</option>
-                            </select>
-                        ` : `<span class="badge bg-${getCriticalityColor(item.criticality)}">${item.criticality || 'medium'}</span>`}
-                    </td>
-                    <td>
-                        <small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small>
-                    </td>
-                    <td>
-                        ${item.status === 'pending' ? `
-                            <button class="btn btn-success btn-sm me-1" onclick="approveQueueItem(${item.id})" title="Approve">
-                                <i class="bi bi-check"></i>
-                            </button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="rejectQueueItem(${item.id})" title="Reject">
-                                <i class="bi bi-x"></i>
-                            </button>
-                        ` : `
-                            <span class="badge bg-${item.status === 'approved' ? 'success' : 'secondary'}">${item.status}</span>
-                        `}
-                    </td>
-                </tr>
-            `;
-        }).join('');
-
+        renderImportQueue();
         loadImportQueueCount();
 
     } catch (error) {
@@ -6056,72 +6628,177 @@ async function loadIntegrationsSummary() {
 // INTEGRATIONS - Pull Sources (formerly Connectors)
 // ============================================================================
 
+const pullSourcesTypeLabels = {
+    'generic_rest': 'REST API',
+    'agent': 'Discovery Agent'
+};
+
+function sortPullSources(field) {
+    if (pullSourcesSortField === field) {
+        pullSourcesSortDir = pullSourcesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        pullSourcesSortField = field;
+        pullSourcesSortDir = 'asc';
+    }
+    pullSourcesPage = 1;
+    renderPullSources();
+}
+
+function changePullSourcesPage(newPage) {
+    pullSourcesPage = newPage;
+    renderPullSources();
+}
+
+function getPullSourcesSortIcon(field) {
+    if (pullSourcesSortField !== field) return '<i class="bi bi-chevron-expand text-muted"></i>';
+    return pullSourcesSortDir === 'asc' ? '<i class="bi bi-sort-up"></i>' : '<i class="bi bi-sort-down"></i>';
+}
+
+function renderPullSources() {
+    const tbody = document.getElementById('integrationsTable');
+    const paginationContainer = document.getElementById('pullSourcesPagination');
+    if (!tbody) return;
+
+    // Update sort icons
+    ['name', 'type', 'organization', 'last_sync', 'status'].forEach(field => {
+        const iconEl = document.getElementById(`pullSourcesSort${field.charAt(0).toUpperCase() + field.slice(1).replace('_', '')}`);
+        if (iconEl) iconEl.innerHTML = getPullSourcesSortIcon(field);
+    });
+
+    if (integrationsList.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-4 text-muted">
+                    <i class="bi bi-plug" style="font-size: 2rem;"></i>
+                    <p class="mb-0 mt-2">No integrations configured</p>
+                    <button class="btn btn-primary btn-sm mt-2" onclick="showCreateIntegrationModal()">
+                        <i class="bi bi-plus-circle me-1"></i>Add First Integration
+                    </button>
+                </td>
+            </tr>
+        `;
+        if (paginationContainer) paginationContainer.innerHTML = '';
+        return;
+    }
+
+    // Sort data
+    const sortedData = [...integrationsList].sort((a, b) => {
+        let aVal, bVal;
+        switch (pullSourcesSortField) {
+            case 'name':
+                aVal = (a.name || '').toLowerCase();
+                bVal = (b.name || '').toLowerCase();
+                break;
+            case 'type':
+                aVal = (pullSourcesTypeLabels[a.integration_type] || a.integration_type || '').toLowerCase();
+                bVal = (pullSourcesTypeLabels[b.integration_type] || b.integration_type || '').toLowerCase();
+                break;
+            case 'organization':
+                aVal = (a.organization_name || 'zzz').toLowerCase();
+                bVal = (b.organization_name || 'zzz').toLowerCase();
+                break;
+            case 'last_sync':
+                aVal = a.last_sync_at ? new Date(a.last_sync_at).getTime() : 0;
+                bVal = b.last_sync_at ? new Date(b.last_sync_at).getTime() : 0;
+                break;
+            case 'status':
+                const statusOrder = { success: 0, error: 1, failed: 1 };
+                aVal = a.last_sync_status ? (statusOrder[a.last_sync_status] ?? 2) : 3;
+                bVal = b.last_sync_status ? (statusOrder[b.last_sync_status] ?? 2) : 3;
+                break;
+            default:
+                aVal = '';
+                bVal = '';
+        }
+        if (aVal < bVal) return pullSourcesSortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return pullSourcesSortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    // Paginate
+    const totalPages = Math.ceil(sortedData.length / pullSourcesPageSize);
+    const startIdx = (pullSourcesPage - 1) * pullSourcesPageSize;
+    const pageData = sortedData.slice(startIdx, startIdx + pullSourcesPageSize);
+
+    tbody.innerHTML = pageData.map(int => {
+        const statusBadge = int.last_sync_status
+            ? `<span class="badge bg-${int.last_sync_status === 'success' ? 'success' : 'danger'}">${int.last_sync_status}</span>`
+            : '<span class="badge bg-secondary">Never synced</span>';
+
+        return `
+            <tr>
+                <td class="fw-semibold">${escapeHtml(int.name)}</td>
+                <td><span class="badge bg-info">${pullSourcesTypeLabels[int.integration_type] || int.integration_type}</span></td>
+                <td>${escapeHtml(int.organization_name || 'All')}</td>
+                <td>
+                    ${int.last_sync_at ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small>` : '-'}
+                    <br><small class="text-muted">${int.last_sync_count || 0} items</small>
+                </td>
+                <td>${statusBadge}</td>
+                <td>
+                    ${int.integration_type !== 'agent' ? `
+                        <button class="btn btn-outline-primary btn-sm me-1" onclick="syncIntegration(${int.id})" title="Sync Now">
+                            <i class="bi bi-arrow-repeat"></i>
+                        </button>
+                    ` : ''}
+                    <button class="btn btn-outline-secondary btn-sm me-1" onclick="showEditIntegrationModal(${int.id})" title="Edit">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm me-1" onclick="showIntegrationApiKey(${int.id})" title="View API Key">
+                        <i class="bi bi-key"></i>
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteIntegration(${int.id})" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // Render pagination
+    if (paginationContainer && totalPages > 1) {
+        paginationContainer.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">Showing ${startIdx + 1}-${Math.min(startIdx + pullSourcesPageSize, sortedData.length)} of ${sortedData.length}</small>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item ${pullSourcesPage === 1 ? 'disabled' : ''}">
+                            <a class="page-link" href="#" onclick="changePullSourcesPage(${pullSourcesPage - 1}); return false;">&laquo;</a>
+                        </li>
+                        ${Array.from({length: Math.min(5, totalPages)}, (_, i) => {
+                            let pageNum;
+                            if (totalPages <= 5) pageNum = i + 1;
+                            else if (pullSourcesPage <= 3) pageNum = i + 1;
+                            else if (pullSourcesPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                            else pageNum = pullSourcesPage - 2 + i;
+                            return `<li class="page-item ${pageNum === pullSourcesPage ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="changePullSourcesPage(${pageNum}); return false;">${pageNum}</a>
+                            </li>`;
+                        }).join('')}
+                        <li class="page-item ${pullSourcesPage === totalPages ? 'disabled' : ''}">
+                            <a class="page-link" href="#" onclick="changePullSourcesPage(${pullSourcesPage + 1}); return false;">&raquo;</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        `;
+    } else if (paginationContainer) {
+        paginationContainer.innerHTML = sortedData.length > 0 ? `<small class="text-muted">${sortedData.length} source(s)</small>` : '';
+    }
+}
+
 async function loadIntegrations() {
     const tbody = document.getElementById('integrationsTable');
     if (!tbody) return;
 
+    pullSourcesPage = 1;  // Reset to first page on reload
+
     try {
-        const response = await fetch('/api/integrations');
+        const response = await fetchWithRetry('/api/integrations', {}, 3, 800);
         if (!response.ok) throw new Error('Failed to load integrations');
 
         integrationsList = await response.json();
-
-        if (integrationsList.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="6" class="text-center py-4 text-muted">
-                        <i class="bi bi-plug" style="font-size: 2rem;"></i>
-                        <p class="mb-0 mt-2">No integrations configured</p>
-                        <button class="btn btn-primary btn-sm mt-2" onclick="showCreateIntegrationModal()">
-                            <i class="bi bi-plus-circle me-1"></i>Add First Integration
-                        </button>
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        const typeLabels = {
-            'pdq': 'PDQ Inventory',
-            'sccm': 'Microsoft SCCM',
-            'intune': 'Microsoft Intune',
-            'lansweeper': 'Lansweeper',
-            'generic_rest': 'REST API',
-            'agent': 'Discovery Agent',
-            'csv': 'CSV Import'
-        };
-
-        tbody.innerHTML = integrationsList.map(int => {
-            const statusBadge = int.last_sync_status
-                ? `<span class="badge bg-${int.last_sync_status === 'success' ? 'success' : 'danger'}">${int.last_sync_status}</span>`
-                : '<span class="badge bg-secondary">Never synced</span>';
-
-            return `
-                <tr>
-                    <td class="fw-semibold">${escapeHtml(int.name)}</td>
-                    <td><span class="badge bg-info">${typeLabels[int.integration_type] || int.integration_type}</span></td>
-                    <td>${escapeHtml(int.organization_name || 'All')}</td>
-                    <td>
-                        ${int.last_sync_at ? `<small>${new Date(int.last_sync_at).toLocaleString()}</small>` : '-'}
-                        <br><small class="text-muted">${int.last_sync_count || 0} items</small>
-                    </td>
-                    <td>${statusBadge}</td>
-                    <td>
-                        ${int.integration_type !== 'agent' ? `
-                            <button class="btn btn-outline-primary btn-sm me-1" onclick="syncIntegration(${int.id})" title="Sync Now">
-                                <i class="bi bi-arrow-repeat"></i>
-                            </button>
-                        ` : ''}
-                        <button class="btn btn-outline-secondary btn-sm me-1" onclick="showIntegrationApiKey(${int.id})" title="View API Key">
-                            <i class="bi bi-key"></i>
-                        </button>
-                        <button class="btn btn-outline-danger btn-sm" onclick="deleteIntegration(${int.id})" title="Delete">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+        renderPullSources();
 
     } catch (error) {
         tbody.innerHTML = `
@@ -6135,51 +6812,117 @@ async function loadIntegrations() {
 }
 
 function showCreateIntegrationModal() {
-    const typeOptions = [
-        { value: 'agent', label: 'Discovery Agent (for endpoint deployment)' },
-        { value: 'generic_rest', label: 'Generic REST API' },
-        { value: 'pdq', label: 'PDQ Inventory' },
-        { value: 'sccm', label: 'Microsoft SCCM' },
-        { value: 'intune', label: 'Microsoft Intune' }
-    ];
-
     const modalHtml = `
         <div class="modal fade" id="createIntegrationModal" tabindex="-1">
-            <div class="modal-dialog">
+            <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-plug me-2"></i>Create Integration</h5>
+                        <h5 class="modal-title"><i class="bi bi-plug me-2"></i>Create Pull Source</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="mb-3">
-                            <label class="form-label">Name</label>
-                            <input type="text" class="form-control" id="integrationName" placeholder="My PDQ Integration">
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>REST API Connector</strong> - Connect to any external system that provides a JSON REST API.
+                            Configure the URL, authentication, and field mappings to match your source system.
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Type</label>
-                            <select class="form-select" id="integrationType" onchange="updateIntegrationFields()">
-                                ${typeOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Default Organization</label>
-                            <select class="form-select" id="integrationOrg">
-                                <option value="">None (assign per-item)</option>
-                                ${organizations.map(o => `<option value="${o.id}">${escapeHtml(o.display_name || o.name)}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <div class="form-check">
-                                <input type="checkbox" class="form-check-input" id="integrationAutoApprove">
-                                <label class="form-check-label">Auto-approve imported items</label>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Name <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="integrationName" placeholder="My Inventory System">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Default Organization</label>
+                                    <select class="form-select" id="integrationOrg">
+                                        <option value="">None (assign per-item)</option>
+                                        ${organizations.map(o => `<option value="${o.id}">${escapeHtml(o.display_name || o.name)}</option>`).join('')}
+                                    </select>
+                                </div>
                             </div>
                         </div>
-                        <div id="integrationConfigFields"></div>
+                        <hr>
+                        <h6 class="text-muted mb-3"><i class="bi bi-link-45deg me-2"></i>Connection Settings</h6>
+                        <div class="mb-3">
+                            <label class="form-label">API URL <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="configApiUrl" placeholder="https://inventory.example.com/api/software">
+                            <div class="form-text">
+                                <strong>Test locally:</strong> Use <code>/api/test/mock-software</code> to test with sample data
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Authentication Type</label>
+                                    <select class="form-select" id="configAuthType">
+                                        <option value="none">None</option>
+                                        <option value="header" selected>API Key (Header)</option>
+                                        <option value="bearer">Bearer Token</option>
+                                        <option value="basic">Basic Auth</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3" id="authHeaderField">
+                                    <label class="form-label">Header Name</label>
+                                    <input type="text" class="form-control" id="configAuthHeader" value="X-API-Key" placeholder="X-API-Key">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row" id="authCredentialsRow">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label" id="authFieldLabel">API Key</label>
+                                    <input type="password" class="form-control" id="configApiKey" placeholder="Your API key">
+                                </div>
+                            </div>
+                            <div class="col-md-6" id="basicAuthPasswordField" style="display: none;">
+                                <div class="mb-3">
+                                    <label class="form-label">Password</label>
+                                    <input type="password" class="form-control" id="configPassword">
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <h6 class="text-muted mb-3"><i class="bi bi-braces me-2"></i>Response Mapping</h6>
+                        <div class="mb-3">
+                            <label class="form-label">Response Path</label>
+                            <input type="text" class="form-control" id="configResponsePath" placeholder="software" value="software">
+                            <div class="form-text">JSON path to the software array (e.g., <code>data.items</code> or <code>software</code>). Leave empty if root is array.</div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Vendor Field</label>
+                                    <input type="text" class="form-control" id="configVendorField" value="vendor" placeholder="vendor">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Product Field</label>
+                                    <input type="text" class="form-control" id="configProductField" value="product" placeholder="product">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Version Field</label>
+                                    <input type="text" class="form-control" id="configVersionField" value="version" placeholder="version">
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="integrationAutoApprove">
+                            <label class="form-check-label">Auto-approve imported items (skip Import Queue)</label>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" onclick="saveIntegration()">Create</button>
+                        <button type="button" class="btn btn-primary" onclick="saveIntegration()">
+                            <i class="bi bi-plus-circle me-1"></i>Create Pull Source
+                        </button>
                     </div>
                 </div>
             </div>
@@ -6191,70 +6934,36 @@ function showCreateIntegrationModal() {
 
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
+    // Handle auth type change
+    document.getElementById('configAuthType').addEventListener('change', function() {
+        const authType = this.value;
+        const headerField = document.getElementById('authHeaderField');
+        const credentialsRow = document.getElementById('authCredentialsRow');
+        const passwordField = document.getElementById('basicAuthPasswordField');
+        const fieldLabel = document.getElementById('authFieldLabel');
+
+        if (authType === 'none') {
+            headerField.style.display = 'none';
+            credentialsRow.style.display = 'none';
+        } else if (authType === 'basic') {
+            headerField.style.display = 'none';
+            credentialsRow.style.display = 'flex';
+            passwordField.style.display = 'block';
+            fieldLabel.textContent = 'Username';
+        } else {
+            headerField.style.display = authType === 'header' ? 'block' : 'none';
+            credentialsRow.style.display = 'flex';
+            passwordField.style.display = 'none';
+            fieldLabel.textContent = authType === 'bearer' ? 'Bearer Token' : 'API Key';
+        }
+    });
+
     const modal = new bootstrap.Modal(document.getElementById('createIntegrationModal'));
     modal.show();
-
-    updateIntegrationFields();
-}
-
-function updateIntegrationFields() {
-    const type = document.getElementById('integrationType').value;
-    const container = document.getElementById('integrationConfigFields');
-
-    let fieldsHtml = '';
-
-    if (type === 'generic_rest') {
-        fieldsHtml = `
-            <div class="mb-3">
-                <label class="form-label">API URL</label>
-                <input type="text" class="form-control" id="configApiUrl" placeholder="https://inventory.example.com/api/software">
-            </div>
-            <div class="mb-3">
-                <label class="form-label">API Key</label>
-                <input type="password" class="form-control" id="configApiKey" placeholder="Your API key">
-            </div>
-        `;
-    } else if (type === 'pdq') {
-        fieldsHtml = `
-            <div class="mb-3">
-                <label class="form-label">PDQ Server URL</label>
-                <input type="text" class="form-control" id="configApiUrl" placeholder="https://pdq.example.com">
-            </div>
-            <div class="mb-3">
-                <label class="form-label">API Key</label>
-                <input type="password" class="form-control" id="configApiKey">
-            </div>
-        `;
-    } else if (type === 'intune') {
-        fieldsHtml = `
-            <div class="mb-3">
-                <label class="form-label">Tenant ID</label>
-                <input type="text" class="form-control" id="configTenantId">
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Client ID</label>
-                <input type="text" class="form-control" id="configClientId">
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Client Secret</label>
-                <input type="password" class="form-control" id="configClientSecret">
-            </div>
-        `;
-    } else if (type === 'agent') {
-        fieldsHtml = `
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle me-2"></i>
-                After creating this integration, you'll get an API key to use with the discovery agent scripts.
-            </div>
-        `;
-    }
-
-    container.innerHTML = fieldsHtml;
 }
 
 async function saveIntegration() {
     const name = document.getElementById('integrationName').value.trim();
-    const type = document.getElementById('integrationType').value;
     const orgId = document.getElementById('integrationOrg').value;
     const autoApprove = document.getElementById('integrationAutoApprove').checked;
 
@@ -6263,16 +6972,26 @@ async function saveIntegration() {
         return;
     }
 
-    const config = {};
-
-    if (type === 'generic_rest' || type === 'pdq') {
-        config.api_url = document.getElementById('configApiUrl')?.value || '';
-        config.api_key = document.getElementById('configApiKey')?.value || '';
-    } else if (type === 'intune') {
-        config.tenant_id = document.getElementById('configTenantId')?.value || '';
-        config.client_id = document.getElementById('configClientId')?.value || '';
-        config.client_secret = document.getElementById('configClientSecret')?.value || '';
+    const apiUrl = document.getElementById('configApiUrl')?.value.trim() || '';
+    if (!apiUrl) {
+        showToast('Please enter an API URL', 'warning');
+        return;
     }
+
+    // Build configuration object
+    const config = {
+        api_url: apiUrl,
+        auth_type: document.getElementById('configAuthType')?.value || 'none',
+        auth_header: document.getElementById('configAuthHeader')?.value || 'X-API-Key',
+        api_key: document.getElementById('configApiKey')?.value || '',
+        username: document.getElementById('configApiKey')?.value || '',  // Reuse field for basic auth
+        password: document.getElementById('configPassword')?.value || '',
+        response_path: document.getElementById('configResponsePath')?.value || '',
+        vendor_field: document.getElementById('configVendorField')?.value || 'vendor',
+        product_field: document.getElementById('configProductField')?.value || 'product',
+        version_field: document.getElementById('configVersionField')?.value || 'version',
+        verify_ssl: true
+    };
 
     try {
         const response = await fetch('/api/integrations', {
@@ -6280,7 +6999,7 @@ async function saveIntegration() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name,
-                integration_type: type,
+                integration_type: 'generic_rest',
                 organization_id: orgId ? parseInt(orgId) : null,
                 auto_approve: autoApprove,
                 config: config
@@ -6295,13 +7014,7 @@ async function saveIntegration() {
         const integration = await response.json();
 
         bootstrap.Modal.getInstance(document.getElementById('createIntegrationModal')).hide();
-
-        if (integration.api_key) {
-            alert(`Integration created!\\n\\nAPI Key: ${integration.api_key}\\n\\nSave this key - you won't see it again!`);
-        } else {
-            showToast('Integration created successfully', 'success');
-        }
-
+        showToast('Pull Source created successfully', 'success');
         loadIntegrations();
 
     } catch (error) {
@@ -6348,17 +7061,38 @@ async function showIntegrationApiKey(integrationId) {
 
 function copyViewedApiKey() {
     const keyInput = document.getElementById('viewApiKeyValue');
-    if (!keyInput) return;
+    if (!keyInput || !keyInput.value) {
+        showToast('No API key to copy', 'warning');
+        return;
+    }
 
     const key = keyInput.value;
+
+    // Try selecting and using execCommand first (most reliable)
+    try {
+        keyInput.select();
+        keyInput.setSelectionRange(0, 99999);
+        const success = document.execCommand('copy');
+        if (success) {
+            showToast('API key copied to clipboard', 'success');
+            return;
+        }
+    } catch (e) {
+        console.log('execCommand copy failed, trying clipboard API');
+    }
+
+    // Try clipboard API
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(key).then(() => {
             showToast('API key copied to clipboard', 'success');
-        }).catch(() => {
-            fallbackCopyText(key);
+        }).catch((err) => {
+            console.error('Clipboard API failed:', err);
+            showToast('Copy failed. Please select the key and press Ctrl+C', 'warning');
+            keyInput.select();
         });
     } else {
-        fallbackCopyText(key);
+        showToast('Copy failed. Please select the key and press Ctrl+C', 'warning');
+        keyInput.select();
     }
 }
 
@@ -6377,6 +7111,200 @@ async function deleteIntegration(integrationId) {
         if (!response.ok) throw new Error('Failed to delete');
         showToast('Integration deleted', 'success');
         loadIntegrations();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function showEditIntegrationModal(integrationId) {
+    try {
+        const response = await fetch(`/api/integrations/${integrationId}`);
+        if (!response.ok) throw new Error('Failed to load integration');
+        const integration = await response.json();
+
+        const config = integration.config || {};
+
+        const modalHtml = `
+            <div class="modal fade" id="editIntegrationModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Edit Pull Source</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="editIntegrationId" value="${integration.id}">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="editIntegrationName" value="${escapeHtml(integration.name || '')}">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Default Organization</label>
+                                        <select class="form-select" id="editIntegrationOrg">
+                                            <option value="">None (assign per-item)</option>
+                                            ${organizations.map(o => `<option value="${o.id}" ${o.id == integration.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr>
+                            <h6 class="text-muted mb-3"><i class="bi bi-link-45deg me-2"></i>Connection Settings</h6>
+                            <div class="mb-3">
+                                <label class="form-label">API URL <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="editConfigApiUrl" value="${escapeHtml(config.api_url || '')}">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Authentication Type</label>
+                                        <select class="form-select" id="editConfigAuthType">
+                                            <option value="none" ${config.auth_type === 'none' ? 'selected' : ''}>None</option>
+                                            <option value="header" ${config.auth_type === 'header' || !config.auth_type ? 'selected' : ''}>API Key (Header)</option>
+                                            <option value="bearer" ${config.auth_type === 'bearer' ? 'selected' : ''}>Bearer Token</option>
+                                            <option value="basic" ${config.auth_type === 'basic' ? 'selected' : ''}>Basic Auth</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Header Name</label>
+                                        <input type="text" class="form-control" id="editConfigAuthHeader" value="${escapeHtml(config.auth_header || 'X-API-Key')}">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">API Key / Username</label>
+                                        <input type="password" class="form-control" id="editConfigApiKey" value="${escapeHtml(config.api_key || config.username || '')}" placeholder="Leave empty to keep current">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Password (Basic Auth)</label>
+                                        <input type="password" class="form-control" id="editConfigPassword" value="${escapeHtml(config.password || '')}" placeholder="Leave empty to keep current">
+                                    </div>
+                                </div>
+                            </div>
+                            <hr>
+                            <h6 class="text-muted mb-3"><i class="bi bi-braces me-2"></i>Response Mapping</h6>
+                            <div class="mb-3">
+                                <label class="form-label">Response Path</label>
+                                <input type="text" class="form-control" id="editConfigResponsePath" value="${escapeHtml(config.response_path || '')}" placeholder="e.g., software or data.items">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Vendor Field</label>
+                                        <input type="text" class="form-control" id="editConfigVendorField" value="${escapeHtml(config.vendor_field || 'vendor')}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Product Field</label>
+                                        <input type="text" class="form-control" id="editConfigProductField" value="${escapeHtml(config.product_field || 'product')}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Version Field</label>
+                                        <input type="text" class="form-control" id="editConfigVersionField" value="${escapeHtml(config.version_field || 'version')}">
+                                    </div>
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="editIntegrationAutoApprove" ${integration.auto_approve ? 'checked' : ''}>
+                                <label class="form-check-label">Auto-approve imported items (skip Import Queue)</label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" onclick="saveEditIntegration()">
+                                <i class="bi bi-check-circle me-1"></i>Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const existingModal = document.getElementById('editIntegrationModal');
+        if (existingModal) existingModal.remove();
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modal = new bootstrap.Modal(document.getElementById('editIntegrationModal'));
+        modal.show();
+
+    } catch (error) {
+        showToast('Error loading integration: ' + error.message, 'danger');
+    }
+}
+
+async function saveEditIntegration() {
+    const integrationId = document.getElementById('editIntegrationId').value;
+    const name = document.getElementById('editIntegrationName').value.trim();
+    const orgId = document.getElementById('editIntegrationOrg').value;
+    const autoApprove = document.getElementById('editIntegrationAutoApprove').checked;
+
+    if (!name) {
+        showToast('Please enter a name', 'warning');
+        return;
+    }
+
+    const apiUrl = document.getElementById('editConfigApiUrl')?.value.trim() || '';
+    if (!apiUrl) {
+        showToast('Please enter an API URL', 'warning');
+        return;
+    }
+
+    const config = {
+        api_url: apiUrl,
+        auth_type: document.getElementById('editConfigAuthType')?.value || 'none',
+        auth_header: document.getElementById('editConfigAuthHeader')?.value || 'X-API-Key',
+        response_path: document.getElementById('editConfigResponsePath')?.value || '',
+        vendor_field: document.getElementById('editConfigVendorField')?.value || 'vendor',
+        product_field: document.getElementById('editConfigProductField')?.value || 'product',
+        version_field: document.getElementById('editConfigVersionField')?.value || 'version',
+        verify_ssl: true
+    };
+
+    // Only include credentials if provided (to avoid overwriting with empty)
+    const apiKey = document.getElementById('editConfigApiKey')?.value;
+    const password = document.getElementById('editConfigPassword')?.value;
+    if (apiKey) {
+        config.api_key = apiKey;
+        config.username = apiKey;  // For basic auth
+    }
+    if (password) {
+        config.password = password;
+    }
+
+    try {
+        const response = await fetch(`/api/integrations/${integrationId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                organization_id: orgId ? parseInt(orgId) : null,
+                auto_approve: autoApprove,
+                config: config
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to update integration');
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('editIntegrationModal')).hide();
+        showToast('Pull Source updated successfully', 'success');
+        loadIntegrations();
+
     } catch (error) {
         showToast('Error: ' + error.message, 'danger');
     }
@@ -6581,8 +7509,8 @@ const adminTabMap = {
     'users': 'users-tab',
     'organizations': 'organizations-tab',
     'settings': 'settings-tab',
-    'ldapUsers': 'ldap-users-tab',
-    'ldapGroups': 'ldap-groups-tab',
+    'ldapUsers': 'ldapUsers-tab',
+    'ldapGroups': 'ldapGroups-tab',
     'license': 'license-tab',
     'integrations': 'integrations-tab'
 };

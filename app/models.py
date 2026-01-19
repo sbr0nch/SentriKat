@@ -286,7 +286,35 @@ class Product(db.Model):
         cpe_vendor, cpe_product, _ = self.get_effective_cpe()
         return bool(cpe_vendor and cpe_product)
 
-    def to_dict(self):
+    def get_platform_summary(self):
+        """
+        Get a summary of which platforms this product is installed on.
+        Returns dict with platform counts and list.
+        """
+        from sqlalchemy import func
+
+        # Query installation counts by platform
+        platform_counts = db.session.query(
+            ProductInstallation.detected_on_os,
+            func.count(ProductInstallation.id)
+        ).filter(
+            ProductInstallation.product_id == self.id
+        ).group_by(
+            ProductInstallation.detected_on_os
+        ).all()
+
+        platforms = {}
+        for platform, count in platform_counts:
+            platform_name = platform or 'unknown'
+            platforms[platform_name] = count
+
+        return {
+            'platforms': platforms,
+            'platform_list': list(platforms.keys()),
+            'total_installations': sum(platforms.values())
+        }
+
+    def to_dict(self, include_platforms=False):
         # Get assigned organizations
         assigned_orgs = [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
                          for org in self.organizations.all()]
@@ -300,7 +328,14 @@ class Product(db.Model):
         # Get effective CPE (product-level or from catalog)
         eff_cpe_vendor, eff_cpe_product, eff_cpe_uri = self.get_effective_cpe()
 
-        return {
+        # Get platforms from installations (lightweight query)
+        platforms = db.session.query(ProductInstallation.detected_on_os).filter(
+            ProductInstallation.product_id == self.id,
+            ProductInstallation.detected_on_os.isnot(None)
+        ).distinct().all()
+        platform_list = sorted(set(p[0] for p in platforms if p[0]))
+
+        result = {
             'id': self.id,
             'organization_id': self.organization_id,  # Legacy field
             'organizations': assigned_orgs,  # New multi-org field
@@ -312,6 +347,7 @@ class Product(db.Model):
             'description': self.description,
             'active': self.active,
             'criticality': self.criticality,
+            'platforms': platform_list,  # OS platforms detected on (Windows, Linux, macOS)
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             # CPE fields
@@ -325,6 +361,78 @@ class Product(db.Model):
             'effective_cpe_uri': eff_cpe_uri,
             'has_cpe': self.has_cpe()
         }
+
+        # Optionally include platform summary (extra query)
+        if include_platforms:
+            result['platform_summary'] = self.get_platform_summary()
+
+        return result
+
+
+class ProductExclusion(db.Model):
+    """
+    Products excluded from agent scanning.
+    When a product is deleted with "exclude from future scans", it's added here.
+    Agents check this list before adding products to prevent re-adding deleted items.
+    """
+    __tablename__ = 'product_exclusions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    vendor = db.Column(db.String(200), nullable=False, index=True)
+    product_name = db.Column(db.String(200), nullable=False, index=True)
+    version = db.Column(db.String(100), nullable=True)  # NULL = exclude all versions
+    reason = db.Column(db.Text, nullable=True)  # Why this was excluded
+    excluded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Unique constraint: one exclusion per vendor/product/version per org
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'vendor', 'product_name', 'version', name='unique_product_exclusion'),
+    )
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('product_exclusions', lazy='dynamic'))
+    excluded_by_user = db.relationship('User', backref='product_exclusions_created')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'vendor': self.vendor,
+            'product_name': self.product_name,
+            'version': self.version,
+            'reason': self.reason,
+            'excluded_by': self.excluded_by_user.username if self.excluded_by_user else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+    @staticmethod
+    def is_excluded(organization_id, vendor, product_name, version=None):
+        """
+        Check if a product is excluded for an organization.
+        Checks for exact match first, then version-agnostic exclusion.
+        """
+        # Check exact match with version
+        if version:
+            exact = ProductExclusion.query.filter_by(
+                organization_id=organization_id,
+                vendor=vendor,
+                product_name=product_name,
+                version=version
+            ).first()
+            if exact:
+                return True
+
+        # Check version-agnostic exclusion (version=NULL means all versions)
+        any_version = ProductExclusion.query.filter_by(
+            organization_id=organization_id,
+            vendor=vendor,
+            product_name=product_name,
+            version=None
+        ).first()
+        return any_version is not None
+
 
 class Vulnerability(db.Model):
     """CISA KEV vulnerabilities cache"""
@@ -448,6 +556,11 @@ class VulnerabilityMatch(db.Model):
     acknowledged = db.Column(db.Boolean, default=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Notification tracking - for "new CVE" alerts
+    # NULL = never alerted, set when first alert is sent
+    # Reset to NULL when CVE is reopened (unacknowledged) to re-alert
+    first_alerted_at = db.Column(db.DateTime, nullable=True, index=True)
+
     # Match method and confidence
     match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
     match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
@@ -457,27 +570,88 @@ class VulnerabilityMatch(db.Model):
 
     def calculate_effective_priority(self):
         """
-        Calculate effective priority combining:
-        - Product criticality
-        - Vulnerability priority
-        Returns the higher of the two
+        Calculate effective priority combining CVE severity with product criticality and age.
+
+        The key insight: Product criticality determines how IMPORTANT the CVE is for YOU.
+        - A critical CVE on a dev laptop (low criticality) = Low priority for you
+        - A medium CVE on a production server (critical) = High priority for you
+
+        Priority Matrix:
+        CVE\\Product | Critical | High   | Medium | Low
+        ------------|----------|--------|--------|------
+        Critical    | Critical | High   | Medium | Low
+        High        | High     | High   | Medium | Low
+        Medium      | High     | Medium | Medium | Low
+        Low         | Medium   | Low    | Low    | Low
+
+        Age Factor (applied after matrix calculation):
+        - CVEs > 2 years old: demote by 2 levels (unless ransomware or due soon)
+        - CVEs > 1 year old: demote by 1 level (unless ransomware or due soon)
+        - CVEs < 90 days old: no demotion
+
+        This reflects reality: very old CVEs that haven't been exploited yet are lower risk
+        than recent vulnerabilities being actively discovered/exploited.
+
+        Special rules:
+        - Ransomware-related CVEs are NEVER demoted by age (actively exploited)
+        - Due within 30 days = NEVER demoted by age (still urgent)
+        - Due within 7 days on critical product = always Critical
         """
         vuln_priority = self.vulnerability.calculate_priority()
-        product_criticality = self.product.criticality
+        product_criticality = self.product.criticality or 'medium'
 
-        priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+        priority_levels = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+        level_names = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
 
-        vuln_level = priority_order.get(vuln_priority, 2)
-        prod_level = priority_order.get(product_criticality, 2)
+        vuln_level = priority_levels.get(vuln_priority, 2)
+        prod_level = priority_levels.get(product_criticality, 2)
 
-        # Return the higher priority
-        max_level = max(vuln_level, prod_level)
+        # Calculate combined priority - product criticality caps the effective priority
+        # Critical product: can show any priority
+        # High product: max is high (critical CVEs show as high)
+        # Medium product: max is medium
+        # Low product: max is low
+        max_allowed = prod_level
+        effective_level = min(vuln_level, max_allowed)
 
-        for priority, level in priority_order.items():
-            if level == max_level:
-                return priority
+        # Special cases that can override:
 
-        return 'medium'
+        # 1. Ransomware on high+ criticality product = elevate by one
+        if self.vulnerability.known_ransomware and prod_level >= 3:
+            effective_level = min(effective_level + 1, 4)
+
+        # 2. Due within 7 days on critical product = Critical
+        if self.vulnerability.due_date and prod_level == 4:
+            days_until_due = (self.vulnerability.due_date - date.today()).days
+            if days_until_due <= 7:
+                effective_level = 4
+
+        # 3. Medium product with critical/high CVE = at least medium (don't demote too much)
+        if prod_level == 2 and vuln_level >= 3:
+            effective_level = max(effective_level, 2)
+
+        # 4. AGE FACTOR: Demote old CVEs (unless they have urgent attributes)
+        # Skip age demotion if:
+        # - Ransomware-related (actively exploited, always dangerous)
+        # - Due within 30 days (still has urgency)
+        is_ransomware = self.vulnerability.known_ransomware
+        has_urgent_due = False
+        if self.vulnerability.due_date:
+            days_until_due = (self.vulnerability.due_date - date.today()).days
+            has_urgent_due = days_until_due <= 30
+
+        if not is_ransomware and not has_urgent_due and self.vulnerability.date_added:
+            days_old = (date.today() - self.vulnerability.date_added).days
+
+            if days_old > 730:  # > 2 years old
+                # Demote by 2 levels (but not below low)
+                effective_level = max(effective_level - 2, 1)
+            elif days_old > 365:  # > 1 year old
+                # Demote by 1 level (but not below low)
+                effective_level = max(effective_level - 1, 1)
+            # < 1 year: no age-based demotion
+
+        return level_names.get(effective_level, 'medium')
 
     def to_dict(self):
         vuln_dict = self.vulnerability.to_dict()
@@ -1127,6 +1301,15 @@ class Asset(db.Model):
         self.metadata_json = json.dumps(data) if data else None
 
     def to_dict(self, include_products=False):
+        # Calculate last_seen as the most recent of last_checkin or last_inventory_at
+        last_seen = None
+        if self.last_checkin and self.last_inventory_at:
+            last_seen = max(self.last_checkin, self.last_inventory_at)
+        elif self.last_checkin:
+            last_seen = self.last_checkin
+        elif self.last_inventory_at:
+            last_seen = self.last_inventory_at
+
         result = {
             'id': self.id,
             'organization_id': self.organization_id,
@@ -1140,6 +1323,7 @@ class Asset(db.Model):
             'os_kernel': self.os_kernel,
             'agent_id': self.agent_id,
             'agent_version': self.agent_version,
+            'last_seen': last_seen.isoformat() if last_seen else None,
             'last_checkin': self.last_checkin.isoformat() if self.last_checkin else None,
             'last_inventory_at': self.last_inventory_at.isoformat() if self.last_inventory_at else None,
             'active': self.active,
@@ -1191,6 +1375,7 @@ class ProductInstallation(db.Model):
     # Installation details
     install_path = db.Column(db.String(500), nullable=True)  # Where it's installed
     detected_by = db.Column(db.String(50), default='agent')  # agent, manual, scan
+    detected_on_os = db.Column(db.String(50), nullable=True, index=True)  # linux, windows, macos, etc.
 
     # Status
     is_vulnerable = db.Column(db.Boolean, default=False, index=True)  # Cached: has matching CVEs?
@@ -1209,7 +1394,50 @@ class ProductInstallation(db.Model):
         db.UniqueConstraint('asset_id', 'product_id', name='uix_asset_product'),
     )
 
+    @staticmethod
+    def normalize_os_name(os_name):
+        """
+        Normalize OS name to a standard platform category.
+        Used for filtering and display consistency.
+        """
+        if not os_name:
+            return None
+
+        os_lower = os_name.lower()
+
+        # Windows variants
+        if 'windows' in os_lower or 'win32' in os_lower or 'win64' in os_lower:
+            return 'windows'
+
+        # Linux variants
+        if any(x in os_lower for x in ['linux', 'ubuntu', 'debian', 'centos', 'rhel',
+                                        'red hat', 'fedora', 'alpine', 'arch', 'suse']):
+            return 'linux'
+
+        # macOS variants
+        if any(x in os_lower for x in ['macos', 'mac os', 'darwin', 'osx']):
+            return 'macos'
+
+        # BSD variants
+        if 'bsd' in os_lower:
+            return 'bsd'
+
+        # Unix generic
+        if 'unix' in os_lower or 'sunos' in os_lower or 'solaris' in os_lower:
+            return 'unix'
+
+        # Container/virtualization
+        if 'docker' in os_lower or 'container' in os_lower:
+            return 'container'
+
+        return 'other'
+
     def to_dict(self):
+        # Get platform from detected_on_os or derive from asset
+        platform = self.detected_on_os
+        if not platform and self.asset:
+            platform = self.normalize_os_name(self.asset.os_name)
+
         return {
             'id': self.id,
             'asset_id': self.asset_id,
@@ -1219,6 +1447,8 @@ class ProductInstallation(db.Model):
             'version': self.version,
             'install_path': self.install_path,
             'detected_by': self.detected_by,
+            'detected_on_os': self.detected_on_os,
+            'platform': platform,  # Normalized platform (linux, windows, macos, etc.)
             'is_vulnerable': self.is_vulnerable,
             'vulnerability_count': self.vulnerability_count,
             'discovered_at': self.discovered_at.isoformat() if self.discovered_at else None,
@@ -1247,6 +1477,7 @@ class AgentApiKey(db.Model):
     active = db.Column(db.Boolean, default=True, index=True)
     max_assets = db.Column(db.Integer, nullable=True)  # NULL = unlimited
     allowed_ips = db.Column(db.Text, nullable=True)  # JSON array of allowed IPs/CIDRs
+    auto_approve = db.Column(db.Boolean, default=False)  # Auto-add products without Import Queue review
 
     # Usage tracking
     last_used_at = db.Column(db.DateTime, nullable=True)
@@ -1294,11 +1525,13 @@ class AgentApiKey(db.Model):
         result = {
             'id': self.id,
             'organization_id': self.organization_id,
+            'organization_name': self.organization.display_name if self.organization else None,
             'name': self.name,
             'key_prefix': self.key_prefix,
             'active': self.active,
             'max_assets': self.max_assets,
             'allowed_ips': self.get_allowed_ips(),
+            'auto_approve': self.auto_approve,
             'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
             'usage_count': self.usage_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -1318,6 +1551,7 @@ class InventoryJob(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
     asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+    api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True, index=True)
 
     # Job details
     job_type = db.Column(db.String(50), default='inventory')  # inventory, sync, import
@@ -1343,6 +1577,7 @@ class InventoryJob(db.Model):
     # Relationships
     organization = db.relationship('Organization', backref=db.backref('inventory_jobs', lazy='dynamic'))
     asset = db.relationship('Asset', backref=db.backref('inventory_jobs', lazy='dynamic'))
+    api_key = db.relationship('AgentApiKey', backref=db.backref('inventory_jobs', lazy='dynamic'))
 
     def to_dict(self):
         return {
@@ -1371,3 +1606,421 @@ class InventoryJob(db.Model):
             InventoryJob.priority.asc(),
             InventoryJob.created_at.asc()
         ).first()
+
+
+# ============================================================================
+# AGENT USAGE TRACKING - Metering and billing for pay-per-agent model
+# ============================================================================
+
+class AgentLicense(db.Model):
+    """
+    Organization's agent usage tracking for metering and billing.
+
+    IMPORTANT ARCHITECTURE NOTE:
+    This table is for USAGE TRACKING and BILLING only, NOT for enforcement.
+    Actual agent limits are enforced via the RSA-signed license system
+    in app/licensing.py (check_agent_limit function).
+
+    The limits stored here (max_agents, max_api_keys) are informational
+    and for historical billing purposes. They should NOT be used for
+    enforcement because database values can be modified by on-premise
+    customers. Use the signed license limits instead.
+
+    The signed license contains tamper-proof limits:
+    - max_agents: Global limit across all organizations
+    - max_agent_api_keys: Global limit across all organizations
+
+    This table tracks:
+    - current_agents: Current count for this org (for billing)
+    - peak_agents: Peak usage in billing period
+    - billing_cycle, billing dates: For invoicing
+
+    License tiers (informational reference):
+    - trial: Limited agents, limited time
+    - starter: Small teams (up to 25 agents)
+    - professional: Medium deployments (up to 100 agents)
+    - enterprise: Large deployments (up to 500 agents)
+    - unlimited: No restrictions
+    """
+    __tablename__ = 'agent_licenses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, unique=True, index=True)
+
+    # License tier and limits
+    tier = db.Column(db.String(50), default='trial', nullable=False)  # trial, starter, professional, enterprise, unlimited
+    max_agents = db.Column(db.Integer, default=5, nullable=False)  # Max concurrent agents
+    max_api_keys = db.Column(db.Integer, default=2, nullable=False)  # Max API keys per org
+
+    # Current usage (cached, updated on agent changes)
+    current_agents = db.Column(db.Integer, default=0)  # Active agents count
+    peak_agents = db.Column(db.Integer, default=0)  # Peak usage in current period
+
+    # License status
+    status = db.Column(db.String(20), default='active', index=True)  # active, trial, suspended, expired, grace_period
+    grace_period_until = db.Column(db.DateTime, nullable=True)  # When grace period ends
+
+    # Billing information
+    billing_cycle = db.Column(db.String(20), default='monthly')  # monthly, annual
+    billing_start_date = db.Column(db.Date, nullable=True)
+    next_billing_date = db.Column(db.Date, nullable=True)
+
+    # Trial information
+    trial_started_at = db.Column(db.DateTime, nullable=True)
+    trial_ends_at = db.Column(db.DateTime, nullable=True)
+
+    # Feature flags (for tier-based features)
+    features = db.Column(db.Text, nullable=True)  # JSON: {"version_history": true, "priority_support": true}
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('agent_license', uselist=False))
+
+    # Tier definitions with limits
+    TIER_LIMITS = {
+        'trial': {'max_agents': 5, 'max_api_keys': 1, 'trial_days': 14},
+        'starter': {'max_agents': 25, 'max_api_keys': 3},
+        'professional': {'max_agents': 100, 'max_api_keys': 10},
+        'enterprise': {'max_agents': 500, 'max_api_keys': 50},
+        'unlimited': {'max_agents': 999999, 'max_api_keys': 999}
+    }
+
+    def get_features(self):
+        """Get enabled features as dict."""
+        if not self.features:
+            return {}
+        try:
+            return json.loads(self.features)
+        except:
+            return {}
+
+    def has_feature(self, feature_name):
+        """Check if a feature is enabled."""
+        features = self.get_features()
+        return features.get(feature_name, False)
+
+    def is_active(self):
+        """Check if license is active and valid."""
+        if self.status == 'expired':
+            return False
+        if self.status == 'suspended':
+            return False
+        if self.status == 'trial' and self.trial_ends_at:
+            if datetime.utcnow() > self.trial_ends_at:
+                return False
+        return True
+
+    def is_in_grace_period(self):
+        """Check if license is in grace period (over limit but allowed temporarily)."""
+        if not self.grace_period_until:
+            return False
+        return datetime.utcnow() < self.grace_period_until
+
+    def can_add_agent(self):
+        """Check if organization can add another agent."""
+        if not self.is_active():
+            return False, "License is not active"
+
+        if self.current_agents >= self.max_agents:
+            if self.is_in_grace_period():
+                return True, "In grace period - please upgrade soon"
+            return False, f"Agent limit reached ({self.current_agents}/{self.max_agents})"
+
+        return True, None
+
+    def get_usage_percent(self):
+        """Get current usage as percentage of limit."""
+        if self.max_agents == 0:
+            return 100
+        return round((self.current_agents / self.max_agents) * 100, 1)
+
+    def update_agent_count(self):
+        """Update current_agents count from database."""
+        from app.models import Asset
+        self.current_agents = Asset.query.filter_by(
+            organization_id=self.organization_id,
+            active=True
+        ).filter(Asset.status.in_(['online', 'offline'])).count()
+
+        # Update peak if needed
+        if self.current_agents > self.peak_agents:
+            self.peak_agents = self.current_agents
+
+        return self.current_agents
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'tier': self.tier,
+            'max_agents': self.max_agents,
+            'max_api_keys': self.max_api_keys,
+            'current_agents': self.current_agents,
+            'peak_agents': self.peak_agents,
+            'usage_percent': self.get_usage_percent(),
+            'status': self.status,
+            'is_active': self.is_active(),
+            'grace_period_until': self.grace_period_until.isoformat() if self.grace_period_until else None,
+            'billing_cycle': self.billing_cycle,
+            'next_billing_date': self.next_billing_date.isoformat() if self.next_billing_date else None,
+            'trial_ends_at': self.trial_ends_at.isoformat() if self.trial_ends_at else None,
+            'features': self.get_features(),
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class AgentUsageRecord(db.Model):
+    """
+    Daily usage records for billing and analytics.
+    Tracks agent count snapshots for accurate billing.
+    """
+    __tablename__ = 'agent_usage_records'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+
+    # Usage date (one record per day per org)
+    record_date = db.Column(db.Date, nullable=False, index=True)
+
+    # Counts at different points
+    active_agents = db.Column(db.Integer, default=0)  # Active agents at snapshot time
+    online_agents = db.Column(db.Integer, default=0)  # Agents that checked in today
+    new_agents = db.Column(db.Integer, default=0)  # New agents registered today
+    decommissioned_agents = db.Column(db.Integer, default=0)  # Agents decommissioned today
+
+    # Peak usage
+    peak_agents = db.Column(db.Integer, default=0)  # Peak count for the day
+
+    # Inventory stats
+    inventory_reports = db.Column(db.Integer, default=0)  # Number of inventory reports
+    products_discovered = db.Column(db.Integer, default=0)  # New products discovered
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Unique constraint: one record per org per day
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'record_date', name='uix_org_date'),
+    )
+
+    @staticmethod
+    def get_or_create_today(organization_id):
+        """Get or create today's usage record."""
+        today = date.today()
+        record = AgentUsageRecord.query.filter_by(
+            organization_id=organization_id,
+            record_date=today
+        ).first()
+
+        if not record:
+            record = AgentUsageRecord(
+                organization_id=organization_id,
+                record_date=today
+            )
+            db.session.add(record)
+            db.session.flush()
+
+        return record
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'record_date': self.record_date.isoformat() if self.record_date else None,
+            'active_agents': self.active_agents,
+            'online_agents': self.online_agents,
+            'new_agents': self.new_agents,
+            'decommissioned_agents': self.decommissioned_agents,
+            'peak_agents': self.peak_agents,
+            'inventory_reports': self.inventory_reports,
+            'products_discovered': self.products_discovered
+        }
+
+
+class AgentEvent(db.Model):
+    """
+    Audit log for agent lifecycle events.
+    Tracks all agent registrations, status changes, and decommissions.
+    Essential for billing disputes and security auditing.
+    """
+    __tablename__ = 'agent_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+    api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True)
+
+    # Event details
+    event_type = db.Column(db.String(50), nullable=False, index=True)
+    # Types: registered, inventory_reported, heartbeat, status_changed, decommissioned,
+    #        license_warning, license_exceeded, ip_blocked, auth_failed
+
+    # Event data
+    details = db.Column(db.Text, nullable=True)  # JSON with event-specific details
+    old_value = db.Column(db.String(200), nullable=True)  # For status changes
+    new_value = db.Column(db.String(200), nullable=True)
+
+    # Request context (for security audit)
+    source_ip = db.Column(db.String(45), nullable=True)
+    user_agent = db.Column(db.String(500), nullable=True)
+
+    # Timestamp
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('agent_events', lazy='dynamic'))
+    asset = db.relationship('Asset', backref=db.backref('events', lazy='dynamic'))
+    api_key = db.relationship('AgentApiKey', backref=db.backref('events', lazy='dynamic'))
+
+    def get_details(self):
+        """Get details as dict."""
+        if not self.details:
+            return {}
+        try:
+            return json.loads(self.details)
+        except:
+            return {}
+
+    @staticmethod
+    def log_event(organization_id, event_type, asset_id=None, api_key_id=None,
+                  details=None, old_value=None, new_value=None,
+                  source_ip=None, user_agent=None):
+        """Create a new event log entry."""
+        event = AgentEvent(
+            organization_id=organization_id,
+            asset_id=asset_id,
+            api_key_id=api_key_id,
+            event_type=event_type,
+            details=json.dumps(details) if details else None,
+            old_value=old_value,
+            new_value=new_value,
+            source_ip=source_ip,
+            user_agent=user_agent
+        )
+        db.session.add(event)
+        return event
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'api_key_id': self.api_key_id,
+            'event_type': self.event_type,
+            'details': self.get_details(),
+            'old_value': self.old_value,
+            'new_value': self.new_value,
+            'source_ip': self.source_ip,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class ProductVersionHistory(db.Model):
+    """
+    Tracks version changes for products installed on assets.
+    Allows tracking when software was updated/downgraded.
+    """
+    __tablename__ = 'product_version_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    installation_id = db.Column(db.Integer, db.ForeignKey('product_installations.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False, index=True)
+
+    # Version info
+    previous_version = db.Column(db.String(100), nullable=True)
+    new_version = db.Column(db.String(100), nullable=False)
+    change_type = db.Column(db.String(20), default='update')  # install, update, downgrade, reinstall
+
+    # Detection info
+    detected_by = db.Column(db.String(50), default='agent')  # agent, scan, manual
+    detected_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    installation = db.relationship('ProductInstallation', backref=db.backref('version_history', lazy='dynamic'))
+    asset = db.relationship('Asset', backref=db.backref('product_changes', lazy='dynamic'))
+    product = db.relationship('Product', backref=db.backref('version_changes', lazy='dynamic'))
+
+    @staticmethod
+    def record_change(installation_id, asset_id, product_id, old_version, new_version, detected_by='agent'):
+        """Record a version change."""
+        # Determine change type
+        if not old_version:
+            change_type = 'install'
+        elif old_version == new_version:
+            change_type = 'reinstall'
+        else:
+            # Simple version comparison (could be enhanced)
+            change_type = 'update'  # Could detect downgrade with proper version parsing
+
+        record = ProductVersionHistory(
+            installation_id=installation_id,
+            asset_id=asset_id,
+            product_id=product_id,
+            previous_version=old_version,
+            new_version=new_version,
+            change_type=change_type,
+            detected_by=detected_by
+        )
+        db.session.add(record)
+        return record
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'installation_id': self.installation_id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'product_id': self.product_id,
+            'product_name': f"{self.product.vendor} {self.product.product_name}" if self.product else None,
+            'previous_version': self.previous_version,
+            'new_version': self.new_version,
+            'change_type': self.change_type,
+            'detected_by': self.detected_by,
+            'detected_at': self.detected_at.isoformat() if self.detected_at else None
+        }
+
+
+class StaleAssetNotification(db.Model):
+    """
+    Tracks notifications sent for stale/offline agents.
+    Prevents notification spam while ensuring admins are alerted.
+    """
+    __tablename__ = 'stale_asset_notifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+
+    # Notification state
+    notification_type = db.Column(db.String(50), nullable=False)  # offline, stale, critical_offline
+    first_detected_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_notified_at = db.Column(db.DateTime, nullable=True)
+    notification_count = db.Column(db.Integer, default=0)
+
+    # Resolution
+    resolved = db.Column(db.Boolean, default=False, index=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    resolved_by = db.Column(db.String(50), nullable=True)  # auto, manual, agent_checkin
+
+    # Relationships
+    asset = db.relationship('Asset', backref=db.backref('stale_notifications', lazy='dynamic'))
+    organization = db.relationship('Organization')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'organization_id': self.organization_id,
+            'notification_type': self.notification_type,
+            'first_detected_at': self.first_detected_at.isoformat() if self.first_detected_at else None,
+            'last_notified_at': self.last_notified_at.isoformat() if self.last_notified_at else None,
+            'notification_count': self.notification_count,
+            'resolved': self.resolved,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None
+        }

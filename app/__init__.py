@@ -10,13 +10,85 @@ import os
 db = SQLAlchemy()
 migrate = Migrate()
 csrf = CSRFProtect()
-limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
+# Rate limits: Allow reasonable admin operations while preventing abuse
+# Exempt admin/manager routes from strict limits via decorator overrides
+limiter = Limiter(key_func=get_remote_address, default_limits=["1000 per day", "200 per hour"])
+
+
+def _apply_schema_migrations(logger, db_uri):
+    """Apply schema migrations for new columns (works for SQLite and PostgreSQL)"""
+    from sqlalchemy import text, create_engine
+
+    # List of migrations to apply: (table_name, column_name, column_definition_sqlite, column_definition_pg)
+    migrations = [
+        ('vulnerability_matches', 'first_alerted_at', 'DATETIME', 'TIMESTAMP'),
+        ('agent_api_keys', 'auto_approve', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('inventory_jobs', 'api_key_id', 'INTEGER', 'INTEGER'),
+    ]
+
+    is_sqlite = db_uri.startswith('sqlite')
+
+    # Use a completely isolated engine for migrations
+    # Use NullPool to avoid any connection pooling issues
+    from sqlalchemy.pool import NullPool
+    engine = None
+    try:
+        engine = create_engine(
+            db_uri,
+            poolclass=NullPool,  # Don't pool connections - each connect() creates new connection
+            isolation_level="AUTOCOMMIT"  # Prevent transaction issues
+        )
+
+        for table_name, column_name, col_def_sqlite, col_def_pg in migrations:
+            conn = None
+            try:
+                conn = engine.connect()
+                # Check if column exists
+                if is_sqlite:
+                    result = conn.execute(text(f"PRAGMA table_info({table_name})"))
+                    columns = [row[1] for row in result.fetchall()]
+                else:
+                    result = conn.execute(text(
+                        f"SELECT column_name FROM information_schema.columns "
+                        f"WHERE table_name = '{table_name}'"
+                    ))
+                    columns = [row[0] for row in result.fetchall()]
+
+                if column_name not in columns:
+                    logger.info(f"Adding column {column_name} to {table_name}")
+                    col_def = col_def_sqlite if is_sqlite else col_def_pg
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {col_def}"))
+                    logger.info(f"Successfully added column {column_name} to {table_name}")
+                else:
+                    logger.debug(f"Column {column_name} already exists in {table_name}")
+            except Exception as e:
+                logger.warning(f"Could not add column {column_name} to {table_name}: {e}")
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.warning(f"Migration error: {e}")
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+
 
 def create_app(config_class=Config):
     app = Flask(__name__,
                 static_folder='../static',
                 template_folder='templates')
     app.config.from_object(config_class)
+
+    # Apply ProxyFix to trust X-Forwarded headers from nginx reverse proxy
+    # This is required for correct HTTPS detection when behind a reverse proxy
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -104,8 +176,12 @@ def create_app(config_class=Config):
                 branding['show_version'] = show_version.value != 'false'
             if logo_url and logo_url.value:
                 branding['logo_url'] = logo_url.value
-        except:
-            pass  # Use defaults if DB not ready
+        except Exception:
+            # Rollback to prevent session corruption on DB errors
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
 
         # Load license info
         license_info = None
@@ -117,7 +193,12 @@ def create_app(config_class=Config):
                 branding['show_powered_by'] = False
             else:
                 branding['show_powered_by'] = True
-        except:
+        except Exception:
+            # Rollback to prevent session corruption on DB errors
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
             branding['show_powered_by'] = True
 
         return dict(
@@ -175,13 +256,23 @@ def create_app(config_class=Config):
                 logging.getLogger(__name__).info(f"Creating new database at: {db_path}")
                 db.create_all()
             else:
-                # Database exists - DON'T run create_all() to avoid issues
-                # Migrations should handle schema changes
+                # Database exists - run migrations for new columns
                 import logging
-                logging.getLogger(__name__).info(f"Using existing database at: {db_path}")
+                logger = logging.getLogger(__name__)
+                logger.info(f"Using existing database at: {db_path}")
+
+                # Apply schema migrations for new columns (SQLite doesn't auto-add columns)
+                _apply_schema_migrations(logger, db_uri)
         else:
-            # Non-SQLite database (PostgreSQL, etc.) - always run create_all for safety
-            # In production, migrations should be used instead
+            # Non-SQLite database (PostgreSQL, etc.)
+            import logging
+            logger = logging.getLogger(__name__)
+
+            # First ensure tables exist
             db.create_all()
+
+            # Then apply schema migrations for new columns
+            logger.info("Applying schema migrations for PostgreSQL...")
+            _apply_schema_migrations(logger, db_uri)
 
     return app

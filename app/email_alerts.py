@@ -54,7 +54,7 @@ class EmailAlertManager:
             new_matches: List of VulnerabilityMatch objects that are new/critical
 
         Returns:
-            dict: Status result with 'status', 'sent_to', 'matches_count', or 'reason'
+            dict: Status result with 'status', 'sent_to', 'matches_count', 'new_count', or 'reason'
         """
         if not new_matches:
             return {'status': 'skipped', 'reason': 'No new matches'}
@@ -131,9 +131,21 @@ class EmailAlertManager:
         if not filtered_matches:
             return {'status': 'skipped', 'reason': 'No matches meet alert criteria'}
 
-        # Build email
-        subject = f"🚨 SentriKat Alert: {len(filtered_matches)} Critical Vulnerabilities Detected"
-        body = EmailAlertManager._build_alert_email_html(organization, filtered_matches)
+        # Separate NEW matches (never alerted) from already-alerted ones
+        # This allows us to show "X new CVEs (Y total)" in the email
+        new_matches_list = [m for m in filtered_matches if m.first_alerted_at is None]
+        total_matches = len(filtered_matches)
+        new_count = len(new_matches_list)
+
+        # Build email with new vs total counts
+        if new_count > 0:
+            subject = f"🚨 SentriKat Alert: {new_count} New CVE{'s' if new_count != 1 else ''} ({total_matches} total unacknowledged)"
+        else:
+            subject = f"🚨 SentriKat Daily Digest: {total_matches} Critical Vulnerabilities"
+
+        body = EmailAlertManager._build_alert_email_html(
+            organization, filtered_matches, new_count=new_count
+        )
 
         # Send email
         try:
@@ -144,11 +156,17 @@ class EmailAlertManager:
                 html_body=body
             )
 
+            # Mark NEW matches as alerted (set first_alerted_at)
+            now = datetime.utcnow()
+            for match in new_matches_list:
+                match.first_alerted_at = now
+            db.session.commit()
+
             # Log success
             EmailAlertManager._log_alert(
                 organization.id,
                 'critical_cve',
-                len(filtered_matches),
+                total_matches,
                 len(recipients),
                 'success',
                 None
@@ -157,7 +175,8 @@ class EmailAlertManager:
             return {
                 'status': 'success',
                 'sent_to': len(recipients),
-                'matches_count': len(filtered_matches)
+                'matches_count': total_matches,
+                'new_count': new_count
             }
 
         except Exception as e:
@@ -165,7 +184,7 @@ class EmailAlertManager:
             EmailAlertManager._log_alert(
                 organization.id,
                 'critical_cve',
-                len(filtered_matches),
+                total_matches,
                 len(recipients),
                 'failed',
                 str(e)
@@ -173,8 +192,15 @@ class EmailAlertManager:
             return {'status': 'error', 'reason': str(e)}
 
     @staticmethod
-    def _build_alert_email_html(organization, matches):
-        """Build HTML email body - Clean, professional enterprise design"""
+    def _build_alert_email_html(organization, matches, new_count=0):
+        """Build HTML email body - Clean, professional enterprise design
+
+        Args:
+            organization: Organization object
+            matches: List of VulnerabilityMatch objects
+            new_count: Number of NEW (never-alerted) matches in the list
+        """
+        total_count = len(matches)
 
         # Group by priority
         by_priority = {'critical': [], 'high': [], 'medium': [], 'low': []}
@@ -255,7 +281,7 @@ class EmailAlertManager:
                                     <tr>
                                         <td>
                                             <span style="font-size: 18px; font-weight: 700; color: #991b1b;">
-                                                {len(matches)} Critical Vulnerabilities
+                                                {f'{new_count} New CVE{"s" if new_count != 1 else ""} ({total_count} total)' if new_count > 0 else f'{total_count} Critical Vulnerabilities'}
                                             </span>
                                             <p style="margin: 4px 0 0 0; font-size: 14px; color: #7f1d1d;">
                                                 Affecting <strong>{organization.display_name}</strong> - Immediate action required
@@ -268,15 +294,19 @@ class EmailAlertManager:
                             <!-- Stats Row -->
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom: 24px;">
                                 <tr>
-                                    <td width="33%" style="text-align: center; padding: 12px 8px;">
+                                    <td width="25%" style="text-align: center; padding: 12px 8px;">
+                                        <div style="font-size: 28px; font-weight: 700; color: #059669;">{new_count}</div>
+                                        <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">New</div>
+                                    </td>
+                                    <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
                                         <div style="font-size: 28px; font-weight: 700; color: #dc2626;">{len(by_priority['critical'])}</div>
                                         <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Critical</div>
                                     </td>
-                                    <td width="33%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">
+                                    <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
                                         <div style="font-size: 28px; font-weight: 700; color: #ea580c;">{len(by_priority['high'])}</div>
                                         <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">High</div>
                                     </td>
-                                    <td width="33%" style="text-align: center; padding: 12px 8px;">
+                                    <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
                                         <div style="font-size: 28px; font-weight: 700; color: #374151;">{len(by_product)}</div>
                                         <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Products</div>
                                     </td>

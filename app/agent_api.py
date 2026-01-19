@@ -12,25 +12,143 @@ Rate Limiting:
 - General queries: 100/minute per IP
 """
 
-from flask import Blueprint, request, jsonify
-from datetime import datetime
+from flask import Blueprint, request, jsonify, current_app
+from datetime import datetime, timedelta
 from functools import wraps
 import logging
+import threading
+import time
+import re
+import ipaddress
 
 from app import db, csrf, limiter
 from app.models import (
-    Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob
+    Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob,
+    AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification
 )
-from app.licensing import requires_professional, get_license
+from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
 import json
 
 # Threshold for async processing (queued instead of immediate)
 ASYNC_BATCH_THRESHOLD = 100
 
+# Input validation limits
+MAX_HOSTNAME_LENGTH = 255
+MAX_VENDOR_LENGTH = 200
+MAX_PRODUCT_NAME_LENGTH = 200
+MAX_VERSION_LENGTH = 100
+MAX_PATH_LENGTH = 500
+MAX_PRODUCTS_PER_REQUEST = 5000  # Absolute maximum products in single request
+
+# Background worker settings
+WORKER_CHECK_INTERVAL = 5  # seconds between job checks
+_worker_thread = None
+_worker_stop_event = threading.Event()
+
 logger = logging.getLogger(__name__)
 
 agent_bp = Blueprint('agent', __name__)
 csrf.exempt(agent_bp)  # Agents use API keys, not CSRF
+
+
+# ============================================================================
+# Software Filtering - CONSERVATIVE approach
+# Only skip items that are CLEARLY not security-relevant
+# When in doubt, DON'T skip - better to have noise than miss a vulnerability
+# ============================================================================
+
+# Exact product names to skip (case-insensitive) - Windows
+# These are Windows Update metadata entries, not actual software
+SKIP_PRODUCTS_WINDOWS = {
+    # Windows Update entries (not real software)
+    'update for windows',
+    'security update for windows',
+    'cumulative update for windows',
+    'feature update to windows',
+    'microsoft update health tools',
+    # Windows SDK components (dev tools, not deployed software)
+    'windows sdk addendum',
+    'windows sdk arm desktop libs',
+    'windows sdk desktop headers',
+    # Language/localization (no executable code)
+    'windows language pack',
+    'microsoft language experience pack',
+}
+
+# Exact product names to skip (case-insensitive) - Linux
+# Package suffixes that indicate non-runtime packages
+SKIP_SUFFIXES_LINUX = [
+    '-doc',           # Documentation only
+    '-docs',          # Documentation only
+    '-man',           # Man pages only
+    '-dbg',           # Debug symbols
+    '-dbgsym',        # Debug symbols (Debian)
+    '-debuginfo',     # Debug symbols (RHEL)
+    '-debugsource',   # Debug source
+    '-locale',        # Locale data
+    '-locales',       # Locale data
+    '-l10n',          # Localization
+    '-i18n',          # Internationalization
+    '-fonts',         # Font packages
+]
+
+# Patterns to skip - VERY SPECIFIC to avoid false negatives
+SKIP_PATTERNS = [
+    # Language packs with no executable code (must match full product name pattern)
+    r'^(microsoft )?language (pack|experience pack|feature)',
+    r'^(windows|language) (input|handwriting|ocr|speech|text.to.speech)',
+    # Font-only packages
+    r'^(microsoft|windows) (fonts?|typography)',
+    r'^fonts?-',  # Linux font packages like fonts-liberation
+    # Linux locale packages
+    r'^locales?(-all)?$',
+    r'^language-pack-',
+    r'^hunspell-',  # Spell check dictionaries
+    r'^hyphen-',    # Hyphenation dictionaries
+    r'^mythes-',    # Thesaurus data
+]
+
+
+def _should_skip_software(vendor: str, product_name: str) -> bool:
+    """
+    Check if software should be skipped (not added to inventory).
+
+    CONSERVATIVE filtering - only skips items that are clearly not security-relevant:
+    - Documentation packages
+    - Debug symbol packages
+    - Language/locale packs (no executable code)
+    - Font packages
+    - Spell-check dictionaries
+
+    Does NOT skip:
+    - Any Microsoft product that could have vulnerabilities (Office, Exchange, etc.)
+    - .NET Framework (has had CVEs)
+    - Visual C++ Redistributables (tracks deployment, rarely has own CVEs but useful)
+    - Any third-party software
+    - Drivers (some have had CVEs)
+
+    Returns True if the software should be skipped.
+    """
+    if not vendor or not product_name:
+        return True
+
+    product_lower = product_name.lower().strip()
+
+    # Check Windows exact product skip list
+    if product_lower in SKIP_PRODUCTS_WINDOWS:
+        return True
+
+    # Check Linux package suffixes (documentation, debug symbols, locales)
+    for suffix in SKIP_SUFFIXES_LINUX:
+        if product_lower.endswith(suffix):
+            return True
+
+    # Check regex patterns (very specific)
+    for pattern in SKIP_PATTERNS:
+        if re.match(pattern, product_lower, re.IGNORECASE):
+            return True
+
+    return False
 
 
 # ============================================================================
@@ -46,14 +164,109 @@ def get_agent_key_for_limit():
 # Agent Authentication
 # ============================================================================
 
+def _ip_in_allowlist(ip_str, allowed_list):
+    """
+    Check if an IP address is in the allowlist.
+    Supports individual IPs and CIDR notation.
+    """
+    if not allowed_list:
+        return True  # No allowlist = allow all
+
+    try:
+        client_ip = ipaddress.ip_address(ip_str)
+
+        for allowed in allowed_list:
+            allowed = allowed.strip()
+            if not allowed:
+                continue
+
+            try:
+                # Check if it's a CIDR network
+                if '/' in allowed:
+                    network = ipaddress.ip_network(allowed, strict=False)
+                    if client_ip in network:
+                        return True
+                else:
+                    # Single IP comparison
+                    if client_ip == ipaddress.ip_address(allowed):
+                        return True
+            except ValueError:
+                # Invalid CIDR/IP in allowlist, skip
+                continue
+
+        return False
+    except ValueError:
+        # Invalid client IP
+        logger.warning(f"Invalid client IP address: {ip_str}")
+        return False
+
+
+def _queue_to_import_queue(organization_id, vendor, product_name, version, hostname=None):
+    """
+    Queue a product to ImportQueue for review instead of directly adding to Products.
+    Used when auto_approve is False on the API key.
+
+    Returns True if queued successfully, False if already exists or error.
+    """
+    from app.integrations_models import ImportQueue
+
+    try:
+        # Check if already in queue (avoid duplicates)
+        existing = ImportQueue.query.filter_by(
+            organization_id=organization_id,
+            vendor=vendor,
+            product_name=product_name,
+            status='pending'
+        ).first()
+
+        if existing:
+            logger.debug(f"Product already in import queue: {vendor} {product_name}")
+            return False
+
+        # Also check if product already exists (approved previously)
+        existing_product = Product.query.filter_by(
+            vendor=vendor,
+            product_name=product_name
+        ).first()
+
+        if existing_product:
+            # Product exists, don't queue - will be handled normally
+            return False
+
+        # Add to import queue
+        queue_item = ImportQueue(
+            organization_id=organization_id,
+            vendor=vendor,
+            product_name=product_name,
+            detected_version=version,
+            status='pending',
+            criticality='medium',
+            source_data=json.dumps({'hostname': hostname, 'source': 'push_agent'})
+        )
+        db.session.add(queue_item)
+        logger.info(f"Queued product for review: {vendor} {product_name}")
+        return True
+    except Exception as e:
+        logger.warning(f"Error queueing to import queue: {e}")
+        return False
+
+
 def get_agent_api_key():
     """
     Validate agent API key from request header.
     Returns (AgentApiKey, Organization) tuple or (None, None) if invalid.
+
+    Security checks:
+    1. Key exists and is valid (active, not expired)
+    2. IP allowlist enforcement (if configured)
+    3. Updates usage statistics for metering
     """
+    source_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', '')[:500]  # Truncate for safety
+
     api_key = request.headers.get('X-Agent-Key')
     if not api_key:
-        logger.warning(f"Agent auth failed: No X-Agent-Key header from {request.remote_addr}")
+        logger.warning(f"Agent auth failed: No X-Agent-Key header from {source_ip}")
         return None, None
 
     # Hash the key and look it up
@@ -61,11 +274,45 @@ def get_agent_api_key():
     agent_key = AgentApiKey.query.filter_by(key_hash=key_hash).first()
 
     if not agent_key:
-        logger.warning(f"Agent auth failed: Invalid API key from {request.remote_addr}")
+        logger.warning(f"Agent auth failed: Invalid API key from {source_ip}")
+        # Log failed auth event
+        try:
+            # We don't know which org, so log without org context
+            pass  # Can't log without org_id
+        except Exception:
+            pass
         return None, None
 
     if not agent_key.is_valid():
-        logger.warning(f"Agent auth failed: Expired/inactive key '{agent_key.name}' from {request.remote_addr}")
+        logger.warning(f"Agent auth failed: Expired/inactive key '{agent_key.name}' from {source_ip}")
+        # Log failed auth event
+        AgentEvent.log_event(
+            organization_id=agent_key.organization_id,
+            event_type='auth_failed',
+            api_key_id=agent_key.id,
+            details={'reason': 'expired_or_inactive'},
+            source_ip=source_ip,
+            user_agent=user_agent
+        )
+        db.session.commit()
+        return None, None
+
+    # ENFORCE IP ALLOWLIST (if configured)
+    allowed_ips = agent_key.get_allowed_ips()
+    if allowed_ips and not _ip_in_allowlist(source_ip, allowed_ips):
+        logger.warning(
+            f"Agent auth failed: IP {source_ip} not in allowlist for key '{agent_key.name}'"
+        )
+        # Log blocked IP event
+        AgentEvent.log_event(
+            organization_id=agent_key.organization_id,
+            event_type='ip_blocked',
+            api_key_id=agent_key.id,
+            details={'blocked_ip': source_ip, 'allowed_ips': allowed_ips},
+            source_ip=source_ip,
+            user_agent=user_agent
+        )
+        db.session.commit()
         return None, None
 
     # Update usage stats
@@ -95,28 +342,342 @@ def agent_auth_required(f):
 
 
 # ============================================================================
+# Input Validation & Sanitization
+# ============================================================================
+
+def sanitize_string(value, max_length, field_name):
+    """
+    Sanitize and validate a string input.
+    Returns (sanitized_value, error) tuple.
+    """
+    if value is None:
+        return None, None
+
+    if not isinstance(value, str):
+        return None, f"{field_name} must be a string"
+
+    # Remove control characters (except newlines/tabs which might be in paths)
+    sanitized = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', value)
+
+    # Trim whitespace
+    sanitized = sanitized.strip()
+
+    # Check length
+    if len(sanitized) > max_length:
+        return sanitized[:max_length], None  # Truncate silently
+
+    return sanitized, None
+
+
+def validate_inventory_payload(data):
+    """
+    Validate the inventory payload structure and content.
+    Returns (is_valid, errors_list) tuple.
+    """
+    errors = []
+
+    # Required fields
+    hostname = data.get('hostname')
+    if not hostname:
+        errors.append("hostname is required")
+    else:
+        hostname, err = sanitize_string(hostname, MAX_HOSTNAME_LENGTH, 'hostname')
+        if err:
+            errors.append(err)
+        elif not hostname:
+            errors.append("hostname cannot be empty")
+        # Validate hostname format (alphanumeric, hyphens, dots)
+        elif not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$', hostname):
+            errors.append("hostname contains invalid characters")
+        data['hostname'] = hostname
+
+    # Products validation
+    products = data.get('products', [])
+    if not isinstance(products, list):
+        errors.append("products must be an array")
+    elif len(products) > MAX_PRODUCTS_PER_REQUEST:
+        errors.append(f"Too many products ({len(products)}). Maximum is {MAX_PRODUCTS_PER_REQUEST}")
+    else:
+        # Validate each product
+        for i, product in enumerate(products):
+            if not isinstance(product, dict):
+                errors.append(f"products[{i}] must be an object")
+                continue
+
+            vendor = product.get('vendor')
+            product_name = product.get('product')
+
+            if vendor:
+                vendor, _ = sanitize_string(vendor, MAX_VENDOR_LENGTH, 'vendor')
+                product['vendor'] = vendor
+
+            if product_name:
+                product_name, _ = sanitize_string(product_name, MAX_PRODUCT_NAME_LENGTH, 'product')
+                product['product'] = product_name
+
+            version = product.get('version')
+            if version:
+                version, _ = sanitize_string(version, MAX_VERSION_LENGTH, 'version')
+                product['version'] = version
+
+            path = product.get('path')
+            if path:
+                path, _ = sanitize_string(path, MAX_PATH_LENGTH, 'path')
+                product['path'] = path
+
+    # Optional fields validation
+    ip_address = data.get('ip_address')
+    if ip_address:
+        ip_address, _ = sanitize_string(ip_address, 45, 'ip_address')
+        data['ip_address'] = ip_address
+
+    return len(errors) == 0, errors
+
+
+def check_license_can_add_agent(organization_id, is_new_agent=True):
+    """
+    Check if the license allows adding a new agent.
+    Returns (allowed, message, license_info) tuple.
+
+    IMPORTANT: This now uses the CORE RSA-signed license system for enforcement,
+    not the database-only AgentLicense table. The limits in the signed license
+    cannot be tampered with by modifying the database.
+
+    Agent limits are GLOBAL (across all organizations) to prevent the multi-org
+    bypass vulnerability where users create multiple orgs to circumvent limits.
+
+    The AgentLicense table is now used only for usage tracking/metering.
+    """
+    # Get license info from core system (RSA-signed, tamper-proof)
+    license_info = get_license()
+    agent_usage = get_agent_usage()
+
+    # Check if push_agents feature is enabled
+    if not agent_usage['feature_enabled']:
+        return False, "Push Agents require a Professional license.", {
+            'edition': license_info.get_effective_edition(),
+            'feature_enabled': False,
+            'upgrade_required': True
+        }
+
+    # Check GLOBAL agent limit (from signed license)
+    if is_new_agent:
+        can_add, limit, message = check_agent_limit()
+        if not can_add:
+            return False, message, {
+                'edition': license_info.get_effective_edition(),
+                'current_agents': agent_usage['agents']['current'],
+                'max_agents': agent_usage['agents']['limit'],
+                'limit_reached': True,
+                'global_limit': True  # Indicate this is a global limit
+            }
+
+    # Update usage tracking (for metering/billing only - not enforcement)
+    try:
+        license_obj = AgentLicense.query.filter_by(organization_id=organization_id).first()
+        if license_obj:
+            license_obj.update_agent_count()
+    except Exception as e:
+        logger.warning(f"Could not update usage tracking: {e}")
+
+    # Calculate usage percentage for warnings
+    current = agent_usage['agents']['current']
+    limit = agent_usage['agents']['limit']
+    warning = None
+
+    if limit != -1:  # Not unlimited
+        usage_percent = (current / limit * 100) if limit > 0 else 100
+        if usage_percent >= 90:
+            warning = f"Agent limit almost reached ({current}/{limit}). Please upgrade soon."
+        elif usage_percent >= 80:
+            warning = f"Approaching agent limit ({current}/{limit})."
+
+    return True, warning, {
+        'edition': license_info.get_effective_edition(),
+        'current_agents': current,
+        'max_agents': limit,
+        'unlimited': limit == -1,
+        'global_limit': True
+    }
+
+
+def update_usage_metrics(organization_id, is_new_agent=False, products_count=0):
+    """
+    Update usage metrics for billing and analytics.
+    Called after successful inventory report.
+    """
+    try:
+        # Get or create today's usage record
+        usage = AgentUsageRecord.get_or_create_today(organization_id)
+
+        # Increment counters
+        usage.inventory_reports += 1
+        usage.products_discovered += products_count
+
+        if is_new_agent:
+            usage.new_agents += 1
+
+        # Update active agent count
+        license_obj = AgentLicense.query.filter_by(organization_id=organization_id).first()
+        if license_obj:
+            license_obj.update_agent_count()
+            usage.active_agents = license_obj.current_agents
+            if usage.active_agents > usage.peak_agents:
+                usage.peak_agents = usage.active_agents
+
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"Error updating usage metrics: {e}")
+        db.session.rollback()
+
+
+# ============================================================================
+# Background Job Worker
+# ============================================================================
+
+def _background_job_worker(app):
+    """
+    Background worker thread that processes pending inventory jobs.
+    Runs continuously until stop event is set.
+
+    IMPORTANT: Each iteration creates a fresh database session to avoid
+    stale connection issues (psycopg2 connection pool problems).
+    """
+    logger.info("Background job worker started")
+
+    while not _worker_stop_event.is_set():
+        try:
+            # Create fresh app context for each iteration to avoid stale connections
+            with app.app_context():
+                try:
+                    # Get next pending job
+                    job = InventoryJob.get_next_pending()
+
+                    if job:
+                        job_id = job.id  # Store ID before processing
+                        logger.info(f"Background worker processing job {job_id}")
+                        try:
+                            success = process_inventory_job(job)
+                            if success:
+                                logger.info(f"Background worker completed job {job_id}")
+                            else:
+                                logger.warning(f"Background worker: job {job_id} failed")
+                        except Exception as e:
+                            logger.error(f"Background worker error processing job {job_id}: {e}", exc_info=True)
+                            # Mark job as failed - refetch to avoid stale object
+                            try:
+                                job = InventoryJob.query.get(job_id)
+                                if job:
+                                    job.status = 'failed'
+                                    job.error_message = str(e)[:500]  # Truncate long errors
+                                    job.completed_at = datetime.utcnow()
+                                    db.session.commit()
+                            except Exception as commit_err:
+                                logger.error(f"Failed to mark job {job_id} as failed: {commit_err}")
+                                db.session.rollback()
+                    else:
+                        # No pending jobs, sleep before checking again
+                        pass  # Will sleep after context exits
+
+                finally:
+                    # Always clean up session to prevent connection leaks
+                    try:
+                        db.session.remove()
+                    except Exception:
+                        pass
+
+            # Sleep outside the app context to allow connection cleanup
+            if not _worker_stop_event.is_set():
+                _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
+
+        except Exception as e:
+            logger.error(f"Background worker unexpected error: {e}", exc_info=True)
+            # Sleep before retrying on error
+            if not _worker_stop_event.is_set():
+                _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
+
+    logger.info("Background job worker stopped")
+
+
+def start_background_worker(app):
+    """Start the background job worker if not already running."""
+    global _worker_thread
+
+    if _worker_thread is not None and _worker_thread.is_alive():
+        return  # Already running
+
+    _worker_stop_event.clear()
+    _worker_thread = threading.Thread(
+        target=_background_job_worker,
+        args=(app,),
+        daemon=True,
+        name="InventoryJobWorker"
+    )
+    _worker_thread.start()
+    logger.info("Started background inventory job worker")
+
+
+def stop_background_worker():
+    """Stop the background job worker."""
+    global _worker_thread
+
+    if _worker_thread is None:
+        return
+
+    _worker_stop_event.set()
+    _worker_thread.join(timeout=10)
+    _worker_thread = None
+    logger.info("Stopped background inventory job worker")
+
+
+def ensure_worker_running():
+    """Ensure the background worker is running (call from request context)."""
+    global _worker_thread
+
+    if _worker_thread is None or not _worker_thread.is_alive():
+        try:
+            start_background_worker(current_app._get_current_object())
+        except Exception as e:
+            logger.warning(f"Could not start background worker: {e}")
+
+
+# ============================================================================
 # Async Job Processing
 # ============================================================================
 
-def queue_inventory_job(organization, data):
+def queue_inventory_job(organization, data, api_key_id=None):
     """
     Queue a large inventory report for async processing.
     Returns immediately with job ID.
+
+    Args:
+        organization: Organization object
+        data: Inventory payload
+        api_key_id: Optional API key ID for tracking auto_approve setting
     """
     hostname = data.get('hostname')
     agent_id = data.get('agent', {}).get('id')
+
+    logger.info(f"queue_inventory_job called for hostname={hostname}, agent_id={agent_id}")
+
+    # Validate organization
+    if not organization:
+        logger.error(f"queue_inventory_job: organization is None for hostname={hostname}")
+        return jsonify({'error': 'Invalid organization. Check API key configuration.'}), 400
 
     try:
         # Find or create asset first (so we have asset_id for the job)
         asset = None
         if agent_id:
             asset = Asset.query.filter_by(agent_id=agent_id).first()
+            logger.debug(f"Found asset by agent_id: {asset}")
 
         if not asset:
             asset = Asset.query.filter_by(
                 organization_id=organization.id,
                 hostname=hostname
             ).first()
+            logger.debug(f"Found asset by org+hostname: {asset}")
 
         if not asset:
             asset = Asset(
@@ -125,6 +686,7 @@ def queue_inventory_job(organization, data):
             )
             db.session.add(asset)
             db.session.flush()
+            logger.info(f"Created new asset for {hostname}, id={asset.id}")
 
         # Update basic asset info immediately
         asset.ip_address = data.get('ip_address')
@@ -140,48 +702,61 @@ def queue_inventory_job(organization, data):
         asset.last_checkin = datetime.utcnow()
         asset.status = 'online'
 
+        products = data.get('products', [])
+        logger.info(f"Creating inventory job for {hostname} with {len(products)} products")
+
         # Create job with products payload
         job = InventoryJob(
             organization_id=organization.id,
             asset_id=asset.id,
+            api_key_id=api_key_id,  # Track which API key was used for auto_approve check
             job_type='inventory',
             status='pending',
             priority=5,
             payload=json.dumps({
-                'products': data.get('products', []),
+                'products': products,
                 'hostname': hostname
             }),
-            total_items=len(data.get('products', []))
+            total_items=len(products)
         )
         db.session.add(job)
         db.session.commit()
 
         logger.info(
             f"Queued inventory job {job.id} for {hostname}: "
-            f"{len(data.get('products', []))} products to process"
+            f"{len(products)} products to process"
         )
+
+        # Ensure background worker is running to process the job
+        ensure_worker_running()
 
         return jsonify({
             'status': 'queued',
             'job_id': job.id,
             'asset_id': asset.id,
             'hostname': hostname,
-            'message': f'Large batch ({len(data.get("products", []))} products) queued for processing',
+            'message': f'Large batch ({len(products)} products) queued for processing',
             'check_status_url': f'/api/agent/jobs/{job.id}'
         }), 202
 
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error queueing inventory job for {hostname}: {e}", exc_info=True)
-        # Return 400 instead of 500 for database errors to match what client sees
-        return jsonify({'error': f'Failed to queue inventory: {str(e)}'}), 400
+        return jsonify({'error': f'Failed to queue inventory: {str(e)}'}), 500
 
 
 def process_inventory_job(job):
     """
     Process a queued inventory job.
     Called by background worker.
+
+    Session management:
+    - Commits in batches of 50 to avoid holding locks too long
+    - Uses explicit rollback on errors to ensure clean state
     """
+    job_id = job.id  # Store ID to avoid stale reference issues
+    logger.info(f"=== Processing inventory job {job_id} ===")
+
     try:
         job.status = 'processing'
         job.started_at = datetime.utcnow()
@@ -189,21 +764,49 @@ def process_inventory_job(job):
 
         payload = json.loads(job.payload)
         products = payload.get('products', [])
-        asset = Asset.query.get(job.asset_id)
-        organization = Organization.query.get(job.organization_id)
+        logger.info(f"Job {job_id}: Loaded {len(products)} products from payload")
+
+        # Store IDs for reference
+        asset_id = job.asset_id
+        org_id = job.organization_id
+
+        asset = Asset.query.get(asset_id)
+        organization = Organization.query.get(org_id)
+
+        logger.info(f"Job {job_id}: Asset={asset.hostname if asset else 'None'}, "
+                    f"Org={organization.name if organization else 'None'}")
 
         if not asset:
+            logger.error(f"Job {job_id}: Asset {asset_id} not found")
             job.status = 'failed'
             job.error_message = 'Asset not found'
             job.completed_at = datetime.utcnow()
             db.session.commit()
             return False
 
+        if not organization:
+            logger.error(f"Job {job_id}: Organization {org_id} not found")
+            job.status = 'failed'
+            job.error_message = 'Organization not found'
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
+            return False
+
+        # Check auto_approve setting from API key
+        auto_approve = True  # Default to True for backward compatibility
+        if job.api_key_id:
+            api_key = AgentApiKey.query.get(job.api_key_id)
+            if api_key:
+                auto_approve = api_key.auto_approve
+                logger.info(f"Job {job_id}: API key auto_approve={auto_approve}")
+
         products_created = 0
         products_updated = 0
+        products_queued = 0  # Track items sent to import queue
         installations_created = 0
         installations_updated = 0
         items_failed = 0
+        items_processed = 0
 
         for product_data in products:
             try:
@@ -215,6 +818,11 @@ def process_inventory_job(job):
                     items_failed += 1
                     continue
 
+                # Skip common Windows bloat and irrelevant software
+                if _should_skip_software(vendor, product_name):
+                    items_processed += 1
+                    continue
+
                 # Find or create product
                 product = Product.query.filter_by(
                     vendor=vendor,
@@ -222,6 +830,20 @@ def process_inventory_job(job):
                 ).first()
 
                 if not product:
+                    # Check if this product is excluded (banned) for this organization
+                    from app.models import ProductExclusion
+                    if ProductExclusion.is_excluded(organization.id, vendor, product_name, version):
+                        logger.debug(f"Skipping excluded product: {vendor} {product_name} for org {organization.id}")
+                        items_processed += 1
+                        continue
+
+                    # Check auto_approve: if False, queue for review instead of creating
+                    if not auto_approve:
+                        if _queue_to_import_queue(organization.id, vendor, product_name, version, asset.hostname):
+                            products_queued += 1
+                        items_processed += 1
+                        continue
+
                     product = Product(
                         vendor=vendor,
                         product_name=product_name,
@@ -229,6 +851,10 @@ def process_inventory_job(job):
                         active=True,
                         criticality='medium'
                     )
+                    # Auto-apply CPE mapping for better vulnerability matching
+                    from app.cpe_mapping import apply_cpe_to_product
+                    apply_cpe_to_product(product)
+
                     db.session.add(product)
                     db.session.flush()
                     products_created += 1
@@ -247,12 +873,16 @@ def process_inventory_job(job):
                 ).first()
 
                 if not installation:
+                    # Normalize OS name to platform category
+                    platform = ProductInstallation.normalize_os_name(asset.os_name)
+
                     installation = ProductInstallation(
                         asset_id=asset.id,
                         product_id=product.id,
                         version=version,
                         install_path=product_data.get('path'),
-                        detected_by='agent'
+                        detected_by='agent',
+                        detected_on_os=platform  # Track which OS this came from
                     )
                     db.session.add(installation)
                     installations_created += 1
@@ -262,41 +892,65 @@ def process_inventory_job(job):
                     installation.last_seen_at = datetime.utcnow()
                     installations_updated += 1
 
-                job.items_processed += 1
+                items_processed += 1
 
-                # Commit in batches of 50
-                if job.items_processed % 50 == 0:
+                # Commit in batches of 50 to avoid holding locks too long
+                if items_processed % 50 == 0:
+                    # Update job progress before commit
+                    job.items_processed = items_processed
                     db.session.commit()
+                    logger.debug(f"Job {job_id}: Committed batch at {items_processed} items")
 
             except Exception as e:
                 items_failed += 1
-                logger.warning(f"Error processing product in job {job.id}: {e}")
+                logger.warning(f"Error processing product in job {job_id}: {e}")
+                # Rollback the failed item but continue processing
+                try:
+                    db.session.rollback()
+                    # Re-fetch objects after rollback
+                    job = InventoryJob.query.get(job_id)
+                    asset = Asset.query.get(asset_id)
+                    organization = Organization.query.get(org_id)
+                except Exception:
+                    pass
 
         # Update asset inventory timestamp
-        asset.last_inventory_at = datetime.utcnow()
+        asset = Asset.query.get(asset_id)  # Re-fetch to ensure fresh object
+        if asset:
+            asset.last_inventory_at = datetime.utcnow()
 
-        # Finalize job
-        job.status = 'completed'
-        job.completed_at = datetime.utcnow()
-        job.items_created = products_created + installations_created
-        job.items_updated = products_updated + installations_updated
-        job.items_failed = items_failed
-        db.session.commit()
+        # Finalize job - re-fetch to ensure fresh object
+        job = InventoryJob.query.get(job_id)
+        if job:
+            job.status = 'completed'
+            job.completed_at = datetime.utcnow()
+            job.items_processed = items_processed
+            job.items_created = products_created + installations_created
+            job.items_updated = products_updated + installations_updated
+            job.items_failed = items_failed
+            db.session.commit()
 
         logger.info(
-            f"Completed inventory job {job.id}: "
+            f"Completed inventory job {job_id}: "
             f"{products_created} products created, {products_updated} updated, "
             f"{installations_created} installations created, {installations_updated} updated"
         )
         return True
 
     except Exception as e:
-        db.session.rollback()
-        job.status = 'failed'
-        job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
-        db.session.commit()
-        logger.error(f"Error processing inventory job {job.id}: {e}", exc_info=True)
+        logger.error(f"Error processing inventory job {job_id}: {e}", exc_info=True)
+        try:
+            db.session.rollback()
+            # Re-fetch job and mark as failed
+            job = InventoryJob.query.get(job_id)
+            if job:
+                job.status = 'failed'
+                job.error_message = str(e)[:500]
+                job.completed_at = datetime.utcnow()
+                db.session.commit()
+        except Exception as commit_err:
+            logger.error(f"Failed to mark job {job_id} as failed: {commit_err}")
+            db.session.rollback()
         return False
 
 
@@ -339,26 +993,109 @@ def report_inventory():
             }
         ]
     }
+
+    Response includes:
+    - status: success/queued/error
+    - license_warning: (if approaching limit)
+    - summary: counts of products processed
     """
-    logger.info(f"Agent inventory request received from {request.remote_addr}")
-    organization = request.organization
-    data = request.get_json()
+    source_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', '')[:500]
+    logger.info(f"=== Agent inventory request received from {source_ip} ===")
+
+    # Get organization from authenticated request
+    organization = getattr(request, 'organization', None)
+    agent_key = getattr(request, 'agent_key', None)
+
+    logger.info(f"Auth context: org={organization.name if organization else 'None'}, "
+                f"key={agent_key.name if agent_key else 'None'}")
+
+    # Parse JSON body
+    try:
+        data = request.get_json(force=True)  # force=True ignores content-type
+    except Exception as e:
+        logger.error(f"Failed to parse JSON body: {e}")
+        return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
 
     if not data:
-        logger.warning(f"Agent inventory failed: No JSON body from {request.remote_addr}")
+        logger.warning(f"Agent inventory failed: No JSON body from {source_ip}")
         return jsonify({'error': 'JSON body required'}), 400
 
-    hostname = data.get('hostname')
-    if not hostname:
-        logger.warning(f"Agent inventory failed: No hostname in payload from {request.remote_addr}")
-        return jsonify({'error': 'hostname is required'}), 400
+    # VALIDATE INPUT
+    is_valid, validation_errors = validate_inventory_payload(data)
+    if not is_valid:
+        logger.warning(f"Agent inventory validation failed from {source_ip}: {validation_errors}")
+        return jsonify({
+            'error': 'Validation failed',
+            'details': validation_errors
+        }), 400
 
+    hostname = data.get('hostname')
     products = data.get('products', [])
-    logger.info(f"Agent inventory: {hostname} sending {len(products)} products")
+    logger.info(f"Agent inventory: {hostname} sending {len(products)} products "
+                f"(threshold={ASYNC_BATCH_THRESHOLD})")
+
+    # Validate organization
+    if not organization:
+        logger.error(f"Agent inventory: No organization for {hostname}. "
+                     f"API key may not be assigned to an organization.")
+        return jsonify({
+            'error': 'API key not associated with an organization',
+            'hint': 'Ensure the API key is created for a specific organization'
+        }), 400
+
+    # Check if this is a new agent (for license check)
+    agent_id = data.get('agent', {}).get('id')
+    existing_asset = None
+    if agent_id:
+        existing_asset = Asset.query.filter_by(agent_id=agent_id).first()
+    if not existing_asset:
+        existing_asset = Asset.query.filter_by(
+            organization_id=organization.id,
+            hostname=hostname
+        ).first()
+
+    is_new_agent = existing_asset is None
+
+    # CHECK LICENSE LIMITS (pay-per-agent enforcement)
+    if is_new_agent:
+        can_add, license_message, license_info = check_license_can_add_agent(
+            organization.id, is_new_agent=True
+        )
+        if not can_add:
+            logger.warning(
+                f"License limit exceeded for org {organization.id}: {license_message}"
+            )
+            # Log license exceeded event
+            AgentEvent.log_event(
+                organization_id=organization.id,
+                event_type='license_exceeded',
+                api_key_id=agent_key.id,
+                details={
+                    'hostname': hostname,
+                    'message': license_message,
+                    'license': license_info
+                },
+                source_ip=source_ip,
+                user_agent=user_agent
+            )
+            db.session.commit()
+            return jsonify({
+                'error': 'License limit exceeded',
+                'message': license_message,
+                'license': license_info,
+                'hint': 'Please upgrade your license to add more agents'
+            }), 403
+    else:
+        # Existing agent - still check license for warning
+        _, license_message, license_info = check_license_can_add_agent(
+            organization.id, is_new_agent=False
+        )
 
     # Check if batch should be processed asynchronously
     if len(products) >= ASYNC_BATCH_THRESHOLD:
-        return queue_inventory_job(organization, data)
+        logger.info(f"Agent inventory: Routing to async processing for {hostname}")
+        return queue_inventory_job(organization, data, api_key_id=agent_key.id if agent_key else None)
 
     try:
         # Find or create asset
@@ -404,9 +1141,16 @@ def report_inventory():
 
         db.session.flush()  # Get asset ID
 
+        # Check auto_approve setting from API key
+        auto_approve = True  # Default to True for backward compatibility
+        if agent_key and hasattr(agent_key, 'auto_approve'):
+            auto_approve = agent_key.auto_approve
+            logger.info(f"Sync inventory: API key auto_approve={auto_approve}")
+
         # Process products
         products_created = 0
         products_updated = 0
+        products_queued = 0  # Track items sent to import queue
         installations_created = 0
         installations_updated = 0
 
@@ -425,6 +1169,12 @@ def report_inventory():
             ).first()
 
             if not product:
+                # Check auto_approve: if False, queue for review instead of creating
+                if not auto_approve:
+                    if _queue_to_import_queue(organization.id, vendor, product_name, version, hostname):
+                        products_queued += 1
+                    continue
+
                 # Create product
                 product = Product(
                     vendor=vendor,
@@ -433,6 +1183,10 @@ def report_inventory():
                     active=True,
                     criticality='medium'
                 )
+                # Auto-apply CPE mapping for better vulnerability matching
+                from app.cpe_mapping import apply_cpe_to_product
+                apply_cpe_to_product(product)
+
                 db.session.add(product)
                 db.session.flush()
                 products_created += 1
@@ -453,23 +1207,85 @@ def report_inventory():
             ).first()
 
             if not installation:
+                # Normalize OS name to platform category
+                platform = ProductInstallation.normalize_os_name(asset.os_name)
+
                 installation = ProductInstallation(
                     asset_id=asset.id,
                     product_id=product.id,
                     version=version,
                     install_path=product_data.get('path'),
-                    detected_by='agent'
+                    detected_by='agent',
+                    detected_on_os=platform  # Track which OS this came from
                 )
                 db.session.add(installation)
+                db.session.flush()  # Get installation ID for version history
                 installations_created += 1
+
+                # Record version history for new installation
+                ProductVersionHistory.record_change(
+                    installation_id=installation.id,
+                    asset_id=asset.id,
+                    product_id=product.id,
+                    old_version=None,
+                    new_version=version,
+                    detected_by='agent'
+                )
             else:
+                # Track version changes
+                old_version = installation.version
+                if old_version != version and version:
+                    ProductVersionHistory.record_change(
+                        installation_id=installation.id,
+                        asset_id=asset.id,
+                        product_id=product.id,
+                        old_version=old_version,
+                        new_version=version,
+                        detected_by='agent'
+                    )
+
                 # Update existing installation
                 installation.version = version
                 installation.install_path = product_data.get('path')
                 installation.last_seen_at = datetime.utcnow()
                 installations_updated += 1
 
+        # Log inventory event
+        AgentEvent.log_event(
+            organization_id=organization.id,
+            event_type='registered' if is_new_agent else 'inventory_reported',
+            asset_id=asset.id,
+            api_key_id=agent_key.id,
+            details={
+                'hostname': hostname,
+                'products_count': len(products),
+                'products_created': products_created,
+                'installations_created': installations_created
+            },
+            source_ip=source_ip,
+            user_agent=user_agent
+        )
+
         db.session.commit()
+
+        # Update usage metrics for billing
+        update_usage_metrics(
+            organization_id=organization.id,
+            is_new_agent=is_new_agent,
+            products_count=products_created
+        )
+
+        # Resolve any stale notifications for this asset
+        if not is_new_agent:
+            StaleAssetNotification.query.filter_by(
+                asset_id=asset.id,
+                resolved=False
+            ).update({
+                'resolved': True,
+                'resolved_at': datetime.utcnow(),
+                'resolved_by': 'agent_checkin'
+            })
+            db.session.commit()
 
         logger.info(
             f"Inventory reported for {hostname}: "
@@ -477,7 +1293,8 @@ def report_inventory():
             f"{installations_created} installations created, {installations_updated} updated"
         )
 
-        return jsonify({
+        # Build response with license warning if applicable
+        response = {
             'status': 'success',
             'asset_id': asset.id,
             'hostname': asset.hostname,
@@ -488,7 +1305,14 @@ def report_inventory():
                 'installations_updated': installations_updated,
                 'total_products': len(products)
             }
-        })
+        }
+
+        # Include license warning if approaching limit
+        if license_message:
+            response['license_warning'] = license_message
+            response['license'] = license_info
+
+        return jsonify(response)
 
     except Exception as e:
         db.session.rollback()
@@ -586,6 +1410,7 @@ def list_jobs():
 
 
 @agent_bp.route('/api/admin/process-jobs', methods=['POST'])
+@limiter.limit("10/minute")
 def trigger_job_processing():
     """
     Trigger processing of pending inventory jobs.
@@ -621,6 +1446,7 @@ def trigger_job_processing():
 
 
 @agent_bp.route('/api/admin/jobs', methods=['GET'])
+@limiter.limit("60/minute")
 def admin_list_jobs():
     """List all inventory jobs (admin view)."""
     from app.auth import get_current_user
@@ -933,32 +1759,49 @@ def list_agent_keys():
     """List agent API keys for organization."""
     from app.auth import get_current_user
 
-    user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
+    try:
+        user = get_current_user()
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
 
-    # Check permission
-    if not user.is_super_admin():
-        # Only org admins can manage keys
-        org_id = request.args.get('organization_id', type=int)
-        if not org_id:
-            return jsonify({'error': 'organization_id required'}), 400
+        # Check permission
+        if not user.is_super_admin():
+            # Only org admins can manage keys
+            org_id = request.args.get('organization_id', type=int)
+            if not org_id:
+                return jsonify({'error': 'organization_id required'}), 400
 
-        user_org = user.org_memberships.filter_by(organization_id=org_id).first()
-        if not user_org or user_org.role != 'org_admin':
-            return jsonify({'error': 'Organization admin access required'}), 403
+            user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+            if not user_org or user_org.role != 'org_admin':
+                return jsonify({'error': 'Organization admin access required'}), 403
 
-        keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
-    else:
-        org_id = request.args.get('organization_id', type=int)
-        if org_id:
             keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
         else:
-            keys = AgentApiKey.query.all()
+            org_id = request.args.get('organization_id', type=int)
+            if org_id:
+                keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
+            else:
+                keys = AgentApiKey.query.all()
 
-    return jsonify({
-        'api_keys': [k.to_dict() for k in keys]
-    })
+        # Safely convert to dict
+        api_keys = []
+        for k in keys:
+            try:
+                api_keys.append(k.to_dict())
+            except Exception as e:
+                logger.error(f"Error converting agent key {k.id} to dict: {e}")
+                api_keys.append({
+                    'id': k.id,
+                    'name': k.name or 'Unknown',
+                    'key_prefix': k.key_prefix or '',
+                    'error': 'Failed to load full details'
+                })
+
+        return jsonify({'api_keys': api_keys})
+
+    except Exception as e:
+        logger.error(f"Error in list_agent_keys: {e}", exc_info=True)
+        return jsonify({'error': f'Failed to load agent keys: {str(e)}'}), 500
 
 
 @agent_bp.route('/api/agent-keys', methods=['POST'])
@@ -984,6 +1827,19 @@ def create_agent_key():
         if not user_org or user_org.role != 'org_admin':
             return jsonify({'error': 'Organization admin access required'}), 403
 
+    # CHECK GLOBAL API KEY LIMIT (from signed license - tamper-proof)
+    can_add, limit, message = check_agent_api_key_limit()
+    if not can_add:
+        agent_usage = get_agent_usage()
+        return jsonify({
+            'error': 'API key limit reached',
+            'message': message,
+            'current_keys': agent_usage['api_keys']['current'],
+            'max_keys': agent_usage['api_keys']['limit'],
+            'global_limit': True,  # Indicate this is a global limit
+            'hint': 'Please upgrade your license to create more API keys'
+        }), 403
+
     # Generate key
     raw_key = AgentApiKey.generate_key()
     key_hash = AgentApiKey.hash_key(raw_key)
@@ -995,6 +1851,7 @@ def create_agent_key():
         key_hash=key_hash,
         key_prefix=key_prefix,
         max_assets=data.get('max_assets'),
+        auto_approve=data.get('auto_approve', False),  # Auto-add products without Import Queue
         created_by=user.id
     )
 
@@ -1068,6 +1925,7 @@ def get_maintenance_stats():
 
 
 @agent_bp.route('/api/admin/maintenance/cleanup', methods=['POST'])
+@limiter.limit("5/minute")
 def run_maintenance_cleanup():
     """
     Run maintenance cleanup tasks.
@@ -1254,3 +2112,408 @@ def get_integrations_summary():
         logger.error(f"Error getting integrations summary: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================================================
+# Worker Health & Status Endpoints
+# ============================================================================
+
+@agent_bp.route('/api/admin/worker-status', methods=['GET'])
+def get_worker_status():
+    """
+    Get the status of the background job worker.
+    Returns worker health, queue depth, and processing statistics.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    global _worker_thread
+
+    # Worker status
+    worker_alive = _worker_thread is not None and _worker_thread.is_alive()
+
+    # Queue statistics
+    pending_jobs = InventoryJob.query.filter_by(status='pending').count()
+    processing_jobs = InventoryJob.query.filter_by(status='processing').count()
+    completed_today = InventoryJob.query.filter(
+        InventoryJob.status == 'completed',
+        InventoryJob.completed_at >= datetime.utcnow().replace(hour=0, minute=0, second=0)
+    ).count()
+    failed_today = InventoryJob.query.filter(
+        InventoryJob.status == 'failed',
+        InventoryJob.completed_at >= datetime.utcnow().replace(hour=0, minute=0, second=0)
+    ).count()
+
+    # Get most recent job
+    latest_job = InventoryJob.query.order_by(InventoryJob.created_at.desc()).first()
+
+    return jsonify({
+        'worker': {
+            'status': 'running' if worker_alive else 'stopped',
+            'is_alive': worker_alive,
+            'check_interval_seconds': WORKER_CHECK_INTERVAL
+        },
+        'queue': {
+            'pending': pending_jobs,
+            'processing': processing_jobs,
+            'completed_today': completed_today,
+            'failed_today': failed_today
+        },
+        'latest_job': latest_job.to_dict() if latest_job else None,
+        'config': {
+            'async_threshold': ASYNC_BATCH_THRESHOLD,
+            'max_products_per_request': MAX_PRODUCTS_PER_REQUEST
+        },
+        'checked_at': datetime.utcnow().isoformat()
+    })
+
+
+@agent_bp.route('/api/admin/worker/start', methods=['POST'])
+@limiter.limit("5/minute")
+def start_worker():
+    """Manually start the background worker."""
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    try:
+        start_background_worker(current_app._get_current_object())
+        return jsonify({
+            'status': 'success',
+            'message': 'Background worker started'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# License Management & Dashboard Endpoints
+# ============================================================================
+
+@agent_bp.route('/api/admin/licenses', methods=['GET'])
+def list_licenses():
+    """List all agent licenses (admin view)."""
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    if user.is_super_admin():
+        licenses = AgentLicense.query.all()
+    else:
+        org_ids = [m.organization_id for m in user.org_memberships.all()]
+        licenses = AgentLicense.query.filter(AgentLicense.organization_id.in_(org_ids)).all()
+
+    # Update counts for each license
+    for lic in licenses:
+        lic.update_agent_count()
+    db.session.commit()
+
+    return jsonify({
+        'licenses': [lic.to_dict() for lic in licenses]
+    })
+
+
+@agent_bp.route('/api/admin/licenses/<int:org_id>', methods=['GET'])
+def get_organization_license(org_id):
+    """Get license details for a specific organization."""
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Check permission
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if org_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    license_obj = AgentLicense.query.filter_by(organization_id=org_id).first()
+
+    if not license_obj:
+        # Create trial license if doesn't exist
+        license_obj = AgentLicense(
+            organization_id=org_id,
+            tier='trial',
+            max_agents=AgentLicense.TIER_LIMITS['trial']['max_agents'],
+            max_api_keys=AgentLicense.TIER_LIMITS['trial']['max_api_keys'],
+            status='trial',
+            trial_started_at=datetime.utcnow(),
+            trial_ends_at=datetime.utcnow() + timedelta(days=14)
+        )
+        db.session.add(license_obj)
+        db.session.commit()
+
+    # Update count
+    license_obj.update_agent_count()
+    db.session.commit()
+
+    return jsonify(license_obj.to_dict())
+
+
+@agent_bp.route('/api/admin/licenses/<int:org_id>', methods=['PUT', 'PATCH'])
+def update_license(org_id):
+    """
+    Update an organization's license (super admin only).
+    Used for upgrading tiers, adjusting limits, extending trials.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    license_obj = AgentLicense.query.filter_by(organization_id=org_id).first()
+    if not license_obj:
+        return jsonify({'error': 'License not found'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    updated_fields = []
+
+    # Update tier
+    if 'tier' in data:
+        new_tier = data['tier']
+        if new_tier in AgentLicense.TIER_LIMITS:
+            old_tier = license_obj.tier
+            license_obj.tier = new_tier
+            # Apply tier defaults if not explicitly set
+            tier_limits = AgentLicense.TIER_LIMITS[new_tier]
+            if 'max_agents' not in data:
+                license_obj.max_agents = tier_limits['max_agents']
+            if 'max_api_keys' not in data:
+                license_obj.max_api_keys = tier_limits['max_api_keys']
+            updated_fields.append(f'tier: {old_tier} -> {new_tier}')
+        else:
+            return jsonify({'error': f'Invalid tier: {new_tier}'}), 400
+
+    # Update limits
+    if 'max_agents' in data:
+        license_obj.max_agents = int(data['max_agents'])
+        updated_fields.append('max_agents')
+    if 'max_api_keys' in data:
+        license_obj.max_api_keys = int(data['max_api_keys'])
+        updated_fields.append('max_api_keys')
+
+    # Update status
+    if 'status' in data:
+        if data['status'] in ['active', 'trial', 'suspended', 'expired', 'grace_period']:
+            license_obj.status = data['status']
+            updated_fields.append('status')
+        else:
+            return jsonify({'error': f'Invalid status: {data["status"]}'}), 400
+
+    # Update billing
+    if 'billing_cycle' in data:
+        license_obj.billing_cycle = data['billing_cycle']
+        updated_fields.append('billing_cycle')
+
+    # Extend trial
+    if 'extend_trial_days' in data:
+        days = int(data['extend_trial_days'])
+        if license_obj.trial_ends_at:
+            license_obj.trial_ends_at = license_obj.trial_ends_at + timedelta(days=days)
+        else:
+            license_obj.trial_ends_at = datetime.utcnow() + timedelta(days=days)
+        updated_fields.append(f'trial extended by {days} days')
+
+    # Set grace period
+    if 'grace_period_days' in data:
+        days = int(data['grace_period_days'])
+        license_obj.grace_period_until = datetime.utcnow() + timedelta(days=days)
+        license_obj.status = 'grace_period'
+        updated_fields.append(f'grace period set for {days} days')
+
+    db.session.commit()
+    logger.info(f"License updated for org {org_id} by {user.username}: {updated_fields}")
+
+    return jsonify({
+        'status': 'success',
+        'message': f'License updated: {", ".join(updated_fields)}',
+        'license': license_obj.to_dict()
+    })
+
+
+@agent_bp.route('/api/admin/usage/<int:org_id>', methods=['GET'])
+def get_usage_history(org_id):
+    """
+    Get usage history for an organization.
+    Used for billing and analytics dashboards.
+    """
+    from app.auth import get_current_user
+    from datetime import date
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Check permission
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if org_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    # Get date range
+    days = request.args.get('days', 30, type=int)
+    start_date = date.today() - timedelta(days=days)
+
+    records = AgentUsageRecord.query.filter(
+        AgentUsageRecord.organization_id == org_id,
+        AgentUsageRecord.record_date >= start_date
+    ).order_by(AgentUsageRecord.record_date.asc()).all()
+
+    # Calculate totals
+    total_reports = sum(r.inventory_reports for r in records)
+    peak_agents = max((r.peak_agents for r in records), default=0)
+    total_new_agents = sum(r.new_agents for r in records)
+
+    return jsonify({
+        'organization_id': org_id,
+        'period_days': days,
+        'records': [r.to_dict() for r in records],
+        'summary': {
+            'total_inventory_reports': total_reports,
+            'peak_agents': peak_agents,
+            'total_new_agents': total_new_agents,
+            'average_daily_agents': round(sum(r.active_agents for r in records) / max(len(records), 1), 1)
+        }
+    })
+
+
+@agent_bp.route('/api/admin/events', methods=['GET'])
+def list_agent_events():
+    """
+    List agent events for audit trail.
+    Supports filtering by organization, event type, and date range.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Build query
+    query = AgentEvent.query
+
+    # Filter by organization
+    if user.is_super_admin():
+        org_id = request.args.get('organization_id', type=int)
+        if org_id:
+            query = query.filter_by(organization_id=org_id)
+    else:
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = query.filter(AgentEvent.organization_id.in_(user_org_ids))
+
+    # Filter by event type
+    event_type = request.args.get('event_type')
+    if event_type:
+        query = query.filter_by(event_type=event_type)
+
+    # Filter by asset
+    asset_id = request.args.get('asset_id', type=int)
+    if asset_id:
+        query = query.filter_by(asset_id=asset_id)
+
+    # Filter by date range
+    days = request.args.get('days', 7, type=int)
+    start_date = datetime.utcnow() - timedelta(days=days)
+    query = query.filter(AgentEvent.created_at >= start_date)
+
+    # Pagination
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 50, type=int), 100)
+
+    pagination = query.order_by(AgentEvent.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
+    return jsonify({
+        'events': [e.to_dict() for e in pagination.items],
+        'total': pagination.total,
+        'page': page,
+        'per_page': per_page,
+        'pages': pagination.pages
+    })
+
+
+@agent_bp.route('/api/admin/version-history', methods=['GET'])
+def list_version_history():
+    """
+    List version change history for products.
+    Useful for tracking software updates across the fleet.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    query = ProductVersionHistory.query
+
+    # Filter by organization (through asset)
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = query.join(Asset).filter(Asset.organization_id.in_(user_org_ids))
+
+    # Filter by product
+    product_id = request.args.get('product_id', type=int)
+    if product_id:
+        query = query.filter(ProductVersionHistory.product_id == product_id)
+
+    # Filter by asset
+    asset_id = request.args.get('asset_id', type=int)
+    if asset_id:
+        query = query.filter(ProductVersionHistory.asset_id == asset_id)
+
+    # Filter by change type
+    change_type = request.args.get('change_type')
+    if change_type:
+        query = query.filter(ProductVersionHistory.change_type == change_type)
+
+    # Filter by date range
+    days = request.args.get('days', 30, type=int)
+    start_date = datetime.utcnow() - timedelta(days=days)
+    query = query.filter(ProductVersionHistory.detected_at >= start_date)
+
+    # Pagination
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 50, type=int), 100)
+
+    pagination = query.order_by(ProductVersionHistory.detected_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
+    return jsonify({
+        'version_history': [vh.to_dict() for vh in pagination.items],
+        'total': pagination.total,
+        'page': page,
+        'per_page': per_page,
+        'pages': pagination.pages
+    })
+
+
+# ============================================================================
+# License Tier Definitions (for reference)
+# ============================================================================
+
+@agent_bp.route('/api/admin/license-tiers', methods=['GET'])
+def get_license_tiers():
+    """Get available license tiers and their limits."""
+    return jsonify({
+        'tiers': AgentLicense.TIER_LIMITS,
+        'description': {
+            'trial': 'Free 14-day trial with limited agents',
+            'starter': 'Small teams and single-site deployments',
+            'professional': 'Medium organizations with multiple sites',
+            'enterprise': 'Large organizations with extensive deployments',
+            'unlimited': 'Unlimited agents for enterprise customers'
+        }
+    })

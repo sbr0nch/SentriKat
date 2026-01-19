@@ -57,6 +57,14 @@ logs/
 tools/
 .license_keys/
 
+# SSL Certificates (CONFIDENTIAL)
+*.pem
+*.key
+*.crt
+*.csr
+nginx/ssl/
+docker/nginx/certs/
+
 # Test/Development files
 tests/
 *.test.py
