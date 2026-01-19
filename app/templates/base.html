@@ -2070,17 +2070,17 @@
                         <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
                     <div class="sidebar-submenu">
-                        <a href="#" onclick="switchToAdminTab('users'); return false;" class="sidebar-sublink">
+                        <a href="/admin-panel#users" class="sidebar-sublink">
                             <i class="bi bi-person"></i>
                             Local Users
                         </a>
                         {% if license and license.is_professional() %}
-                        <a href="#" onclick="switchToAdminTab('ldapUsers'); return false;" class="sidebar-sublink">
+                        <a href="/admin-panel#ldapUsers" class="sidebar-sublink">
                             <i class="bi bi-diagram-3"></i>
                             LDAP Users
                             <span class="badge bg-info ms-auto">PRO</span>
                         </a>
-                        <a href="#" onclick="switchToAdminTab('ldapGroups'); return false;" class="sidebar-sublink">
+                        <a href="/admin-panel#ldapGroups" class="sidebar-sublink">
                             <i class="bi bi-diagram-2"></i>
                             LDAP Groups
                             <span class="badge bg-info ms-auto">PRO</span>
@@ -2089,7 +2089,7 @@
                     </div>
 
                     <!-- Organizations -->
-                    <a href="#" onclick="switchToAdminTab('organizations'); return false;" class="sidebar-link" data-tooltip="Organizations">
+                    <a href="/admin-panel#organizations" class="sidebar-link" data-tooltip="Organizations">
                         <i class="bi bi-building"></i>
                         <span class="link-text">Organizations</span>
                     </a>
@@ -2100,7 +2100,7 @@
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Integrations</div>
-                    <a href="#" onclick="switchToAdminTab('integrations'); return false;" class="sidebar-link" data-tooltip="Integrations">
+                    <a href="/admin-panel#integrations" class="sidebar-link" data-tooltip="Integrations">
                         <i class="bi bi-plug-fill"></i>
                         <span class="link-text">Integrations</span>
                         {% if license and license.is_professional() %}
@@ -2114,7 +2114,7 @@
                 {% if current_user and current_user.is_super_admin() %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">System</div>
-                    <a href="#" onclick="switchToAdminTab('settings'); return false;" class="sidebar-link" data-tooltip="Settings">
+                    <a href="/admin-panel#settings" class="sidebar-link" data-tooltip="Settings">
                         <i class="bi bi-gear-fill"></i>
                         <span class="link-text">Settings</span>
                     </a>

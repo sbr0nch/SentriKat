@@ -8,59 +8,25 @@
 
 {% block content %}
 <div class="fade-in">
-    <div class="row mb-4">
-        <div class="col">
-            <h1 class="display-6 fw-bold text-dark mb-2">
-                <i class="bi bi-shield-lock me-2"></i>Administration Panel
-            </h1>
-            <p class="text-muted">Manage users, organizations, and system settings</p>
-        </div>
+    <!-- Hidden tab triggers (for programmatic switching) -->
+    <div id="adminTabs" class="d-none">
+        <button id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button"></button>
+        <button id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button"></button>
+        <button id="ldap-groups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button"></button>
+        <button id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button"></button>
+        <button id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button"></button>
+        <button id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button"></button>
     </div>
 
-    <!-- Admin Tabs -->
-    <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">
-                <i class="bi bi-people me-2"></i>Users
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="ldap-users-tab-item" style="display: none;">
-            <button class="nav-link" id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button">
-                <i class="bi bi-diagram-3 me-2"></i>LDAP Users
-                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="ldap-groups-tab-item" style="display: none;">
-            <button class="nav-link" id="ldap-groups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button">
-                <i class="bi bi-diagram-2 me-2"></i>LDAP Groups
-                {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>{% endif %}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button">
-                <i class="bi bi-building me-2"></i>Organizations
-            </button>
-        </li>
-        {% if license and license.is_professional() %}
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button">
-                <i class="bi bi-plug me-2"></i>Integrations
-                <span class="badge bg-secondary ms-1" id="importQueueBadge" style="display: none;">0</span>
-            </button>
-        </li>
-        {% endif %}
-        {% if current_user and current_user.is_super_admin() %}
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
-                <i class="bi bi-gear me-2"></i>Settings
-            </button>
-        </li>
-        {% endif %}
-    </ul>
-
     <div class="tab-content" id="adminTabsContent">
-        <!-- Users Tab -->
+        <!-- Users Section -->
         <div class="tab-pane fade show active" id="users" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-people-fill me-2"></i>Local Users</h2>
+                    <p class="text-muted mb-0 small">Manage local user accounts and permissions</p>
+                </div>
+            </div>
             <div class="alert alert-light border mb-3 small">
                 <i class="bi bi-info-circle me-1"></i>
                 <strong>Local users</strong> can be created manually below. <strong>LDAP users</strong> are auto-created when they first log in (if Auto-Provision is enabled in LDAP Group Mappings).
@@ -129,9 +95,16 @@
 
         <!-- LDAP Users Tab -->
         <div class="tab-pane fade" id="ldapUsers" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-3 me-2"></i>LDAP Users</h2>
+                    <p class="text-muted mb-0 small">Discover and invite users from your LDAP/Active Directory</p>
+                </div>
+                <span class="badge bg-info">PRO</span>
+            </div>
             <div class="card">
                 <div class="card-header">
-                    <span><i class="bi bi-diagram-3 me-2"></i>LDAP User Discovery & Management</span>
+                    <span><i class="bi bi-search me-2"></i>User Discovery</span>
                 </div>
                 <div class="card-body">
                     <div class="alert alert-info">
@@ -189,8 +162,14 @@
             </div>
         </div>
 
-        <!-- Organizations Tab -->
+        <!-- Organizations Section -->
         <div class="tab-pane fade" id="organizations" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-building me-2"></i>Organizations</h2>
+                    <p class="text-muted mb-0 small">Manage tenants, departments, and team structures</p>
+                </div>
+            </div>
             <div class="alert alert-light border mb-3 small">
                 <i class="bi bi-info-circle me-1"></i>
                 <strong>Organizations</strong> are logical groups (e.g., tenants, departments, teams) that contain users and products. Each organization can have its own SMTP settings for notifications. Users are assigned to one organization, while Super Admins can access all.
@@ -257,8 +236,15 @@
             </div>
         </div>
 
-        <!-- LDAP Groups Tab -->
+        <!-- LDAP Groups Section -->
         <div class="tab-pane fade" id="ldapGroups" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-2 me-2"></i>LDAP Groups</h2>
+                    <p class="text-muted mb-0 small">Map LDAP/AD groups to SentriKat roles and organizations</p>
+                </div>
+                <span class="badge bg-info">PRO</span>
+            </div>
             <div class="row">
                 <div class="col-12">
                     <div class="alert alert-info mb-3">
@@ -500,7 +486,14 @@
         {% if license and license.is_professional() %}
         <!-- Integrations Tab (PRO Feature) -->
         <div class="tab-pane fade" id="integrations" role="tabpanel">
-            <!-- Integrations Sub-Tabs (Redesigned) -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-plug-fill me-2"></i>Integrations</h2>
+                    <p class="text-muted mb-0 small">Agent management, API keys, and data imports</p>
+                </div>
+                <span class="badge bg-success">PRO</span>
+            </div>
+            <!-- Integrations Sub-Tabs -->
             <ul class="nav nav-pills mb-4" id="integrationsTabs" role="tablist">
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="integrations-overview-tab" data-bs-toggle="pill" data-bs-target="#integrationsOverview" type="button">
@@ -901,6 +894,12 @@
 
         <!-- Settings Tab -->
         <div class="tab-pane fade" id="settings" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-gear-fill me-2"></i>System Settings</h2>
+                    <p class="text-muted mb-0 small">LDAP configuration, SMTP settings, and system options</p>
+                </div>
+            </div>
             <!-- Settings Sub-Tabs -->
             <ul class="nav nav-pills mb-4" id="settingsTabs" role="tablist">
                 {% if current_user and current_user.is_super_admin() %}
@@ -2988,4 +2987,38 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/admin_panel.js') }}"></script>
+<script>
+// Hash-based navigation for admin panel sections
+function activateTabFromHash() {
+    const hash = window.location.hash.replace('#', '');
+    if (hash) {
+        const tabButton = document.getElementById(hash + '-tab');
+        if (tabButton) {
+            // Use Bootstrap's tab API
+            const tab = new bootstrap.Tab(tabButton);
+            tab.show();
+        }
+    }
+}
+
+// Activate tab on page load
+document.addEventListener('DOMContentLoaded', function() {
+    activateTabFromHash();
+});
+
+// Handle back/forward navigation
+window.addEventListener('hashchange', function() {
+    activateTabFromHash();
+});
+
+// Update hash when tab changes (for bookmarking)
+document.querySelectorAll('#adminTabs button[data-bs-toggle="tab"]').forEach(function(tabButton) {
+    tabButton.addEventListener('shown.bs.tab', function(e) {
+        const target = e.target.getAttribute('data-bs-target');
+        if (target) {
+            history.replaceState(null, null, target);
+        }
+    });
+});
+</script>
 {% endblock %}
