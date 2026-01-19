@@ -85,6 +85,11 @@ def create_app(config_class=Config):
                 template_folder='templates')
     app.config.from_object(config_class)
 
+    # Apply ProxyFix to trust X-Forwarded headers from nginx reverse proxy
+    # This is required for correct HTTPS detection when behind a reverse proxy
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
     db.init_app(app)
     migrate.init_app(app, db)
     csrf.init_app(app)
