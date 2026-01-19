@@ -15,7 +15,7 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "5
 
 def _apply_schema_migrations(logger, db_uri):
     """Apply schema migrations for new columns (works for SQLite and PostgreSQL)"""
-    from sqlalchemy import text
+    from sqlalchemy import text, create_engine
 
     # List of migrations to apply: (table_name, column_name, column_definition_sqlite, column_definition_pg)
     migrations = [
@@ -26,31 +26,40 @@ def _apply_schema_migrations(logger, db_uri):
 
     is_sqlite = db_uri.startswith('sqlite')
 
-    for table_name, column_name, col_def_sqlite, col_def_pg in migrations:
-        try:
-            # Check if column exists - different query for SQLite vs PostgreSQL
-            if is_sqlite:
-                result = db.session.execute(text(f"PRAGMA table_info({table_name})"))
-                columns = [row[1] for row in result.fetchall()]
-            else:
-                # PostgreSQL - use information_schema
-                result = db.session.execute(text(
-                    f"SELECT column_name FROM information_schema.columns "
-                    f"WHERE table_name = '{table_name}'"
-                ))
-                columns = [row[0] for row in result.fetchall()]
+    # Use a separate engine/connection for migrations to avoid session issues
+    try:
+        engine = create_engine(db_uri)
+        with engine.connect() as conn:
+            for table_name, column_name, col_def_sqlite, col_def_pg in migrations:
+                try:
+                    # Check if column exists
+                    if is_sqlite:
+                        result = conn.execute(text(f"PRAGMA table_info({table_name})"))
+                        columns = [row[1] for row in result.fetchall()]
+                    else:
+                        result = conn.execute(text(
+                            f"SELECT column_name FROM information_schema.columns "
+                            f"WHERE table_name = '{table_name}'"
+                        ))
+                        columns = [row[0] for row in result.fetchall()]
 
-            if column_name not in columns:
-                logger.info(f"Adding column {column_name} to {table_name}")
-                col_def = col_def_sqlite if is_sqlite else col_def_pg
-                db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {col_def}"))
-                db.session.commit()
-                logger.info(f"Successfully added column {column_name} to {table_name}")
-            else:
-                logger.info(f"Column {column_name} already exists in {table_name}")
-        except Exception as e:
-            logger.warning(f"Could not add column {column_name} to {table_name}: {e}")
-            db.session.rollback()
+                    if column_name not in columns:
+                        logger.info(f"Adding column {column_name} to {table_name}")
+                        col_def = col_def_sqlite if is_sqlite else col_def_pg
+                        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {col_def}"))
+                        conn.commit()
+                        logger.info(f"Successfully added column {column_name} to {table_name}")
+                    else:
+                        logger.debug(f"Column {column_name} already exists in {table_name}")
+                except Exception as e:
+                    logger.warning(f"Could not add column {column_name} to {table_name}: {e}")
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
+        engine.dispose()
+    except Exception as e:
+        logger.warning(f"Migration error: {e}")
 
 
 def create_app(config_class=Config):
