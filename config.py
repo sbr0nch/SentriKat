@@ -31,15 +31,14 @@ class Config:
 
     # Database URL (PostgreSQL recommended for production)
     # Format: postgresql://user:password@host:port/database
-    DATABASE_URL = os.environ.get('DATABASE_URL')
-    if DATABASE_URL:
-        SQLALCHEMY_DATABASE_URI = DATABASE_URL
-    else:
-        # Default PostgreSQL connection for Docker deployment
-        SQLALCHEMY_DATABASE_URI = os.environ.get(
-            'DATABASE_URL',
-            'postgresql://sentrikat:sentrikat@db:5432/sentrikat'
-        )
+    # MUST be set via DATABASE_URL environment variable
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
+    if not SQLALCHEMY_DATABASE_URI:
+        import warnings
+        if os.environ.get('FLASK_ENV') == 'production':
+            raise ValueError("DATABASE_URL environment variable must be set in production!")
+        warnings.warn("DATABASE_URL not set - using default Docker credentials for development only")
+        SQLALCHEMY_DATABASE_URI = 'postgresql://sentrikat:sentrikat@db:5432/sentrikat'
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {

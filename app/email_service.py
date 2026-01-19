@@ -6,8 +6,14 @@ import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.models import User
+from config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def _get_app_url():
+    """Get the configured SentriKat URL for email links"""
+    return Config.SENTRIKAT_URL or ''
 
 
 def send_product_assignment_notification(product, organization, action='assigned'):
@@ -62,7 +68,7 @@ def send_product_assignment_notification(product, organization, action='assigned
                     <p>SentriKat will now monitor this product for vulnerabilities and send alerts according to your organization's notification settings.</p>
 
                     <p style="margin-top: 20px;">
-                        <a href="https://sentrikat.local/admin" style="background: #1e40af; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View in SentriKat</a>
+                        <a href="{_get_app_url()}/admin" style="background: #1e40af; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View in SentriKat</a>
                     </p>
                 </div>
                 <div style="margin-top: 20px; padding: 15px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb;">
