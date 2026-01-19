@@ -516,12 +516,12 @@
                         <div class="col-12">
                             <div class="card border-0 bg-light">
                                 <div class="card-body">
-                                    <h5 class="card-title mb-3"><i class="bi bi-lightbulb me-2 text-warning"></i>How Integrations Work</h5>
+                                    <h5 class="card-title mb-3"><i class="bi bi-diagram-3 me-2 text-muted"></i>How Integrations Work</h5>
                                     <div class="row align-items-center">
                                         <!-- Pull Sources -->
                                         <div class="col-md-3 text-center mb-3 mb-md-0">
-                                            <div class="p-3 bg-white rounded shadow-sm">
-                                                <i class="bi bi-cloud-download text-primary" style="font-size: 2rem;"></i>
+                                            <div class="p-3 bg-white rounded border">
+                                                <i class="bi bi-cloud-download text-muted" style="font-size: 2rem;"></i>
                                                 <h6 class="mt-2 mb-1">Pull Sources</h6>
                                                 <small class="text-muted">REST API sources</small>
                                             </div>
@@ -532,10 +532,10 @@
                                         </div>
                                         <!-- SentriKat -->
                                         <div class="col-md-4 text-center mb-3 mb-md-0">
-                                            <div class="p-3 bg-primary text-white rounded shadow">
-                                                <i class="bi bi-shield-check" style="font-size: 2rem;"></i>
-                                                <h6 class="mt-2 mb-1">SentriKat</h6>
-                                                <small>Import Queue &rarr; Products</small>
+                                            <div class="p-3 bg-white rounded border border-2">
+                                                <i class="bi bi-shield-check text-dark" style="font-size: 2rem;"></i>
+                                                <h6 class="mt-2 mb-1 fw-bold">SentriKat</h6>
+                                                <small class="text-muted">Import Queue &rarr; Products</small>
                                             </div>
                                         </div>
                                         <!-- Arrow -->
@@ -544,8 +544,8 @@
                                         </div>
                                         <!-- Push Agents -->
                                         <div class="col-md-3 text-center">
-                                            <div class="p-3 bg-white rounded shadow-sm">
-                                                <i class="bi bi-cloud-upload text-success" style="font-size: 2rem;"></i>
+                                            <div class="p-3 bg-white rounded border">
+                                                <i class="bi bi-cloud-upload text-muted" style="font-size: 2rem;"></i>
                                                 <h6 class="mt-2 mb-1">Push Agents</h6>
                                                 <small class="text-muted">Windows/Linux endpoints</small>
                                             </div>
@@ -559,7 +559,7 @@
                     <!-- Stats Cards -->
                     <div class="row mb-4" id="integrationStatsRow">
                         <div class="col-md-3">
-                            <div class="card h-100 border-start border-primary border-4">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('pull-sources-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -567,7 +567,7 @@
                                             <h3 class="mb-0" id="statPullSources">-</h3>
                                         </div>
                                         <div class="align-self-center">
-                                            <i class="bi bi-cloud-download text-primary" style="font-size: 2rem; opacity: 0.5;"></i>
+                                            <i class="bi bi-cloud-download text-secondary" style="font-size: 2rem; opacity: 0.4;"></i>
                                         </div>
                                     </div>
                                     <small class="text-muted">External inventory systems</small>
@@ -575,7 +575,7 @@
                             </div>
                         </div>
                         <div class="col-md-3">
-                            <div class="card h-100 border-start border-success border-4">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('push-agents-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -583,7 +583,7 @@
                                             <h3 class="mb-0"><span id="statEndpointsOnline">-</span><small class="text-muted fs-6">/<span id="statEndpointsTotal">-</span></small></h3>
                                         </div>
                                         <div class="align-self-center">
-                                            <i class="bi bi-pc-display text-success" style="font-size: 2rem; opacity: 0.5;"></i>
+                                            <i class="bi bi-pc-display text-secondary" style="font-size: 2rem; opacity: 0.4;"></i>
                                         </div>
                                     </div>
                                     <small class="text-muted">Online / Total endpoints</small>
@@ -591,7 +591,7 @@
                             </div>
                         </div>
                         <div class="col-md-3">
-                            <div class="card h-100 border-start border-warning border-4">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('import-queue-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -599,7 +599,7 @@
                                             <h3 class="mb-0" id="statPendingImports">-</h3>
                                         </div>
                                         <div class="align-self-center">
-                                            <i class="bi bi-inbox text-warning" style="font-size: 2rem; opacity: 0.5;"></i>
+                                            <i class="bi bi-inbox text-secondary" style="font-size: 2rem; opacity: 0.4;"></i>
                                         </div>
                                     </div>
                                     <small class="text-muted">Pending review</small>
@@ -607,7 +607,7 @@
                             </div>
                         </div>
                         <div class="col-md-3">
-                            <div class="card h-100 border-start border-info border-4">
+                            <div class="card h-100">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -615,7 +615,7 @@
                                             <h3 class="mb-0" id="statRecentCheckins">-</h3>
                                         </div>
                                         <div class="align-self-center">
-                                            <i class="bi bi-activity text-info" style="font-size: 2rem; opacity: 0.5;"></i>
+                                            <i class="bi bi-activity text-secondary" style="font-size: 2rem; opacity: 0.4;"></i>
                                         </div>
                                     </div>
                                     <small class="text-muted">Check-ins last 24h</small>
@@ -628,8 +628,8 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="card">
-                                <div class="card-header bg-primary text-white">
-                                    <i class="bi bi-cloud-download me-2"></i>Pull Sources
+                                <div class="card-header bg-white">
+                                    <i class="bi bi-cloud-download me-2 text-muted"></i><strong>Pull Sources</strong>
                                 </div>
                                 <div class="card-body">
                                     <p class="text-muted mb-3">Connect to existing software inventory systems. SentriKat will fetch and import your software catalog automatically.</p>
@@ -638,7 +638,7 @@
                                         <span class="badge bg-light text-dark border"><i class="bi bi-box me-1"></i>Inventory Systems</span>
                                         <span class="badge bg-light text-dark border"><i class="bi bi-hdd-network me-1"></i>Asset Management</span>
                                     </div>
-                                    <button class="btn btn-primary btn-sm" onclick="document.getElementById('pull-sources-tab').click()">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('pull-sources-tab').click()">
                                         <i class="bi bi-gear me-1"></i>Configure Pull Sources
                                     </button>
                                 </div>
@@ -646,8 +646,8 @@
                         </div>
                         <div class="col-md-6">
                             <div class="card">
-                                <div class="card-header bg-success text-white">
-                                    <i class="bi bi-cloud-upload me-2"></i>Push Agents
+                                <div class="card-header bg-white">
+                                    <i class="bi bi-cloud-upload me-2 text-muted"></i><strong>Push Agents</strong>
                                 </div>
                                 <div class="card-body">
                                     <p class="text-muted mb-3">Deploy lightweight agents on servers and workstations. Agents report installed software directly to SentriKat.</p>
@@ -656,7 +656,7 @@
                                         <span class="badge bg-light text-dark border"><i class="bi bi-ubuntu me-1"></i>Linux</span>
                                         <span class="badge bg-light text-dark border"><i class="bi bi-terminal me-1"></i>PowerShell/Bash</span>
                                     </div>
-                                    <button class="btn btn-success btn-sm" onclick="document.getElementById('push-agents-tab').click()">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('push-agents-tab').click()">
                                         <i class="bi bi-download me-1"></i>Deploy Agents
                                     </button>
                                 </div>

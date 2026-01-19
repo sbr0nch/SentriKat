@@ -573,6 +573,11 @@ document.addEventListener('DOMContentLoaded', async function() {
             loadAllSettings();
         }, 500);
 
+        // Pre-load integrations summary (for Overview stats)
+        setTimeout(() => {
+            loadIntegrationsSummary();
+        }, 300);
+
         // Tab change handlers
         const orgTab = document.getElementById('organizations-tab');
         if (orgTab) {
