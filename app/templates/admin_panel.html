@@ -11,8 +11,8 @@
     <!-- Hidden tab triggers (for programmatic switching) -->
     <div id="adminTabs" class="d-none">
         <button id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button"></button>
-        <button id="ldap-users-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button"></button>
-        <button id="ldap-groups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button"></button>
+        <button id="ldapUsers-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button"></button>
+        <button id="ldapGroups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button"></button>
         <button id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button"></button>
         <button id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button"></button>
         <button id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button"></button>
@@ -2987,8 +2987,8 @@ function activateTabFromHash() {
     // Validate that the tab exists
     const tabButton = document.getElementById(hash + '-tab');
     if (tabButton) {
-        // Hide all tab panes first
-        document.querySelectorAll('.tab-pane').forEach(pane => {
+        // Hide all main tab panes first (only direct children of adminTabsContent)
+        document.querySelectorAll('#adminTabsContent > .tab-pane').forEach(pane => {
             pane.classList.remove('show', 'active');
         });
 
@@ -2996,6 +2996,29 @@ function activateTabFromHash() {
         const targetPane = document.getElementById(hash);
         if (targetPane) {
             targetPane.classList.add('show', 'active');
+
+            // If this section has inner pills (Integrations, Settings, LDAP Groups),
+            // activate the first pill and its content
+            const innerPillsNav = targetPane.querySelector('.nav-pills');
+            if (innerPillsNav) {
+                const firstPill = innerPillsNav.querySelector('.nav-link');
+                const innerTabContent = targetPane.querySelector('.tab-content');
+
+                if (firstPill && innerTabContent) {
+                    // Activate first pill button
+                    innerPillsNav.querySelectorAll('.nav-link').forEach(p => p.classList.remove('active'));
+                    firstPill.classList.add('active');
+
+                    // Show first inner tab pane
+                    innerTabContent.querySelectorAll('.tab-pane').forEach(p => {
+                        p.classList.remove('show', 'active');
+                    });
+                    const firstInnerPane = innerTabContent.querySelector('.tab-pane');
+                    if (firstInnerPane) {
+                        firstInnerPane.classList.add('show', 'active');
+                    }
+                }
+            }
         }
 
         // Update active state on hidden tab buttons
