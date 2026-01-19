@@ -56,6 +56,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: sentrikat-nginx
+    entrypoint: ["/docker-entrypoint-custom.sh"]
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
@@ -63,11 +64,14 @@ services:
       - SERVER_NAME=${SERVER_NAME:-localhost}
       - SSL_CERT_FILE=${SSL_CERT_FILE:-fullchain.pem}
       - SSL_KEY_FILE=${SSL_KEY_FILE:-privkey.pem}
+      - SSL_CHAIN_FILE=${SSL_CHAIN_FILE:-}
     volumes:
-      # Use nginx.conf.template for HTTP-only, nginx-ssl.conf.template for HTTPS
+      # Custom entrypoint for SSL certificate handling
+      - ./nginx/docker-entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      # Nginx config template
       - ./nginx/${NGINX_TEMPLATE:-nginx.conf.template}:/etc/nginx/templates/default.conf.template:ro
-      # Mount SSL certificates here when using HTTPS (optional)
-      - ${SSL_CERT_PATH:-./nginx/ssl}:/etc/nginx/ssl:ro
+      # Mount SSL certificates (read-only source)
+      - ${SSL_CERT_PATH:-./nginx/ssl}:/ssl-certs:ro
     depends_on:
       - sentrikat
     restart: unless-stopped
