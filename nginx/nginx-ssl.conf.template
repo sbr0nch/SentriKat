@@ -34,8 +34,8 @@ http {
         server_name ${SERVER_NAME};
 
         # SSL certificates (mount these via docker volume)
-        ssl_certificate /etc/nginx/ssl/fullchain.pem;
-        ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+        ssl_certificate /etc/nginx/ssl/${SSL_CERT_FILE};
+        ssl_certificate_key /etc/nginx/ssl/${SSL_KEY_FILE};
 
         # Modern SSL configuration
         ssl_protocols TLSv1.2 TLSv1.3;

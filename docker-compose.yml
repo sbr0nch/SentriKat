@@ -61,6 +61,8 @@ services:
       - "${HTTPS_PORT:-443}:443"
     environment:
       - SERVER_NAME=${SERVER_NAME:-localhost}
+      - SSL_CERT_FILE=${SSL_CERT_FILE:-fullchain.pem}
+      - SSL_KEY_FILE=${SSL_KEY_FILE:-privkey.pem}
     volumes:
       # Use nginx.conf.template for HTTP-only, nginx-ssl.conf.template for HTTPS
       - ./nginx/${NGINX_TEMPLATE:-nginx.conf.template}:/etc/nginx/templates/default.conf.template:ro
