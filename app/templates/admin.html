@@ -1736,23 +1736,34 @@
         try {
             // Process in batches of 10 to avoid overwhelming the server
             const batchSize = 10;
+            let rateLimited = false;
+
             for (let i = 0; i < productIds.length; i += batchSize) {
+                // If we got rate limited, stop processing
+                if (rateLimited) break;
+
                 const batch = productIds.slice(i, i + batchSize);
                 const results = await Promise.all(
                     batch.map(async (productId) => {
                         try {
                             const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
-                            return response.ok;
+                            if (response.status === 429) {
+                                rateLimited = true;
+                                return { ok: false, rateLimited: true };
+                            }
+                            return { ok: response.ok, rateLimited: false };
                         } catch {
-                            return false;
+                            return { ok: false, rateLimited: false };
                         }
                     })
                 );
-                successCount += results.filter(r => r).length;
-                failCount += results.filter(r => !r).length;
+                successCount += results.filter(r => r.ok).length;
+                failCount += results.filter(r => !r.ok && !r.rateLimited).length;
             }
 
-            if (failCount === 0) {
+            if (rateLimited) {
+                showToast(`Rate limit reached. Deleted ${successCount} products. Please wait a minute and try again.`, 'warning');
+            } else if (failCount === 0) {
                 showToast(`${successCount} product(s) deleted successfully`, 'success');
             } else if (successCount === 0) {
                 showToast(`Failed to delete ${failCount} product(s)`, 'danger');

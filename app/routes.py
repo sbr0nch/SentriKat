@@ -521,6 +521,7 @@ def update_product(product_id):
 
 @bp.route('/api/products/<int:product_id>', methods=['DELETE'])
 @manager_required
+@limiter.limit("500 per minute")  # Allow bulk delete operations
 def delete_product(product_id):
     """
     Delete a product or remove it from current organization.
