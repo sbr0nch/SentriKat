@@ -201,6 +201,56 @@ def _ip_in_allowlist(ip_str, allowed_list):
         return False
 
 
+def _queue_to_import_queue(organization_id, vendor, product_name, version, hostname=None):
+    """
+    Queue a product to ImportQueue for review instead of directly adding to Products.
+    Used when auto_approve is False on the API key.
+
+    Returns True if queued successfully, False if already exists or error.
+    """
+    from app.integrations_models import ImportQueue
+
+    try:
+        # Check if already in queue (avoid duplicates)
+        existing = ImportQueue.query.filter_by(
+            organization_id=organization_id,
+            vendor=vendor,
+            product_name=product_name,
+            status='pending'
+        ).first()
+
+        if existing:
+            logger.debug(f"Product already in import queue: {vendor} {product_name}")
+            return False
+
+        # Also check if product already exists (approved previously)
+        existing_product = Product.query.filter_by(
+            vendor=vendor,
+            product_name=product_name
+        ).first()
+
+        if existing_product:
+            # Product exists, don't queue - will be handled normally
+            return False
+
+        # Add to import queue
+        queue_item = ImportQueue(
+            organization_id=organization_id,
+            vendor=vendor,
+            product_name=product_name,
+            detected_version=version,
+            status='pending',
+            criticality='medium',
+            source_data=json.dumps({'hostname': hostname, 'source': 'push_agent'})
+        )
+        db.session.add(queue_item)
+        logger.info(f"Queued product for review: {vendor} {product_name}")
+        return True
+    except Exception as e:
+        logger.warning(f"Error queueing to import queue: {e}")
+        return False
+
+
 def get_agent_api_key():
     """
     Validate agent API key from request header.
@@ -742,8 +792,17 @@ def process_inventory_job(job):
             db.session.commit()
             return False
 
+        # Check auto_approve setting from API key
+        auto_approve = True  # Default to True for backward compatibility
+        if job.api_key_id:
+            api_key = AgentApiKey.query.get(job.api_key_id)
+            if api_key:
+                auto_approve = api_key.auto_approve
+                logger.info(f"Job {job_id}: API key auto_approve={auto_approve}")
+
         products_created = 0
         products_updated = 0
+        products_queued = 0  # Track items sent to import queue
         installations_created = 0
         installations_updated = 0
         items_failed = 0
@@ -775,6 +834,13 @@ def process_inventory_job(job):
                     from app.models import ProductExclusion
                     if ProductExclusion.is_excluded(organization.id, vendor, product_name, version):
                         logger.debug(f"Skipping excluded product: {vendor} {product_name} for org {organization.id}")
+                        items_processed += 1
+                        continue
+
+                    # Check auto_approve: if False, queue for review instead of creating
+                    if not auto_approve:
+                        if _queue_to_import_queue(organization.id, vendor, product_name, version, asset.hostname):
+                            products_queued += 1
                         items_processed += 1
                         continue
 
@@ -1075,9 +1141,16 @@ def report_inventory():
 
         db.session.flush()  # Get asset ID
 
+        # Check auto_approve setting from API key
+        auto_approve = True  # Default to True for backward compatibility
+        if agent_key and hasattr(agent_key, 'auto_approve'):
+            auto_approve = agent_key.auto_approve
+            logger.info(f"Sync inventory: API key auto_approve={auto_approve}")
+
         # Process products
         products_created = 0
         products_updated = 0
+        products_queued = 0  # Track items sent to import queue
         installations_created = 0
         installations_updated = 0
 
@@ -1096,6 +1169,12 @@ def report_inventory():
             ).first()
 
             if not product:
+                # Check auto_approve: if False, queue for review instead of creating
+                if not auto_approve:
+                    if _queue_to_import_queue(organization.id, vendor, product_name, version, hostname):
+                        products_queued += 1
+                    continue
+
                 # Create product
                 product = Product(
                     vendor=vendor,

@@ -5444,6 +5444,10 @@ function fallbackCopy(inputEl) {
 
 let agentKeysLoaded = false;
 
+// Temporary storage for recently created API keys (cleared on page refresh)
+// Maps key_prefix -> full_key for re-download capability
+const recentlyCreatedKeys = new Map();
+
 async function loadAgentKeys() {
     const tbody = document.getElementById('agentKeysTableBody');
     if (!tbody) return;
@@ -5580,6 +5584,11 @@ async function createAgentKey() {
 
         const data = await response.json();
 
+        // Store the full key temporarily for re-download from table
+        if (data.key_prefix && data.api_key) {
+            recentlyCreatedKeys.set(data.key_prefix, data.api_key);
+        }
+
         // Hide create modal
         bootstrap.Modal.getInstance(document.getElementById('agentKeyModal')).hide();
 
@@ -5587,6 +5596,9 @@ async function createAgentKey() {
         document.getElementById('newAgentKeyValue').value = data.api_key;
         const showModal = new bootstrap.Modal(document.getElementById('showAgentKeyModal'));
         showModal.show();
+
+        // Refresh the keys table to show the new key
+        loadAgentKeys();
 
         showToast('Agent API key created successfully', 'success');
     } catch (error) {
@@ -5706,12 +5718,19 @@ function fallbackCopyText(text) {
  * Called from the API keys table download buttons
  */
 async function downloadAgentWithKey(keyPrefix, platform) {
-    // We need to get the full key - but we only have the prefix
-    // Show a message that they need to use the key shown when created
-    showToast(`Downloading ${platform === 'windows' ? 'Windows' : 'Linux'} agent script...`, 'info');
+    // Check if we have the full key stored from recent creation
+    const fullKey = recentlyCreatedKeys.get(keyPrefix);
+    const hasKey = !!fullKey;
+
+    showToast(`Downloading ${platform === 'windows' ? 'Windows' : 'Linux'} agent${hasKey ? ' with embedded key' : ''}...`, 'info');
 
     try {
-        const url = `/api/agents/script/${platform}`;
+        // If we have the full key, embed it in the download
+        let url = `/api/agents/script/${platform}`;
+        if (hasKey) {
+            url += `?api_key=${encodeURIComponent(fullKey)}`;
+        }
+
         const response = await fetch(url);
 
         if (!response.ok) {
@@ -5722,7 +5741,11 @@ async function downloadAgentWithKey(keyPrefix, platform) {
         const filename = platform === 'windows' ? 'sentrikat-agent.ps1' : 'sentrikat-agent.sh';
         downloadScript(filename, script);
 
-        showToast(`Agent script downloaded! Replace YOUR_API_KEY with the key shown when created.`, 'success');
+        if (hasKey) {
+            showToast(`${platform === 'windows' ? 'Windows' : 'Linux'} agent downloaded with API key embedded!`, 'success');
+        } else {
+            showToast(`Agent script downloaded. Replace YOUR_API_KEY with your key (only available at creation time).`, 'warning');
+        }
     } catch (error) {
         showToast(`Error downloading agent: ${error.message}`, 'danger');
     }
