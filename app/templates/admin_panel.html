@@ -11,8 +11,10 @@
     <!-- Hidden tab triggers (for programmatic switching) -->
     <div id="adminTabs" class="d-none">
         <button id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button"></button>
+        {% if license and license.is_professional() %}
         <button id="ldapUsers-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button"></button>
         <button id="ldapGroups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button"></button>
+        {% endif %}
         <button id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button"></button>
         <button id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button"></button>
         <button id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button"></button>
@@ -232,7 +234,8 @@
             </div>
         </div>
 
-        <!-- LDAP Groups Section -->
+        {% if license and license.is_professional() %}
+        <!-- LDAP Groups Section (Professional License Only) -->
         <div class="tab-pane fade" id="ldapGroups" role="tabpanel">
             <div class="mb-4">
                 <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-2 me-2"></i>LDAP Groups</h2>
@@ -475,6 +478,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
         {% if license and license.is_professional() %}
         <!-- Integrations Section -->
@@ -1459,7 +1463,6 @@
                     <div class="card mt-4" id="backupRestoreCard">
                         <div class="card-header">
                             <i class="bi bi-cloud-download me-2"></i>Backup & Restore
-                            {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>{% endif %}
                         </div>
                         <div class="card-body">
                             <div class="alert alert-warning">
@@ -2369,6 +2372,43 @@
                                 <label class="form-check-label fw-semibold" for="isActive">
                                     Active (user can log in)
                                 </label>
+                            </div>
+                        </div>
+
+                        <!-- Security Settings (shown when editing local users) -->
+                        <div class="col-md-12 mt-3" id="securitySettingsSection" style="display: none;">
+                            <div class="card border-info">
+                                <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                                    <span><i class="bi bi-shield-lock me-2"></i>Security Settings</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <!-- 2FA Status -->
+                                        <div class="col-md-6">
+                                            <label class="form-label text-muted small mb-1">Two-Factor Authentication</label>
+                                            <div id="user2FAStatus">
+                                                <span class="badge bg-secondary">Loading...</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6 text-end">
+                                            <div id="user2FAActions">
+                                                <!-- Actions will be populated by JS -->
+                                            </div>
+                                        </div>
+                                        <!-- Password Status -->
+                                        <div class="col-md-6">
+                                            <label class="form-label text-muted small mb-1">Password Status</label>
+                                            <div id="userPasswordStatus">
+                                                <span class="badge bg-secondary">Loading...</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6 text-end">
+                                            <button type="button" class="btn btn-sm btn-outline-warning" id="forcePasswordChangeBtn" onclick="forcePasswordChangeFromModal()">
+                                                <i class="bi bi-key me-1"></i>Force Password Change
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

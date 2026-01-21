@@ -2922,6 +2922,57 @@ def force_password_change(user_id):
         'email_sent': email_sent
     })
 
+
+@bp.route('/api/users/<int:user_id>/require-2fa', methods=['POST'])
+@org_admin_required
+def require_2fa_for_user(user_id):
+    """
+    Require a user to set up 2FA on next login.
+
+    Permissions:
+    - Super Admin: Can require for any user
+    - Org Admin: Can only require for users in their organization
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Cannot require 2FA for yourself via this endpoint
+    if user_id == current_user_id:
+        return jsonify({'error': 'Use Security Settings to manage your own 2FA'}), 400
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Only for local users
+    if user.auth_type != 'local':
+        return jsonify({'error': '2FA management only applies to local users'}), 400
+
+    # If already enabled, nothing to do
+    if user.totp_enabled:
+        return jsonify({'error': 'User already has 2FA enabled'}), 400
+
+    # Set the totp_required flag (user must set up 2FA on next login)
+    user.totp_required = True
+
+    log_audit_event(
+        'REQUIRE_2FA',
+        'users',
+        user.id,
+        details=f"2FA required for {user.username} by {current_user.username}"
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'{user.username} will be required to set up 2FA on next login'
+    })
+
+
 # ============================================================================
 # USER ORGANIZATION ASSIGNMENTS (Multi-Org Support)
 # ============================================================================

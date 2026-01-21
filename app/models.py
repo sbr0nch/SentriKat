@@ -789,6 +789,7 @@ class User(db.Model):
     # Two-Factor Authentication
     totp_secret = db.Column(db.String(32), nullable=True)
     totp_enabled = db.Column(db.Boolean, default=False)
+    totp_required = db.Column(db.Boolean, default=False)  # Admin can require 2FA setup
 
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -1153,6 +1154,7 @@ class User(db.Model):
             'must_change_password': self.must_change_password or False,
             # 2FA status
             'totp_enabled': self.totp_enabled or False,
+            'totp_required': self.totp_required or False,
             # Multi-org data
             'org_memberships': org_memberships,
             'all_organizations': self.get_all_organizations()

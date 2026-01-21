@@ -774,7 +774,11 @@ async function loadUsers() {
                                 <button class="btn-action btn-action-warning" onclick="reset2FA(${user.id}, '${escapeHtml(user.username)}')" title="Reset 2FA">
                                     <i class="bi bi-phone-flip"></i>
                                 </button>
-                                ` : ''}
+                                ` : (user.auth_type === 'local' ? `
+                                <button class="btn-action" onclick="require2FAForUser(${user.id}, '${escapeHtml(user.username)}')" title="Require 2FA Setup" style="color: #0d6efd;">
+                                    <i class="bi bi-shield-plus"></i>
+                                </button>
+                                ` : '')}
                                 ${user.auth_type === 'local' ? `
                                 <button class="btn-action" onclick="forcePasswordChange(${user.id}, '${escapeHtml(user.username)}')" title="Force Password Change" style="color: #7c3aed;">
                                     <i class="bi bi-key-fill"></i>
@@ -907,9 +911,117 @@ async function editUser(userId) {
         document.getElementById('orgMembershipsSection').style.display = 'block';
         loadUserOrgMemberships(userId);
 
+        // Show security settings section for local users and load 2FA status
+        const securitySection = document.getElementById('securitySettingsSection');
+        if (user.auth_type === 'local') {
+            securitySection.style.display = 'block';
+            updateUser2FAStatus(user);
+            updateUserPasswordStatus(user);
+        } else {
+            securitySection.style.display = 'none';
+        }
+
         new bootstrap.Modal(document.getElementById('userModal')).show();
     } catch (error) {
         showToast(`Error loading user: ${error.message}`, 'danger');
+    }
+}
+
+// Update 2FA status display in user modal
+function updateUser2FAStatus(user) {
+    const statusDiv = document.getElementById('user2FAStatus');
+    const actionsDiv = document.getElementById('user2FAActions');
+
+    if (user.totp_enabled) {
+        statusDiv.innerHTML = '<span class="badge bg-success"><i class="bi bi-shield-check me-1"></i>Enabled</span>';
+        actionsDiv.innerHTML = `
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="reset2FAFromModal(${user.id}, '${escapeHtml(user.username)}')">
+                <i class="bi bi-phone-flip me-1"></i>Reset 2FA
+            </button>
+        `;
+    } else {
+        statusDiv.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-shield-exclamation me-1"></i>Not Enabled</span>';
+        actionsDiv.innerHTML = `
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="require2FAForUser(${user.id}, '${escapeHtml(user.username)}')">
+                <i class="bi bi-shield-plus me-1"></i>Require 2FA
+            </button>
+        `;
+    }
+}
+
+// Update password status display in user modal
+function updateUserPasswordStatus(user) {
+    const statusDiv = document.getElementById('userPasswordStatus');
+    const forceBtn = document.getElementById('forcePasswordChangeBtn');
+
+    if (user.must_change_password) {
+        statusDiv.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Change Required</span>';
+        forceBtn.disabled = true;
+        forceBtn.innerHTML = '<i class="bi bi-check me-1"></i>Already Required';
+    } else if (user.password_days_until_expiry !== null && user.password_days_until_expiry <= 7) {
+        statusDiv.innerHTML = `<span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Expires in ${user.password_days_until_expiry} days</span>`;
+        forceBtn.disabled = false;
+        forceBtn.innerHTML = '<i class="bi bi-key me-1"></i>Force Password Change';
+    } else {
+        statusDiv.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>OK</span>';
+        forceBtn.disabled = false;
+        forceBtn.innerHTML = '<i class="bi bi-key me-1"></i>Force Password Change';
+    }
+}
+
+// Reset 2FA from modal
+async function reset2FAFromModal(userId, username) {
+    if (!confirm(`Are you sure you want to reset 2FA for ${username}? They will need to set up 2FA again.`)) {
+        return;
+    }
+    await reset2FA(userId, username);
+    // Refresh the user data
+    const response = await fetch(`/api/users/${userId}`);
+    const user = await response.json();
+    updateUser2FAStatus(user);
+}
+
+// Force password change from modal
+async function forcePasswordChangeFromModal() {
+    if (!currentUserId) return;
+
+    const response = await fetch(`/api/users/${currentUserId}`);
+    const user = await response.json();
+
+    await forcePasswordChange(currentUserId, user.username);
+
+    // Refresh status
+    const updatedResponse = await fetch(`/api/users/${currentUserId}`);
+    const updatedUser = await updatedResponse.json();
+    updateUserPasswordStatus(updatedUser);
+}
+
+// Require 2FA for a user (admin function)
+async function require2FAForUser(userId, username) {
+    if (!confirm(`Require 2FA for ${username}? They will be prompted to set up 2FA on their next login.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/${userId}/require-2fa`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to require 2FA');
+        }
+
+        showToast(`2FA requirement set for ${username}`, 'success');
+
+        // Refresh the user data
+        const userResponse = await fetch(`/api/users/${userId}`);
+        const user = await userResponse.json();
+        updateUser2FAStatus(user);
+        loadUsers();
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'danger');
     }
 }
 

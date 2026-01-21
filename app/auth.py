@@ -410,6 +410,12 @@ def api_login():
 
         logger.info(f"2FA verified for {username}")
 
+    # Check if user must set up 2FA (admin required it but not yet enabled)
+    must_setup_2fa = False
+    if user.auth_type == 'local' and getattr(user, 'totp_required', False) and not user.totp_enabled:
+        must_setup_2fa = True
+        logger.info(f"2FA setup required for {username} (admin mandated)")
+
     # Check for password expiration (local users only)
     password_expired = False
     if user.auth_type == 'local' and user.is_password_expired():
@@ -437,6 +443,10 @@ def api_login():
     if password_expired:
         session['must_change_password'] = True
 
+    # Set flag for 2FA setup requirement
+    if must_setup_2fa:
+        session['must_setup_2fa'] = True
+
     # Set organization
     if user.organization_id:
         session['organization_id'] = user.organization_id
@@ -449,6 +459,7 @@ def api_login():
     return jsonify({
         'success': True,
         'password_expired': password_expired,
+        'must_setup_2fa': must_setup_2fa,
         'user': user.to_dict(),
         'redirect': url_for('main.index')
     })
