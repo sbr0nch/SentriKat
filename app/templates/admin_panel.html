@@ -23,8 +23,8 @@
         <div class="tab-pane fade" id="users" role="tabpanel">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
-                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-people-fill me-2"></i>Local Users</h2>
-                    <p class="text-muted mb-0 small">Manage local user accounts and permissions</p>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-people-fill me-2"></i>All Users</h2>
+                    <p class="text-muted mb-0 small">Manage user accounts and permissions</p>
                 </div>
             </div>
             <div class="alert alert-light border mb-3 small">
@@ -1000,7 +1000,7 @@
 
                                     <div class="col-md-8">
                                         <label for="ldapServer" class="form-label fw-semibold">LDAP Server URL *</label>
-                                        <input type="text" class="form-control" id="ldapServer" placeholder="ldap://dc3.bonelabs.com:389">
+                                        <input type="text" class="form-control" id="ldapServer" placeholder="ldap://dc.example.com:389">
                                         <small class="form-text text-muted">Format: ldap://server:port or ldaps://server:636</small>
                                     </div>
 
@@ -1012,13 +1012,13 @@
 
                                     <div class="col-md-12">
                                         <label for="ldapBaseDN" class="form-label fw-semibold">Base DN *</label>
-                                        <input type="text" class="form-control" id="ldapBaseDN" placeholder="DC=bonelabs,DC=com">
+                                        <input type="text" class="form-control" id="ldapBaseDN" placeholder="DC=example,DC=com">
                                         <small class="form-text text-muted">Base Distinguished Name for searches</small>
                                     </div>
 
                                     <div class="col-md-12">
                                         <label for="ldapBindDN" class="form-label fw-semibold">Bind DN (Service Account) *</label>
-                                        <input type="text" class="form-control" id="ldapBindDN" placeholder="CN=Service Account,OU=Users,DC=bonelabs,DC=com">
+                                        <input type="text" class="form-control" id="ldapBindDN" placeholder="CN=Service Account,OU=Users,DC=example,DC=com">
                                         <small class="form-text text-muted">Service account for LDAP binds</small>
                                     </div>
 
@@ -2490,7 +2490,6 @@
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" id="webhook-tab" data-bs-toggle="tab" data-bs-target="#webhookSettings" type="button">
                                 <i class="bi bi-broadcast me-1"></i>Webhook
-                                <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
                             </button>
                         </li>
                     </ul>

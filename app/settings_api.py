@@ -352,7 +352,6 @@ def get_smtp_settings():
 
 @settings_bp.route('/smtp', methods=['POST'])
 @admin_required
-@requires_professional('Email Alerts')
 def save_smtp_settings():
     """Save global SMTP settings"""
     data = request.get_json()
@@ -377,7 +376,6 @@ def save_smtp_settings():
 
 @settings_bp.route('/smtp/test', methods=['POST'])
 @admin_required
-@requires_professional('Email Alerts')
 def test_smtp_connection():
     """Test global SMTP connection by sending test email"""
     try:

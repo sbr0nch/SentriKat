@@ -510,14 +510,30 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
         }
 
     except Exception as e:
+        # Rollback any failed transaction first
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
         # Log error
         duration = (datetime.utcnow() - start_time).total_seconds()
-        sync_log.status = 'error'
-        sync_log.error_message = str(e)
-        sync_log.duration_seconds = duration
 
-        db.session.add(sync_log)
-        db.session.commit()
+        # Try to log the error in a fresh transaction
+        try:
+            sync_log.status = 'error'
+            sync_log.error_message = str(e)
+            sync_log.duration_seconds = duration
+
+            db.session.add(sync_log)
+            db.session.commit()
+        except Exception as log_error:
+            # If logging fails, just continue - don't lose the original error
+            logger.error(f"Failed to log sync error: {log_error}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
 
         return {
             'status': 'error',
