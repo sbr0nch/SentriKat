@@ -145,7 +145,8 @@ class Organization(db.Model):
             'webhook_configured': bool(self.webhook_enabled and self.webhook_url),
             'user_count': user_count,
             'active': self.active,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'is_default': self.name == 'default'  # Flag for UI to prevent deletion
         }
 
     def _decrypt_webhook_url(self):

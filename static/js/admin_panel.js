@@ -1366,7 +1366,7 @@ async function loadOrganizations() {
     const tbody = document.getElementById('orgsTable');
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
     // Clear selection state
     selectedOrgs.clear();
@@ -1384,7 +1384,7 @@ async function loadOrganizations() {
         if (organizations.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center py-5">
+                    <td colspan="6" class="text-center py-5">
                         <i class="bi bi-building text-muted" style="font-size: 3rem;"></i>
                         <h5 class="mt-3 text-muted">No organizations yet</h5>
                         <p class="text-muted">Click "Create Organization" to add your first organization.</p>
@@ -1407,8 +1407,7 @@ async function loadOrganizations() {
                             <input type="checkbox" class="form-check-input org-checkbox"
                                    data-org-id="${org.id}" onchange="toggleOrgSelect(${org.id}, this)">
                         </td>
-                        <td data-column="name" class="fw-semibold">${escapeHtml(org.name)}</td>
-                        <td data-column="displayname">${escapeHtml(org.display_name)}</td>
+                        <td data-column="displayname" class="fw-semibold">${escapeHtml(org.display_name)}</td>
                         <td data-column="users"><span class="badge badge-role-manager">${org.user_count || 0}</span></td>
                         <td data-column="smtp">${smtpBadge}</td>
                         <td data-column="status">${statusBadge}</td>
@@ -1417,7 +1416,7 @@ async function loadOrganizations() {
                                 <button class="btn-action btn-action-edit" onclick="editOrganization(${org.id})" title="Edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                ${org.name !== 'default' ? `
+                                ${org.is_default !== true ? `
                                 <button class="btn-action btn-action-delete" onclick="deleteOrganization(${org.id}, '${escapeHtml(org.display_name)}')" title="Delete">
                                     <i class="bi bi-trash3"></i>
                                 </button>
@@ -1445,7 +1444,7 @@ async function loadOrganizations() {
         console.error('loadOrganizations: Error:', error);
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="text-center text-danger py-4">
+                <td colspan="6" class="text-center text-danger py-4">
                     <i class="bi bi-exclamation-triangle"></i> Error loading organizations: ${error.message}
                 </td>
             </tr>
