@@ -1935,6 +1935,11 @@
         #confirmModal ~ .modal-backdrop {
             z-index: 1059 !important;
         }
+
+        /* Security Settings modal - ensure it shows properly */
+        #securitySettingsModal {
+            z-index: 1055 !important;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -2085,10 +2090,12 @@
                             <i class="bi bi-diagram-3"></i>
                             LDAP Users
                         </a>
+                        {% if current_user and current_user.is_super_admin() %}
                         <a href="/admin-panel#ldapGroups" class="sidebar-sublink">
                             <i class="bi bi-diagram-2"></i>
                             LDAP Groups
                         </a>
+                        {% endif %}
                         {% endif %}
                     </div>
 

@@ -1771,8 +1771,25 @@ def list_agent_keys():
             if not org_id:
                 return jsonify({'error': 'organization_id required'}), 400
 
-            user_org = user.org_memberships.filter_by(organization_id=org_id).first()
-            if not user_org or user_org.role != 'org_admin':
+            # Check if user is org_admin either globally or in this specific org
+            has_permission = False
+
+            # Check global role first
+            if user.role == 'org_admin':
+                # Check if user belongs to this org (primary org or membership)
+                if user.organization_id == org_id:
+                    has_permission = True
+                else:
+                    user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+                    if user_org:
+                        has_permission = True
+            else:
+                # Check org-specific role
+                user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+                if user_org and user_org.role == 'org_admin':
+                    has_permission = True
+
+            if not has_permission:
                 return jsonify({'error': 'Organization admin access required'}), 403
 
             keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
