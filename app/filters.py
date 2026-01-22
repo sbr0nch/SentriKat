@@ -380,9 +380,10 @@ def get_filtered_vulnerabilities(filters=None):
     from app.models import product_organizations
 
     # Use joinedload to eagerly load related objects and avoid N+1 queries
+    # Note: Product.organizations is a dynamic relationship and can't be eager loaded
     query = db.session.query(VulnerabilityMatch).options(
         joinedload(VulnerabilityMatch.vulnerability),
-        joinedload(VulnerabilityMatch.product).joinedload(Product.organizations)
+        joinedload(VulnerabilityMatch.product)
     ).join(Vulnerability).join(Product)
 
     if filters:

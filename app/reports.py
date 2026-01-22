@@ -111,9 +111,10 @@ class VulnerabilityReportGenerator:
     def _get_stats(self, start_date, end_date):
         """Get vulnerability statistics for the date range"""
         # Use joinedload to eagerly load related objects and avoid N+1 queries
+        # Note: Product.organizations is a dynamic relationship and can't be eager loaded
         query = db.session.query(VulnerabilityMatch).options(
             joinedload(VulnerabilityMatch.vulnerability),
-            joinedload(VulnerabilityMatch.product).joinedload(Product.organizations)
+            joinedload(VulnerabilityMatch.product)
         ).join(Product)
 
         if self.organization_id:
@@ -488,9 +489,10 @@ class VulnerabilityReportGenerator:
                 org_name = org.display_name
 
         # Get the selected matches with eager loading to avoid N+1 queries
+        # Note: Product.organizations is a dynamic relationship and can't be eager loaded
         matches = VulnerabilityMatch.query.options(
             joinedload(VulnerabilityMatch.vulnerability),
-            joinedload(VulnerabilityMatch.product).joinedload(Product.organizations)
+            joinedload(VulnerabilityMatch.product)
         ).filter(
             VulnerabilityMatch.id.in_(match_ids)
         ).all()
