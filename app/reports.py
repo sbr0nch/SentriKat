@@ -114,11 +114,11 @@ class VulnerabilityReportGenerator:
         query = db.session.query(VulnerabilityMatch)
 
         if self.organization_id:
-            # Filter by organization using subquery
+            # Filter by organization using scalar_subquery for proper IN() usage
             from app.models import product_organizations
             org_product_ids = db.session.query(product_organizations.c.product_id).filter(
                 product_organizations.c.organization_id == self.organization_id
-            ).subquery()
+            ).scalar_subquery()
             query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
 
         all_matches = query.all()

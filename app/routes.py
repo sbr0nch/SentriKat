@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, send_from_directory
 from app import db, csrf, limiter
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 import os
 from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
 from app.cisa_sync import sync_cisa_kev
@@ -1029,14 +1030,14 @@ def get_vulnerability_stats():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
-    total_vulns = db.session.query(func.count(Vulnerability.id)).scalar() or 0
+    total_vulns = db.session.query(Vulnerability).count() or 0
 
-    # Filter matches by organization using subqueries to avoid column mapping issues
+    # Filter matches by organization using scalar_subquery for proper IN() usage
     if org_id:
-        # Get product IDs for this organization via subquery
+        # Get product IDs for this organization via scalar_subquery
         org_product_ids = db.session.query(product_organizations.c.product_id).filter(
             product_organizations.c.organization_id == org_id
-        ).subquery()
+        ).scalar_subquery()
 
         total_matches_query = db.session.query(VulnerabilityMatch).filter(
             VulnerabilityMatch.product_id.in_(org_product_ids)
@@ -1047,10 +1048,10 @@ def get_vulnerability_stats():
             VulnerabilityMatch.acknowledged == False
         )
 
-        # Get ransomware vulnerability IDs via subquery
+        # Get ransomware vulnerability IDs via scalar_subquery
         ransomware_vuln_ids = db.session.query(Vulnerability.id).filter(
             Vulnerability.known_ransomware == True
-        ).subquery()
+        ).scalar_subquery()
         ransomware_query = db.session.query(VulnerabilityMatch).filter(
             VulnerabilityMatch.product_id.in_(org_product_ids),
             VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids)
@@ -1064,7 +1065,7 @@ def get_vulnerability_stats():
         # No org filter - show all
         total_matches_query = db.session.query(VulnerabilityMatch)
         unacknowledged_query = db.session.query(VulnerabilityMatch).filter(VulnerabilityMatch.acknowledged == False)
-        ransomware_vuln_ids = db.session.query(Vulnerability.id).filter(Vulnerability.known_ransomware == True).subquery()
+        ransomware_vuln_ids = db.session.query(Vulnerability.id).filter(Vulnerability.known_ransomware == True).scalar_subquery()
         ransomware_query = db.session.query(VulnerabilityMatch).filter(VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids))
         products_tracked_query = Product.query.filter_by(active=True)
 
@@ -1074,7 +1075,11 @@ def get_vulnerability_stats():
     products_tracked = products_tracked_query.count()
 
     # Calculate priority-based stats (both CVE counts and match counts)
-    all_matches = unacknowledged_query.all()
+    # Use selectinload to eagerly load relationships and avoid column mapping issues
+    all_matches = unacknowledged_query.options(
+        selectinload(VulnerabilityMatch.product),
+        selectinload(VulnerabilityMatch.vulnerability)
+    ).all()
 
     # Match counts (existing)
     priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
@@ -1554,13 +1559,13 @@ def acknowledge_by_cve(cve_id):
             acknowledged=False
         ).all()
     else:
-        # Non-admin: filter by organization membership using subquery
+        # Non-admin: filter by organization membership using scalar_subquery
         user_org_ids = [org.id for org in current_user.get_all_organizations()]
 
         # Get product IDs accessible to user's organizations
         user_product_ids = db.session.query(product_organizations.c.product_id).filter(
             product_organizations.c.organization_id.in_(user_org_ids)
-        ).subquery()
+        ).scalar_subquery()
 
         matches = db.session.query(VulnerabilityMatch).filter(
             VulnerabilityMatch.vulnerability_id == vuln.id,
@@ -1624,13 +1629,13 @@ def unacknowledge_by_cve(cve_id):
             acknowledged=True
         ).all()
     else:
-        # Non-admin: filter by organization membership using subquery
+        # Non-admin: filter by organization membership using scalar_subquery
         user_org_ids = [org.id for org in current_user.get_all_organizations()]
 
         # Get product IDs accessible to user's organizations
         user_product_ids = db.session.query(product_organizations.c.product_id).filter(
             product_organizations.c.organization_id.in_(user_org_ids)
-        ).subquery()
+        ).scalar_subquery()
 
         matches = db.session.query(VulnerabilityMatch).filter(
             VulnerabilityMatch.vulnerability_id == vuln.id,
@@ -1865,10 +1870,10 @@ def trigger_critical_cve_alerts():
         organizations = Organization.query.filter_by(active=True).all()
 
         for org in organizations:
-            # Get unacknowledged critical/high priority vulnerabilities using subquery
+            # Get unacknowledged critical/high priority vulnerabilities using scalar_subquery
             org_product_ids = db.session.query(Product.id).filter(
                 Product.organization_id == org.id
-            ).subquery()
+            ).scalar_subquery()
 
             unack_matches = (
                 VulnerabilityMatch.query

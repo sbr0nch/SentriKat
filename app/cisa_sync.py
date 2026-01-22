@@ -410,11 +410,11 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
             alert_mode = alert_config['mode']
             escalation_days = alert_config['escalation_days']
 
-            # Build queries using subqueries to avoid column mapping issues
+            # Build queries using scalar_subquery for proper IN() usage
             # Get product IDs for this organization
             org_product_ids = db.session.query(Product.id).filter(
                 Product.organization_id == org.id
-            ).subquery()
+            ).scalar_subquery()
 
             if alert_mode == 'new_only':
                 # Only alert on NEW matches from this sync
@@ -431,7 +431,7 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
                 vuln_ids_due = db.session.query(Vulnerability.id).filter(
                     Vulnerability.due_date <= cutoff_date,
                     Vulnerability.due_date >= date.today()
-                ).subquery()
+                ).scalar_subquery()
                 matches_to_alert = VulnerabilityMatch.query.filter(
                     VulnerabilityMatch.product_id.in_(org_product_ids),
                     VulnerabilityMatch.acknowledged == False,
@@ -445,7 +445,7 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
                 vuln_ids_due = db.session.query(Vulnerability.id).filter(
                     Vulnerability.due_date <= cutoff_date,
                     Vulnerability.due_date >= date.today()
-                ).subquery()
+                ).scalar_subquery()
                 matches_to_alert = VulnerabilityMatch.query.filter(
                     VulnerabilityMatch.product_id.in_(org_product_ids),
                     VulnerabilityMatch.acknowledged == False,
@@ -480,15 +480,15 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
         # Send global webhook notifications for orgs without their own webhook
         if stored > 0 or matches_count > 0:
             # Count total critical matches (for orgs without their own webhook)
-            # Use subqueries to avoid column mapping issues
+            # Use scalar_subquery for proper IN() usage
             critical_vuln_ids = db.session.query(Vulnerability.id).filter(
                 db.or_(Vulnerability.known_ransomware == True, Vulnerability.cvss_score >= 9.0)
-            ).subquery()
+            ).scalar_subquery()
 
             if orgs_with_own_webhook:
                 excluded_product_ids = db.session.query(Product.id).filter(
                     Product.organization_id.in_(orgs_with_own_webhook)
-                ).subquery()
+                ).scalar_subquery()
                 total_critical = VulnerabilityMatch.query.filter(
                     VulnerabilityMatch.created_at >= start_time,
                     ~VulnerabilityMatch.product_id.in_(excluded_product_ids),

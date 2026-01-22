@@ -177,7 +177,7 @@ def cleanup_orphaned_products(dry_run=False):
     # Find products with no installations
     products_with_installations = db.session.query(
         ProductInstallation.product_id
-    ).distinct().subquery()
+    ).distinct().scalar_subquery()
 
     orphaned = Product.query.filter(
         ~Product.id.in_(products_with_installations),
@@ -324,7 +324,7 @@ def get_maintenance_stats():
     # Orphaned products
     products_with_installations = db.session.query(
         ProductInstallation.product_id
-    ).distinct().subquery()
+    ).distinct().scalar_subquery()
 
     orphaned_products = Product.query.filter(
         ~Product.id.in_(products_with_installations),
