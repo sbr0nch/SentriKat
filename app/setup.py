@@ -20,9 +20,9 @@ def is_setup_complete():
     """Check if initial setup has been completed"""
     try:
         # Check if at least one organization exists
-        org_count = db.session.query(func.count(Organization.id)).scalar() or 0
+        org_count = Organization.query.count() or 0
         # Check if at least one user exists (only if auth is enabled)
-        user_count = db.session.query(func.count(User.id)).scalar() or 0
+        user_count = User.query.count() or 0
 
         # Setup is complete if we have at least one organization
         # and either auth is disabled or we have at least one user
@@ -55,9 +55,9 @@ def setup_status():
     return jsonify({
         'setup_complete': is_setup_complete(),
         'auth_enabled': os.environ.get('DISABLE_AUTH', 'false').lower() != 'true',
-        'org_count': db.session.query(func.count(Organization.id)).scalar() or 0,
-        'user_count': db.session.query(func.count(User.id)).scalar() or 0,
-        'service_count': db.session.query(func.count(ServiceCatalog.id)).scalar() or 0
+        'org_count': Organization.query.count() or 0,
+        'user_count': User.query.count() or 0,
+        'service_count': ServiceCatalog.query.count() or 0
     })
 
 @setup_bp.route('/api/setup/create-organization', methods=['POST'])

@@ -105,7 +105,7 @@ def get_status():
     """
     try:
         last_sync = SyncLog.query.order_by(SyncLog.started_at.desc()).first()
-        vuln_count = db.session.query(func.count(Vulnerability.id)).scalar() or 0
+        vuln_count = Vulnerability.query.count() or 0
 
         return jsonify({
             'status': 'online',
@@ -116,6 +116,7 @@ def get_status():
         })
     except Exception as e:
         logger.error(f"Status check error: {str(e)}")
+        db.session.rollback()  # Rollback on error to clean session state
         return jsonify({
             'status': 'error',
             'version': APP_VERSION
@@ -250,18 +251,20 @@ def get_products():
     logger.info(f"get_products: user={current_user.username}, role={current_user.role}, is_super_admin={current_user.is_super_admin()}")
 
     # Build base query based on permissions
+    # Use subqueries instead of joins to avoid pagination count issues
     if current_user.is_super_admin():
         query = Product.query
         logger.info("get_products: super_admin sees all products")
 
         # Super admin can filter by specific organization
         if filter_org:
-            query = query.join(
-                product_organizations,
-                Product.id == product_organizations.c.product_id
-            ).filter(
+            # Get product IDs for this org via subquery
+            org_product_ids = db.session.query(product_organizations.c.product_id).filter(
+                product_organizations.c.organization_id == filter_org
+            ).scalar_subquery()
+            query = query.filter(
                 db.or_(
-                    product_organizations.c.organization_id == filter_org,
+                    Product.id.in_(org_product_ids),
                     Product.organization_id == filter_org
                 )
             )
@@ -276,13 +279,13 @@ def get_products():
                 return jsonify({'products': [], 'total': 0, 'page': 1, 'per_page': per_page, 'pages': 0})
             return jsonify([])
 
-        # Get products assigned via many-to-many table or legacy field
-        query = Product.query.outerjoin(
-            product_organizations,
-            Product.id == product_organizations.c.product_id
-        ).filter(
+        # Get products assigned via many-to-many table or legacy field using subquery
+        org_product_ids = db.session.query(product_organizations.c.product_id).filter(
+            product_organizations.c.organization_id == org_id
+        ).scalar_subquery()
+        query = query.filter(
             db.or_(
-                product_organizations.c.organization_id == org_id,
+                Product.id.in_(org_product_ids),
                 Product.organization_id == org_id
             )
         )
@@ -316,8 +319,8 @@ def get_products():
     elif status == 'inactive':
         query = query.filter(Product.active == False)
 
-    # Ensure no duplicates from join and order by vendor, product name
-    query = query.distinct().order_by(Product.vendor, Product.product_name)
+    # Order by vendor, product name (no distinct needed with subquery approach)
+    query = query.order_by(Product.vendor, Product.product_name)
 
     # If pagination requested, return paginated result
     if page:
@@ -1961,24 +1964,26 @@ def search_catalog():
 
     # Autocomplete mode: return unique vendor or product names
     if search_type == 'vendor':
-        vendors = db.session.query(ServiceCatalog.vendor)\
+        vendors = ServiceCatalog.query\
             .filter(ServiceCatalog.is_active == True)\
             .filter(ServiceCatalog.vendor.ilike(f'%{query}%'))\
+            .with_entities(ServiceCatalog.vendor)\
             .distinct()\
             .order_by(ServiceCatalog.vendor)\
             .limit(limit)\
             .all()
-        return jsonify([v[0] for v in vendors])
+        return jsonify([v.vendor for v in vendors])
 
     elif search_type == 'product':
-        products = db.session.query(ServiceCatalog.product_name)\
+        products = ServiceCatalog.query\
             .filter(ServiceCatalog.is_active == True)\
             .filter(ServiceCatalog.product_name.ilike(f'%{query}%'))\
+            .with_entities(ServiceCatalog.product_name)\
             .distinct()\
             .order_by(ServiceCatalog.product_name)\
             .limit(limit)\
             .all()
-        return jsonify([p[0] for p in products])
+        return jsonify([p.product_name for p in products])
 
     # Full search mode: return complete service records
     results = ServiceCatalog.query.filter_by(is_active=True)
@@ -2008,12 +2013,16 @@ def search_catalog():
 @login_required
 def get_categories():
     """Get all categories with counts"""
-    categories = db.session.query(
-        ServiceCatalog.category,
-        db.func.count(ServiceCatalog.id).label('count')
-    ).filter_by(is_active=True).group_by(ServiceCatalog.category).all()
+    categories = ServiceCatalog.query\
+        .filter_by(is_active=True)\
+        .with_entities(
+            ServiceCatalog.category,
+            func.count(ServiceCatalog.id).label('count')
+        )\
+        .group_by(ServiceCatalog.category)\
+        .all()
 
-    return jsonify([{'name': c[0], 'count': c[1]} for c in categories])
+    return jsonify([{'name': c.category, 'count': c.count} for c in categories])
 
 @bp.route('/api/catalog/popular', methods=['GET'])
 @login_required

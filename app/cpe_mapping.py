@@ -323,13 +323,13 @@ def get_cpe_coverage_stats():
     """
     from app.models import Product
 
-    total = db.session.query(func.count(Product.id)).scalar() or 0
-    with_cpe = db.session.query(func.count(Product.id)).filter(
+    total = Product.query.count() or 0
+    with_cpe = Product.query.filter(
         Product.cpe_vendor.isnot(None),
         Product.cpe_vendor != '',
         Product.cpe_product.isnot(None),
         Product.cpe_product != ''
-    ).scalar() or 0
+    ).count() or 0
 
     return {
         'total_products': total,

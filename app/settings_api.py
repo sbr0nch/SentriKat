@@ -523,7 +523,7 @@ def get_sync_status():
         last_sync = SyncLog.query.order_by(SyncLog.sync_date.desc()).first()
 
         # Get total vulnerabilities
-        total_vulns = db.session.query(func.count(Vulnerability.id)).scalar() or 0
+        total_vulns = Vulnerability.query.count() or 0
 
         # Calculate next sync (simplified - would need proper scheduling logic)
         auto_sync = get_setting('auto_sync_enabled', 'false') == 'true'

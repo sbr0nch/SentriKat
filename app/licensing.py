@@ -617,28 +617,25 @@ def requires_professional(feature=None):
 
 def check_user_limit():
     """Check if user limit is reached"""
-    from app import db
     from app.models import User
     license_info = get_license()
-    current_users = db.session.query(func.count(User.id)).filter(User.is_active == True).scalar() or 0
+    current_users = User.query.filter(User.is_active == True).count() or 0
     return license_info.check_limit('users', current_users)
 
 
 def check_org_limit():
     """Check if organization limit is reached"""
-    from app import db
     from app.models import Organization
     license_info = get_license()
-    current_orgs = db.session.query(func.count(Organization.id)).scalar() or 0
+    current_orgs = Organization.query.count() or 0
     return license_info.check_limit('organizations', current_orgs)
 
 
 def check_product_limit():
     """Check if product limit is reached"""
-    from app import db
     from app.models import Product
     license_info = get_license()
-    current_products = db.session.query(func.count(Product.id)).scalar() or 0
+    current_products = Product.query.count() or 0
     return license_info.check_limit('products', current_products)
 
 
@@ -652,12 +649,11 @@ def check_agent_limit():
 
     Returns: (allowed, limit, message) tuple
     """
-    from app import db
     from app.models import Asset
     license_info = get_license()
 
     # Count ALL active agents across ALL organizations (global limit)
-    current_agents = db.session.query(func.count(Asset.id)).filter(Asset.active == True).scalar() or 0
+    current_agents = Asset.query.filter(Asset.active == True).count() or 0
 
     return license_info.check_limit('agents', current_agents)
 
@@ -671,12 +667,11 @@ def check_agent_api_key_limit():
 
     Returns: (allowed, limit, message) tuple
     """
-    from app import db
     from app.models import AgentApiKey
     license_info = get_license()
 
     # Count ALL active API keys across ALL organizations (global limit)
-    current_keys = db.session.query(func.count(AgentApiKey.id)).filter(AgentApiKey.active == True).scalar() or 0
+    current_keys = AgentApiKey.query.filter(AgentApiKey.active == True).count() or 0
 
     return license_info.check_limit('agent_api_keys', current_keys)
 
@@ -686,19 +681,18 @@ def get_agent_usage():
     Get current agent usage statistics for display.
     Returns dict with counts and limits.
     """
-    from app import db
     from app.models import Asset, AgentApiKey
     license_info = get_license()
     limits = license_info.get_effective_limits()
 
     return {
         'agents': {
-            'current': db.session.query(func.count(Asset.id)).filter(Asset.active == True).scalar() or 0,
+            'current': Asset.query.filter(Asset.active == True).count() or 0,
             'limit': limits['max_agents'],
             'unlimited': limits['max_agents'] == -1
         },
         'api_keys': {
-            'current': db.session.query(func.count(AgentApiKey.id)).filter(AgentApiKey.active == True).scalar() or 0,
+            'current': AgentApiKey.query.filter(AgentApiKey.active == True).count() or 0,
             'limit': limits['max_agent_api_keys'],
             'unlimited': limits['max_agent_api_keys'] == -1
         },
@@ -720,7 +714,6 @@ csrf.exempt(license_bp)
 @license_bp.route('/api/license', methods=['GET'])
 def get_license_info():
     """Get current license information"""
-    from app import db
     from app.auth import get_current_user
     from app.models import User, Organization, Product, Asset, AgentApiKey
 
@@ -731,11 +724,11 @@ def get_license_info():
     license_info = get_license()
     response = license_info.to_dict()
     response['usage'] = {
-        'users': db.session.query(func.count(User.id)).filter(User.is_active == True).scalar() or 0,
-        'organizations': db.session.query(func.count(Organization.id)).scalar() or 0,
-        'products': db.session.query(func.count(Product.id)).scalar() or 0,
-        'agents': db.session.query(func.count(Asset.id)).filter(Asset.active == True).scalar() or 0,
-        'agent_api_keys': db.session.query(func.count(AgentApiKey.id)).filter(AgentApiKey.active == True).scalar() or 0
+        'users': User.query.filter(User.is_active == True).count() or 0,
+        'organizations': Organization.query.count() or 0,
+        'products': Product.query.count() or 0,
+        'agents': Asset.query.filter(Asset.active == True).count() or 0,
+        'agent_api_keys': AgentApiKey.query.filter(AgentApiKey.active == True).count() or 0
     }
     # Include agent-specific usage info
     response['agent_usage'] = get_agent_usage()

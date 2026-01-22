@@ -8,8 +8,12 @@ from flask import Blueprint, render_template, request, jsonify, redirect, url_fo
 from app import db, csrf, limiter
 from app.models import User, Organization
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -19,6 +23,36 @@ csrf.exempt(auth_bp)
 # Authentication is ALWAYS enabled by default (security requirement)
 # Only disable for testing with DISABLE_AUTH=true (NOT recommended)
 AUTH_ENABLED = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
+
+
+def _safe_get_user(user_id):
+    """
+    Safely get a user from the database, handling session state issues.
+
+    Returns the User object or None if not found or error occurs.
+    """
+    if user_id is None:
+        return None
+
+    try:
+        # Use a fresh query instead of db.session.get() to avoid session state issues
+        user = User.query.filter_by(id=user_id).first()
+        return user
+    except SQLAlchemyError as e:
+        # If there's a database error, try to rollback and retry
+        logger.warning(f"Database error getting user {user_id}: {e}")
+        try:
+            db.session.rollback()
+            # Retry with fresh query
+            user = User.query.filter_by(id=user_id).first()
+            return user
+        except Exception as retry_error:
+            logger.error(f"Failed to recover user query: {retry_error}")
+            db.session.rollback()
+            return None
+    except Exception as e:
+        logger.error(f"Unexpected error getting user {user_id}: {e}")
+        return None
 
 def login_required(f):
     """Decorator to require login for routes"""
@@ -34,8 +68,8 @@ def login_required(f):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
-        # Verify user still exists and is active
-        user = db.session.get(User, session['user_id'])
+        # Verify user still exists and is active (use safe query to handle session issues)
+        user = _safe_get_user(session['user_id'])
         if not user or not user.is_active:
             session.clear()
             if request.is_json or request.path.startswith('/api/'):
@@ -74,7 +108,7 @@ def admin_required(f):
             return redirect(url_for('auth.login', next=request.url))
 
         # Check if user is super_admin or has legacy is_admin flag
-        user = db.session.get(User, session['user_id'])
+        user = _safe_get_user(session['user_id'])
         if not user:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'User not found'}), 401
@@ -115,7 +149,7 @@ def manager_required(f):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
-        user = db.session.get(User, session['user_id'])
+        user = _safe_get_user(session['user_id'])
         if not user:
             logger.error(f"User {session['user_id']} not found in database")
             if request.is_json or request.path.startswith('/api/'):
@@ -160,7 +194,7 @@ def org_admin_required(f):
             return redirect(url_for('auth.login', next=request.url))
 
         # Check if user is org_admin, super_admin, or legacy is_admin
-        user = db.session.get(User, session['user_id'])
+        user = _safe_get_user(session['user_id'])
         if not user:
             logger.error(f"User {session['user_id']} not found in database")
             if request.is_json or request.path.startswith('/api/'):
@@ -198,7 +232,7 @@ def get_current_user():
         return None
 
     if 'user_id' in session:
-        return db.session.get(User, session['user_id'])
+        return _safe_get_user(session['user_id'])
     return None
 
 @auth_bp.route('/login', methods=['GET'])
@@ -208,7 +242,7 @@ def login():
         return redirect(url_for('main.index'))
 
     # Check if setup is needed (no users exist)
-    if db.session.query(func.count(User.id)).scalar() == 0:
+    if User.query.count() == 0:
         return redirect(url_for('auth.setup'))
 
     if 'user_id' in session:
@@ -220,7 +254,7 @@ def login():
 def setup():
     """First-time setup wizard"""
     # Only allow if no users exist
-    if db.session.query(func.count(User.id)).scalar() > 0:
+    if User.query.count() > 0:
         return redirect(url_for('auth.login'))
 
     return render_template('setup.html')
@@ -229,7 +263,7 @@ def setup():
 def api_setup():
     """Handle first-time setup"""
     # Only allow if no users exist
-    if db.session.query(func.count(User.id)).scalar() > 0:
+    if User.query.count() > 0:
         return jsonify({'error': 'Setup already completed'}), 400
 
     data = request.get_json()
