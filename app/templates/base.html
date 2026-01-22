@@ -2021,6 +2021,331 @@
         body.security-modal-open .modal-backdrop {
             display: none !important;
         }
+
+        /* ========================================
+           SentriKat Security Settings Modal Styling
+           ======================================== */
+
+        /* Modal header with gradient */
+        #securitySettingsModal .modal-header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            border-bottom: none;
+            padding: 1.25rem 1.5rem;
+        }
+
+        #securitySettingsModal .modal-header .modal-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+        }
+
+        #securitySettingsModal .modal-header .btn-close {
+            filter: brightness(0) invert(1);
+            opacity: 0.8;
+        }
+
+        #securitySettingsModal .modal-header .btn-close:hover {
+            opacity: 1;
+        }
+
+        #securitySettingsModal .modal-body {
+            padding: 1.5rem;
+            background-color: var(--bg-color);
+        }
+
+        /* Card styling within security modal */
+        #securitySettingsModal .card {
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+            transition: box-shadow 0.2s ease;
+        }
+
+        #securitySettingsModal .card:hover {
+            box-shadow: var(--shadow-md);
+        }
+
+        #securitySettingsModal .card-header {
+            background: linear-gradient(135deg, var(--gray-50) 0%, var(--gray-100) 100%);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            color: var(--gray-800);
+            padding: 0.875rem 1.25rem;
+            display: flex;
+            align-items: center;
+        }
+
+        #securitySettingsModal .card-header i {
+            color: var(--primary-color);
+            font-size: 1.1rem;
+        }
+
+        #securitySettingsModal .card-body {
+            padding: 1.5rem;
+            background-color: var(--surface-color);
+        }
+
+        /* 2FA Section specific styles */
+        #2faDisabled .alert-info,
+        #2faSetup .alert-warning,
+        #2faEnabled .alert-success {
+            border-radius: 10px;
+            border: none;
+            padding: 1rem 1.25rem;
+            font-size: 0.9rem;
+        }
+
+        #2faDisabled .alert-info {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            color: #1e40af;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        #2faSetup .alert-warning {
+            background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+            color: #92400e;
+            border-left: 4px solid var(--warning-color);
+        }
+
+        #2faEnabled .alert-success {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            color: #065f46;
+            border-left: 4px solid var(--success-color);
+        }
+
+        /* QR Code container styling */
+        #qrCodeContainer {
+            background: white !important;
+            border-radius: 12px !important;
+            border: 2px solid var(--gray-200) !important;
+            padding: 1.25rem !important;
+            box-shadow: var(--shadow-md);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        #qrCodeContainer:hover {
+            transform: scale(1.02);
+            box-shadow: var(--shadow-lg);
+        }
+
+        /* TOTP secret display */
+        #totpSecretDisplay {
+            background: var(--gray-100);
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-family: 'SF Mono', 'Fira Code', 'Monaco', monospace;
+            font-size: 0.85rem;
+            color: var(--primary-dark);
+            border: 1px solid var(--border-color);
+            display: inline-block;
+            margin-top: 0.5rem;
+        }
+
+        /* Verification code input - SentriKat branded */
+        #verify2FACode {
+            font-size: 1.75rem !important;
+            letter-spacing: 0.75rem !important;
+            font-family: 'SF Mono', 'Fira Code', 'Monaco', monospace !important;
+            text-align: center !important;
+            padding: 1rem !important;
+            border: 2px solid var(--border-color) !important;
+            border-radius: 10px !important;
+            background: var(--surface-color) !important;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+        }
+
+        #verify2FACode:focus {
+            border-color: var(--primary-color) !important;
+            box-shadow: 0 0 0 4px rgba(30, 64, 175, 0.15) !important;
+            outline: none !important;
+        }
+
+        #verify2FACode::placeholder {
+            color: var(--gray-300) !important;
+            letter-spacing: 0.75rem !important;
+        }
+
+        /* Button styling within 2FA section */
+        #securitySettingsModal .btn-success {
+            background: linear-gradient(135deg, var(--success-color) 0%, #059669 100%);
+            border: none;
+            padding: 0.625rem 1.25rem;
+            font-weight: 500;
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        #securitySettingsModal .btn-success:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        #securitySettingsModal .btn-danger {
+            background: linear-gradient(135deg, var(--danger-color) 0%, #dc2626 100%);
+            border: none;
+            padding: 0.625rem 1.25rem;
+            font-weight: 500;
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        #securitySettingsModal .btn-danger:hover {
+            background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        #securitySettingsModal .btn-primary {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            border: none;
+            padding: 0.625rem 1.25rem;
+            font-weight: 500;
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        #securitySettingsModal .btn-primary:hover {
+            background: linear-gradient(135deg, var(--primary-dark) 0%, #1e3a8a 100%);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        #securitySettingsModal .btn-outline-secondary {
+            border-radius: 8px;
+            padding: 0.625rem 1.25rem;
+            font-weight: 500;
+            transition: all 0.15s ease;
+        }
+
+        #securitySettingsModal .btn-outline-secondary:hover {
+            background-color: var(--gray-100);
+        }
+
+        /* Form labels and text */
+        #securitySettingsModal .form-label {
+            font-weight: 500;
+            color: var(--gray-700);
+            margin-bottom: 0.5rem;
+        }
+
+        #securitySettingsModal .form-text {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        #securitySettingsModal small.text-muted {
+            color: var(--text-muted) !important;
+        }
+
+        /* Password change section inputs */
+        #securitySettingsModal .form-control {
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            padding: 0.625rem 0.875rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        #securitySettingsModal .form-control:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+        }
+
+        /* Loading spinner in 2FA status */
+        #2faStatus .spinner-border {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-width: 3px;
+            color: var(--primary-color) !important;
+        }
+
+        /* LDAP user notice */
+        #securitySettingsModal .alert-info:not(#2faDisabled .alert-info) {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            color: #1e40af;
+            border: none;
+            border-radius: 10px;
+            border-left: 4px solid var(--info-color);
+        }
+
+        /* Dark mode adjustments for security modal */
+        [data-theme="dark"] #securitySettingsModal .modal-body {
+            background-color: var(--bg-color);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .card {
+            background-color: var(--surface-color);
+            border-color: var(--border-color);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .card-header {
+            background: linear-gradient(135deg, var(--gray-100) 0%, var(--gray-50) 100%);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .card-header i {
+            color: var(--primary-light);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .card-body {
+            background-color: var(--surface-color);
+        }
+
+        [data-theme="dark"] #2faDisabled .alert-info {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.1) 100%);
+            color: var(--primary-light);
+        }
+
+        [data-theme="dark"] #2faSetup .alert-warning {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.1) 100%);
+            color: #fbbf24;
+        }
+
+        [data-theme="dark"] #2faEnabled .alert-success {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%);
+            color: #34d399;
+        }
+
+        [data-theme="dark"] #qrCodeContainer {
+            background: white !important;
+            border-color: var(--gray-400) !important;
+        }
+
+        [data-theme="dark"] #totpSecretDisplay {
+            background: var(--gray-100);
+            color: var(--primary-light);
+            border-color: var(--border-color);
+        }
+
+        [data-theme="dark"] #verify2FACode {
+            background: var(--surface-color) !important;
+            border-color: var(--border-color) !important;
+            color: var(--text-color) !important;
+        }
+
+        [data-theme="dark"] #verify2FACode:focus {
+            border-color: var(--primary-light) !important;
+            box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.2) !important;
+        }
+
+        [data-theme="dark"] #verify2FACode::placeholder {
+            color: var(--gray-400) !important;
+        }
+
+        [data-theme="dark"] #securitySettingsModal .form-label {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .alert-info:not(#2faDisabled .alert-info) {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.1) 100%);
+            color: var(--primary-light);
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
