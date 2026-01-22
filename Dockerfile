@@ -46,6 +46,5 @@ ENV FLASK_APP=run.py
 ENV PYTHONUNBUFFERED=1
 
 # Run the application with gunicorn
-# Uses gunicorn_config.py for worker settings and post_fork hook
-# to properly manage database connections across forked workers
-CMD ["gunicorn", "-c", "gunicorn_config.py", "run:app"]
+# --preload loads app once before forking workers (prevents race condition in db.create_all)
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "--preload", "run:app"]
