@@ -70,6 +70,31 @@ function sleep(ms) {
 }
 
 /**
+ * Safely parse JSON response with detailed error messages
+ * @param {Response} response - Fetch response
+ * @param {string} context - Context for error messages (e.g., "organizations", "assets")
+ * @returns {Promise<any>} Parsed JSON data
+ * @throws {Error} with detailed message if parsing fails
+ */
+async function safeParseJSON(response, context = 'data') {
+    const contentType = response.headers.get('content-type') || '';
+
+    // Check if response is JSON
+    if (!contentType.includes('application/json')) {
+        // Try to read the response to provide better error info
+        const text = await response.text();
+        if (text.startsWith('<!') || text.startsWith('<html')) {
+            // HTML response - likely an error page or redirect
+            console.error(`API returned HTML instead of JSON for ${context}:`, text.substring(0, 200));
+            throw new Error(`Server returned an error page. Please refresh and try again.`);
+        }
+        throw new Error(`Unexpected response type: ${contentType || 'unknown'}`);
+    }
+
+    return response.json();
+}
+
+/**
  * Load data with retry and update element state
  * @param {string} elementId - Element to update on error
  * @param {Function} loadFn - Async function to load data
@@ -1532,10 +1557,16 @@ async function loadOrganizations() {
         const response = await fetchWithRetry('/api/organizations', {}, 3, 800);
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            // Try to get error message from response
+            try {
+                const errorData = await safeParseJSON(response, 'organizations');
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            } catch (e) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
         }
 
-        organizations = await response.json();
+        organizations = await safeParseJSON(response, 'organizations');
 
         if (organizations.length === 0) {
             tbody.innerHTML = `
@@ -1618,9 +1649,14 @@ async function loadOrganizationsDropdown() {
     try {
         const response = await fetch('/api/organizations');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            try {
+                const errorData = await safeParseJSON(response, 'organizations dropdown');
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            } catch (e) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
         }
-        const orgs = await response.json();
+        const orgs = await safeParseJSON(response, 'organizations dropdown');
 
         if (orgs.length === 0) {
             select.innerHTML = '<option value="">No organizations available</option>';
@@ -1630,7 +1666,7 @@ async function loadOrganizationsDropdown() {
         }
     } catch (error) {
         console.error('Error loading organizations dropdown:', error);
-        select.innerHTML = '<option value="">Error loading organizations</option>';
+        select.innerHTML = `<option value="">Error: ${error.message}</option>`;
     }
 }
 
@@ -5981,9 +6017,16 @@ async function loadAssets(page = 1) {
 
         const response = await fetch(`/api/assets?${params}`);
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            // Try to get error message from response
+            try {
+                const errorData = await safeParseJSON(response, 'assets');
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            } catch (e) {
+                if (e.message.includes('Server returned')) throw e;
+                throw new Error(`HTTP ${response.status}`);
+            }
         }
-        const data = await response.json();
+        const data = await safeParseJSON(response, 'assets');
         const assets = data.assets || [];
         const total = data.total || 0;
         const pages = Math.ceil(total / assetsPerPage);

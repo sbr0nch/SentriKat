@@ -1940,6 +1940,17 @@
         #securitySettingsModal {
             z-index: 1055 !important;
         }
+        #securitySettingsModal .modal-dialog {
+            z-index: 1056 !important;
+        }
+        #securitySettingsModal .modal-content {
+            position: relative;
+            z-index: 1056 !important;
+        }
+        /* Ensure modal backdrop doesn't block clicks when showing single modal */
+        .modal-backdrop.show {
+            opacity: 0.5;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -3667,8 +3678,19 @@
         let securityModal = null;
 
         function openSecuritySettings() {
+            // Clean up any lingering backdrops first
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.paddingRight = '';
+
             if (!securityModal) {
-                securityModal = new bootstrap.Modal(document.getElementById('securitySettingsModal'));
+                const modalEl = document.getElementById('securitySettingsModal');
+                securityModal = new bootstrap.Modal(modalEl, {
+                    backdrop: true,
+                    keyboard: true,
+                    focus: true
+                });
             }
             securityModal.show();
             load2FAStatus();

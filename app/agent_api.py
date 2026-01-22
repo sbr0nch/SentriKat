@@ -1512,8 +1512,16 @@ def list_assets():
                 query = query.filter_by(organization_id=org_id)
         else:
             # Non-super-admins can only see their organization's assets
+            # Include both primary organization and org_memberships
             try:
-                user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+                user_org_ids = set()
+                # Add primary organization
+                if user.organization_id:
+                    user_org_ids.add(user.organization_id)
+                # Add multi-org memberships
+                for m in user.org_memberships.all():
+                    user_org_ids.add(m.organization_id)
+                user_org_ids = list(user_org_ids)
             except Exception as e:
                 logger.warning(f"Error getting org memberships for user {user.id}: {e}")
                 user_org_ids = []
