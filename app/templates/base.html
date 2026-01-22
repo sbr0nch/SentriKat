@@ -1947,9 +1947,23 @@
             position: relative;
             z-index: 1056 !important;
         }
-        /* Ensure modal backdrop doesn't block clicks when showing single modal */
-        .modal-backdrop.show {
-            opacity: 0.5;
+        /* Custom backdrop for security settings modal */
+        #securitySettingsBackdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1054;
+            display: none;
+        }
+        #securitySettingsBackdrop.show {
+            display: block;
+        }
+        /* Hide any Bootstrap backdrops when security modal is open */
+        body.security-modal-open .modal-backdrop {
+            display: none !important;
         }
     </style>
     {% block extra_css %}{% endblock %}
@@ -3552,12 +3566,14 @@
 
     <!-- Security Settings Modal -->
     {% if auth_enabled and current_user %}
-    <div class="modal fade" id="securitySettingsModal" tabindex="-1" aria-labelledby="securitySettingsModalLabel" aria-hidden="true" data-bs-backdrop="true" data-bs-keyboard="true">
+    <!-- Custom backdrop for security settings - we manage this ourselves -->
+    <div id="securitySettingsBackdrop" onclick="closeSecuritySettings()"></div>
+    <div class="modal fade" id="securitySettingsModal" tabindex="-1" aria-labelledby="securitySettingsModalLabel" aria-hidden="true" data-bs-backdrop="false" data-bs-keyboard="true">
         <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="bi bi-shield-lock me-2"></i>Security Settings</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" onclick="closeSecuritySettings()"></button>
                 </div>
                 <div class="modal-body">
                     {% if current_user.auth_type == 'local' %}
@@ -3678,13 +3694,16 @@
         let securityModal = null;
 
         function openSecuritySettings() {
-            // Clean up any lingering backdrops first
+            // AGGRESSIVE CLEANUP: Remove ALL Bootstrap backdrops and modal state
             document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
             document.body.classList.remove('modal-open');
             document.body.style.overflow = '';
             document.body.style.paddingRight = '';
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
 
             const modalEl = document.getElementById('securitySettingsModal');
+            const customBackdrop = document.getElementById('securitySettingsBackdrop');
 
             // Dispose existing modal instance if any
             if (securityModal) {
@@ -3694,24 +3713,106 @@
                 securityModal = null;
             }
 
-            // Create fresh modal instance with static backdrop to prevent accidental close
+            // Remove any existing Bootstrap Modal instance from the element
+            const existingInstance = bootstrap.Modal.getInstance(modalEl);
+            if (existingInstance) {
+                try {
+                    existingInstance.dispose();
+                } catch (e) {}
+            }
+
+            // Show our custom backdrop
+            customBackdrop.classList.add('show');
+            document.body.classList.add('security-modal-open');
+            document.body.style.overflow = 'hidden';
+
+            // Create fresh modal instance WITHOUT Bootstrap backdrop
             securityModal = new bootstrap.Modal(modalEl, {
-                backdrop: 'static',
+                backdrop: false,
                 keyboard: true,
                 focus: true
             });
 
-            // Add event listener to clean up on hide
-            modalEl.addEventListener('hidden.bs.modal', function cleanup() {
-                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-                document.body.classList.remove('modal-open');
-                document.body.style.overflow = '';
-                document.body.style.paddingRight = '';
-                modalEl.removeEventListener('hidden.bs.modal', cleanup);
-            }, { once: true });
+            // Listen for modal hide to clean up
+            modalEl.addEventListener('hidden.bs.modal', handleSecurityModalHidden, { once: true });
+
+            // Also listen for escape key
+            document.addEventListener('keydown', handleSecurityModalEscape);
 
             securityModal.show();
             load2FAStatus();
+        }
+
+        function handleSecurityModalEscape(e) {
+            if (e.key === 'Escape') {
+                closeSecuritySettings();
+            }
+        }
+
+        function handleSecurityModalHidden() {
+            cleanupSecurityModal();
+        }
+
+        function closeSecuritySettings() {
+            const modalEl = document.getElementById('securitySettingsModal');
+
+            if (securityModal) {
+                try {
+                    securityModal.hide();
+                } catch (e) {}
+            }
+
+            // Force cleanup after a small delay to ensure Bootstrap has finished
+            setTimeout(cleanupSecurityModal, 100);
+        }
+
+        function cleanupSecurityModal() {
+            const customBackdrop = document.getElementById('securitySettingsBackdrop');
+            const modalEl = document.getElementById('securitySettingsModal');
+
+            // Hide custom backdrop
+            if (customBackdrop) {
+                customBackdrop.classList.remove('show');
+            }
+
+            // Remove body classes and styles
+            document.body.classList.remove('security-modal-open');
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.paddingRight = '';
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
+
+            // Remove ALL Bootstrap backdrops (paranoid cleanup)
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+
+            // Dispose modal instance
+            if (securityModal) {
+                try {
+                    securityModal.dispose();
+                } catch (e) {}
+                securityModal = null;
+            }
+
+            // Also dispose any Bootstrap instance on the element
+            const existingInstance = bootstrap.Modal.getInstance(modalEl);
+            if (existingInstance) {
+                try {
+                    existingInstance.dispose();
+                } catch (e) {}
+            }
+
+            // Remove escape key listener
+            document.removeEventListener('keydown', handleSecurityModalEscape);
+
+            // Reset modal element classes
+            if (modalEl) {
+                modalEl.classList.remove('show');
+                modalEl.style.display = '';
+                modalEl.setAttribute('aria-hidden', 'true');
+                modalEl.removeAttribute('aria-modal');
+                modalEl.removeAttribute('role');
+            }
         }
 
         async function load2FAStatus() {
