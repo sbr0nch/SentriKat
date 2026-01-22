@@ -147,7 +147,7 @@ def create_app(config_class=Config):
 
         current_user = None
         if 'user_id' in session:
-            current_user = User.query.get(session['user_id'])
+            current_user = db.session.get(User, session['user_id'])
 
         # Match auth.py: AUTH_ENABLED = DISABLE_AUTH != 'true'
         auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'

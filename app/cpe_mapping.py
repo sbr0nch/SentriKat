@@ -10,6 +10,7 @@ We store just vendor and product for matching.
 
 import re
 from app import db
+from sqlalchemy import func
 
 # ============================================================================
 # CPE Mappings Database
@@ -322,13 +323,13 @@ def get_cpe_coverage_stats():
     """
     from app.models import Product
 
-    total = Product.query.count()
-    with_cpe = Product.query.filter(
+    total = db.session.query(func.count(Product.id)).scalar() or 0
+    with_cpe = db.session.query(func.count(Product.id)).filter(
         Product.cpe_vendor.isnot(None),
         Product.cpe_vendor != '',
         Product.cpe_product.isnot(None),
         Product.cpe_product != ''
-    ).count()
+    ).scalar() or 0
 
     return {
         'total_products': total,

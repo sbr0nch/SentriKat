@@ -1426,7 +1426,9 @@ def trigger_job_processing():
     if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
-    max_jobs = request.args.get('max', 10, type=int)
+    max_jobs = min(request.args.get('max', 10, type=int), 100)  # Cap at 100 to prevent resource exhaustion
+    if max_jobs < 1:
+        max_jobs = 10
     jobs_processed = 0
     jobs_failed = 0
 
@@ -2382,8 +2384,8 @@ def get_usage_history(org_id):
         if org_id not in user_org_ids:
             return jsonify({'error': 'Access denied'}), 403
 
-    # Get date range
-    days = request.args.get('days', 30, type=int)
+    # Get date range (cap at 365 days to prevent excessive data queries)
+    days = min(max(request.args.get('days', 30, type=int), 1), 365)
     start_date = date.today() - timedelta(days=days)
 
     records = AgentUsageRecord.query.filter(

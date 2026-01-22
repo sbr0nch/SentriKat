@@ -67,7 +67,10 @@ class LDAPManager:
             if search_query and search_query != '*':
                 # Search for users matching the query - use configured username attribute
                 username_attr = config['username_attr']
-                search_filter = f"(&(objectClass=person)(|(cn=*{search_query}*)(mail=*{search_query}*)({username_attr}=*{search_query}*)))"
+                # Escape LDAP special characters to prevent LDAP injection
+                from ldap3.utils.conv import escape_filter_chars
+                safe_query = escape_filter_chars(search_query)
+                search_filter = f"(&(objectClass=person)(|(cn=*{safe_query}*)(mail=*{safe_query}*)({username_attr}=*{safe_query}*)))"
             else:
                 # Get all users
                 search_filter = "(objectClass=person)"

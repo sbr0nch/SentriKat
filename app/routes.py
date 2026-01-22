@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, send_from_directory
 from app import db, csrf, limiter
+from sqlalchemy import func
 import os
 from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
 from app.cisa_sync import sync_cisa_kev
@@ -103,7 +104,7 @@ def get_status():
     """
     try:
         last_sync = SyncLog.query.order_by(SyncLog.started_at.desc()).first()
-        vuln_count = Vulnerability.query.count()
+        vuln_count = db.session.query(func.count(Vulnerability.id)).scalar() or 0
 
         return jsonify({
             'status': 'online',
@@ -1028,7 +1029,7 @@ def get_vulnerability_stats():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
-    total_vulns = Vulnerability.query.count()
+    total_vulns = db.session.query(func.count(Vulnerability.id)).scalar() or 0
 
     # Filter matches by organization using multi-org relationship
     if org_id:

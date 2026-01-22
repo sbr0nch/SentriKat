@@ -2697,7 +2697,66 @@
             document.body.classList.remove('modal-open');
             // Reset body padding that Bootstrap adds
             document.body.style.removeProperty('padding-right');
+            document.body.style.removeProperty('overflow');
         }
+
+        /**
+         * Properly close and dispose of a Bootstrap modal
+         * Use this instead of just calling .hide() to prevent backdrop issues
+         */
+        function safeCloseModal(modalElement) {
+            if (!modalElement) return;
+
+            const instance = bootstrap.Modal.getInstance(modalElement);
+            if (instance) {
+                try {
+                    instance.hide();
+                    // Let Bootstrap finish its animation before disposing
+                    setTimeout(() => {
+                        try {
+                            instance.dispose();
+                        } catch (e) {}
+                        cleanupModalBackdrops();
+                    }, 300);
+                } catch (e) {
+                    console.error('Error closing modal:', e);
+                    cleanupModalBackdrops();
+                }
+            } else {
+                // No Bootstrap instance, just clean up
+                modalElement.classList.remove('show');
+                modalElement.style.display = 'none';
+                cleanupModalBackdrops();
+            }
+        }
+
+        /**
+         * Safely remove a dynamic modal element from the DOM
+         * Use this for modals created dynamically via insertAdjacentHTML
+         */
+        function safeRemoveModal(modalId) {
+            const modalElement = document.getElementById(modalId);
+            if (!modalElement) return;
+
+            const instance = bootstrap.Modal.getInstance(modalElement);
+            if (instance) {
+                try {
+                    instance.dispose();
+                } catch (e) {}
+            }
+            modalElement.remove();
+            cleanupModalBackdrops();
+        }
+
+        // Global event listener to clean up modal backdrops when ANY modal is fully hidden
+        document.addEventListener('hidden.bs.modal', function(event) {
+            // Check if any other modals are still open
+            const openModals = document.querySelectorAll('.modal.show');
+            if (openModals.length === 0) {
+                // No modals open, clean up all backdrops
+                setTimeout(cleanupModalBackdrops, 50);
+            }
+        });
 
         /**
          * Switch to a specific admin panel tab
@@ -2782,8 +2841,28 @@
         }
 
         // Check CVE status on page load and every 5 minutes
+        // Retry mechanism for initial load timing issues
+        let cveStatusRetries = 0;
+        async function checkCVEServiceStatusWithRetry() {
+            const led = document.getElementById('cveStatusLed');
+            try {
+                await checkCVEServiceStatus();
+                // If status is red/error on first load, retry a few times
+                if (led && led.classList.contains('status-led-red') && cveStatusRetries < 3) {
+                    cveStatusRetries++;
+                    setTimeout(checkCVEServiceStatusWithRetry, 2000); // Retry after 2 seconds
+                }
+            } catch (e) {
+                if (cveStatusRetries < 3) {
+                    cveStatusRetries++;
+                    setTimeout(checkCVEServiceStatusWithRetry, 2000);
+                }
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
-            checkCVEServiceStatus();
+            // Small delay to ensure database connections are ready
+            setTimeout(checkCVEServiceStatusWithRetry, 500);
             setInterval(checkCVEServiceStatus, 300000); // 5 minutes
         });
 
@@ -4109,12 +4188,13 @@
                     <!-- LDAP User Notice -->
                     <div class="alert alert-info mb-4">
                         <i class="bi bi-info-circle me-2"></i>
-                        Your password is managed through your organization's directory service (LDAP/Active Directory).
-                        You can still enable two-factor authentication below for additional security.
+                        Your password and security settings are managed through your organization's directory service (LDAP/Active Directory).
+                        Two-factor authentication is not available for LDAP users as authentication is handled externally.
                     </div>
                     {% endif %}
 
-                    <!-- Two-Factor Authentication Section -->
+                    <!-- Two-Factor Authentication Section (local users only) -->
+                    {% if current_user.auth_type == 'local' %}
                     <div class="card">
                         <div class="card-header">
                             <i class="bi bi-phone me-2"></i>Two-Factor Authentication
@@ -4183,6 +4263,7 @@
                             </div>
                         </div>
                     </div>
+                    {% endif %}
                 </div>
             </div>
         </div>

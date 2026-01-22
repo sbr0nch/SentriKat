@@ -3904,7 +3904,7 @@ async function loadGroupMappings() {
 
     tableBody.innerHTML = `
         <tr>
-            <td colspan="9" class="text-center py-4">
+            <td colspan="10" class="text-center py-4">
                 <div class="spinner-border text-primary" role="status"></div>
                 <p class="text-muted mt-2">Loading group mappings...</p>
             </td>
@@ -4012,7 +4012,7 @@ async function loadGroupMappings() {
         console.error('Error loading group mappings:', error);
         tableBody.innerHTML = `
             <tr>
-                <td colspan="9" class="text-center py-4 text-danger">
+                <td colspan="10" class="text-center py-4 text-danger">
                     <p>Error loading group mappings</p>
                 </td>
             </tr>
@@ -4142,8 +4142,9 @@ async function saveGroupMapping() {
         if (response.ok) {
             showToast(`Group mapping ${mappingId ? 'updated' : 'created'} successfully`, 'success');
 
-            const modal = bootstrap.Modal.getInstance(document.getElementById('groupMappingModal'));
-            modal.hide();
+            const modalEl = document.getElementById('groupMappingModal');
+            const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+            if (modal) modal.hide();
 
             loadGroupMappings();
         } else {
@@ -7021,6 +7022,20 @@ async function loadIntegrations() {
 }
 
 function showCreateIntegrationModal() {
+    // Clean up any existing modal first
+    const existingModal = document.getElementById('createIntegrationModal');
+    if (existingModal) {
+        const instance = bootstrap.Modal.getInstance(existingModal);
+        if (instance) {
+            try { instance.dispose(); } catch (e) {}
+        }
+        existingModal.remove();
+    }
+    // Clean up lingering backdrops
+    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+    document.body.classList.remove('modal-open');
+    document.body.style.removeProperty('padding-right');
+
     const modalHtml = `
         <div class="modal fade" id="createIntegrationModal" tabindex="-1">
             <div class="modal-dialog modal-lg">
@@ -7222,7 +7237,18 @@ async function saveIntegration() {
 
         const integration = await response.json();
 
-        bootstrap.Modal.getInstance(document.getElementById('createIntegrationModal')).hide();
+        const modalEl = document.getElementById('createIntegrationModal');
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) {
+            modalInstance.hide();
+            setTimeout(() => {
+                try { modalInstance.dispose(); } catch (e) {}
+                if (modalEl) modalEl.remove();
+                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('padding-right');
+            }, 300);
+        }
         showToast('Pull Source created successfully', 'success');
         loadIntegrations();
 
@@ -7442,8 +7468,19 @@ async function showEditIntegrationModal(integrationId) {
             </div>
         `;
 
+        // Clean up any existing modal first
         const existingModal = document.getElementById('editIntegrationModal');
-        if (existingModal) existingModal.remove();
+        if (existingModal) {
+            const instance = bootstrap.Modal.getInstance(existingModal);
+            if (instance) {
+                try { instance.dispose(); } catch (e) {}
+            }
+            existingModal.remove();
+        }
+        // Clean up lingering backdrops
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('padding-right');
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         const modal = new bootstrap.Modal(document.getElementById('editIntegrationModal'));
@@ -7510,7 +7547,18 @@ async function saveEditIntegration() {
             throw new Error(error.error || 'Failed to update integration');
         }
 
-        bootstrap.Modal.getInstance(document.getElementById('editIntegrationModal')).hide();
+        const modalEl = document.getElementById('editIntegrationModal');
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) {
+            modalInstance.hide();
+            setTimeout(() => {
+                try { modalInstance.dispose(); } catch (e) {}
+                if (modalEl) modalEl.remove();
+                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('padding-right');
+            }, 300);
+        }
         showToast('Pull Source updated successfully', 'success');
         loadIntegrations();
 

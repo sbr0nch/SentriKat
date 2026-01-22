@@ -7,6 +7,7 @@ from functools import wraps
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, flash
 from app import db, csrf, limiter
 from app.models import User, Organization
+from sqlalchemy import func
 from datetime import datetime
 import os
 
@@ -34,7 +35,7 @@ def login_required(f):
             return redirect(url_for('auth.login', next=request.url))
 
         # Verify user still exists and is active
-        user = User.query.get(session['user_id'])
+        user = db.session.get(User, session['user_id'])
         if not user or not user.is_active:
             session.clear()
             if request.is_json or request.path.startswith('/api/'):
@@ -73,7 +74,7 @@ def admin_required(f):
             return redirect(url_for('auth.login', next=request.url))
 
         # Check if user is super_admin or has legacy is_admin flag
-        user = User.query.get(session['user_id'])
+        user = db.session.get(User, session['user_id'])
         if not user:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'User not found'}), 401
@@ -114,7 +115,7 @@ def manager_required(f):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
-        user = User.query.get(session['user_id'])
+        user = db.session.get(User, session['user_id'])
         if not user:
             logger.error(f"User {session['user_id']} not found in database")
             if request.is_json or request.path.startswith('/api/'):
@@ -159,7 +160,7 @@ def org_admin_required(f):
             return redirect(url_for('auth.login', next=request.url))
 
         # Check if user is org_admin, super_admin, or legacy is_admin
-        user = User.query.get(session['user_id'])
+        user = db.session.get(User, session['user_id'])
         if not user:
             logger.error(f"User {session['user_id']} not found in database")
             if request.is_json or request.path.startswith('/api/'):
@@ -197,7 +198,7 @@ def get_current_user():
         return None
 
     if 'user_id' in session:
-        return User.query.get(session['user_id'])
+        return db.session.get(User, session['user_id'])
     return None
 
 @auth_bp.route('/login', methods=['GET'])
@@ -207,7 +208,7 @@ def login():
         return redirect(url_for('main.index'))
 
     # Check if setup is needed (no users exist)
-    if User.query.count() == 0:
+    if db.session.query(func.count(User.id)).scalar() == 0:
         return redirect(url_for('auth.setup'))
 
     if 'user_id' in session:
@@ -219,7 +220,7 @@ def login():
 def setup():
     """First-time setup wizard"""
     # Only allow if no users exist
-    if User.query.count() > 0:
+    if db.session.query(func.count(User.id)).scalar() > 0:
         return redirect(url_for('auth.login'))
 
     return render_template('setup.html')
@@ -228,7 +229,7 @@ def setup():
 def api_setup():
     """Handle first-time setup"""
     # Only allow if no users exist
-    if User.query.count() > 0:
+    if db.session.query(func.count(User.id)).scalar() > 0:
         return jsonify({'error': 'Setup already completed'}), 400
 
     data = request.get_json()
