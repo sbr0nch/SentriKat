@@ -844,12 +844,12 @@ async function loadUsers() {
                                     <i class="bi bi-phone-flip"></i>
                                 </button>
                                 ` : (user.auth_type === 'local' ? `
-                                <button class="btn-action" onclick="require2FAForUser(${user.id}, '${escapeHtml(user.username)}')" title="Require 2FA Setup" style="color: #0d6efd;">
+                                <button class="btn-action btn-action-primary" onclick="require2FAForUser(${user.id}, '${escapeHtml(user.username)}')" title="Require 2FA Setup">
                                     <i class="bi bi-shield-plus"></i>
                                 </button>
                                 ` : '')}
                                 ${user.auth_type === 'local' ? `
-                                <button class="btn-action" onclick="forcePasswordChange(${user.id}, '${escapeHtml(user.username)}')" title="Force Password Change" style="color: #7c3aed;">
+                                <button class="btn-action btn-action-secondary" onclick="forcePasswordChange(${user.id}, '${escapeHtml(user.username)}')" title="Force Password Change">
                                     <i class="bi bi-key-fill"></i>
                                 </button>
                                 ` : ''}

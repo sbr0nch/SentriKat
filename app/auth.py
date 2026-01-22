@@ -542,9 +542,6 @@ def setup_2fa():
     if not current_user:
         return jsonify({'error': 'Not authenticated'}), 401
 
-    if current_user.auth_type != 'local':
-        return jsonify({'error': '2FA is only available for local users'}), 400
-
     if current_user.totp_enabled:
         return jsonify({'error': '2FA is already enabled. Disable it first to set up again.'}), 400
 
@@ -648,9 +645,17 @@ def disable_2fa():
     if not password:
         return jsonify({'error': 'Password is required to disable 2FA'}), 400
 
-    if not current_user.check_password(password):
-        logger.warning(f"2FA disable failed for {current_user.username}: incorrect password")
-        return jsonify({'error': 'Incorrect password'}), 401
+    # Verify password based on auth type
+    if current_user.auth_type == 'ldap':
+        # For LDAP users, verify against LDAP server
+        if not authenticate_ldap(current_user, password):
+            logger.warning(f"2FA disable failed for {current_user.username}: LDAP authentication failed")
+            return jsonify({'error': 'Incorrect password'}), 401
+    else:
+        # For local users, verify against stored hash
+        if not current_user.check_password(password):
+            logger.warning(f"2FA disable failed for {current_user.username}: incorrect password")
+            return jsonify({'error': 'Incorrect password'}), 401
 
     current_user.disable_totp()
     db.session.commit()
@@ -668,7 +673,7 @@ def get_2fa_status():
 
     return jsonify({
         'enabled': current_user.totp_enabled or False,
-        'available': current_user.auth_type == 'local'
+        'available': True  # 2FA available for all users (local and LDAP)
     })
 
 def authenticate_ldap(user, password):
