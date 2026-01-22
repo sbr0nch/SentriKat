@@ -1,5 +1,6 @@
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, send_from_directory
 from app import db, csrf, limiter
+import os
 from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
@@ -21,6 +22,18 @@ bp = Blueprint('main', __name__)
 
 # Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
 csrf.exempt(bp)
+
+
+# =============================================================================
+# Static File Serving (Persistent uploads from data volume)
+# =============================================================================
+
+@bp.route('/data/uploads/<path:filename>')
+def serve_upload(filename):
+    """Serve uploaded files from persistent data directory"""
+    data_dir = os.environ.get('DATA_DIR', '/app/data')
+    uploads_dir = os.path.join(data_dir, 'uploads')
+    return send_from_directory(uploads_dir, filename)
 
 
 # =============================================================================

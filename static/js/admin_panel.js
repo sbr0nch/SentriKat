@@ -114,11 +114,18 @@ async function loadCurrentUserInfo() {
  * Get organization_id query parameter for API calls (for non-super-admin users)
  */
 function getOrgIdParam() {
-    if (!window.currentUserInfo) return '';
-    if (window.currentUserInfo.role === 'super_admin') return '';
-    if (window.currentUserInfo.organization_id) {
-        return `?organization_id=${window.currentUserInfo.organization_id}`;
+    if (!window.currentUserInfo) {
+        console.warn('getOrgIdParam: currentUserInfo not loaded yet');
+        return '';
     }
+    if (window.currentUserInfo.role === 'super_admin') return '';
+
+    // Try organization_id first, then active_organization_id
+    const orgId = window.currentUserInfo.organization_id || window.currentUserInfo.active_organization_id;
+    if (orgId) {
+        return `?organization_id=${orgId}`;
+    }
+    console.warn('getOrgIdParam: No organization_id found for user', window.currentUserInfo.username);
     return '';
 }
 
@@ -2197,6 +2204,11 @@ async function saveSyncSettings() {
 }
 
 async function loadSyncStatus() {
+    // Only super admins can access sync status
+    if (!window.currentUserInfo || window.currentUserInfo.role !== 'super_admin') {
+        return;
+    }
+
     try {
         const response = await fetch('/api/settings/sync/status');
         const status = await response.json();
@@ -2979,6 +2991,12 @@ async function loadAuditLogs() {
 }
 
 async function loadAllSettings() {
+    // Only super admins can access most settings
+    if (!window.currentUserInfo || window.currentUserInfo.role !== 'super_admin') {
+        console.log('Skipping settings load - not a super admin');
+        return;
+    }
+
     console.log('Loading all settings...');
 
     // Load settings in parallel with retry support
@@ -7722,11 +7740,14 @@ document.addEventListener('DOMContentLoaded', function() {
     window.addEventListener('hashchange', handleUrlHash);
 
     // Save tab to localStorage whenever a main tab is clicked
-    document.querySelectorAll('#adminTabs .nav-link').forEach(tabButton => {
-        tabButton.addEventListener('shown.bs.tab', function(e) {
-            // Extract tab name from button ID (e.g., 'integrations-tab' -> 'integrations')
-            const tabName = e.target.id.replace('-tab', '');
-            saveCurrentAdminTab(tabName);
+    const adminTabs = document.getElementById('adminTabs');
+    if (adminTabs) {
+        adminTabs.querySelectorAll('button[data-bs-toggle="tab"]').forEach(tabButton => {
+            tabButton.addEventListener('shown.bs.tab', function(e) {
+                // Extract tab name from button ID (e.g., 'integrations-tab' -> 'integrations')
+                const tabName = e.target.id.replace('-tab', '');
+                saveCurrentAdminTab(tabName);
+            });
         });
-    });
+    }
 });

@@ -973,8 +973,9 @@ def upload_logo():
         return jsonify({'error': f'File too large. Maximum size: {MAX_LOGO_SIZE // (1024*1024)}MB'}), 400
 
     try:
-        # Create uploads directory if it doesn't exist
-        upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'uploads')
+        # Create uploads directory in /app/data (persistent volume)
+        data_dir = os.environ.get('DATA_DIR', '/app/data')
+        upload_dir = os.path.join(data_dir, 'uploads')
         os.makedirs(upload_dir, exist_ok=True)
 
         # Generate safe filename
@@ -985,8 +986,8 @@ def upload_logo():
         # Save file
         file.save(filepath)
 
-        # Update branding setting with logo path
-        logo_url = f'/static/uploads/{filename}'
+        # Update branding setting with logo path (served via /data/uploads route)
+        logo_url = f'/data/uploads/{filename}'
         set_setting('logo_url', logo_url, 'branding', 'Custom logo URL')
 
         return jsonify({
@@ -1008,8 +1009,14 @@ def delete_logo():
         # Get current logo path
         logo_url = get_setting('logo_url', '')
 
-        if logo_url and logo_url.startswith('/static/uploads/'):
-            # Delete file
+        if logo_url and logo_url.startswith('/data/uploads/'):
+            # Delete file from persistent data directory
+            data_dir = os.environ.get('DATA_DIR', '/app/data')
+            filepath = os.path.join(data_dir, 'uploads', os.path.basename(logo_url))
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        elif logo_url and logo_url.startswith('/static/uploads/'):
+            # Legacy: delete file from static directory
             filepath = os.path.join(os.path.dirname(os.path.dirname(__file__)), logo_url.lstrip('/'))
             if os.path.exists(filepath):
                 os.remove(filepath)
