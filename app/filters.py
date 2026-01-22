@@ -1,5 +1,6 @@
 from app import db
 from app.models import Product, Vulnerability, VulnerabilityMatch
+from sqlalchemy.orm import joinedload
 import re
 import json
 
@@ -378,7 +379,11 @@ def get_filtered_vulnerabilities(filters=None):
     """Get vulnerabilities filtered by various criteria"""
     from app.models import product_organizations
 
-    query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product)
+    # Use joinedload to eagerly load related objects and avoid N+1 queries
+    query = db.session.query(VulnerabilityMatch).options(
+        joinedload(VulnerabilityMatch.vulnerability),
+        joinedload(VulnerabilityMatch.product).joinedload(Product.organizations)
+    ).join(Vulnerability).join(Product)
 
     if filters:
         # Filter by organization using multi-org relationship

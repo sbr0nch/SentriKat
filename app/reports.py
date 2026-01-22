@@ -14,6 +14,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from app.models import VulnerabilityMatch, Product, Vulnerability, Organization
 from app import db
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 
 class VulnerabilityReportGenerator:
@@ -109,7 +110,11 @@ class VulnerabilityReportGenerator:
 
     def _get_stats(self, start_date, end_date):
         """Get vulnerability statistics for the date range"""
-        query = db.session.query(VulnerabilityMatch).join(Product)
+        # Use joinedload to eagerly load related objects and avoid N+1 queries
+        query = db.session.query(VulnerabilityMatch).options(
+            joinedload(VulnerabilityMatch.vulnerability),
+            joinedload(VulnerabilityMatch.product).joinedload(Product.organizations)
+        ).join(Product)
 
         if self.organization_id:
             query = query.filter(Product.organization_id == self.organization_id)
@@ -482,8 +487,11 @@ class VulnerabilityReportGenerator:
             if org:
                 org_name = org.display_name
 
-        # Get the selected matches
-        matches = VulnerabilityMatch.query.filter(
+        # Get the selected matches with eager loading to avoid N+1 queries
+        matches = VulnerabilityMatch.query.options(
+            joinedload(VulnerabilityMatch.vulnerability),
+            joinedload(VulnerabilityMatch.product).joinedload(Product.organizations)
+        ).filter(
             VulnerabilityMatch.id.in_(match_ids)
         ).all()
 
