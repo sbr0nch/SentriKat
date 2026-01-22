@@ -3684,14 +3684,32 @@
             document.body.style.overflow = '';
             document.body.style.paddingRight = '';
 
-            if (!securityModal) {
-                const modalEl = document.getElementById('securitySettingsModal');
-                securityModal = new bootstrap.Modal(modalEl, {
-                    backdrop: true,
-                    keyboard: true,
-                    focus: true
-                });
+            const modalEl = document.getElementById('securitySettingsModal');
+
+            // Dispose existing modal instance if any
+            if (securityModal) {
+                try {
+                    securityModal.dispose();
+                } catch (e) {}
+                securityModal = null;
             }
+
+            // Create fresh modal instance with static backdrop to prevent accidental close
+            securityModal = new bootstrap.Modal(modalEl, {
+                backdrop: 'static',
+                keyboard: true,
+                focus: true
+            });
+
+            // Add event listener to clean up on hide
+            modalEl.addEventListener('hidden.bs.modal', function cleanup() {
+                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = '';
+                document.body.style.paddingRight = '';
+                modalEl.removeEventListener('hidden.bs.modal', cleanup);
+            }, { once: true });
+
             securityModal.show();
             load2FAStatus();
         }
