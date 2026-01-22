@@ -202,11 +202,24 @@ def create_app(config_class=Config):
                 pass
             branding['show_powered_by'] = True
 
+        # Load session timeout for client-side handling
+        session_timeout_minutes = 480  # Default 8 hours
+        try:
+            timeout_setting = SystemSettings.query.filter_by(key='session_timeout').first()
+            if timeout_setting and timeout_setting.value:
+                session_timeout_minutes = int(timeout_setting.value)
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
         return dict(
             current_user=current_user,
             auth_enabled=auth_enabled,
             branding=branding,
-            license=license_info
+            license=license_info,
+            session_timeout_minutes=session_timeout_minutes
         )
 
     # Setup wizard redirect

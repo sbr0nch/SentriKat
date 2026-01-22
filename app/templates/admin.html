@@ -915,12 +915,26 @@
     }
 
     async function saveProduct() {
+        // Clear previous validation
+        clearFormValidation('productForm');
+
         const vendor = document.getElementById('vendor').value.trim();
         const productName = document.getElementById('productName').value.trim();
         const criticality = document.getElementById('criticality').value;
 
-        if (!vendor || !productName) {
-            showToast('Vendor and Product Name are required', 'warning');
+        // Validate required fields
+        let isValid = true;
+        if (!vendor) {
+            setFieldInvalid('vendor', 'Vendor is required');
+            isValid = false;
+        }
+        if (!productName) {
+            setFieldInvalid('productName', 'Product name is required');
+            isValid = false;
+        }
+
+        if (!isValid) {
+            showToast('Please fill in all required fields', 'warning');
             return;
         }
 
