@@ -1,7 +1,6 @@
 import requests
 import json
 from datetime import datetime, timedelta
-from sqlalchemy.orm import selectinload
 from app import db
 from app.models import Vulnerability, SyncLog, Product, SystemSettings, Organization
 from app.nvd_api import fetch_cvss_data
@@ -411,58 +410,54 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
             alert_mode = alert_config['mode']
             escalation_days = alert_config['escalation_days']
 
-            # Build query based on alert mode - use selectinload for eager loading
-            base_options = [
-                selectinload(VulnerabilityMatch.vulnerability),
-                selectinload(VulnerabilityMatch.product)
-            ]
+            # Build queries using subqueries to avoid column mapping issues
+            # Get product IDs for this organization
+            org_product_ids = db.session.query(Product.id).filter(
+                Product.organization_id == org.id
+            ).subquery()
 
             if alert_mode == 'new_only':
                 # Only alert on NEW matches from this sync
-                matches_to_alert = VulnerabilityMatch.query\
-                    .options(*base_options)\
-                    .join(Vulnerability).join(Product)\
-                    .filter(
-                        Product.organization_id == org.id,
-                        VulnerabilityMatch.acknowledged == False,
-                        VulnerabilityMatch.created_at >= start_time
-                    ).all()
+                matches_to_alert = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.acknowledged == False,
+                    VulnerabilityMatch.created_at >= start_time
+                ).all()
             elif alert_mode == 'daily_reminder':
                 # Alert on ALL unacknowledged critical CVEs due within 7 days
                 from datetime import date, timedelta
                 cutoff_date = date.today() + timedelta(days=7)
-                matches_to_alert = VulnerabilityMatch.query\
-                    .options(*base_options)\
-                    .join(Vulnerability).join(Product)\
-                    .filter(
-                        Product.organization_id == org.id,
-                        VulnerabilityMatch.acknowledged == False,
-                        Vulnerability.due_date <= cutoff_date,
-                        Vulnerability.due_date >= date.today()  # Not overdue
-                    ).all()
+                # Get vulnerability IDs within due date range
+                vuln_ids_due = db.session.query(Vulnerability.id).filter(
+                    Vulnerability.due_date <= cutoff_date,
+                    Vulnerability.due_date >= date.today()
+                ).subquery()
+                matches_to_alert = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.acknowledged == False,
+                    VulnerabilityMatch.vulnerability_id.in_(vuln_ids_due)
+                ).all()
             elif alert_mode == 'escalation':
                 # Alert on CVEs approaching due date (within escalation_days)
                 from datetime import date, timedelta
                 cutoff_date = date.today() + timedelta(days=escalation_days)
-                matches_to_alert = VulnerabilityMatch.query\
-                    .options(*base_options)\
-                    .join(Vulnerability).join(Product)\
-                    .filter(
-                        Product.organization_id == org.id,
-                        VulnerabilityMatch.acknowledged == False,
-                        Vulnerability.due_date <= cutoff_date,
-                        Vulnerability.due_date >= date.today()  # Not overdue
-                    ).all()
+                # Get vulnerability IDs within due date range
+                vuln_ids_due = db.session.query(Vulnerability.id).filter(
+                    Vulnerability.due_date <= cutoff_date,
+                    Vulnerability.due_date >= date.today()
+                ).subquery()
+                matches_to_alert = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.acknowledged == False,
+                    VulnerabilityMatch.vulnerability_id.in_(vuln_ids_due)
+                ).all()
             else:
                 # Fallback to new_only behavior
-                matches_to_alert = VulnerabilityMatch.query\
-                    .options(*base_options)\
-                    .join(Vulnerability).join(Product)\
-                    .filter(
-                        Product.organization_id == org.id,
-                        VulnerabilityMatch.acknowledged == False,
-                        VulnerabilityMatch.created_at >= start_time
-                    ).all()
+                matches_to_alert = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.acknowledged == False,
+                    VulnerabilityMatch.created_at >= start_time
+                ).all()
 
             if matches_to_alert:
                 # Send email alert
@@ -485,12 +480,24 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
         # Send global webhook notifications for orgs without their own webhook
         if stored > 0 or matches_count > 0:
             # Count total critical matches (for orgs without their own webhook)
-            total_critical = VulnerabilityMatch.query\
-                .join(Vulnerability).join(Product)\
-                .filter(
+            # Use subqueries to avoid column mapping issues
+            critical_vuln_ids = db.session.query(Vulnerability.id).filter(
+                db.or_(Vulnerability.known_ransomware == True, Vulnerability.cvss_score >= 9.0)
+            ).subquery()
+
+            if orgs_with_own_webhook:
+                excluded_product_ids = db.session.query(Product.id).filter(
+                    Product.organization_id.in_(orgs_with_own_webhook)
+                ).subquery()
+                total_critical = VulnerabilityMatch.query.filter(
                     VulnerabilityMatch.created_at >= start_time,
-                    ~Product.organization_id.in_(orgs_with_own_webhook) if orgs_with_own_webhook else True,
-                    db.or_(Vulnerability.known_ransomware == True, Vulnerability.cvss_score >= 9.0)
+                    ~VulnerabilityMatch.product_id.in_(excluded_product_ids),
+                    VulnerabilityMatch.vulnerability_id.in_(critical_vuln_ids)
+                ).count()
+            else:
+                total_critical = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.created_at >= start_time,
+                    VulnerabilityMatch.vulnerability_id.in_(critical_vuln_ids)
                 ).count()
 
             # Only send global webhook if there are orgs without their own webhook

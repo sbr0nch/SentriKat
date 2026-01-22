@@ -186,13 +186,16 @@ def critical_cve_reminder_job(app):
 
             for org in organizations:
                 try:
-                    # Get unacknowledged critical vulnerabilities for this org
+                    # Get unacknowledged critical vulnerabilities for this org using subquery
                     # Filter by match creation date to only include recent ones
+                    org_product_ids = db.session.query(Product.id).filter(
+                        Product.organization_id == org.id
+                    ).subquery()
+
                     unack_matches = (
                         VulnerabilityMatch.query
-                        .join(Product)
                         .filter(
-                            Product.organization_id == org.id,
+                            VulnerabilityMatch.product_id.in_(org_product_ids),
                             VulnerabilityMatch.acknowledged == False,
                             VulnerabilityMatch.created_at >= cutoff_date
                         )

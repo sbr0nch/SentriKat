@@ -110,18 +110,16 @@ class VulnerabilityReportGenerator:
 
     def _get_stats(self, start_date, end_date):
         """Get vulnerability statistics for the date range"""
-        # Use selectinload to eagerly load related objects and avoid N+1 queries
-        # Note: Product.organizations is a dynamic relationship and can't be eager loaded
-        query = db.session.query(VulnerabilityMatch).options(
-            selectinload(VulnerabilityMatch.vulnerability),
-            selectinload(VulnerabilityMatch.product)
-        ).join(Product)
+        # Build base query without eager loading to avoid column mapping issues
+        query = db.session.query(VulnerabilityMatch)
 
         if self.organization_id:
-            query = query.filter(Product.organization_id == self.organization_id)
-
-        # Filter by date range (using match date or vulnerability date_added)
-        query = query.join(Vulnerability)
+            # Filter by organization using subquery
+            from app.models import product_organizations
+            org_product_ids = db.session.query(product_organizations.c.product_id).filter(
+                product_organizations.c.organization_id == self.organization_id
+            ).subquery()
+            query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
 
         all_matches = query.all()
 

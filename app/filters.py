@@ -1,6 +1,5 @@
 from app import db
 from app.models import Product, Vulnerability, VulnerabilityMatch
-from sqlalchemy.orm import selectinload
 import re
 import json
 
@@ -379,45 +378,55 @@ def get_filtered_vulnerabilities(filters=None):
     """Get vulnerabilities filtered by various criteria"""
     from app.models import product_organizations
 
-    # Use selectinload (separate query) to eagerly load related objects
-    # This avoids conflicts with explicit joins and is more reliable
-    query = db.session.query(VulnerabilityMatch).options(
-        selectinload(VulnerabilityMatch.vulnerability),
-        selectinload(VulnerabilityMatch.product)
-    ).join(Vulnerability).join(Product)
+    # Build base query without eager loading - let SQLAlchemy handle lazy loading
+    # This avoids column mapping issues with joins
+    query = db.session.query(VulnerabilityMatch)
 
     if filters:
-        # Filter by organization using multi-org relationship
+        # Filter by organization using subquery
         if filters.get('organization_id'):
-            query = query.join(
-                product_organizations, Product.id == product_organizations.c.product_id
-            ).filter(product_organizations.c.organization_id == filters['organization_id'])
+            org_product_ids = db.session.query(product_organizations.c.product_id).filter(
+                product_organizations.c.organization_id == filters['organization_id']
+            ).subquery()
+            query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
 
         # Filter by product ID
         if filters.get('product_id'):
             query = query.filter(VulnerabilityMatch.product_id == filters['product_id'])
 
-        # Filter by CVE ID
+        # Filter by CVE ID using subquery
         if filters.get('cve_id'):
-            query = query.filter(Vulnerability.cve_id.ilike(f"%{filters['cve_id']}%"))
+            vuln_ids = db.session.query(Vulnerability.cve_id).filter(
+                Vulnerability.cve_id.ilike(f"%{filters['cve_id']}%")
+            ).subquery()
+            query = query.filter(VulnerabilityMatch.vulnerability_id.in_(
+                db.session.query(Vulnerability.id).filter(Vulnerability.cve_id.ilike(f"%{filters['cve_id']}%"))
+            ))
 
-        # Filter by vendor
+        # Filter by vendor using subquery
         if filters.get('vendor'):
-            query = query.filter(Vulnerability.vendor_project.ilike(f"%{filters['vendor']}%"))
+            query = query.filter(VulnerabilityMatch.vulnerability_id.in_(
+                db.session.query(Vulnerability.id).filter(Vulnerability.vendor_project.ilike(f"%{filters['vendor']}%"))
+            ))
 
-        # Filter by product
+        # Filter by product using subquery
         if filters.get('product'):
-            query = query.filter(Vulnerability.product.ilike(f"%{filters['product']}%"))
+            query = query.filter(VulnerabilityMatch.vulnerability_id.in_(
+                db.session.query(Vulnerability.id).filter(Vulnerability.product.ilike(f"%{filters['product']}%"))
+            ))
 
-        # Filter by ransomware
+        # Filter by ransomware using subquery
         if filters.get('ransomware_only'):
-            query = query.filter(Vulnerability.known_ransomware == True)
+            query = query.filter(VulnerabilityMatch.vulnerability_id.in_(
+                db.session.query(Vulnerability.id).filter(Vulnerability.known_ransomware == True)
+            ))
 
         # Filter by acknowledged status
         if filters.get('acknowledged') is not None:
             query = query.filter(VulnerabilityMatch.acknowledged == filters['acknowledged'])
 
-    # Order by date added (newest first)
-    query = query.order_by(Vulnerability.date_added.desc())
+    # Order by match creation date (newest first)
+    # Avoid joining for ordering as it causes column mapping issues
+    query = query.order_by(VulnerabilityMatch.created_at.desc())
 
     return query.all()
