@@ -563,7 +563,31 @@ def bulk_process_queue():
 @requires_professional('Integrations')
 def get_integrations():
     """Get all integrations."""
-    integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Filter by organization for non-super-admin users
+    if user.is_super_admin():
+        org_id = request.args.get('organization_id', type=int)
+        if org_id:
+            integrations = Integration.query.filter_by(is_active=True, organization_id=org_id).order_by(Integration.name).all()
+        else:
+            integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
+    else:
+        org_id = request.args.get('organization_id', type=int)
+        if not org_id:
+            return jsonify({'error': 'organization_id required'}), 400
+
+        # Check permission
+        user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+        if not user_org or user_org.role not in ['org_admin', 'manager']:
+            return jsonify({'error': 'Organization admin access required'}), 403
+
+        integrations = Integration.query.filter_by(is_active=True, organization_id=org_id).order_by(Integration.name).all()
+
     return jsonify([i.to_dict() for i in integrations])
 
 

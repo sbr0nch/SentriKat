@@ -7,6 +7,9 @@ let currentUserId = null;
 let currentOrgId = null;
 let organizations = [];
 
+// Global current user info - loaded at page init
+window.currentUserInfo = null;
+
 // Global license info - loaded at page init
 window.licenseInfo = null;
 
@@ -86,6 +89,37 @@ async function loadWithRetry(elementId, loadFn, errorMessage = 'Failed to load')
             }
         }
     }
+}
+
+// ============================================================================
+// CURRENT USER INFO - For permission-aware API calls
+// ============================================================================
+
+/**
+ * Load current user info and store globally for permission checks
+ */
+async function loadCurrentUserInfo() {
+    try {
+        const response = await fetch('/api/current-user');
+        if (response.ok) {
+            window.currentUserInfo = await response.json();
+            console.log('Loaded current user info:', window.currentUserInfo?.username, 'role:', window.currentUserInfo?.role);
+        }
+    } catch (error) {
+        console.error('Error loading current user info:', error);
+    }
+}
+
+/**
+ * Get organization_id query parameter for API calls (for non-super-admin users)
+ */
+function getOrgIdParam() {
+    if (!window.currentUserInfo) return '';
+    if (window.currentUserInfo.role === 'super_admin') return '';
+    if (window.currentUserInfo.organization_id) {
+        return `?organization_id=${window.currentUserInfo.organization_id}`;
+    }
+    return '';
 }
 
 // ============================================================================
@@ -560,6 +594,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Load license info first and apply UI restrictions (await to ensure restrictions apply before showing tabs)
         // Uses retry logic internally to handle startup timing
         await loadLicenseAndApplyRestrictions();
+
+        // Load current user info for permission checks
+        await loadCurrentUserInfo();
 
         // Load users and orgs with retry
         loadUsersWithRetry();
@@ -5569,7 +5606,7 @@ async function loadAgentKeys() {
     if (!tbody) return;
 
     try {
-        const response = await fetchWithRetry('/api/agent-keys', {}, 3, 800);
+        const response = await fetchWithRetry('/api/agent-keys' + getOrgIdParam(), {}, 3, 800);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
@@ -6905,7 +6942,7 @@ async function loadIntegrations() {
     pullSourcesPage = 1;  // Reset to first page on reload
 
     try {
-        const response = await fetchWithRetry('/api/integrations', {}, 3, 800);
+        const response = await fetchWithRetry('/api/integrations' + getOrgIdParam(), {}, 3, 800);
         if (!response.ok) throw new Error('Failed to load integrations');
 
         integrationsList = await response.json();

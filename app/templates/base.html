@@ -1927,6 +1927,14 @@
             border-color: var(--border-color);
             color: var(--text-muted);
         }
+
+        /* Confirmation modal should stack above other modals */
+        #confirmModal {
+            z-index: 1060 !important;
+        }
+        #confirmModal ~ .modal-backdrop {
+            z-index: 1059 !important;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -2180,8 +2188,8 @@
     <!-- Toast Container -->
     <div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
 
-    <!-- Confirmation Modal -->
-    <div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalLabel" aria-hidden="true">
+    <!-- Confirmation Modal (higher z-index for stacking on top of other modals) -->
+    <div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalLabel" aria-hidden="true" style="z-index: 1060;">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
@@ -2618,7 +2626,11 @@
                 // Check content type before parsing JSON
                 const currentContentType = currentResponse.headers.get('content-type');
                 if (!currentContentType || !currentContentType.includes('application/json')) {
-                    throw new Error('Invalid response from server');
+                    console.error('Invalid content type from /api/session/organization:', currentContentType);
+                    // Try to get the response text for debugging
+                    const text = await currentResponse.text();
+                    console.error('Response body:', text.substring(0, 500));
+                    throw new Error('Server returned non-JSON response');
                 }
                 const currentOrg = await currentResponse.json();
 

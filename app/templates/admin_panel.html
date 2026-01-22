@@ -2345,7 +2345,9 @@
                                 <option value="user">User - View-only access to vulnerabilities</option>
                                 <option value="manager">Manager - Can manage products and view vulnerabilities</option>
                                 <option value="org_admin">Organization Admin - Full access within their organization</option>
+                                {% if current_user and current_user.is_super_admin() %}
                                 <option value="super_admin">Super Admin - Full system access across all organizations</option>
+                                {% endif %}
                             </select>
                             <div class="alert alert-sm mt-2" id="roleDescription"></div>
                         </div>
