@@ -1,6 +1,7 @@
 import requests
 import json
 from datetime import datetime, timedelta
+from sqlalchemy.orm import joinedload
 from app import db
 from app.models import Vulnerability, SyncLog, Product, SystemSettings, Organization
 from app.nvd_api import fetch_cvss_data
@@ -410,10 +411,16 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
             alert_mode = alert_config['mode']
             escalation_days = alert_config['escalation_days']
 
-            # Build query based on alert mode
+            # Build query based on alert mode - use joinedload for eager loading
+            base_options = [
+                joinedload(VulnerabilityMatch.vulnerability),
+                joinedload(VulnerabilityMatch.product)
+            ]
+
             if alert_mode == 'new_only':
                 # Only alert on NEW matches from this sync
                 matches_to_alert = VulnerabilityMatch.query\
+                    .options(*base_options)\
                     .join(Vulnerability).join(Product)\
                     .filter(
                         Product.organization_id == org.id,
@@ -425,6 +432,7 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
                 from datetime import date, timedelta
                 cutoff_date = date.today() + timedelta(days=7)
                 matches_to_alert = VulnerabilityMatch.query\
+                    .options(*base_options)\
                     .join(Vulnerability).join(Product)\
                     .filter(
                         Product.organization_id == org.id,
@@ -437,6 +445,7 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
                 from datetime import date, timedelta
                 cutoff_date = date.today() + timedelta(days=escalation_days)
                 matches_to_alert = VulnerabilityMatch.query\
+                    .options(*base_options)\
                     .join(Vulnerability).join(Product)\
                     .filter(
                         Product.organization_id == org.id,
@@ -447,6 +456,7 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
             else:
                 # Fallback to new_only behavior
                 matches_to_alert = VulnerabilityMatch.query\
+                    .options(*base_options)\
                     .join(Vulnerability).join(Product)\
                     .filter(
                         Product.organization_id == org.id,

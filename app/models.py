@@ -241,7 +241,7 @@ class Product(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True, index=True)  # NULL for migration compatibility
-    service_catalog_id = db.Column(db.Integer, db.ForeignKey('service_catalog.id'), nullable=True)  # Optional link to catalog
+    service_catalog_id = db.Column(db.Integer, db.ForeignKey('service_catalog.id'), nullable=True, index=True)  # Optional link to catalog
     vendor = db.Column(db.String(200), nullable=False, index=True)
     product_name = db.Column(db.String(200), nullable=False, index=True)
     version = db.Column(db.String(100), nullable=True)
@@ -1868,7 +1868,7 @@ class AgentEvent(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
     asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
-    api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True)
+    api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True, index=True)
 
     # Event details
     event_type = db.Column(db.String(50), nullable=False, index=True)

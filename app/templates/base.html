@@ -992,6 +992,61 @@
             .sidebar-open .sidebar-overlay {
                 display: block;
             }
+
+            /* Full-width modals on mobile */
+            .modal-dialog {
+                margin: 0.5rem;
+                max-width: calc(100% - 1rem);
+            }
+
+            /* Scrollable tables on mobile */
+            .table-responsive-mobile {
+                display: block;
+                width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Stack form columns on mobile */
+            .row.g-2 > [class*="col-md-"],
+            .row.g-3 > [class*="col-md-"] {
+                width: 100%;
+            }
+
+            /* Adjust card padding on mobile */
+            .card-body {
+                padding: 1rem;
+            }
+
+            /* Smaller buttons on mobile */
+            .btn-group-mobile .btn {
+                padding: 0.25rem 0.5rem;
+                font-size: 0.875rem;
+            }
+        }
+
+        /* Extra small mobile screens */
+        @media (max-width: 575.98px) {
+            .modal-dialog {
+                margin: 0;
+                max-width: 100%;
+            }
+
+            .modal-content {
+                border-radius: 0;
+                min-height: 100vh;
+            }
+
+            /* Hide less important table columns on very small screens */
+            .hide-xs {
+                display: none !important;
+            }
+
+            /* Stack action buttons */
+            .btn-group.flex-wrap-mobile {
+                flex-wrap: wrap;
+                gap: 0.25rem;
+            }
         }
 
         .sidebar-overlay {
@@ -2003,8 +2058,8 @@
                     </button>
 
                     <!-- Dark Mode Toggle -->
-                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" id="themeToggle">
-                        <i class="bi bi-moon-fill" id="themeIcon"></i>
+                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" id="themeToggle" aria-label="Toggle dark mode">
+                        <i class="bi bi-moon-fill" id="themeIcon" aria-hidden="true"></i>
                     </button>
 
                     <!-- User Menu (when auth is enabled) -->
@@ -2076,12 +2131,12 @@
             </div>
 
             <!-- Sidebar Navigation -->
-            <nav class="sidebar-nav">
+            <nav class="sidebar-nav" aria-label="Main navigation">
                 <!-- Overview Section -->
-                <div class="sidebar-nav-section">
+                <div class="sidebar-nav-section" role="group" aria-label="Overview">
                     <div class="sidebar-nav-title">Overview</div>
                     <a href="/" class="sidebar-link {{ 'active' if request.endpoint == 'main.index' else '' }}" data-tooltip="Dashboard">
-                        <i class="bi bi-grid-1x2-fill"></i>
+                        <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
                         <span class="link-text">Dashboard</span>
                     </a>
                 </div>
@@ -2163,8 +2218,8 @@
         <div class="app-main">
             <!-- Mobile Sidebar Toggle -->
             <div class="d-lg-none p-2 border-bottom">
-                <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
-                    <i class="bi bi-list"></i> Menu
+                <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle navigation menu" aria-expanded="false">
+                    <i class="bi bi-list" aria-hidden="true"></i> Menu
                 </button>
             </div>
 
@@ -3689,7 +3744,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="bi bi-shield-lock me-2"></i>Security Settings</h5>
-                    <button type="button" class="btn-close" onclick="closeSecuritySettings()"></button>
+                    <button type="button" class="btn-close" onclick="closeSecuritySettings()" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     {% if current_user.auth_type == 'local' %}
