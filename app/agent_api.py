@@ -28,6 +28,7 @@ from app.models import (
 )
 from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
 from app.auth import login_required, admin_required, org_admin_required
+from app.error_utils import ERROR_MSGS
 import json
 
 # Threshold for async processing (queued instead of immediate)
@@ -742,8 +743,8 @@ def queue_inventory_job(organization, data, api_key_id=None):
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error queueing inventory job for {hostname}: {e}", exc_info=True)
-        return jsonify({'error': f'Failed to queue inventory: {str(e)}'}), 500
+        logger.exception(f"Error queueing inventory job for {hostname}")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 def process_inventory_job(job):
@@ -1016,7 +1017,7 @@ def report_inventory():
         data = request.get_json(force=True)  # force=True ignores content-type
     except Exception as e:
         logger.error(f"Failed to parse JSON body: {e}")
-        return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
+        return jsonify({'error': 'Invalid JSON format'}), 400
 
     if not data:
         logger.warning(f"Agent inventory failed: No JSON body from {source_ip}")
@@ -1317,8 +1318,8 @@ def report_inventory():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error processing inventory report: {e}", exc_info=True)
-        return jsonify({'error': f'Failed to process inventory: {str(e)}'}), 500
+        logger.exception("Error processing inventory report")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 @agent_bp.route('/api/agent/heartbeat', methods=['POST'])
@@ -1600,8 +1601,8 @@ def list_assets():
         })
 
     except Exception as e:
-        logger.error(f"Error in list_assets: {e}", exc_info=True)
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+        logger.exception("Error in list_assets")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['GET'])
@@ -1821,8 +1822,8 @@ def list_agent_keys():
         return jsonify({'api_keys': api_keys})
 
     except Exception as e:
-        logger.error(f"Error in list_agent_keys: {e}", exc_info=True)
-        return jsonify({'error': f'Failed to load agent keys: {str(e)}'}), 500
+        logger.exception("Error in list_agent_keys")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 @agent_bp.route('/api/agent-keys', methods=['POST'])
@@ -1940,8 +1941,8 @@ def get_maintenance_stats():
         stats = get_stats()
         return jsonify(stats)
     except Exception as e:
-        logger.error(f"Error getting maintenance stats: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting maintenance stats")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @agent_bp.route('/api/admin/maintenance/cleanup', methods=['POST'])
@@ -1984,8 +1985,8 @@ def run_maintenance_cleanup():
         logger.info(f"Maintenance run by {user.username}: {result.to_dict()}")
         return jsonify(result.to_dict())
     except Exception as e:
-        logger.error(f"Error running maintenance: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error running maintenance")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @agent_bp.route('/api/admin/products/<int:product_id>/versions', methods=['GET'])
@@ -2021,8 +2022,8 @@ def get_product_versions(product_id):
             'total_installations': sum(v['count'] for v in versions)
         })
     except Exception as e:
-        logger.error(f"Error getting product versions: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting product versions")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 # ============================================================================
@@ -2128,8 +2129,8 @@ def get_integrations_summary():
         })
 
     except Exception as e:
-        logger.error(f"Error getting integrations summary: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting integrations summary")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 # ============================================================================
@@ -2208,7 +2209,8 @@ def start_worker():
             'message': 'Background worker started'
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to start background worker")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 # ============================================================================

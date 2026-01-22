@@ -7,6 +7,7 @@ from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerab
 from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required, org_admin_required, manager_required
 from app.licensing import requires_professional, check_user_limit, check_org_limit, check_product_limit
+from app.error_utils import safe_error_response, ERROR_MSGS
 import json
 import re
 import logging
@@ -689,7 +690,8 @@ def delete_product(product_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.exception("Failed to delete product")
+        return jsonify({'success': False, 'error': ERROR_MSGS['database']}), 500
 
 
 @bp.route('/api/products/bulk-update-criticality', methods=['POST'])
@@ -763,13 +765,15 @@ def bulk_update_product_criticality():
                 skipped += 1
 
         except Exception as e:
-            errors.append({'product_id': product_id, 'error': str(e)})
+            logger.warning(f"Failed to update product {product_id}: {e}")
+            errors.append({'product_id': product_id, 'error': 'Update failed'})
 
     try:
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Database error: {str(e)}'}), 500
+        logger.exception("Database error during bulk criticality update")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
     return jsonify({
         'success': True,
@@ -844,7 +848,8 @@ def assign_product_organizations(product_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to add organization to product")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 @bp.route('/api/products/<int:product_id>/organizations/<int:org_id>', methods=['DELETE'])
 @org_admin_required
@@ -927,7 +932,8 @@ def remove_product_organization(product_id, org_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to remove organization from product")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 @bp.route('/api/vulnerabilities', methods=['GET'])
 @login_required
@@ -1007,8 +1013,8 @@ def get_vulnerabilities():
         })
 
     except Exception as e:
-        logger.error(f"Error getting vulnerabilities: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting vulnerabilities")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 @bp.route('/api/vulnerabilities/stats', methods=['GET'])
 @login_required
@@ -1266,8 +1272,8 @@ def get_vulnerabilities_grouped():
         })
 
     except Exception as e:
-        logger.error(f"Error getting grouped vulnerabilities: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting grouped vulnerabilities")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 @bp.route('/api/products/aggregated', methods=['GET'])
@@ -1725,29 +1731,34 @@ def test_connection():
             }), 400
 
     except requests.exceptions.SSLError as e:
+        logger.warning(f"SSL error during proxy test: {e}")
         return jsonify({
             'success': False,
-            'error': f'SSL Error: {str(e)}. Try disabling SSL verification if behind a proxy.'
+            'error': 'SSL Error: Try disabling SSL verification if behind a proxy.'
         }), 400
     except requests.exceptions.ProxyError as e:
+        logger.warning(f"Proxy error during proxy test: {e}")
         return jsonify({
             'success': False,
-            'error': f'Proxy Error: {str(e)}. Check your proxy settings.'
+            'error': 'Proxy Error: Check your proxy settings.'
         }), 400
     except requests.exceptions.ConnectionError as e:
+        logger.warning(f"Connection error during proxy test: {e}")
         return jsonify({
             'success': False,
-            'error': f'Connection Error: {str(e)}'
+            'error': 'Connection Error: Unable to reach the target URL.'
         }), 400
     except requests.exceptions.Timeout as e:
+        logger.warning(f"Timeout during proxy test: {e}")
         return jsonify({
             'success': False,
-            'error': f'Timeout: {str(e)}'
+            'error': 'Timeout: The request took too long to complete.'
         }), 400
     except Exception as e:
+        logger.exception("Unexpected error during proxy test")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': ERROR_MSGS['network']
         }), 500
 
 
@@ -1772,7 +1783,8 @@ def rematch_products():
             'message': f'Removed {removed} invalid matches, added {added} new matches'
         })
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.exception("Error during product rematch")
+        return jsonify({'status': 'error', 'message': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/products/apply-cpe', methods=['POST'])
@@ -1798,7 +1810,8 @@ def apply_cpe_mappings():
             'message': f'Applied CPE to {updated} products. Coverage: {stats["coverage_percent"]}%'
         })
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.exception("Error applying CPE mappings")
+        return jsonify({'status': 'error', 'message': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/products/cpe-suggestions', methods=['GET'])
@@ -1821,7 +1834,8 @@ def get_cpe_suggestions():
             'coverage': stats
         })
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.exception("Error getting CPE suggestions")
+        return jsonify({'status': 'error', 'message': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/alerts/trigger-critical', methods=['POST'])
@@ -1892,9 +1906,10 @@ def trigger_critical_cve_alerts():
         })
 
     except Exception as e:
+        logger.exception("Error triggering critical CVE alerts")
         return jsonify({
             'status': 'error',
-            'error': str(e)
+            'error': ERROR_MSGS['smtp']
         }), 500
 
 # ============================================================================
@@ -2307,7 +2322,8 @@ def test_smtp(org_id):
         })
 
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.exception("Failed to send test email")
+        return jsonify({'success': False, 'error': ERROR_MSGS['smtp']})
 
 @bp.route('/api/organizations/<int:org_id>/alert-logs', methods=['GET'])
 @login_required
@@ -2697,7 +2713,8 @@ def delete_user(user_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to delete user: {str(e)}'}), 500
+        logger.exception(f"Failed to delete user {user_id}")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 @bp.route('/api/users/<int:user_id>/toggle-active', methods=['POST'])
 @org_admin_required
@@ -3379,7 +3396,8 @@ def get_audit_logs():
         paginated_logs = all_logs[start_idx:end_idx]
 
     except Exception as e:
-        return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
+        logger.exception("Failed to read audit logs")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
     return jsonify({
         'logs': paginated_logs,
@@ -3466,7 +3484,8 @@ def export_audit_logs():
                     continue
 
     except Exception as e:
-        return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
+        logger.exception("Failed to read audit logs for export")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
     # Sort by timestamp descending (most recent first)
     logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
@@ -3617,9 +3636,8 @@ def generate_monthly_report():
         return response
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to generate monthly report")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/reports/custom', methods=['GET'])
@@ -3681,9 +3699,8 @@ def generate_custom_report():
     except ValueError as e:
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to generate custom report")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/reports/export', methods=['GET'])
@@ -3729,9 +3746,8 @@ def export_selected_matches():
         return response
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to export selected matches")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 # ============================================================================

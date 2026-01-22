@@ -15,6 +15,7 @@ from app.models import SystemSettings, User, Vulnerability, SyncLog
 from app.auth import admin_required
 from app.encryption import encrypt_value, decrypt_value
 from app.licensing import requires_professional
+from app.error_utils import ERROR_MSGS
 import os
 import json
 from datetime import datetime
@@ -283,7 +284,8 @@ def save_ldap_settings():
 
         return jsonify({'success': True, 'message': 'LDAP settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save LDAP settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/ldap/test', methods=['POST'])
 @admin_required
@@ -327,7 +329,8 @@ def test_ldap_connection():
     except ImportError:
         return jsonify({'success': False, 'error': 'ldap3 library not installed. Run: pip install ldap3'})
     except Exception as e:
-        return jsonify({'success': False, 'error': f'LDAP connection failed: {str(e)}'})
+        logger.warning(f"LDAP connection test failed: {e}")
+        return jsonify({'success': False, 'error': ERROR_MSGS['ldap']})
 
 
 # ============================================================================
@@ -372,7 +375,8 @@ def save_smtp_settings():
 
         return jsonify({'success': True, 'message': 'SMTP settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save SMTP settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/smtp/test', methods=['POST'])
 @admin_required
@@ -462,7 +466,8 @@ def test_smtp_connection():
         })
 
     except Exception as e:
-        return jsonify({'success': False, 'error': f'SMTP test failed: {str(e)}'})
+        logger.warning(f"SMTP test failed: {e}")
+        return jsonify({'success': False, 'error': ERROR_MSGS['smtp']})
 
 
 # ============================================================================
@@ -505,7 +510,8 @@ def save_sync_settings():
 
         return jsonify({'success': True, 'message': 'Sync settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save sync settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/sync/status', methods=['GET'])
 @admin_required
@@ -532,7 +538,8 @@ def get_sync_status():
             'auto_sync_enabled': auto_sync
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to get sync status")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 # ============================================================================
 # General Settings
@@ -565,7 +572,8 @@ def save_general_settings():
 
         return jsonify({'success': True, 'message': 'General settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save general settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 
 # ============================================================================
@@ -610,7 +618,8 @@ def save_security_settings():
 
         return jsonify({'success': True, 'message': 'Security settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save security settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 
 # ============================================================================
@@ -646,7 +655,8 @@ def save_branding_settings():
 
         return jsonify({'success': True, 'message': 'Branding settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save branding settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 
 # ============================================================================
@@ -728,7 +738,8 @@ def save_notification_settings():
 
         return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save notification settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/notifications/test', methods=['POST'])
 @admin_required
@@ -898,11 +909,14 @@ def test_notification():
     except requests.exceptions.Timeout:
         return jsonify({'success': False, 'error': 'Connection timed out after 30 seconds. Check your proxy settings and network connectivity.'})
     except requests.exceptions.ProxyError as e:
-        return jsonify({'success': False, 'error': f'Proxy error: {str(e)}'})
+        logger.warning(f"Webhook proxy error: {e}")
+        return jsonify({'success': False, 'error': 'Proxy error. Check your proxy settings.'})
     except requests.exceptions.SSLError as e:
-        return jsonify({'success': False, 'error': f'SSL error: {str(e)}. Try disabling SSL verification in General Settings if using self-signed certificates.'})
+        logger.warning(f"Webhook SSL error: {e}")
+        return jsonify({'success': False, 'error': 'SSL error. Try disabling SSL verification in General Settings if using self-signed certificates.'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.exception("Webhook test failed")
+        return jsonify({'success': False, 'error': ERROR_MSGS['external']})
 
 
 # ============================================================================
@@ -933,7 +947,8 @@ def save_retention_settings():
 
         return jsonify({'success': True, 'message': 'Retention settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save retention settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 
 # ============================================================================
@@ -996,8 +1011,8 @@ def upload_logo():
             'logo_url': logo_url
         })
     except Exception as e:
-        logger.error(f"Logo upload failed: {e}")
-        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+        logger.exception("Logo upload failed")
+        return jsonify({'error': ERROR_MSGS['upload']}), 500
 
 @settings_bp.route('/branding/logo', methods=['DELETE'])
 @admin_required
@@ -1049,8 +1064,8 @@ def delete_logo():
 
         return jsonify({'success': True, 'message': 'Logo removed, reverted to default'})
     except Exception as e:
-        logger.error(f"Logo deletion failed: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Logo deletion failed")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 # ============================================================================
@@ -1191,8 +1206,8 @@ def create_backup():
         )
 
     except Exception as e:
-        logger.error(f"Backup creation failed: {e}")
-        return jsonify({'error': f'Backup failed: {str(e)}'}), 500
+        logger.exception("Backup creation failed")
+        return jsonify({'error': ERROR_MSGS['backup']}), 500
 
 
 @settings_bp.route('/restore', methods=['POST'])
@@ -1262,8 +1277,8 @@ def restore_backup():
         return jsonify({'error': 'Invalid JSON file'}), 400
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Restore failed: {e}")
-        return jsonify({'error': f'Restore failed: {str(e)}'}), 500
+        logger.exception("Restore failed")
+        return jsonify({'error': ERROR_MSGS['restore']}), 500
 
 
 @settings_bp.route('/restore-full', methods=['POST'])
@@ -1474,5 +1489,5 @@ def restore_full_backup():
         return jsonify({'error': 'Invalid JSON file'}), 400
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Full restore failed: {e}")
-        return jsonify({'error': f'Full restore failed: {str(e)}'}), 500
+        logger.exception("Full restore failed")
+        return jsonify({'error': ERROR_MSGS['restore']}), 500

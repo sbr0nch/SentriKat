@@ -578,8 +578,8 @@ class VulnerabilityMatch(db.Model):
         db.Index('idx_match_vuln_ack', 'vulnerability_id', 'acknowledged'),
     )
 
-    product = db.relationship('Product', backref='matches')
-    vulnerability = db.relationship('Vulnerability', backref='matches')
+    product = db.relationship('Product', backref=db.backref('matches', cascade='all, delete-orphan'))
+    vulnerability = db.relationship('Vulnerability', backref=db.backref('matches', cascade='all, delete-orphan'))
 
     def calculate_effective_priority(self):
         """
