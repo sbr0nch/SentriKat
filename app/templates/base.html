@@ -2694,11 +2694,19 @@
                         <li>
                             <a class="dropdown-item ${org.id === currentOrg.id ? 'active' : ''}"
                                href="#"
-                               onclick="switchOrganization(${org.id}, '${org.display_name}'); return false;">
-                                <i class="bi bi-building me-2"></i>${org.display_name}
+                               data-org-id="${org.id}"
+                               data-org-name="${escapeHtml(org.display_name)}">
+                                <i class="bi bi-building me-2"></i>${escapeHtml(org.display_name)}
                             </a>
                         </li>
                     `).join('');
+                    // Add click handlers using event delegation
+                    orgList.querySelectorAll('[data-org-id]').forEach(link => {
+                        link.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            switchOrganization(parseInt(this.dataset.orgId), this.dataset.orgName);
+                        });
+                    });
                 } else {
                     orgList.innerHTML = '<li><span class="dropdown-item-text text-muted small">No organizations available</span></li>';
                 }
@@ -3375,10 +3383,11 @@
                 const existingDropdown = container.querySelector(`[data-column-toggle="${tableId}"]`);
                 if (existingDropdown) return;
 
-                // Create dropdown HTML
+                // Create dropdown HTML - using data attributes for safer event handling
                 const dropdownId = `columnToggle_${tableId}`;
+                const safeTableId = escapeHtml(tableId);
                 const dropdownHTML = `
-                    <div class="dropdown" data-column-toggle="${tableId}">
+                    <div class="dropdown" data-column-toggle="${safeTableId}">
                         <button class="btn-column-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
                             <i class="bi bi-layout-three-columns"></i>
                             <span>Columns</span>
@@ -3391,21 +3400,21 @@
                             </div>
                             <div class="column-list">
                                 ${columns.map(col => `
-                                    <div class="column-item" onclick="TableEnhancements.toggleColumnCheckbox('${tableId}', '${col.name}', event)">
-                                        <input type="checkbox" class="form-check-input"
-                                               id="col_${tableId}_${col.name}"
-                                               data-column="${col.name}"
-                                               checked
-                                               onclick="event.stopPropagation(); TableEnhancements.toggleColumn('${tableId}', '${col.name}', this.checked)">
+                                    <div class="column-item" data-table-id="${safeTableId}" data-col-name="${escapeHtml(col.name)}">
+                                        <input type="checkbox" class="form-check-input column-toggle-checkbox"
+                                               id="col_${safeTableId}_${escapeHtml(col.name)}"
+                                               data-column="${escapeHtml(col.name)}"
+                                               data-table-id="${safeTableId}"
+                                               checked>
                                         <div class="column-icon">
-                                            <i class="bi ${col.icon}"></i>
+                                            <i class="bi ${escapeHtml(col.icon)}"></i>
                                         </div>
-                                        <label for="col_${tableId}_${col.name}">${col.label}</label>
+                                        <label for="col_${safeTableId}_${escapeHtml(col.name)}">${escapeHtml(col.label)}</label>
                                     </div>
                                 `).join('')}
                             </div>
                             <div class="dropdown-footer">
-                                <button class="reset-btn" onclick="TableEnhancements.resetColumns('${tableId}')">
+                                <button class="reset-btn" data-reset-table="${safeTableId}">
                                     <i class="bi bi-arrow-counterclockwise"></i>
                                     Reset All
                                 </button>
@@ -3417,7 +3426,40 @@
                 // Insert dropdown
                 const wrapper = document.createElement('div');
                 wrapper.innerHTML = dropdownHTML;
-                container.appendChild(wrapper.firstElementChild);
+                const dropdownEl = wrapper.firstElementChild;
+                container.appendChild(dropdownEl);
+
+                // Add event listeners for column items
+                dropdownEl.querySelectorAll('.column-item').forEach(item => {
+                    item.addEventListener('click', (e) => {
+                        if (e.target.type === 'checkbox') return;
+                        const tblId = item.dataset.tableId;
+                        const colName = item.dataset.colName;
+                        const checkbox = item.querySelector('input[type="checkbox"]');
+                        if (checkbox) {
+                            checkbox.checked = !checkbox.checked;
+                            TableEnhancements.toggleColumn(tblId, colName, checkbox.checked);
+                        }
+                    });
+                });
+
+                // Add event listeners for checkboxes
+                dropdownEl.querySelectorAll('.column-toggle-checkbox').forEach(checkbox => {
+                    checkbox.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const tblId = checkbox.dataset.tableId;
+                        const colName = checkbox.dataset.column;
+                        TableEnhancements.toggleColumn(tblId, colName, checkbox.checked);
+                    });
+                });
+
+                // Add event listener for reset button
+                const resetBtn = dropdownEl.querySelector('[data-reset-table]');
+                if (resetBtn) {
+                    resetBtn.addEventListener('click', () => {
+                        TableEnhancements.resetColumns(resetBtn.dataset.resetTable);
+                    });
+                }
             },
 
             /**
