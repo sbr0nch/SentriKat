@@ -27,6 +27,7 @@ from app.models import (
     AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification
 )
 from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
+from app.auth import login_required, admin_required, org_admin_required
 import json
 
 # Threshold for async processing (queued instead of immediate)
@@ -1410,16 +1411,18 @@ def list_jobs():
 
 
 @agent_bp.route('/api/admin/process-jobs', methods=['POST'])
+@admin_required
 @limiter.limit("10/minute")
 def trigger_job_processing():
     """
     Trigger processing of pending inventory jobs.
     Called by cron or manually by admin.
+    Requires super admin access.
     """
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     max_jobs = request.args.get('max', 10, type=int)
@@ -1446,14 +1449,13 @@ def trigger_job_processing():
 
 
 @agent_bp.route('/api/admin/jobs', methods=['GET'])
+@login_required
 @limiter.limit("60/minute")
 def admin_list_jobs():
     """List all inventory jobs (admin view)."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
@@ -1490,6 +1492,7 @@ def admin_list_jobs():
 # ============================================================================
 
 @agent_bp.route('/api/assets', methods=['GET'])
+@login_required
 @limiter.limit("100/minute")
 def list_assets():
     """List all assets for the organization."""
@@ -1497,8 +1500,6 @@ def list_assets():
 
     try:
         user = get_current_user()
-        if not user:
-            return jsonify({'error': 'Authentication required'}), 401
 
         # Get organization filter
         org_id = request.args.get('organization_id', type=int)
@@ -1604,13 +1605,12 @@ def list_assets():
 
 
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['GET'])
+@login_required
 def get_asset(asset_id):
     """Get asset details with installed products."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     asset = Asset.query.get_or_404(asset_id)
 
@@ -1624,13 +1624,12 @@ def get_asset(asset_id):
 
 
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['DELETE'])
+@login_required
 def delete_asset(asset_id):
     """Delete an asset and its product installations."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     asset = Asset.query.get_or_404(asset_id)
 
@@ -1653,6 +1652,7 @@ def delete_asset(asset_id):
 
 
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['PUT', 'PATCH'])
+@login_required
 def update_asset(asset_id):
     """
     Update asset details.
@@ -1668,8 +1668,6 @@ def update_asset(asset_id):
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     asset = Asset.query.get_or_404(asset_id)
 
@@ -1725,13 +1723,12 @@ def update_asset(asset_id):
 
 
 @agent_bp.route('/api/assets/groups', methods=['GET'])
+@login_required
 def list_asset_groups():
     """List all unique asset groups/environments for filtering."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     # Build query based on permissions
     if user.is_super_admin():
@@ -1762,6 +1759,7 @@ def list_asset_groups():
 # ============================================================================
 
 @agent_bp.route('/api/agent-keys', methods=['GET'])
+@login_required
 @requires_professional('Agent Keys')
 def list_agent_keys():
     """List agent API keys for organization."""
@@ -1769,8 +1767,6 @@ def list_agent_keys():
 
     try:
         user = get_current_user()
-        if not user:
-            return jsonify({'error': 'Authentication required'}), 401
 
         # Check permission
         if not user.is_super_admin():
@@ -1830,14 +1826,13 @@ def list_agent_keys():
 
 
 @agent_bp.route('/api/agent-keys', methods=['POST'])
+@login_required
 @requires_professional('Agent Keys')
 def create_agent_key():
     """Create a new agent API key."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     data = request.get_json()
     org_id = data.get('organization_id')
@@ -1898,14 +1893,13 @@ def create_agent_key():
 
 
 @agent_bp.route('/api/agent-keys/<int:key_id>', methods=['DELETE'])
+@login_required
 @requires_professional('Agent Keys')
 def delete_agent_key(key_id):
     """Delete an agent API key."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     agent_key = AgentApiKey.query.get_or_404(key_id)
 
@@ -1932,13 +1926,14 @@ def delete_agent_key(key_id):
 # ============================================================================
 
 @agent_bp.route('/api/admin/maintenance/stats', methods=['GET'])
+@admin_required
 def get_maintenance_stats():
     """Get statistics about stale/orphaned data."""
     from app.auth import get_current_user
     from app.maintenance import get_maintenance_stats as get_stats
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     try:
@@ -1950,6 +1945,7 @@ def get_maintenance_stats():
 
 
 @agent_bp.route('/api/admin/maintenance/cleanup', methods=['POST'])
+@admin_required
 @limiter.limit("5/minute")
 def run_maintenance_cleanup():
     """
@@ -1968,7 +1964,7 @@ def run_maintenance_cleanup():
     from app.maintenance import run_full_maintenance
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     data = request.get_json() or {}
@@ -1993,6 +1989,7 @@ def run_maintenance_cleanup():
 
 
 @agent_bp.route('/api/admin/products/<int:product_id>/versions', methods=['GET'])
+@login_required
 def get_product_versions(product_id):
     """
     Get version summary for a product across all assets.
@@ -2004,8 +2001,6 @@ def get_product_versions(product_id):
     from app.maintenance import get_product_version_summary
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     product = Product.query.get_or_404(product_id)
 
@@ -2035,6 +2030,7 @@ def get_product_versions(product_id):
 # ============================================================================
 
 @agent_bp.route('/api/integrations/summary', methods=['GET'])
+@login_required
 @requires_professional('Integrations')
 def get_integrations_summary():
     """
@@ -2049,8 +2045,6 @@ def get_integrations_summary():
     from app.integrations_models import Integration, ImportQueue
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     try:
         # Get organization filter
@@ -2143,6 +2137,7 @@ def get_integrations_summary():
 # ============================================================================
 
 @agent_bp.route('/api/admin/worker-status', methods=['GET'])
+@admin_required
 def get_worker_status():
     """
     Get the status of the background job worker.
@@ -2151,7 +2146,7 @@ def get_worker_status():
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     global _worker_thread
@@ -2196,13 +2191,14 @@ def get_worker_status():
 
 
 @agent_bp.route('/api/admin/worker/start', methods=['POST'])
+@admin_required
 @limiter.limit("5/minute")
 def start_worker():
     """Manually start the background worker."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     try:
@@ -2220,13 +2216,12 @@ def start_worker():
 # ============================================================================
 
 @agent_bp.route('/api/admin/licenses', methods=['GET'])
+@login_required
 def list_licenses():
     """List all agent licenses (admin view)."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     if user.is_super_admin():
         licenses = AgentLicense.query.all()
@@ -2245,13 +2240,12 @@ def list_licenses():
 
 
 @agent_bp.route('/api/admin/licenses/<int:org_id>', methods=['GET'])
+@login_required
 def get_organization_license(org_id):
     """Get license details for a specific organization."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     # Check permission
     if not user.is_super_admin():
@@ -2283,6 +2277,7 @@ def get_organization_license(org_id):
 
 
 @agent_bp.route('/api/admin/licenses/<int:org_id>', methods=['PUT', 'PATCH'])
+@admin_required
 def update_license(org_id):
     """
     Update an organization's license (super admin only).
@@ -2291,7 +2286,7 @@ def update_license(org_id):
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     license_obj = AgentLicense.query.filter_by(organization_id=org_id).first()
@@ -2368,6 +2363,7 @@ def update_license(org_id):
 
 
 @agent_bp.route('/api/admin/usage/<int:org_id>', methods=['GET'])
+@login_required
 def get_usage_history(org_id):
     """
     Get usage history for an organization.
@@ -2377,8 +2373,6 @@ def get_usage_history(org_id):
     from datetime import date
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     # Check permission
     if not user.is_super_admin():
@@ -2414,6 +2408,7 @@ def get_usage_history(org_id):
 
 
 @agent_bp.route('/api/admin/events', methods=['GET'])
+@login_required
 def list_agent_events():
     """
     List agent events for audit trail.
@@ -2422,8 +2417,6 @@ def list_agent_events():
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     # Build query
     query = AgentEvent.query
@@ -2470,6 +2463,7 @@ def list_agent_events():
 
 
 @agent_bp.route('/api/admin/version-history', methods=['GET'])
+@login_required
 def list_version_history():
     """
     List version change history for products.
@@ -2478,8 +2472,6 @@ def list_version_history():
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     query = ProductVersionHistory.query
 

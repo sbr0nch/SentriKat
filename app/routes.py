@@ -29,8 +29,17 @@ csrf.exempt(bp)
 # =============================================================================
 
 @bp.route('/data/uploads/<path:filename>')
+@login_required
 def serve_upload(filename):
-    """Serve uploaded files from persistent data directory"""
+    """Serve uploaded files from persistent data directory.
+
+    Protected by login_required since uploaded files may contain sensitive branding.
+    Flask's send_from_directory has built-in path traversal protection.
+    """
+    # Additional path traversal protection - reject any path with .. or absolute paths
+    if '..' in filename or filename.startswith('/'):
+        return jsonify({'error': 'Invalid filename'}), 400
+
     data_dir = os.environ.get('DATA_DIR', '/app/data')
     uploads_dir = os.path.join(data_dir, 'uploads')
     return send_from_directory(uploads_dir, filename)

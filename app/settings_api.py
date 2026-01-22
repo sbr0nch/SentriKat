@@ -1011,13 +1011,33 @@ def delete_logo():
 
         if logo_url and logo_url.startswith('/data/uploads/'):
             # Delete file from persistent data directory
+            # Use basename to prevent path traversal attacks
             data_dir = os.environ.get('DATA_DIR', '/app/data')
-            filepath = os.path.join(data_dir, 'uploads', os.path.basename(logo_url))
+            safe_filename = os.path.basename(logo_url)
+            # Extra validation: reject any suspicious patterns
+            if '..' in safe_filename or safe_filename.startswith('/'):
+                return jsonify({'error': 'Invalid logo path'}), 400
+            filepath = os.path.join(data_dir, 'uploads', safe_filename)
+            # Verify filepath is within uploads directory (belt and suspenders)
+            real_filepath = os.path.realpath(filepath)
+            real_uploads_dir = os.path.realpath(os.path.join(data_dir, 'uploads'))
+            if not real_filepath.startswith(real_uploads_dir):
+                return jsonify({'error': 'Invalid logo path'}), 400
             if os.path.exists(filepath):
                 os.remove(filepath)
         elif logo_url and logo_url.startswith('/static/uploads/'):
             # Legacy: delete file from static directory
-            filepath = os.path.join(os.path.dirname(os.path.dirname(__file__)), logo_url.lstrip('/'))
+            # Use basename to prevent path traversal attacks
+            safe_filename = os.path.basename(logo_url)
+            if '..' in safe_filename or safe_filename.startswith('/'):
+                return jsonify({'error': 'Invalid logo path'}), 400
+            static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'uploads')
+            filepath = os.path.join(static_dir, safe_filename)
+            # Verify filepath is within static/uploads directory
+            real_filepath = os.path.realpath(filepath)
+            real_static_dir = os.path.realpath(static_dir)
+            if not real_filepath.startswith(real_static_dir):
+                return jsonify({'error': 'Invalid logo path'}), 400
             if os.path.exists(filepath):
                 os.remove(filepath)
 
