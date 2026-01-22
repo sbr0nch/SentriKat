@@ -3583,19 +3583,22 @@
                             <i class="bi bi-key me-2"></i>Change Password
                         </div>
                         <div class="card-body">
-                            <form id="changePasswordForm">
+                            <form id="changePasswordForm" novalidate>
                                 <div class="row g-3">
                                     <div class="col-md-12">
                                         <label class="form-label">Current Password</label>
                                         <input type="password" class="form-control" id="secCurrentPassword" required>
+                                        <div class="invalid-feedback">Please enter your current password</div>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">New Password</label>
-                                        <input type="password" class="form-control" id="secNewPassword" required>
+                                        <input type="password" class="form-control" id="secNewPassword" required minlength="8">
+                                        <div class="invalid-feedback">Password must be at least 8 characters</div>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Confirm New Password</label>
                                         <input type="password" class="form-control" id="secConfirmPassword" required>
+                                        <div class="invalid-feedback">Passwords do not match</div>
                                     </div>
                                     <div class="col-12">
                                         <button type="submit" class="btn btn-primary">
@@ -3932,18 +3935,64 @@
             }
         }
 
+        // Password Change Form - helper to set field invalid
+        function setSecFieldInvalid(fieldId, message) {
+            const field = document.getElementById(fieldId);
+            const feedback = field?.nextElementSibling;
+            if (field) {
+                field.classList.add('is-invalid');
+                if (feedback && feedback.classList.contains('invalid-feedback') && message) {
+                    feedback.textContent = message;
+                }
+            }
+        }
+
+        function clearSecFieldValidation(fieldId) {
+            const field = document.getElementById(fieldId);
+            if (field) field.classList.remove('is-invalid');
+        }
+
+        // Clear validation on input
+        ['secCurrentPassword', 'secNewPassword', 'secConfirmPassword'].forEach(id => {
+            document.getElementById(id)?.addEventListener('input', () => clearSecFieldValidation(id));
+        });
+
         // Password Change Form
         document.getElementById('changePasswordForm')?.addEventListener('submit', async function(e) {
             e.preventDefault();
+
+            // Clear previous validation
+            ['secCurrentPassword', 'secNewPassword', 'secConfirmPassword'].forEach(clearSecFieldValidation);
 
             const currentPassword = document.getElementById('secCurrentPassword').value;
             const newPassword = document.getElementById('secNewPassword').value;
             const confirmPassword = document.getElementById('secConfirmPassword').value;
 
-            if (newPassword !== confirmPassword) {
-                await showAlert('New passwords do not match', 'Validation Error', 'warning');
-                return;
+            // Client-side validation
+            let isValid = true;
+
+            if (!currentPassword) {
+                setSecFieldInvalid('secCurrentPassword', 'Please enter your current password');
+                isValid = false;
             }
+
+            if (!newPassword) {
+                setSecFieldInvalid('secNewPassword', 'Please enter a new password');
+                isValid = false;
+            } else if (newPassword.length < 8) {
+                setSecFieldInvalid('secNewPassword', 'Password must be at least 8 characters');
+                isValid = false;
+            }
+
+            if (!confirmPassword) {
+                setSecFieldInvalid('secConfirmPassword', 'Please confirm your new password');
+                isValid = false;
+            } else if (newPassword !== confirmPassword) {
+                setSecFieldInvalid('secConfirmPassword', 'Passwords do not match');
+                isValid = false;
+            }
+
+            if (!isValid) return;
 
             try {
                 const response = await fetch('/api/auth/change-password', {
@@ -3963,7 +4012,14 @@
                     document.getElementById('secNewPassword').value = '';
                     document.getElementById('secConfirmPassword').value = '';
                 } else {
-                    await showAlert(data.error || 'Failed to change password', 'Error', 'error');
+                    // Show field-specific error if possible
+                    if (data.error && data.error.toLowerCase().includes('current')) {
+                        setSecFieldInvalid('secCurrentPassword', data.error);
+                    } else if (data.error && (data.error.toLowerCase().includes('policy') || data.error.toLowerCase().includes('new password'))) {
+                        setSecFieldInvalid('secNewPassword', data.error);
+                    } else {
+                        await showAlert(data.error || 'Failed to change password', 'Error', 'error');
+                    }
                 }
             } catch (error) {
                 await showAlert('Error changing password: ' + error.message, 'Error', 'error');
