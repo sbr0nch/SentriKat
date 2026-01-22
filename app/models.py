@@ -258,6 +258,12 @@ class Product(db.Model):
     cpe_uri = db.Column(db.String(500), nullable=True)  # Full CPE 2.3 URI (optional)
     match_type = db.Column(db.String(20), default='auto')  # auto, cpe, keyword, both
 
+    # Composite indexes for common query patterns
+    __table_args__ = (
+        db.Index('idx_product_org_active', 'organization_id', 'active'),
+        db.Index('idx_product_vendor_name', 'vendor', 'product_name'),
+    )
+
     # Relationships
     organization = db.relationship('Organization', backref='products')  # Legacy single org (deprecated)
     organizations = db.relationship('Organization', secondary=product_organizations, backref='assigned_products', lazy='dynamic')  # Multi-org support
@@ -565,6 +571,12 @@ class VulnerabilityMatch(db.Model):
     # Match method and confidence
     match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
     match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
+
+    # Composite indexes for common query patterns
+    __table_args__ = (
+        db.Index('idx_match_product_ack', 'product_id', 'acknowledged'),
+        db.Index('idx_match_vuln_ack', 'vulnerability_id', 'acknowledged'),
+    )
 
     product = db.relationship('Product', backref='matches')
     vulnerability = db.relationship('Vulnerability', backref='matches')
@@ -1272,9 +1284,11 @@ class Asset(db.Model):
     organization = db.relationship('Organization', backref=db.backref('assets', lazy='dynamic'))
     product_installations = db.relationship('ProductInstallation', backref='asset', cascade='all, delete-orphan', lazy='dynamic')
 
-    # Unique constraint: hostname should be unique per organization
+    # Unique constraint and composite indexes
     __table_args__ = (
         db.UniqueConstraint('organization_id', 'hostname', name='uix_org_hostname'),
+        db.Index('idx_asset_org_agent', 'organization_id', 'agent_id'),
+        db.Index('idx_asset_org_status', 'organization_id', 'status'),
     )
 
     def get_tags(self):
