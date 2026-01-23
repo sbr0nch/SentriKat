@@ -955,7 +955,7 @@ async function loadUsers() {
         tbody.innerHTML = `
             <tr>
                 <td colspan="9" class="text-center text-danger py-4">
-                    <i class="bi bi-exclamation-triangle"></i> Error loading users: ${error.message}
+                    <i class="bi bi-exclamation-triangle text-danger"></i> Error loading users: ${error.message}
                 </td>
             </tr>
         `;
@@ -1702,7 +1702,7 @@ async function loadOrganizations() {
         tbody.innerHTML = `
             <tr>
                 <td colspan="6" class="text-center text-danger py-4">
-                    <i class="bi bi-exclamation-triangle"></i> Error loading organizations: ${error.message}
+                    <i class="bi bi-exclamation-triangle text-danger"></i> Error loading organizations: ${error.message}
                 </td>
             </tr>
         `;
@@ -3314,7 +3314,7 @@ function displayLDAPUserResults(page = 1) {
     if (allResults.length === 0) {
         resultsDiv.innerHTML = `
             <div class="text-center text-muted py-5">
-                <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                <i class="bi bi-inbox text-primary" style="font-size: 3rem;"></i>
                 <p class="mt-3">No LDAP users found</p>
                 <p class="text-muted">Check your LDAP configuration in Settings</p>
             </div>
@@ -3488,7 +3488,7 @@ async function searchLdapUsersInline(page = 1) {
         if (allResults.length === 0) {
             resultsDiv.innerHTML = `
                 <div class="text-center text-muted py-5">
-                    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                    <i class="bi bi-inbox text-primary" style="font-size: 3rem;"></i>
                     <p class="mt-3">No users found matching "${escapeHtml(query)}"</p>
                     <p class="text-muted">Try a different search term or wildcard pattern (e.g., "*${escapeHtml(query)}*")</p>
                 </div>
@@ -3749,7 +3749,7 @@ async function searchLdapUsers() {
         if (results.users.length === 0) {
             resultsDiv.innerHTML = `
                 <div class="text-center text-muted py-4">
-                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <i class="bi bi-inbox text-primary" style="font-size: 2rem;"></i>
                     <p class="mt-2">No users found matching "${escapeHtml(query)}"</p>
                 </div>
             `;
@@ -3810,7 +3810,7 @@ async function searchLdapUsers() {
         console.error('Error searching LDAP:', error);
         resultsDiv.innerHTML = `
             <div class="text-center text-danger py-4">
-                <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                <i class="bi bi-exclamation-triangle text-danger" style="font-size: 2rem;"></i>
                 <p class="mt-2">Error: ${escapeHtml(error.message)}</p>
             </div>
         `;
@@ -4097,7 +4097,7 @@ async function loadGroupMappings() {
                 tableBody.innerHTML = `
                     <tr>
                         <td colspan="10" class="text-center py-4 text-danger">
-                            <i class="bi bi-exclamation-triangle" style="font-size: 3rem;"></i>
+                            <i class="bi bi-exclamation-triangle text-danger" style="font-size: 3rem;"></i>
                             <p class="mt-3">Error loading mappings: ${escapeHtml(error.error || 'Unknown error')}</p>
                         </td>
                     </tr>
@@ -5777,7 +5777,7 @@ async function loadAgentKeys() {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="7" class="text-center py-4 text-muted">
-                        <i class="bi bi-key" style="font-size: 2rem;"></i>
+                        <i class="bi bi-key text-warning" style="font-size: 2rem;"></i>
                         <p class="mt-2 mb-0">No agent API keys configured</p>
                         <p class="small">Create an API key to download agents with embedded authentication</p>
                     </td>
@@ -5823,7 +5823,7 @@ async function loadAgentKeys() {
         tbody.innerHTML = `
             <tr>
                 <td colspan="7" class="text-center py-4 text-danger">
-                    <i class="bi bi-exclamation-triangle"></i>
+                    <i class="bi bi-exclamation-triangle text-danger"></i>
                     <span class="ms-2">Error loading agent keys: ${error.message}</span>
                 </td>
             </tr>
@@ -6145,7 +6145,7 @@ async function loadAssets(page = 1) {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="8" class="text-center py-4 text-muted">
-                        <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
+                        <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
                         <p class="mt-2 mb-0">No endpoints discovered</p>
                         <p class="small">Endpoints will appear here when agents report their inventory</p>
                     </td>
@@ -6229,7 +6229,7 @@ async function loadAssets(page = 1) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="7" class="text-center py-4 text-danger">
-                    <i class="bi bi-exclamation-triangle"></i>
+                    <i class="bi bi-exclamation-triangle text-danger"></i>
                     <span class="ms-2">Error loading assets: ${error.message}</span>
                 </td>
             </tr>
@@ -6403,7 +6403,7 @@ async function showAssetDetails(assetId) {
         let productsHtml = '';
         if (assetProductsData.length > 0) {
             productsHtml = `
-                <h6 class="mt-4 mb-3"><i class="bi bi-box me-2"></i>Installed Products (${assetProductsData.length})</h6>
+                <h6 class="mt-4 mb-3"><i class="bi bi-box me-2 text-success"></i>Installed Products (${assetProductsData.length})</h6>
                 <div id="assetProductsTableContainer"></div>
             `;
         } else {
@@ -6413,7 +6413,7 @@ async function showAssetDetails(assetId) {
         modalBody.innerHTML = `
             <div class="row">
                 <div class="col-md-6">
-                    <h6><i class="bi bi-pc-display me-2"></i>System Information</h6>
+                    <h6><i class="bi bi-pc-display me-2 text-primary"></i>System Information</h6>
                     <table class="table table-sm">
                         <tr><td class="text-muted" style="width: 100px;">Hostname</td><td><strong>${escapeHtml(asset.hostname)}</strong></td></tr>
                         <tr><td class="text-muted">IP Address</td><td><code>${escapeHtml(asset.ip_address || '-')}</code></td></tr>
@@ -6421,7 +6421,7 @@ async function showAssetDetails(assetId) {
                     </table>
                 </div>
                 <div class="col-md-6">
-                    <h6><i class="bi bi-info-circle me-2"></i>Agent Information</h6>
+                    <h6><i class="bi bi-info-circle me-2 text-info"></i>Agent Information</h6>
                     <table class="table table-sm">
                         <tr><td class="text-muted" style="width: 110px;">Agent ID</td><td><code class="small">${escapeHtml(asset.agent_id || '-')}</code></td></tr>
                         <tr><td class="text-muted">Agent Version</td><td>${escapeHtml(asset.agent_version || '-')}</td></tr>
@@ -6441,7 +6441,7 @@ async function showAssetDetails(assetId) {
         console.error('Error loading asset details:', error);
         modalBody.innerHTML = `
             <div class="text-center py-4 text-danger">
-                <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                <i class="bi bi-exclamation-triangle text-danger" style="font-size: 2rem;"></i>
                 <p class="mt-2">Error loading asset details: ${error.message}</p>
             </div>
         `;
@@ -6551,7 +6551,7 @@ function renderImportQueue() {
         tbody.innerHTML = `
             <tr>
                 <td colspan="7" class="text-center py-4 text-muted">
-                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <i class="bi bi-inbox text-success" style="font-size: 2rem;"></i>
                     <p class="mb-0 mt-2">No items in queue</p>
                 </td>
             </tr>
@@ -6735,7 +6735,7 @@ async function loadImportQueue() {
         tbody.innerHTML = `
             <tr>
                 <td colspan="7" class="text-center py-4 text-danger">
-                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                    <i class="bi bi-exclamation-triangle text-danger" style="font-size: 2rem;"></i>
                     <p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p>
                 </td>
             </tr>
@@ -6984,7 +6984,7 @@ function renderPullSources() {
         tbody.innerHTML = `
             <tr>
                 <td colspan="6" class="text-center py-4 text-muted">
-                    <i class="bi bi-plug" style="font-size: 2rem;"></i>
+                    <i class="bi bi-plug text-primary" style="font-size: 2rem;"></i>
                     <p class="mb-0 mt-2">No integrations configured</p>
                     <button class="btn btn-primary btn-sm mt-2" onclick="showCreateIntegrationModal()">
                         <i class="bi bi-plus-circle me-1"></i>Add First Integration
@@ -7643,7 +7643,7 @@ async function loadDiscoveryAgents() {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="6" class="text-center py-4 text-muted">
-                        <i class="bi bi-pc-display" style="font-size: 2rem;"></i>
+                        <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
                         <p class="mb-0 mt-2">No agents registered yet</p>
                         <small>Create an agent integration and deploy the script to get started</small>
                     </td>
