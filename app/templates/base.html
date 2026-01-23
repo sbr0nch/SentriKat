@@ -538,6 +538,9 @@
             background-color: var(--gray-50);
             color: var(--gray-900);
             line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         /* ============================================================================
@@ -586,7 +589,8 @@
         /* Content wrapper - holds sidebar + main content */
         .content-wrapper {
             display: flex;
-            min-height: calc(100vh - 140px); /* Account for header and footer */
+            flex: 1;
+            min-height: 0; /* Allow flexbox to shrink */
         }
 
         /* ============================================
@@ -601,8 +605,8 @@
             flex-direction: column;
             flex-shrink: 0;
             position: sticky;
-            top: 0;
-            height: calc(100vh - 140px);
+            top: 56px; /* Navbar height */
+            height: calc(100vh - 56px);
             overflow-y: auto;
             overflow-x: hidden;
             transition: width 0.3s ease;
@@ -1758,11 +1762,12 @@
         .app-footer {
             background: white;
             padding: 1.5rem 0;
-            margin-top: 3rem;
+            margin-top: auto; /* Push to bottom */
             border-top: 1px solid var(--gray-200);
             text-align: center;
             color: var(--gray-600);
             font-size: 0.875rem;
+            flex-shrink: 0;
         }
 
         /* Modal Improvements - Compact Styling */

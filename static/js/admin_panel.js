@@ -749,6 +749,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         const ldapGroupsTab = document.getElementById('ldapGroups-tab');
         if (ldapGroupsTab) {
             ldapGroupsTab.addEventListener('shown.bs.tab', function() {
+                // Pre-fill Group Search Base DN from LDAP settings if empty
+                const groupSearchBaseInline = document.getElementById('groupSearchBaseInline');
+                const ldapBaseDN = document.getElementById('ldapBaseDN');
+                if (groupSearchBaseInline && !groupSearchBaseInline.value && ldapBaseDN && ldapBaseDN.value) {
+                    groupSearchBaseInline.value = ldapBaseDN.value;
+                }
                 loadGroupMappings();
                 loadSyncStats();
                 loadSyncHistory();
@@ -3137,6 +3143,16 @@ async function loadAllSettings() {
                     if (ldapUseTLS) ldapUseTLS.checked = ldap.ldap_use_tls || false;
                     if (ldapSyncEnabled) ldapSyncEnabled.checked = ldap.ldap_sync_enabled || false;
                     if (ldapSyncInterval) ldapSyncInterval.value = ldap.ldap_sync_interval_hours || '24';
+
+                    // Populate Group Search Base DN with LDAP Base DN as default
+                    const groupSearchBaseInline = document.getElementById('groupSearchBaseInline');
+                    const groupSearchBase = document.getElementById('groupSearchBase');
+                    if (groupSearchBaseInline && !groupSearchBaseInline.value && ldap.ldap_base_dn) {
+                        groupSearchBaseInline.value = ldap.ldap_base_dn;
+                    }
+                    if (groupSearchBase && !groupSearchBase.value && ldap.ldap_base_dn) {
+                        groupSearchBase.value = ldap.ldap_base_dn;
+                    }
 
                     loadLastScheduledSync();
                     console.log('LDAP settings loaded');
