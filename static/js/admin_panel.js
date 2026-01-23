@@ -7153,9 +7153,6 @@ function showCreateIntegrationModal() {
         </div>
     `;
 
-    const existingModal = document.getElementById('createIntegrationModal');
-    if (existingModal) existingModal.remove();
-
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
     // Handle auth type change
