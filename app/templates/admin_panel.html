@@ -288,11 +288,11 @@
                             <div class="d-flex justify-content-between align-items-center">
                                 <span><i class="bi bi-search me-2"></i>Discover LDAP Groups</span>
                                 <button class="btn btn-sm btn-outline-secondary" onclick="toggleGroupDiscovery()">
-                                    <i class="bi bi-chevron-down" id="discoveryToggleIcon"></i>
+                                    <i class="bi bi-chevron-up" id="discoveryToggleIcon"></i>
                                 </button>
                             </div>
                         </div>
-                        <div class="card-body" id="groupDiscoveryPanel" style="display: none;">
+                        <div class="card-body" id="groupDiscoveryPanel">
                             <div class="row g-3 mb-3">
                                 <div class="col-md-8">
                                     <label class="form-label fw-semibold">Search Base DN</label>
@@ -366,12 +366,7 @@
                                         </tr>
                                     </thead>
                                     <tbody id="groupMappingsTable">
-                                        <tr>
-                                            <td colspan="10" class="text-center py-4">
-                                                <div class="spinner-border text-primary" role="status"></div>
-                                                <p class="text-muted mt-2">Loading group mappings...</p>
-                                            </td>
-                                        </tr>
+                                        <!-- Content loaded by JavaScript -->
                                     </tbody>
                                 </table>
                             </div>

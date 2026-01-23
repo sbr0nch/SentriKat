@@ -117,6 +117,76 @@ async function loadWithRetry(elementId, loadFn, errorMessage = 'Failed to load')
 }
 
 // ============================================================================
+// MODAL CLEANUP UTILITY - Prevent grey backdrop issues
+// ============================================================================
+
+/**
+ * Clean up all modal backdrops and body classes
+ * Call this after hiding any modal to ensure no grey overlay remains
+ */
+function cleanupModalBackdrops() {
+    // Remove all backdrop elements
+    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+    // Remove modal-open class from body
+    document.body.classList.remove('modal-open');
+    // Remove any padding added for scrollbar
+    document.body.style.removeProperty('padding-right');
+    document.body.style.overflow = '';
+}
+
+/**
+ * Safely hide a modal and clean up
+ * @param {string} modalId - The ID of the modal element
+ */
+function safeHideModal(modalId) {
+    const modalEl = document.getElementById(modalId);
+    if (modalEl) {
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) {
+            modalInstance.hide();
+        }
+    }
+    // Always clean up after a short delay to ensure Bootstrap has finished
+    setTimeout(cleanupModalBackdrops, 300);
+}
+
+/**
+ * Safely dispose of a modal completely
+ * @param {string} modalId - The ID of the modal element
+ * @param {boolean} removeElement - Whether to remove the modal element from DOM
+ */
+function safeDisposeModal(modalId, removeElement = false) {
+    const modalEl = document.getElementById(modalId);
+    if (modalEl) {
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) {
+            try {
+                modalInstance.hide();
+                modalInstance.dispose();
+            } catch (e) {
+                console.warn('Error disposing modal:', e);
+            }
+        }
+        if (removeElement) {
+            modalEl.remove();
+        }
+    }
+    cleanupModalBackdrops();
+}
+
+// Global event listener to clean up backdrops when any modal is hidden
+document.addEventListener('hidden.bs.modal', function(event) {
+    // Small delay to ensure Bootstrap has finished its cleanup
+    setTimeout(() => {
+        // Check if any modal is still open
+        const openModals = document.querySelectorAll('.modal.show');
+        if (openModals.length === 0) {
+            cleanupModalBackdrops();
+        }
+    }, 100);
+});
+
+// ============================================================================
 // CURRENT USER INFO - For permission-aware API calls
 // ============================================================================
 
@@ -1210,7 +1280,7 @@ async function addOrgMembership() {
 
         if (response.ok) {
             showToast(result.message || 'Organization added successfully', 'success');
-            bootstrap.Modal.getInstance(document.getElementById('addOrgMembershipModal')).hide();
+            safeHideModal('addOrgMembershipModal');
             loadUserOrgMemberships(userId);
         } else {
             showToast(result.error || 'Failed to add organization', 'danger');
@@ -1367,7 +1437,7 @@ async function saveUser() {
                 currentUserId ? '✓ User updated successfully' : '✓ User created successfully',
                 'success'
             );
-            bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
+            safeHideModal('userModal');
             loadUsers();
         } else {
             const error = await response.json();
@@ -1838,7 +1908,7 @@ async function saveOrganization() {
                 currentOrgId ? '✓ Organization updated successfully' : '✓ Organization created successfully',
                 'success'
             );
-            bootstrap.Modal.getInstance(document.getElementById('orgModal')).hide();
+            safeHideModal('orgModal');
             loadOrganizations();
             loadOrganizationsDropdown();
         } else {
@@ -3847,8 +3917,7 @@ async function inviteLdapUser() {
 
             // Close the invite modal after a brief delay
             setTimeout(() => {
-                const inviteModal = bootstrap.Modal.getInstance(document.getElementById('ldapInviteModal'));
-                if (inviteModal) inviteModal.hide();
+                safeHideModal('ldapInviteModal');
 
                 // Reset button state
                 if (inviteBtn) {
@@ -3901,6 +3970,20 @@ async function inviteLdapUser() {
 async function loadGroupMappings() {
     const tableBody = document.getElementById('groupMappingsTable');
     if (!tableBody) return;
+
+    // Check if LDAP feature is licensed before attempting to load
+    if (!isFeatureLicensed('ldap')) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="10" class="text-center py-5">
+                    <i class="bi bi-shield-lock text-muted" style="font-size: 3rem;"></i>
+                    <h5 class="mt-3 text-muted">LDAP Integration Not Available</h5>
+                    <p class="text-muted mb-0">LDAP integration requires a Professional license.</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
 
     tableBody.innerHTML = `
         <tr>
@@ -3999,14 +4082,27 @@ async function loadGroupMappings() {
             }
         } else {
             const error = await response.json();
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="10" class="text-center py-4 text-danger">
-                        <i class="bi bi-exclamation-triangle" style="font-size: 3rem;"></i>
-                        <p class="mt-3">Error loading mappings: ${escapeHtml(error.error)}</p>
-                    </td>
-                </tr>
-            `;
+            // Handle license required case gracefully
+            if (error.license_required) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="text-center py-5">
+                            <i class="bi bi-shield-lock text-muted" style="font-size: 3rem;"></i>
+                            <h5 class="mt-3 text-muted">LDAP Integration Not Available</h5>
+                            <p class="text-muted mb-0">LDAP integration requires a Professional license.</p>
+                        </td>
+                    </tr>
+                `;
+            } else {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="text-center py-4 text-danger">
+                            <i class="bi bi-exclamation-triangle" style="font-size: 3rem;"></i>
+                            <p class="mt-3">Error loading mappings: ${escapeHtml(error.error || 'Unknown error')}</p>
+                        </td>
+                    </tr>
+                `;
+            }
         }
     } catch (error) {
         console.error('Error loading group mappings:', error);
@@ -4142,10 +4238,7 @@ async function saveGroupMapping() {
         if (response.ok) {
             showToast(`Group mapping ${mappingId ? 'updated' : 'created'} successfully`, 'success');
 
-            const modalEl = document.getElementById('groupMappingModal');
-            const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
-            if (modal) modal.hide();
-
+            safeHideModal('groupMappingModal');
             loadGroupMappings();
         } else {
             const error = await response.json();
@@ -4486,10 +4579,7 @@ async function performGroupDiscovery() {
  */
 function createMappingFromDiscovery(dn, cn, description, memberCount) {
     // Close discovery modal
-    const discoveryModal = bootstrap.Modal.getInstance(document.getElementById('ldapDiscoveryModal'));
-    if (discoveryModal) {
-        discoveryModal.hide();
-    }
+    safeHideModal('ldapDiscoveryModal');
 
     // Pre-fill mapping form
     const form = document.getElementById('groupMappingForm');
@@ -4603,6 +4693,9 @@ async function triggerManualSync() {
  * Load sync statistics
  */
 async function loadSyncStats() {
+    // Skip if LDAP is not licensed
+    if (!isFeatureLicensed('ldap')) return;
+
     try {
         const response = await fetch('/api/ldap/groups/sync/history?limit=1');
         if (response.ok) {
@@ -4648,6 +4741,18 @@ async function loadSyncStats() {
 async function loadSyncHistory() {
     const tableBody = document.getElementById('syncHistoryTable');
     if (!tableBody) return;
+
+    // Skip if LDAP is not licensed
+    if (!isFeatureLicensed('ldap')) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="9" class="text-center py-4 text-muted">
+                    LDAP integration requires a Professional license.
+                </td>
+            </tr>
+        `;
+        return;
+    }
 
     try {
         const response = await fetch('/api/ldap/groups/sync/history?limit=20');
@@ -5798,7 +5903,7 @@ async function createAgentKey() {
         }
 
         // Hide create modal
-        bootstrap.Modal.getInstance(document.getElementById('agentKeyModal')).hide();
+        safeHideModal('agentKeyModal');
 
         // Show the key to user
         document.getElementById('newAgentKeyValue').value = data.api_key;
@@ -7023,18 +7128,7 @@ async function loadIntegrations() {
 
 function showCreateIntegrationModal() {
     // Clean up any existing modal first
-    const existingModal = document.getElementById('createIntegrationModal');
-    if (existingModal) {
-        const instance = bootstrap.Modal.getInstance(existingModal);
-        if (instance) {
-            try { instance.dispose(); } catch (e) {}
-        }
-        existingModal.remove();
-    }
-    // Clean up lingering backdrops
-    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-    document.body.classList.remove('modal-open');
-    document.body.style.removeProperty('padding-right');
+    safeDisposeModal('createIntegrationModal', true);
 
     const modalHtml = `
         <div class="modal fade" id="createIntegrationModal" tabindex="-1">
@@ -7234,18 +7328,7 @@ async function saveIntegration() {
 
         const integration = await response.json();
 
-        const modalEl = document.getElementById('createIntegrationModal');
-        const modalInstance = bootstrap.Modal.getInstance(modalEl);
-        if (modalInstance) {
-            modalInstance.hide();
-            setTimeout(() => {
-                try { modalInstance.dispose(); } catch (e) {}
-                if (modalEl) modalEl.remove();
-                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-                document.body.classList.remove('modal-open');
-                document.body.style.removeProperty('padding-right');
-            }, 300);
-        }
+        safeDisposeModal('createIntegrationModal', true);
         showToast('Pull Source created successfully', 'success');
         loadIntegrations();
 
@@ -7466,18 +7549,7 @@ async function showEditIntegrationModal(integrationId) {
         `;
 
         // Clean up any existing modal first
-        const existingModal = document.getElementById('editIntegrationModal');
-        if (existingModal) {
-            const instance = bootstrap.Modal.getInstance(existingModal);
-            if (instance) {
-                try { instance.dispose(); } catch (e) {}
-            }
-            existingModal.remove();
-        }
-        // Clean up lingering backdrops
-        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-        document.body.classList.remove('modal-open');
-        document.body.style.removeProperty('padding-right');
+        safeDisposeModal('editIntegrationModal', true);
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         const modal = new bootstrap.Modal(document.getElementById('editIntegrationModal'));
@@ -7544,18 +7616,7 @@ async function saveEditIntegration() {
             throw new Error(error.error || 'Failed to update integration');
         }
 
-        const modalEl = document.getElementById('editIntegrationModal');
-        const modalInstance = bootstrap.Modal.getInstance(modalEl);
-        if (modalInstance) {
-            modalInstance.hide();
-            setTimeout(() => {
-                try { modalInstance.dispose(); } catch (e) {}
-                if (modalEl) modalEl.remove();
-                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-                document.body.classList.remove('modal-open');
-                document.body.style.removeProperty('padding-right');
-            }, 300);
-        }
+        safeDisposeModal('editIntegrationModal', true);
         showToast('Pull Source updated successfully', 'success');
         loadIntegrations();
 
