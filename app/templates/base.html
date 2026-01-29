@@ -2833,11 +2833,23 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        let loadingTimeout = null;
+
         function showLoading() {
             document.getElementById('loadingOverlay').classList.add('show');
+            // Safety timeout - auto-hide loading after 30 seconds to prevent stuck grey screen
+            if (loadingTimeout) clearTimeout(loadingTimeout);
+            loadingTimeout = setTimeout(function() {
+                console.warn('Loading overlay auto-hidden after 30s timeout');
+                hideLoading();
+            }, 30000);
         }
 
         function hideLoading() {
+            if (loadingTimeout) {
+                clearTimeout(loadingTimeout);
+                loadingTimeout = null;
+            }
             document.getElementById('loadingOverlay').classList.remove('show');
             // Clean up any lingering modal backdrops
             cleanupModalBackdrops();
@@ -2916,6 +2928,45 @@
                 setTimeout(cleanupModalBackdrops, 50);
             }
         });
+
+        // AGGRESSIVE CLEANUP: Watch for orphaned backdrops and remove them
+        // This catches cases where modals are closed but backdrops remain
+        const backdropObserver = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                // Check for added nodes that might be orphaned backdrops
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.classList && node.classList.contains('modal-backdrop')) {
+                        // Verify if there's actually a visible modal for this backdrop
+                        setTimeout(function() {
+                            const visibleModals = document.querySelectorAll('.modal.show');
+                            const backdrops = document.querySelectorAll('.modal-backdrop');
+                            // If more backdrops than visible modals, clean up
+                            if (backdrops.length > visibleModals.length) {
+                                cleanupModalBackdrops();
+                                // Re-add backdrop for any still-open modal
+                                visibleModals.forEach(function(modal) {
+                                    const instance = bootstrap.Modal.getInstance(modal);
+                                    if (instance) {
+                                        // Force Bootstrap to manage its own backdrop
+                                    }
+                                });
+                            }
+                        }, 500);
+                    }
+                });
+            });
+        });
+        backdropObserver.observe(document.body, { childList: true });
+
+        // Periodic cleanup every 5 seconds - catches any missed orphan backdrops
+        setInterval(function() {
+            const visibleModals = document.querySelectorAll('.modal.show');
+            const backdrops = document.querySelectorAll('.modal-backdrop');
+            if (visibleModals.length === 0 && backdrops.length > 0) {
+                console.log('Cleaning up orphaned modal backdrops');
+                cleanupModalBackdrops();
+            }
+        }, 5000);
 
         /**
          * Switch to a specific admin panel tab
