@@ -1026,6 +1026,7 @@ def get_vulnerabilities():
 def get_vulnerability_stats():
     """Get vulnerability statistics with priority breakdown for current organization"""
     from app.models import product_organizations
+    from sqlalchemy import select, func
 
     # Get current organization
     org_id = session.get('organization_id')
@@ -1033,43 +1034,67 @@ def get_vulnerability_stats():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
-    total_vulns = db.session.query(Vulnerability).count() or 0
+    # Use func.count for scalar counts to avoid session issues
+    total_vulns = db.session.execute(select(func.count()).select_from(Vulnerability)).scalar() or 0
 
-    # Filter matches by organization using scalar_subquery for proper IN() usage
+    # Filter matches by organization - fetch IDs first to avoid subquery issues
     if org_id:
-        # Get product IDs for this organization via scalar_subquery
-        org_product_ids = db.session.query(product_organizations.c.product_id).filter(
-            product_organizations.c.organization_id == org_id
-        ).scalar_subquery()
+        # Get product IDs for this organization
+        org_product_ids = db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == org_id
+            )
+        ).scalars().all()
 
-        total_matches_query = db.session.query(VulnerabilityMatch).filter(
-            VulnerabilityMatch.product_id.in_(org_product_ids)
-        )
+        if org_product_ids:
+            total_matches_query = db.session.query(VulnerabilityMatch).filter(
+                VulnerabilityMatch.product_id.in_(org_product_ids)
+            )
 
-        unacknowledged_query = db.session.query(VulnerabilityMatch).filter(
-            VulnerabilityMatch.product_id.in_(org_product_ids),
-            VulnerabilityMatch.acknowledged == False
-        )
+            unacknowledged_query = db.session.query(VulnerabilityMatch).filter(
+                VulnerabilityMatch.product_id.in_(org_product_ids),
+                VulnerabilityMatch.acknowledged == False
+            )
 
-        # Get ransomware vulnerability IDs via scalar_subquery
-        ransomware_vuln_ids = db.session.query(Vulnerability.id).filter(
-            Vulnerability.known_ransomware == True
-        ).scalar_subquery()
-        ransomware_query = db.session.query(VulnerabilityMatch).filter(
-            VulnerabilityMatch.product_id.in_(org_product_ids),
-            VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids)
-        )
+            # Get ransomware vulnerability IDs
+            ransomware_vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(Vulnerability.known_ransomware == True)
+            ).scalars().all()
 
-        products_tracked_query = db.session.query(Product).filter(
-            Product.id.in_(org_product_ids),
-            Product.active == True
-        )
+            if ransomware_vuln_ids:
+                ransomware_query = db.session.query(VulnerabilityMatch).filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids)
+                )
+            else:
+                ransomware_query = db.session.query(VulnerabilityMatch).filter(False)  # Empty query
+
+            products_tracked_query = db.session.query(Product).filter(
+                Product.id.in_(org_product_ids),
+                Product.active == True
+            )
+        else:
+            # No products in org - empty queries
+            total_matches_query = db.session.query(VulnerabilityMatch).filter(False)
+            unacknowledged_query = db.session.query(VulnerabilityMatch).filter(False)
+            ransomware_query = db.session.query(VulnerabilityMatch).filter(False)
+            products_tracked_query = db.session.query(Product).filter(False)
     else:
         # No org filter - show all
         total_matches_query = db.session.query(VulnerabilityMatch)
         unacknowledged_query = db.session.query(VulnerabilityMatch).filter(VulnerabilityMatch.acknowledged == False)
-        ransomware_vuln_ids = db.session.query(Vulnerability.id).filter(Vulnerability.known_ransomware == True).scalar_subquery()
-        ransomware_query = db.session.query(VulnerabilityMatch).filter(VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids))
+
+        ransomware_vuln_ids = db.session.execute(
+            select(Vulnerability.id).where(Vulnerability.known_ransomware == True)
+        ).scalars().all()
+
+        if ransomware_vuln_ids:
+            ransomware_query = db.session.query(VulnerabilityMatch).filter(
+                VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids)
+            )
+        else:
+            ransomware_query = db.session.query(VulnerabilityMatch).filter(False)
+
         products_tracked_query = Product.query.filter_by(active=True)
 
     total_matches = total_matches_query.count()
