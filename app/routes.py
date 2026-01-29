@@ -230,6 +230,7 @@ def get_products():
     - Others: Only see products assigned to their organization
     """
     from app.models import product_organizations
+    from sqlalchemy import select
     import logging
     logger = logging.getLogger(__name__)
 
@@ -251,23 +252,29 @@ def get_products():
     logger.info(f"get_products: user={current_user.username}, role={current_user.role}, is_super_admin={current_user.is_super_admin()}")
 
     # Build base query based on permissions
-    # Use subqueries instead of joins to avoid pagination count issues
+    # Fetch IDs first to avoid scalar_subquery issues with connection pool
+    query = Product.query
+
     if current_user.is_super_admin():
-        query = Product.query
         logger.info("get_products: super_admin sees all products")
 
         # Super admin can filter by specific organization
         if filter_org:
-            # Get product IDs for this org via subquery
-            org_product_ids = db.session.query(product_organizations.c.product_id).filter(
-                product_organizations.c.organization_id == filter_org
-            ).scalar_subquery()
-            query = query.filter(
-                db.or_(
-                    Product.id.in_(org_product_ids),
-                    Product.organization_id == filter_org
+            # Get product IDs for this org - fetch IDs first
+            org_product_ids = db.session.execute(
+                select(product_organizations.c.product_id).where(
+                    product_organizations.c.organization_id == filter_org
                 )
-            )
+            ).scalars().all()
+            if org_product_ids:
+                query = query.filter(
+                    db.or_(
+                        Product.id.in_(org_product_ids),
+                        Product.organization_id == filter_org
+                    )
+                )
+            else:
+                query = query.filter(Product.organization_id == filter_org)
     else:
         # Get user's current organization from session
         org_id = session.get('organization_id') or current_user.organization_id
@@ -279,14 +286,21 @@ def get_products():
                 return jsonify({'products': [], 'total': 0, 'page': 1, 'per_page': per_page, 'pages': 0})
             return jsonify([])
 
-        # Get products assigned via many-to-many table or legacy field using subquery
-        org_product_ids = db.session.query(product_organizations.c.product_id).filter(
-            product_organizations.c.organization_id == org_id
-        ).scalar_subquery()
-        query = query.filter(
-            db.or_(
-                Product.id.in_(org_product_ids),
-                Product.organization_id == org_id
+        # Get products assigned via many-to-many table - fetch IDs first
+        org_product_ids = db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == org_id
+            )
+        ).scalars().all()
+        if org_product_ids:
+            query = query.filter(
+                db.or_(
+                    Product.id.in_(org_product_ids),
+                    Product.organization_id == org_id
+                )
+            )
+        else:
+            query = query.filter(Product.organization_id == org_id)
             )
         )
 
@@ -1026,7 +1040,7 @@ def get_vulnerabilities():
 def get_vulnerability_stats():
     """Get vulnerability statistics with priority breakdown for current organization"""
     from app.models import product_organizations
-    from sqlalchemy import select, func
+    from sqlalchemy import select
 
     # Get current organization
     org_id = session.get('organization_id')
@@ -1034,8 +1048,8 @@ def get_vulnerability_stats():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
-    # Use func.count for scalar counts to avoid session issues
-    total_vulns = db.session.execute(select(func.count()).select_from(Vulnerability)).scalar() or 0
+    # Use simple ORM count - avoid complex select patterns
+    total_vulns = Vulnerability.query.count() or 0
 
     # Filter matches by organization - fetch IDs first to avoid subquery issues
     if org_id:
@@ -1047,11 +1061,11 @@ def get_vulnerability_stats():
         ).scalars().all()
 
         if org_product_ids:
-            total_matches_query = db.session.query(VulnerabilityMatch).filter(
+            total_matches_query = VulnerabilityMatch.query.filter(
                 VulnerabilityMatch.product_id.in_(org_product_ids)
             )
 
-            unacknowledged_query = db.session.query(VulnerabilityMatch).filter(
+            unacknowledged_query = VulnerabilityMatch.query.filter(
                 VulnerabilityMatch.product_id.in_(org_product_ids),
                 VulnerabilityMatch.acknowledged == False
             )
@@ -1062,38 +1076,48 @@ def get_vulnerability_stats():
             ).scalars().all()
 
             if ransomware_vuln_ids:
-                ransomware_query = db.session.query(VulnerabilityMatch).filter(
+                ransomware_query = VulnerabilityMatch.query.filter(
                     VulnerabilityMatch.product_id.in_(org_product_ids),
                     VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids)
                 )
             else:
-                ransomware_query = db.session.query(VulnerabilityMatch).filter(False)  # Empty query
+                ransomware_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.id < 0)  # Empty
 
-            products_tracked_query = db.session.query(Product).filter(
+            products_tracked_query = Product.query.filter(
                 Product.id.in_(org_product_ids),
                 Product.active == True
             )
         else:
-            # No products in org - empty queries
-            total_matches_query = db.session.query(VulnerabilityMatch).filter(False)
-            unacknowledged_query = db.session.query(VulnerabilityMatch).filter(False)
-            ransomware_query = db.session.query(VulnerabilityMatch).filter(False)
-            products_tracked_query = db.session.query(Product).filter(False)
+            # No products in org - return zeros
+            return jsonify({
+                'total_vulnerabilities': total_vulns,
+                'total_matches': 0,
+                'unacknowledged': 0,
+                'unacknowledged_cves': 0,
+                'ransomware_related': 0,
+                'products_tracked': 0,
+                'priority_breakdown': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0},
+                'cve_priority_breakdown': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0},
+                'critical_count': 0,
+                'high_count': 0,
+                'medium_count': 0,
+                'low_count': 0
+            })
     else:
         # No org filter - show all
-        total_matches_query = db.session.query(VulnerabilityMatch)
-        unacknowledged_query = db.session.query(VulnerabilityMatch).filter(VulnerabilityMatch.acknowledged == False)
+        total_matches_query = VulnerabilityMatch.query
+        unacknowledged_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.acknowledged == False)
 
         ransomware_vuln_ids = db.session.execute(
             select(Vulnerability.id).where(Vulnerability.known_ransomware == True)
         ).scalars().all()
 
         if ransomware_vuln_ids:
-            ransomware_query = db.session.query(VulnerabilityMatch).filter(
+            ransomware_query = VulnerabilityMatch.query.filter(
                 VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids)
             )
         else:
-            ransomware_query = db.session.query(VulnerabilityMatch).filter(False)
+            ransomware_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.id < 0)  # Empty
 
         products_tracked_query = Product.query.filter_by(active=True)
 
