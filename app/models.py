@@ -73,6 +73,7 @@ class Organization(db.Model):
     alert_on_high = db.Column(db.Boolean, default=False)
     alert_on_new_cve = db.Column(db.Boolean, default=True)
     alert_on_ransomware = db.Column(db.Boolean, default=True)
+    alert_on_low_confidence = db.Column(db.Boolean, default=False)  # Include LOW confidence matches in alerts (default: skip)
     alert_time_start = db.Column(db.String(5), default='08:00')  # HH:MM format
     alert_time_end = db.Column(db.String(5), default='18:00')    # HH:MM format
     alert_days = db.Column(db.String(50), default='mon,tue,wed,thu,fri')  # Comma-separated days
@@ -115,6 +116,7 @@ class Organization(db.Model):
                 'high': self.alert_on_high,
                 'new_cve': self.alert_on_new_cve,
                 'ransomware': self.alert_on_ransomware,
+                'low_confidence': self.alert_on_low_confidence,  # Include low-confidence matches
                 'time_start': self.alert_time_start,
                 'time_end': self.alert_time_end,
                 'days': self.alert_days,
@@ -136,6 +138,7 @@ class Organization(db.Model):
             'alert_on_high': self.alert_on_high,
             'alert_on_new_cve': self.alert_on_new_cve,
             'alert_on_ransomware': self.alert_on_ransomware,
+            'alert_on_low_confidence': self.alert_on_low_confidence,
             # Webhook settings (decrypt URL for editing)
             'webhook_enabled': self.webhook_enabled,
             'webhook_url': self._decrypt_webhook_url(),

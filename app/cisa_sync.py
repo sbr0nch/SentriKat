@@ -342,6 +342,62 @@ def parse_and_store_vulnerabilities(kev_data):
     db.session.commit()
     return stored_count, updated_count
 
+def fetch_cpe_version_data(limit=30):
+    """
+    Fetch CPE version range data from NVD for vulnerabilities.
+    This enables precise version-based matching instead of keyword matching.
+
+    CRITICAL for enterprise accuracy: Without version ranges, ALL versions
+    of a product are flagged as vulnerable, causing false positives.
+
+    Args:
+        limit: Maximum CVEs to fetch per run (NVD rate limits apply)
+
+    Returns:
+        int: Number of vulnerabilities enriched with CPE data
+    """
+    from app.nvd_cpe_api import match_cve_to_cpe
+    import time
+
+    # Get vulnerabilities without CPE data, prioritize:
+    # 1. New CVEs (recently added to CISA KEV)
+    # 2. CVEs with product matches (more urgent to get version data)
+    vulns_to_fetch = Vulnerability.query.filter(
+        Vulnerability.cpe_data == None
+    ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
+
+    if not vulns_to_fetch:
+        logger.info("All vulnerabilities already have CPE version data")
+        return 0
+
+    enriched_count = 0
+    logger.info(f"Fetching CPE version data for {len(vulns_to_fetch)} vulnerabilities from NVD")
+
+    for vuln in vulns_to_fetch:
+        try:
+            # Fetch CPE data with version ranges from NVD
+            cpe_entries = match_cve_to_cpe(vuln.cve_id)
+
+            if cpe_entries:
+                # Store CPE data using the model's method
+                vuln.set_cpe_entries(cpe_entries)
+                enriched_count += 1
+                logger.debug(f"Fetched {len(cpe_entries)} CPE entries for {vuln.cve_id}")
+            else:
+                # Mark as checked even if no CPE data found
+                vuln.cpe_data = '[]'
+                vuln.cpe_fetched_at = datetime.utcnow()
+                logger.debug(f"No CPE data found for {vuln.cve_id}")
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch CPE data for {vuln.cve_id}: {e}")
+            continue
+
+    db.session.commit()
+    logger.info(f"Enriched {enriched_count} vulnerabilities with CPE version data")
+    return enriched_count
+
+
 def enrich_with_cvss_data(limit=50):
     """
     Enrich vulnerabilities with CVSS scores from NVD API
@@ -375,7 +431,7 @@ def enrich_with_cvss_data(limit=50):
     logger.info(f"Enriched {enriched_count} vulnerabilities with CVSS data")
     return enriched_count
 
-def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
+def sync_cisa_kev(enrich_cvss=False, cvss_limit=50, fetch_cpe=True, cpe_limit=30):
     """Main sync function to download and process CISA KEV"""
     start_time = datetime.utcnow()
     sync_log = SyncLog()
@@ -387,7 +443,17 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
         # Parse and store vulnerabilities
         stored, updated = parse_and_store_vulnerabilities(kev_data)
 
-        # Match vulnerabilities with products
+        # Fetch CPE version data from NVD BEFORE matching
+        # This enables precise version-based matching
+        cpe_enriched = 0
+        if fetch_cpe:
+            try:
+                cpe_enriched = fetch_cpe_version_data(limit=cpe_limit)
+                logger.info(f"Fetched CPE version data for {cpe_enriched} vulnerabilities")
+            except Exception as e:
+                logger.warning(f"CPE version fetch failed (non-critical): {e}")
+
+        # Match vulnerabilities with products (now with version data if available)
         from app.filters import match_vulnerabilities_to_products
         matches_count = match_vulnerabilities_to_products()
 
@@ -539,6 +605,7 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50):
             'stored': stored,
             'updated': updated,
             'matches': matches_count,
+            'cpe_enriched': cpe_enriched,
             'duration': duration,
             'alerts_sent': alert_results
         }

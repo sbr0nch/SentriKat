@@ -100,12 +100,25 @@ class EmailAlertManager:
         if not recipients:
             return {'status': 'error', 'reason': 'No recipients configured'}
 
-        # Filter matches by alert settings
+        # Filter matches by alert settings and confidence level
         filtered_matches = []
+        low_confidence_skipped = 0
         now = datetime.utcnow()
+
+        # Get organization's confidence threshold setting (default: skip LOW confidence)
+        # Organizations can choose to include low-confidence matches in alerts
+        include_low_confidence = getattr(organization, 'alert_on_low_confidence', False)
+
         for match in new_matches:
             # Skip snoozed matches
             if match.snoozed_until and match.snoozed_until > now:
+                continue
+
+            # ENTERPRISE FEATURE: Skip LOW confidence matches by default
+            # LOW confidence = keyword-only matching, often false positives
+            # HIGH/MEDIUM confidence = CPE matching or vendor+product matching
+            if not include_low_confidence and match.match_confidence == 'low':
+                low_confidence_skipped += 1
                 continue
 
             severity = match.calculate_effective_priority()  # Now returns CVE severity directly
@@ -129,6 +142,14 @@ class EmailAlertManager:
 
             if should_alert:
                 filtered_matches.append(match)
+
+        # Log skipped low-confidence matches for transparency
+        if low_confidence_skipped > 0:
+            import logging
+            logging.getLogger(__name__).info(
+                f"Skipped {low_confidence_skipped} low-confidence matches for {organization.name} "
+                f"(enable alert_on_low_confidence to include)"
+            )
 
         if not filtered_matches:
             return {'status': 'skipped', 'reason': 'No matches meet alert criteria'}
