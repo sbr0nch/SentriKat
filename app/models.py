@@ -567,6 +567,10 @@ class VulnerabilityMatch(db.Model):
     # Reset to NULL when CVE is reopened (unacknowledged) to re-alert
     first_alerted_at = db.Column(db.DateTime, nullable=True, index=True)
 
+    # Snooze feature - temporarily suppress alerts until this datetime
+    # NULL = not snoozed, set when user clicks "Remind me later"
+    snoozed_until = db.Column(db.DateTime, nullable=True, index=True)
+
     # Match method and confidence
     match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
     match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
@@ -603,9 +607,9 @@ class VulnerabilityMatch(db.Model):
             'match_method': self.match_method or 'keyword',
             'match_confidence': self.match_confidence or 'medium',
             'acknowledged': self.acknowledged,
+            'snoozed_until': self.snoozed_until.isoformat() if self.snoozed_until else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'effective_priority': self.calculate_effective_priority(),
-            'product_criticality': product_dict['criticality']
+            'effective_priority': self.calculate_effective_priority()
         }
 
 class SyncLog(db.Model):

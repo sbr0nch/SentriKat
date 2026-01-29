@@ -102,7 +102,12 @@ class EmailAlertManager:
 
         # Filter matches by alert settings
         filtered_matches = []
+        now = datetime.utcnow()
         for match in new_matches:
+            # Skip snoozed matches
+            if match.snoozed_until and match.snoozed_until > now:
+                continue
+
             severity = match.calculate_effective_priority()  # Now returns CVE severity directly
             vuln = match.vulnerability
 

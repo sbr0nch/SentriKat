@@ -13,7 +13,7 @@ from app.error_utils import safe_error_response, ERROR_MSGS
 import json
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -1481,6 +1481,74 @@ def unacknowledge_match(match_id):
     match.acknowledged = False
     # Reset first_alerted_at so it will be alerted again as "new"
     match.first_alerted_at = None
+    db.session.commit()
+    return jsonify(match.to_dict())
+
+
+@bp.route('/api/matches/<int:match_id>/snooze', methods=['POST'])
+@login_required
+def snooze_match(match_id):
+    """
+    Snooze a vulnerability match for a specified duration.
+
+    Request body:
+    {
+        "hours": 24  // or "days": 7
+    }
+
+    Snoozing temporarily suppresses alerts for this match until the snooze expires.
+    Useful when a patch isn't available yet or remediation is planned.
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    match = VulnerabilityMatch.query.get_or_404(match_id)
+
+    # Authorization: verify user can manage this product's matches
+    if not current_user.is_super_admin():
+        product_org_ids = [org.id for org in match.product.organizations.all()]
+        if match.product.organization_id:
+            product_org_ids.append(match.product.organization_id)
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if not any(org_id in user_org_ids for org_id in product_org_ids):
+            return jsonify({'error': 'Insufficient permissions'}), 403
+
+    data = request.get_json() or {}
+    hours = data.get('hours', 0)
+    days = data.get('days', 0)
+
+    if not hours and not days:
+        # Default to 24 hours if not specified
+        hours = 24
+
+    total_hours = hours + (days * 24)
+    match.snoozed_until = datetime.utcnow() + timedelta(hours=total_hours)
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'snoozed_until': match.snoozed_until.isoformat(),
+        'match': match.to_dict()
+    })
+
+
+@bp.route('/api/matches/<int:match_id>/unsnooze', methods=['POST'])
+@login_required
+def unsnooze_match(match_id):
+    """Remove snooze from a vulnerability match."""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    match = VulnerabilityMatch.query.get_or_404(match_id)
+
+    # Authorization
+    if not current_user.is_super_admin():
+        product_org_ids = [org.id for org in match.product.organizations.all()]
+        if match.product.organization_id:
+            product_org_ids.append(match.product.organization_id)
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if not any(org_id in user_org_ids for org_id in product_org_ids):
+            return jsonify({'error': 'Insufficient permissions'}), 403
+
+    match.snoozed_until = None
     db.session.commit()
     return jsonify(match.to_dict())
 
