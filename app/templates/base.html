@@ -1751,6 +1751,11 @@
             display: flex !important;
         }
 
+        /* Disable modal backdrops completely - they were causing grey overlay issues */
+        .modal-backdrop {
+            display: none !important;
+        }
+
         /* Toast Notifications */
         .toast {
             border-radius: 0.5rem;
