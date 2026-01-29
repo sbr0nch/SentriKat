@@ -2411,21 +2411,35 @@
     function resetNVDSearch() {
         nvdSelectedVendor = null;
         nvdSelectedProduct = null;
-        document.getElementById('nvdSearchInput').value = '';
-        document.getElementById('nvdSearchStatus').style.display = 'none';
-        document.getElementById('nvdResultsList').style.display = 'none';
-        document.getElementById('nvdResultsList').innerHTML = '';
-        document.getElementById('nvdSelectedProduct').style.display = 'none';
-        document.getElementById('versionSuggestions').innerHTML = '';
-        document.getElementById('loadVersionsBtn').style.display = 'none';
+
+        // Safe element access with null checks
+        const nvdSearchInput = document.getElementById('nvdSearchInput');
+        const nvdSearchStatus = document.getElementById('nvdSearchStatus');
+        const nvdResultsList = document.getElementById('nvdResultsList');
+        const nvdSelectedProduct = document.getElementById('nvdSelectedProduct');
+        const versionSuggestions = document.getElementById('versionSuggestions');
+        const loadVersionsBtn = document.getElementById('loadVersionsBtn');
+        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
+        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
+        const clearCpeBtn = document.getElementById('clearCpeBtn');
+        const toggle = document.getElementById('manualEntryToggle');
+
+        if (nvdSearchInput) nvdSearchInput.value = '';
+        if (nvdSearchStatus) nvdSearchStatus.style.display = 'none';
+        if (nvdResultsList) {
+            nvdResultsList.style.display = 'none';
+            nvdResultsList.innerHTML = '';
+        }
+        if (nvdSelectedProduct) nvdSelectedProduct.style.display = 'none';
+        if (versionSuggestions) versionSuggestions.innerHTML = '';
+        if (loadVersionsBtn) loadVersionsBtn.style.display = 'none';
 
         // Reset CPE status display
-        document.getElementById('cpeSelectedInfo').style.display = 'none';
-        document.getElementById('cpeNotLinkedInfo').style.display = 'block';
-        document.getElementById('clearCpeBtn').style.display = 'none';
+        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'none';
+        if (cpeNotLinkedInfo) cpeNotLinkedInfo.style.display = 'block';
+        if (clearCpeBtn) clearCpeBtn.style.display = 'none';
 
         // Show manual entry toggle
-        const toggle = document.getElementById('manualEntryToggle');
         if (toggle) toggle.style.display = 'block';
     }
 
@@ -2560,18 +2574,28 @@
     }
 
     function clearCPE() {
-        document.getElementById('cpeVendor').value = '';
-        document.getElementById('cpeProduct').value = '';
-        document.getElementById('cpeUri').value = '';
-        document.getElementById('cpeSelectedInfo').style.display = 'none';
-        document.getElementById('matchType').value = 'auto';
+        const cpeVendor = document.getElementById('cpeVendor');
+        const cpeProduct = document.getElementById('cpeProduct');
+        const cpeUri = document.getElementById('cpeUri');
+        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
+        const matchType = document.getElementById('matchType');
+
+        if (cpeVendor) cpeVendor.value = '';
+        if (cpeProduct) cpeProduct.value = '';
+        if (cpeUri) cpeUri.value = '';
+        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'none';
+        if (matchType) matchType.value = 'auto';
     }
 
     function resetCPEForm() {
         clearCPE();
-        document.getElementById('cpeSearchResults').style.display = 'none';
-        document.getElementById('cpeSearchInput').value = '';
-        document.getElementById('cpeResultsList').innerHTML = '';
+        const cpeSearchResults = document.getElementById('cpeSearchResults');
+        const cpeSearchInput = document.getElementById('cpeSearchInput');
+        const cpeResultsList = document.getElementById('cpeResultsList');
+
+        if (cpeSearchResults) cpeSearchResults.style.display = 'none';
+        if (cpeSearchInput) cpeSearchInput.value = '';
+        if (cpeResultsList) cpeResultsList.innerHTML = '';
     }
 
     function loadCPEIntoForm(product) {
