@@ -851,7 +851,9 @@ def process_inventory_job(job):
                         product_name=product_name,
                         version=version,
                         active=True,
-                        criticality='medium'
+                        criticality='medium',
+                        source='agent',  # Track that this was auto-added by agent
+                        last_agent_report=datetime.utcnow()
                     )
                     # Auto-apply CPE mapping for better vulnerability matching
                     from app.cpe_mapping import apply_cpe_to_product
@@ -864,6 +866,15 @@ def process_inventory_job(job):
                     if organization not in product.organizations.all():
                         product.organizations.append(organization)
                 else:
+                    # Update last_agent_report timestamp
+                    product.last_agent_report = datetime.utcnow()
+
+                    # Re-enable if it was auto-disabled
+                    if product.auto_disabled:
+                        product.active = True
+                        product.auto_disabled = False
+                        logger.info(f"Re-enabled auto-disabled product: {vendor} {product_name}")
+
                     products_updated += 1
                     if organization not in product.organizations.all():
                         product.organizations.append(organization)
@@ -1183,7 +1194,9 @@ def report_inventory():
                     product_name=product_name,
                     version=version,  # Use first reported version as default
                     active=True,
-                    criticality='medium'
+                    criticality='medium',
+                    source='agent',  # Track that this was auto-added by agent
+                    last_agent_report=datetime.utcnow()
                 )
                 # Auto-apply CPE mapping for better vulnerability matching
                 from app.cpe_mapping import apply_cpe_to_product
@@ -1197,6 +1210,15 @@ def report_inventory():
                 if organization not in product.organizations.all():
                     product.organizations.append(organization)
             else:
+                # Update last_agent_report timestamp
+                product.last_agent_report = datetime.utcnow()
+
+                # Re-enable if it was auto-disabled
+                if product.auto_disabled:
+                    product.active = True
+                    product.auto_disabled = False
+                    logger.info(f"Re-enabled auto-disabled product: {vendor} {product_name}")
+
                 products_updated += 1
                 # Ensure product is assigned to this organization
                 if organization not in product.organizations.all():

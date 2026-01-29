@@ -90,6 +90,11 @@ class Organization(db.Model):
     webhook_format = db.Column(db.String(50), default='slack')  # slack, discord, teams, rocketchat, custom
     webhook_token = db.Column(db.String(500), nullable=True)  # Optional auth token
 
+    # Agent Product Settings
+    agent_require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for agent-added products
+    agent_stale_threshold_days = db.Column(db.Integer, default=30)  # Days before agent is considered stale
+    product_stale_threshold_days = db.Column(db.Integer, default=90)  # Days before product auto-disables
+
     # Metadata
     active = db.Column(db.Boolean, default=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -261,10 +266,23 @@ class Product(db.Model):
     cpe_uri = db.Column(db.String(500), nullable=True)  # Full CPE 2.3 URI (optional)
     match_type = db.Column(db.String(20), default='auto')  # auto, cpe, keyword, both
 
+    # Agent product queue fields - for approval workflow
+    source = db.Column(db.String(20), default='manual', index=True)  # manual, agent
+    approval_status = db.Column(db.String(20), default='approved', index=True)  # approved, pending, rejected
+    pending_since = db.Column(db.DateTime, nullable=True)  # When added to queue
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Who approved/rejected
+    reviewed_at = db.Column(db.DateTime, nullable=True)  # When approved/rejected
+    rejection_reason = db.Column(db.String(500), nullable=True)  # Why rejected
+
+    # Auto-disable tracking
+    last_agent_report = db.Column(db.DateTime, nullable=True, index=True)  # Last time an agent reported this product
+    auto_disabled = db.Column(db.Boolean, default=False)  # Was disabled due to no agent reports
+
     # Composite indexes for common query patterns
     __table_args__ = (
         db.Index('idx_product_org_active', 'organization_id', 'active'),
         db.Index('idx_product_vendor_name', 'vendor', 'product_name'),
+        db.Index('idx_product_approval', 'approval_status', 'source'),
     )
 
     # Relationships
