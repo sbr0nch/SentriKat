@@ -812,13 +812,51 @@
         }
     }
 
+    // Safe element access helper - returns null if element doesn't exist
+    function safeGetElement(id) {
+        return document.getElementById(id);
+    }
+
+    // Safe set value helper
+    function safeSetValue(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    }
+
+    // Safe set innerHTML helper
+    function safeSetHtml(id, html) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html;
+    }
+
+    // Safe set checked helper
+    function safeSetChecked(id, checked) {
+        const el = document.getElementById(id);
+        if (el) el.checked = checked;
+    }
+
+    // Safe set display helper
+    function safeSetDisplay(id, display) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = display;
+    }
+
+    // Safe set text content helper
+    function safeSetText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    }
+
     async function showAddProduct() {
         currentProductId = null;
-        document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-plus-circle me-2"></i>Add Product';
-        document.getElementById('productForm').reset();
-        document.getElementById('active').checked = true;
-        document.getElementById('criticality').value = 'medium';
-        document.getElementById('matchType').value = 'auto';
+        safeSetHtml('productModalTitle', '<i class="bi bi-plus-circle me-2"></i>Add Product');
+
+        const productForm = safeGetElement('productForm');
+        if (productForm) productForm.reset();
+
+        safeSetChecked('active', true);
+        safeSetValue('criticality', 'medium');
+        safeSetValue('matchType', 'auto');
 
         // Reset NVD search UI (primary method)
         resetNVDSearch();
@@ -827,12 +865,11 @@
         resetCPEForm();
 
         // Collapse advanced options
-        const advancedCollapse = document.getElementById('advancedOptionsCollapse');
+        const advancedCollapse = safeGetElement('advancedOptionsCollapse');
         if (advancedCollapse) advancedCollapse.classList.remove('show');
 
         // Show manual entry toggle
-        const toggle = document.getElementById('manualEntryToggle');
-        if (toggle) toggle.style.display = 'block';
+        safeSetDisplay('manualEntryToggle', 'block');
 
         // Check NVD API key status and show rate limit warning if needed
         checkNvdApiKeyStatus();
@@ -841,12 +878,11 @@
         await loadOrganizationsIntoProductForm();
 
         // Show the modal - reuse or create instance
-        const modalEl = document.getElementById('productModal');
-        let modal = bootstrap.Modal.getInstance(modalEl);
-        if (!modal) {
-            modal = new bootstrap.Modal(modalEl);
+        const modalEl = safeGetElement('productModal');
+        if (modalEl) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+            modal.show();
         }
-        modal.show();
     }
 
     async function checkNvdApiKeyStatus() {
@@ -870,7 +906,7 @@
 
     async function editProduct(productId) {
         currentProductId = productId;
-        document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Product';
+        safeSetHtml('productModalTitle', '<i class="bi bi-pencil me-2"></i>Edit Product');
 
         // Reset NVD search UI
         resetNVDSearch();
@@ -882,33 +918,31 @@
             const response = await fetch(`/api/products/${productId}`);
             const product = await response.json();
 
-            document.getElementById('vendor').value = product.vendor;
-            document.getElementById('productName').value = product.product_name;
-            document.getElementById('version').value = product.version || '';
-            document.getElementById('criticality').value = product.criticality || 'medium';
-            document.getElementById('keywords').value = product.keywords || '';
-            document.getElementById('description').value = product.description || '';
-            document.getElementById('active').checked = product.active;
-            document.getElementById('productOrganization').value = product.organization_id || '';
+            safeSetValue('vendor', product.vendor);
+            safeSetValue('productName', product.product_name);
+            safeSetValue('version', product.version || '');
+            safeSetValue('criticality', product.criticality || 'medium');
+            safeSetValue('keywords', product.keywords || '');
+            safeSetValue('description', product.description || '');
+            safeSetChecked('active', product.active);
+            safeSetValue('productOrganization', product.organization_id || '');
 
             // Load CPE data and update NVD selection display
             loadCPEIntoForm(product);
 
             // Hide manual entry toggle when editing (data is already filled)
-            const toggle = document.getElementById('manualEntryToggle');
-            if (toggle) toggle.style.display = 'none';
+            safeSetDisplay('manualEntryToggle', 'none');
 
             // Collapse advanced options by default
-            const advancedCollapse = document.getElementById('advancedOptionsCollapse');
+            const advancedCollapse = safeGetElement('advancedOptionsCollapse');
             if (advancedCollapse) advancedCollapse.classList.remove('show');
 
             // Show the modal - reuse or create instance
-            const modalEl = document.getElementById('productModal');
-            let modal = bootstrap.Modal.getInstance(modalEl);
-            if (!modal) {
-                modal = new bootstrap.Modal(modalEl);
+            const modalEl = safeGetElement('productModal');
+            if (modalEl) {
+                const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+                modal.show();
             }
-            modal.show();
         } catch (error) {
             showToast(`Error loading product: ${error.message}`, 'danger');
         }
@@ -2269,47 +2303,39 @@
         const formattedVendor = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
         // Set hidden CPE fields
-        document.getElementById('cpeVendor').value = vendor;
-        document.getElementById('cpeProduct').value = product;
-        document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:${versionStr}:*:*:*:*:*:*:*`;
+        safeSetValue('cpeVendor', vendor);
+        safeSetValue('cpeProduct', product);
+        safeSetValue('cpeUri', `cpe:2.3:a:${vendor}:${product}:${versionStr}:*:*:*:*:*:*:*`);
 
         // Show selected product card with full vendor - product name
         const fullSelectedName = `${formattedVendor} - ${displayName}`;
-        document.getElementById('nvdSelectedName').textContent = fullSelectedName;
-        const versionBadge = document.getElementById('nvdSelectedVersion');
-        versionBadge.textContent = version ? `v${version}` : 'All versions';
-        versionBadge.className = version ? 'badge bg-primary ms-1' : 'badge bg-secondary ms-1';
-        document.getElementById('nvdSelectedCpe').textContent = `CPE: ${vendor}:${product}:${versionStr}`;
-        document.getElementById('nvdSelectedProduct').style.display = 'block';
+        safeSetText('nvdSelectedName', fullSelectedName);
+        const versionBadge = safeGetElement('nvdSelectedVersion');
+        if (versionBadge) {
+            versionBadge.textContent = version ? `v${version}` : 'All versions';
+            versionBadge.className = version ? 'badge bg-primary ms-1' : 'badge bg-secondary ms-1';
+        }
+        safeSetText('nvdSelectedCpe', `CPE: ${vendor}:${product}:${versionStr}`);
+        safeSetDisplay('nvdSelectedProduct', 'block');
 
         // Hide search results and manual entry toggle
-        document.getElementById('nvdResultsList').style.display = 'none';
-        document.getElementById('nvdSearchStatus').style.display = 'none';
-        const toggle = document.getElementById('manualEntryToggle');
-        if (toggle) toggle.style.display = 'none';
+        safeSetDisplay('nvdResultsList', 'none');
+        safeSetDisplay('nvdSearchStatus', 'none');
+        safeSetDisplay('manualEntryToggle', 'none');
 
         // Auto-fill vendor and product name fields
-        const vendorInput = document.getElementById('vendor');
-        const productInput = document.getElementById('productName');
-        const versionInput = document.getElementById('version');
-
         // Format product for display (capitalize words, replace underscores)
         const formattedProduct = product.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
-        vendorInput.value = formattedVendor;
-        productInput.value = formattedProduct;
-        versionInput.value = version || '';
+        safeSetValue('vendor', formattedVendor);
+        safeSetValue('productName', formattedProduct);
+        safeSetValue('version', version || '');
 
         // Update CPE status in advanced options
-        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
-        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
-        const cpeDisplayUri = document.getElementById('cpeDisplayUri');
-        const clearCpeBtn = document.getElementById('clearCpeBtn');
-
-        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'block';
-        if (cpeDisplayUri) cpeDisplayUri.textContent = `${vendor}:${product}`;
-        if (cpeNotLinkedInfo) cpeNotLinkedInfo.style.display = 'none';
-        if (clearCpeBtn) clearCpeBtn.style.display = 'inline-block';
+        safeSetDisplay('cpeSelectedInfo', 'block');
+        safeSetText('cpeDisplayUri', `${vendor}:${product}`);
+        safeSetDisplay('cpeNotLinkedInfo', 'none');
+        safeSetDisplay('clearCpeBtn', 'inline-block');
 
         currentExpandedProduct = null;
     }
@@ -2319,45 +2345,39 @@
         nvdSelectedProduct = null;
 
         // Clear hidden fields
-        document.getElementById('cpeVendor').value = '';
-        document.getElementById('cpeProduct').value = '';
-        document.getElementById('cpeUri').value = '';
+        safeSetValue('cpeVendor', '');
+        safeSetValue('cpeProduct', '');
+        safeSetValue('cpeUri', '');
 
         // Hide selected product card
-        document.getElementById('nvdSelectedProduct').style.display = 'none';
-        document.getElementById('nvdSelectedName').textContent = '';
-        document.getElementById('nvdSelectedCpe').textContent = '';
-        const versionBadge = document.getElementById('nvdSelectedVersion');
+        safeSetDisplay('nvdSelectedProduct', 'none');
+        safeSetText('nvdSelectedName', '');
+        safeSetText('nvdSelectedCpe', '');
+        const versionBadge = safeGetElement('nvdSelectedVersion');
         if (versionBadge) versionBadge.textContent = '';
 
         // Clear form fields
-        document.getElementById('vendor').value = '';
-        document.getElementById('productName').value = '';
-        document.getElementById('version').value = '';
-        const versionSuggestions = document.getElementById('versionSuggestions');
+        safeSetValue('vendor', '');
+        safeSetValue('productName', '');
+        safeSetValue('version', '');
+        const versionSuggestions = safeGetElement('versionSuggestions');
         if (versionSuggestions) versionSuggestions.innerHTML = '';
-        const loadVersionsBtn = document.getElementById('loadVersionsBtn');
-        if (loadVersionsBtn) loadVersionsBtn.style.display = 'none';
+        safeSetDisplay('loadVersionsBtn', 'none');
 
         // Reset CPE status in advanced options
-        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
-        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
-        const clearCpeBtn = document.getElementById('clearCpeBtn');
-        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'none';
-        if (cpeNotLinkedInfo) cpeNotLinkedInfo.style.display = 'block';
-        if (clearCpeBtn) clearCpeBtn.style.display = 'none';
+        safeSetDisplay('cpeSelectedInfo', 'none');
+        safeSetDisplay('cpeNotLinkedInfo', 'block');
+        safeSetDisplay('clearCpeBtn', 'none');
 
         // Show search input and results (don't clear, let user refine)
-        document.getElementById('nvdSearchStatus').style.display = 'block';
-        document.getElementById('nvdResultsList').style.display = 'block';
+        safeSetDisplay('nvdSearchStatus', 'block');
+        safeSetDisplay('nvdResultsList', 'block');
 
         // Hide manual fields section
-        const manualFields = document.getElementById('manualFieldsSection');
-        if (manualFields) manualFields.style.display = 'none';
+        safeSetDisplay('manualFieldsSection', 'none');
 
         // Show manual entry toggle again
-        const toggle = document.getElementById('manualEntryToggle');
-        if (toggle) toggle.style.display = 'block';
+        safeSetDisplay('manualEntryToggle', 'block');
 
         currentExpandedProduct = null;
     }
@@ -2606,44 +2626,44 @@
             nvdSelectedProduct = product.cpe_product;
 
             // Set hidden fields
-            document.getElementById('cpeVendor').value = product.cpe_vendor;
-            document.getElementById('cpeProduct').value = product.cpe_product;
-            document.getElementById('cpeUri').value = product.cpe_uri || '';
+            safeSetValue('cpeVendor', product.cpe_vendor);
+            safeSetValue('cpeProduct', product.cpe_product);
+            safeSetValue('cpeUri', product.cpe_uri || '');
 
             // Show NVD selected product display (primary UI)
             const displayName = `${product.vendor} ${product.product_name}`;
-            document.getElementById('nvdSelectedName').textContent = displayName;
-            document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${product.cpe_vendor}:${product.cpe_product}:*`;
-            document.getElementById('nvdSelectedProduct').style.display = 'block';
-            document.getElementById('loadVersionsBtn').style.display = 'inline-block';
+            safeSetText('nvdSelectedName', displayName);
+            safeSetText('nvdSelectedCpe', `cpe:2.3:a:${product.cpe_vendor}:${product.cpe_product}:*`);
+            safeSetDisplay('nvdSelectedProduct', 'block');
+            safeSetDisplay('loadVersionsBtn', 'inline-block');
 
             // Update CPE status in advanced options
-            document.getElementById('cpeSelectedInfo').style.display = 'block';
-            document.getElementById('cpeDisplayUri').textContent = `${product.cpe_vendor}:${product.cpe_product}`;
-            document.getElementById('cpeNotLinkedInfo').style.display = 'none';
-            document.getElementById('clearCpeBtn').style.display = 'inline-block';
+            safeSetDisplay('cpeSelectedInfo', 'block');
+            safeSetText('cpeDisplayUri', `${product.cpe_vendor}:${product.cpe_product}`);
+            safeSetDisplay('cpeNotLinkedInfo', 'none');
+            safeSetDisplay('clearCpeBtn', 'inline-block');
         } else if (product.effective_cpe_vendor && product.effective_cpe_product) {
             // Show effective CPE from catalog (linked via ServiceCatalog)
             nvdSelectedVendor = product.effective_cpe_vendor;
             nvdSelectedProduct = product.effective_cpe_product;
 
             const displayName = `${product.vendor} ${product.product_name}`;
-            document.getElementById('nvdSelectedName').textContent = `${displayName} (from catalog)`;
-            document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${product.effective_cpe_vendor}:${product.effective_cpe_product}:*`;
-            document.getElementById('nvdSelectedProduct').style.display = 'block';
-            document.getElementById('loadVersionsBtn').style.display = 'inline-block';
+            safeSetText('nvdSelectedName', `${displayName} (from catalog)`);
+            safeSetText('nvdSelectedCpe', `cpe:2.3:a:${product.effective_cpe_vendor}:${product.effective_cpe_product}:*`);
+            safeSetDisplay('nvdSelectedProduct', 'block');
+            safeSetDisplay('loadVersionsBtn', 'inline-block');
 
             // Update CPE status in advanced options
-            document.getElementById('cpeSelectedInfo').style.display = 'block';
-            document.getElementById('cpeDisplayUri').textContent = `${product.effective_cpe_vendor}:${product.effective_cpe_product} (from catalog)`;
-            document.getElementById('cpeNotLinkedInfo').style.display = 'none';
+            safeSetDisplay('cpeSelectedInfo', 'block');
+            safeSetText('cpeDisplayUri', `${product.effective_cpe_vendor}:${product.effective_cpe_product} (from catalog)`);
+            safeSetDisplay('cpeNotLinkedInfo', 'none');
         } else {
             // No CPE data - show manual entry state
             resetNVDSearch();
             resetCPEForm();
         }
 
-        document.getElementById('matchType').value = product.match_type || 'auto';
+        safeSetValue('matchType', product.match_type || 'auto');
     }
 
     // Admin Tools Modal Functions

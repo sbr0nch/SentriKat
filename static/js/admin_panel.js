@@ -5921,9 +5921,13 @@ async function createAgentKey() {
         safeHideModal('agentKeyModal');
 
         // Show the key to user
-        document.getElementById('newAgentKeyValue').value = data.api_key;
-        const showModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('showAgentKeyModal'));
-        showModal.show();
+        const keyValueField = document.getElementById('newAgentKeyValue');
+        const showModalEl = document.getElementById('showAgentKeyModal');
+        if (keyValueField) keyValueField.value = data.api_key;
+        if (showModalEl) {
+            const showModal = bootstrap.Modal.getOrCreateInstance(showModalEl);
+            showModal.show();
+        }
 
         // Refresh the keys table to show the new key
         loadAgentKeys();

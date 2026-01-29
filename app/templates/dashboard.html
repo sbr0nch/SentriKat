@@ -1688,7 +1688,10 @@
                     ${result.shared_view.description ? `<br><small>${result.shared_view.description}</small>` : ''}
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 `;
-                document.querySelector('.fade-in').insertBefore(notification, document.querySelector('.fade-in').firstChild);
+                const fadeInContainer = document.querySelector('.fade-in');
+                if (fadeInContainer) {
+                    fadeInContainer.insertBefore(notification, fadeInContainer.firstChild);
+                }
 
                 // Load vulnerabilities with these filters
                 loadVulnerabilities();

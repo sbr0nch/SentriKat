@@ -587,26 +587,30 @@
 
         function updateProgress() {
             const progress = ((currentStep - 1) / (totalSteps - 1)) * 100;
-            document.getElementById('progressBar').style.width = progress + '%';
+            const progressBar = document.getElementById('progressBar');
+            if (progressBar) progressBar.style.width = progress + '%';
 
             // Update step dots
             for (let i = 1; i <= totalSteps; i++) {
                 const dot = document.getElementById(`dot-${i}`);
-                if (i < currentStep) {
-                    dot.classList.add('completed');
-                    dot.classList.remove('active');
-                } else if (i === currentStep) {
-                    dot.classList.add('active');
-                    dot.classList.remove('completed');
-                } else {
-                    dot.classList.remove('active', 'completed');
+                if (dot) {
+                    if (i < currentStep) {
+                        dot.classList.add('completed');
+                        dot.classList.remove('active');
+                    } else if (i === currentStep) {
+                        dot.classList.add('active');
+                        dot.classList.remove('completed');
+                    } else {
+                        dot.classList.remove('active', 'completed');
+                    }
                 }
             }
         }
 
         function showStep(step) {
             document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
-            document.getElementById(`step-${step}`).classList.add('active');
+            const stepEl = document.getElementById(`step-${step}`);
+            if (stepEl) stepEl.classList.add('active');
             currentStep = step;
             updateProgress();
         }
@@ -630,12 +634,14 @@
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
             `;
-            document.getElementById('alertContainer').innerHTML = alertHtml;
+            const alertContainer = document.getElementById('alertContainer');
+            if (alertContainer) alertContainer.innerHTML = alertHtml;
             window.scrollTo(0, 0);
         }
 
         function clearAlert() {
-            document.getElementById('alertContainer').innerHTML = '';
+            const alertContainer = document.getElementById('alertContainer');
+            if (alertContainer) alertContainer.innerHTML = '';
         }
 
         // Create Organization
@@ -771,10 +777,13 @@
         }
 
         // Proxy toggle (for sync step)
-        document.getElementById('proxy_enabled').addEventListener('change', function() {
-            const proxyFields = document.getElementById('proxyFields');
-            proxyFields.style.display = this.checked ? 'block' : 'none';
-        });
+        const proxyEnabledCheckbox = document.getElementById('proxy_enabled');
+        if (proxyEnabledCheckbox) {
+            proxyEnabledCheckbox.addEventListener('change', function() {
+                const proxyFields = document.getElementById('proxyFields');
+                if (proxyFields) proxyFields.style.display = this.checked ? 'block' : 'none';
+            });
+        }
 
         // Initial Sync
         async function runInitialSync() {
