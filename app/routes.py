@@ -365,7 +365,7 @@ def get_products():
                 'id': p.id,
                 'version': p.version or 'Any',
                 'active': p.active,
-                'cpe_string': p.cpe_string,
+                'cpe_uri': p.cpe_uri,
                 'source': getattr(p, 'source', 'manual'),
                 'created_at': p.created_at.isoformat() if p.created_at else None,
                 'vulnerability_count': len(p.vulnerability_matches) if p.vulnerability_matches else 0,
