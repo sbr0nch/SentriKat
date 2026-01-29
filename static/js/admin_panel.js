@@ -57,14 +57,7 @@ if (typeof SK === 'undefined' || !SK.DOM) {
             if (el) el.disabled = !!disabled;
         }
     };
-    SK.Modal = SK.Modal || {
-        cleanupBackdrops: function() {
-            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-            document.body.classList.remove('modal-open');
-            document.body.style.removeProperty('padding-right');
-            document.body.style.overflow = '';
-        }
-    };
+    SK.Modal = SK.Modal || {};
     SK.warn = function(...args) { console.warn('[SentriKat]', ...args); };
 }
 

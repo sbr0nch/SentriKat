@@ -1892,7 +1892,6 @@
             const existingModal = bootstrap.Modal.getInstance(modalElement);
             if (existingModal) {
                 existingModal.dispose();
-                cleanupModalBackdrops();
             }
 
             // Create and show new modal
@@ -2695,7 +2694,6 @@
 
         newOkBtn.addEventListener('click', () => {
             bsModal.hide();
-            setTimeout(cleanupModalBackdrops, 100);
             onConfirm();
         });
 

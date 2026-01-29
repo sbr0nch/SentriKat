@@ -353,8 +353,6 @@
             if (overlay) {
                 overlay.classList.remove('show');
             }
-            // Note: Do NOT call cleanupBackdrops() here - loading and modals are independent
-            // Calling cleanup here caused race conditions when modals were opening
         }
     };
 
@@ -689,26 +687,6 @@
             });
 
             return data;
-        },
-
-        /**
-         * Clean up orphaned modal backdrops
-         */
-        cleanupBackdrops: function() {
-            const backdrops = document.querySelectorAll('.modal-backdrop');
-            const openModals = document.querySelectorAll('.modal.show');
-
-            if (openModals.length === 0 && backdrops.length > 0) {
-                SK.log('Cleaning up orphaned backdrops:', backdrops.length);
-                backdrops.forEach(b => b.remove());
-            }
-
-            // Reset body state if no modals open
-            if (openModals.length === 0) {
-                document.body.classList.remove('modal-open');
-                document.body.style.removeProperty('padding-right');
-                document.body.style.removeProperty('overflow');
-            }
         }
     };
 
@@ -987,10 +965,6 @@
         // Initialize toast container
         SK.Toast.init();
 
-        // Note: We no longer auto-cleanup backdrops on modal hide
-        // Bootstrap handles its own backdrop management - our interference caused race conditions
-        // The fixGreyScreen() function remains available for manual recovery if needed
-
         this.initialized = true;
         SK.log('SentriKat Core initialized');
     };
@@ -1003,11 +977,6 @@
     window.showLoading = function() { SK.Loading.show(); };
     window.hideLoading = function() { SK.Loading.hide(); };
     window.showToast = function(message, type) { SK.Toast.show(message, type); };
-    window.cleanupModalBackdrops = function() { SK.Modal.cleanupBackdrops(); };
-    window.fixGreyScreen = function() {
-        SK.Loading.forceHide();
-        SK.Modal.cleanupBackdrops();
-    };
 
     // ========================================================================
     // EXPORT

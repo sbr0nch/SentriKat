@@ -2514,7 +2514,7 @@
         <div class="text-center">
             <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div>
             <p class="text-secondary fw-semibold mt-3">Processing...</p>
-            <button type="button" class="btn btn-sm btn-outline-secondary mt-3" onclick="fixGreyScreen()" style="opacity: 0.5;">
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-3" onclick="SK.Loading.forceHide()" style="opacity: 0.5;">
                 Click here if stuck
             </button>
         </div>
@@ -2847,21 +2847,6 @@
          */
 
         /**
-         * Clean up modal backdrops - fallback function
-         */
-        function cleanupModalBackdrops() {
-            if (typeof SK !== 'undefined' && SK.Modal) {
-                SK.Modal.cleanupBackdrops();
-            } else {
-                // Fallback cleanup
-                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-                document.body.classList.remove('modal-open');
-                document.body.style.removeProperty('padding-right');
-                document.body.style.overflow = '';
-            }
-        }
-
-        /**
          * Safely close and dispose of a Bootstrap modal
          */
         function safeCloseModal(modalElement) {
@@ -2869,7 +2854,6 @@
             const instance = bootstrap.Modal.getInstance(modalElement);
             if (instance) {
                 instance.hide();
-                setTimeout(cleanupModalBackdrops, 300);
             }
         }
 
@@ -2884,7 +2868,6 @@
                 try { instance.dispose(); } catch (e) {}
             }
             modalElement.remove();
-            cleanupModalBackdrops();
         }
 
         /**
@@ -3010,8 +2993,6 @@
                     confirmBtn.removeEventListener('click', handleConfirm);
                     modal.removeEventListener('hidden.bs.modal', handleCancel);
                     bsModal.hide();
-                    // Clean up any lingering backdrops
-                    setTimeout(cleanupModalBackdrops, 100);
                 };
 
                 confirmBtn.addEventListener('click', handleConfirm);
@@ -3052,8 +3033,6 @@
 
                 const handleClose = () => {
                     modal.removeEventListener('hidden.bs.modal', handleClose);
-                    // Clean up any lingering backdrops
-                    setTimeout(cleanupModalBackdrops, 100);
                     resolve();
                 };
 
@@ -3110,8 +3089,6 @@
                     input.removeEventListener('keypress', handleEnter);
                     modal.removeEventListener('hidden.bs.modal', handleCancel);
                     bsModal.hide();
-                    // Clean up any lingering backdrops
-                    setTimeout(cleanupModalBackdrops, 100);
                 };
 
                 submitBtn.addEventListener('click', handleSubmit);
