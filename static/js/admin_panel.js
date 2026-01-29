@@ -1040,6 +1040,13 @@ function showCreateUserModal() {
         const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
         console.log('Modal created, showing...');
         modal.show();
+
+        // Debug: Check modal state after short delay
+        setTimeout(() => {
+            console.log('Modal element classes:', modalElement.className);
+            console.log('Modal display style:', window.getComputedStyle(modalElement).display);
+            console.log('Backdrop count:', document.querySelectorAll('.modal-backdrop').length);
+        }, 500);
     } catch (error) {
         console.error('Error in showCreateUserModal:', error);
         showToast('Error opening user modal: ' + error.message, 'danger');
