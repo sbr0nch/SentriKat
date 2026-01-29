@@ -301,8 +301,6 @@ def get_products():
             )
         else:
             query = query.filter(Product.organization_id == org_id)
-            )
-        )
 
         logger.info(f"get_products: filtered to org {org_id}")
 
