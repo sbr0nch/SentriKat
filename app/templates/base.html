@@ -2837,314 +2837,58 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- SentriKat Core Module - Centralized utilities -->
+    <script src="{{ url_for('static', filename='js/sentrikat-core.js') }}"></script>
+    <!-- SentriKat Modal Configurations -->
+    <script src="{{ url_for('static', filename='js/sentrikat-modals.js') }}"></script>
     <script>
         /**
-         * ========================================
-         * SENTRIKAT OVERLAY MANAGER
-         * Centralized management for all overlays
-         * ========================================
+         * Page-specific utilities
          */
-        const OverlayManager = {
-            // Configuration
-            LOADING_TIMEOUT_MS: 30000,  // Auto-hide loading after 30s
-            CLEANUP_INTERVAL_MS: 3000,  // Check for orphans every 3s
-            DEBUG: true,  // Enable console logging
-
-            // State tracking
-            loadingCount: 0,
-            loadingTimer: null,
-            cleanupInterval: null,
-
-            /**
-             * Initialize the overlay manager
-             */
-            init: function() {
-                this.log('OverlayManager initialized');
-
-                // Start periodic cleanup
-                this.cleanupInterval = setInterval(() => this.periodicCleanup(), this.CLEANUP_INTERVAL_MS);
-
-                // Listen for all modal hidden events
-                document.addEventListener('hidden.bs.modal', (e) => this.onModalHidden(e));
-
-                // Emergency cleanup on escape key
-                document.addEventListener('keydown', (e) => {
-                    if (e.key === 'Escape') {
-                        setTimeout(() => this.emergencyCleanup(), 100);
-                    }
-                });
-
-                // Cleanup on page visibility change (user switches tabs and back)
-                document.addEventListener('visibilitychange', () => {
-                    if (!document.hidden) {
-                        setTimeout(() => this.periodicCleanup(), 500);
-                    }
-                });
-            },
-
-            /**
-             * Show loading overlay
-             */
-            showLoading: function() {
-                this.loadingCount++;
-                this.log('showLoading called, count:', this.loadingCount);
-
-                const overlay = document.getElementById('loadingOverlay');
-                if (overlay) {
-                    overlay.classList.add('show');
-                }
-
-                // Clear any existing timeout
-                if (this.loadingTimer) {
-                    clearTimeout(this.loadingTimer);
-                }
-
-                // Set safety timeout
-                this.loadingTimer = setTimeout(() => {
-                    this.log('Loading timeout reached - forcing hide');
-                    this.forceHideLoading();
-                }, this.LOADING_TIMEOUT_MS);
-            },
-
-            /**
-             * Hide loading overlay
-             */
-            hideLoading: function() {
-                this.loadingCount = Math.max(0, this.loadingCount - 1);
-                this.log('hideLoading called, count:', this.loadingCount);
-
-                if (this.loadingCount === 0) {
-                    this.forceHideLoading();
-                }
-            },
-
-            /**
-             * Force hide loading regardless of count
-             */
-            forceHideLoading: function() {
-                this.loadingCount = 0;
-
-                if (this.loadingTimer) {
-                    clearTimeout(this.loadingTimer);
-                    this.loadingTimer = null;
-                }
-
-                const overlay = document.getElementById('loadingOverlay');
-                if (overlay) {
-                    overlay.classList.remove('show');
-                }
-
-                this.log('Loading overlay hidden');
-            },
-
-            /**
-             * Clean up all modal backdrops
-             */
-            cleanupBackdrops: function() {
-                const backdrops = document.querySelectorAll('.modal-backdrop');
-                const count = backdrops.length;
-
-                if (count > 0) {
-                    this.log('Removing', count, 'modal backdrops');
-                    backdrops.forEach(b => b.remove());
-                }
-
-                // Reset body state
-                document.body.classList.remove('modal-open');
-                document.body.style.removeProperty('padding-right');
-                document.body.style.removeProperty('overflow');
-                document.body.style.overflow = '';
-                document.body.style.paddingRight = '';
-            },
-
-            /**
-             * Called when any Bootstrap modal is hidden
-             */
-            onModalHidden: function(event) {
-                this.log('Modal hidden:', event.target.id);
-
-                // Check if any modals are still open
-                setTimeout(() => {
-                    const openModals = document.querySelectorAll('.modal.show');
-                    if (openModals.length === 0) {
-                        this.cleanupBackdrops();
-                    }
-                }, 100);
-            },
-
-            /**
-             * Periodic cleanup - runs every few seconds
-             */
-            periodicCleanup: function() {
-                const openModals = document.querySelectorAll('.modal.show');
-                const backdrops = document.querySelectorAll('.modal-backdrop');
-                const loadingOverlay = document.getElementById('loadingOverlay');
-                const isLoadingVisible = loadingOverlay && loadingOverlay.classList.contains('show');
-
-                // Clean orphaned backdrops
-                if (openModals.length === 0 && backdrops.length > 0) {
-                    this.log('Periodic: cleaning orphaned backdrops');
-                    this.cleanupBackdrops();
-                }
-
-                // Check for stuck loading overlay
-                if (isLoadingVisible && this.loadingCount === 0) {
-                    this.log('Periodic: fixing stuck loading overlay');
-                    this.forceHideLoading();
-                }
-            },
-
-            /**
-             * Emergency cleanup - removes ALL overlays
-             */
-            emergencyCleanup: function() {
-                const openModals = document.querySelectorAll('.modal.show');
-
-                // Only do emergency cleanup if no modals are legitimately open
-                if (openModals.length === 0) {
-                    this.log('Emergency cleanup triggered');
-                    this.forceHideLoading();
-                    this.cleanupBackdrops();
-
-                    // Also hide sidebar overlay
-                    document.body.classList.remove('sidebar-open');
-
-                    // Also hide security settings backdrop
-                    const secBackdrop = document.getElementById('securitySettingsBackdrop');
-                    if (secBackdrop) {
-                        secBackdrop.classList.remove('show');
-                        secBackdrop.style.display = 'none';
-                    }
-                }
-            },
-
-            /**
-             * Debug logging
-             */
-            log: function(...args) {
-                if (this.DEBUG) {
-                    console.log('[OverlayManager]', ...args);
-                }
-            }
-        };
-
-        // Initialize on DOM ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => OverlayManager.init());
-        } else {
-            OverlayManager.init();
-        }
-
-        // Global functions for backwards compatibility
-        function showLoading() {
-            OverlayManager.showLoading();
-        }
-
-        function hideLoading() {
-            OverlayManager.hideLoading();
-        }
-
-        function cleanupModalBackdrops() {
-            OverlayManager.cleanupBackdrops();
-        }
-
-        // Emergency cleanup function - can be called from console
-        function fixGreyScreen() {
-            console.log('Manual grey screen fix triggered');
-            OverlayManager.forceHideLoading();
-            OverlayManager.cleanupBackdrops();
-            OverlayManager.emergencyCleanup();
-        }
 
         /**
-         * Properly close and dispose of a Bootstrap modal
-         * Use this instead of just calling .hide() to prevent backdrop issues
+         * Safely close and dispose of a Bootstrap modal
          */
         function safeCloseModal(modalElement) {
             if (!modalElement) return;
-
             const instance = bootstrap.Modal.getInstance(modalElement);
             if (instance) {
-                try {
-                    instance.hide();
-                    // Let Bootstrap finish its animation before cleanup
-                    setTimeout(() => {
-                        cleanupModalBackdrops();
-                    }, 300);
-                } catch (e) {
-                    console.error('Error closing modal:', e);
-                    cleanupModalBackdrops();
-                }
-            } else {
-                // No Bootstrap instance, just clean up
-                modalElement.classList.remove('show');
-                modalElement.style.display = 'none';
-                cleanupModalBackdrops();
+                instance.hide();
+                setTimeout(() => SK.Modal.cleanupBackdrops(), 300);
             }
         }
 
         /**
          * Safely remove a dynamic modal element from the DOM
-         * Use this for modals created dynamically via insertAdjacentHTML
          */
         function safeRemoveModal(modalId) {
-            const modalElement = document.getElementById(modalId);
+            const modalElement = SK.DOM.get(modalId);
             if (!modalElement) return;
-
             const instance = bootstrap.Modal.getInstance(modalElement);
             if (instance) {
-                try {
-                    instance.dispose();
-                } catch (e) {}
+                try { instance.dispose(); } catch (e) {}
             }
             modalElement.remove();
-            cleanupModalBackdrops();
+            SK.Modal.cleanupBackdrops();
         }
 
         /**
          * Switch to a specific admin panel tab
-         * Used by the admin dropdown menu
          */
         function switchToAdminTab(tabId) {
-            // Navigate to admin panel if not already there
             if (window.location.pathname !== '/admin-panel') {
                 window.location.href = '/admin-panel#' + tabId;
                 return;
             }
-
-            // Switch tab on current page
-            const tabButton = document.getElementById(tabId + '-tab');
+            const tabButton = SK.DOM.get(tabId + '-tab');
             if (tabButton) {
                 const tab = new bootstrap.Tab(tabButton);
                 tab.show();
             }
         }
 
-        function showToast(message, type = 'success') {
-            const toastContainer = document.getElementById('toastContainer');
-            const icon = {
-                'success': 'check-circle-fill',
-                'danger': 'exclamation-triangle-fill',
-                'warning': 'exclamation-circle-fill',
-                'info': 'info-circle-fill'
-            }[type] || 'info-circle-fill';
-
-            const toast = document.createElement('div');
-            toast.className = `toast align-items-center text-white bg-${type} border-0`;
-            toast.setAttribute('role', 'alert');
-            toast.innerHTML = `
-                <div class="d-flex">
-                    <div class="toast-body">
-                        <i class="bi bi-${icon} me-2"></i>${message}
-                    </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-                </div>
-            `;
-            toastContainer.appendChild(toast);
-            const bsToast = new bootstrap.Toast(toast, { delay: 5000 });
-            bsToast.show();
-            toast.addEventListener('hidden.bs.toast', () => toast.remove());
-        }
+        // Initialize SK with debug mode for development
+        SK.init({ debug: true });
 
         /**
          * Check CVE service status and update the status indicator

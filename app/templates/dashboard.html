@@ -581,7 +581,7 @@
     // Report Export Functions
     function initReportFields() {
         // Populate year dropdown
-        const yearSelect = document.getElementById('reportYear');
+        const yearSelect = SK.DOM.get('reportYear');
         const currentYear = new Date().getFullYear();
         for (let year = currentYear; year >= currentYear - 5; year--) {
             const option = document.createElement('option');
@@ -592,21 +592,21 @@
 
         // Set current month and year
         const currentMonth = new Date().getMonth() + 1;
-        document.getElementById('reportMonth').value = currentMonth;
+        SK.DOM.get('reportMonth').value = currentMonth;
 
         // Set default date range for custom reports (last 30 days)
         const today = new Date();
         const thirtyDaysAgo = new Date(today);
         thirtyDaysAgo.setDate(today.getDate() - 30);
 
-        document.getElementById('reportEndDate').value = today.toISOString().split('T')[0];
-        document.getElementById('reportStartDate').value = thirtyDaysAgo.toISOString().split('T')[0];
+        SK.DOM.get('reportEndDate').value = today.toISOString().split('T')[0];
+        SK.DOM.get('reportStartDate').value = thirtyDaysAgo.toISOString().split('T')[0];
     }
 
     function toggleReportDateFields() {
-        const reportType = document.getElementById('reportType').value;
-        const monthlyFields = document.getElementById('monthlyFields');
-        const customFields = document.getElementById('customFields');
+        const reportType = SK.DOM.get('reportType').value;
+        const monthlyFields = SK.DOM.get('monthlyFields');
+        const customFields = SK.DOM.get('customFields');
 
         if (reportType === 'monthly') {
             monthlyFields.style.display = 'flex';
@@ -618,16 +618,16 @@
     }
 
     async function exportReport() {
-        const reportType = document.getElementById('reportType').value;
+        const reportType = SK.DOM.get('reportType').value;
         let url;
 
         if (reportType === 'monthly') {
-            const month = document.getElementById('reportMonth').value;
-            const year = document.getElementById('reportYear').value;
+            const month = SK.DOM.get('reportMonth').value;
+            const year = SK.DOM.get('reportYear').value;
             url = `/api/reports/monthly?month=${month}&year=${year}`;
         } else {
-            const startDate = document.getElementById('reportStartDate').value;
-            const endDate = document.getElementById('reportEndDate').value;
+            const startDate = SK.DOM.get('reportStartDate').value;
+            const endDate = SK.DOM.get('reportEndDate').value;
 
             if (!startDate || !endDate) {
                 showToast('Please select both start and end dates', 'warning');
@@ -724,7 +724,7 @@
     let pageSize = 15;
 
     function changePageSize() {
-        const select = document.getElementById('pageSize');
+        const select = SK.DOM.get('pageSize');
         pageSize = select.value === 'all' ? Infinity : parseInt(select.value);
         currentPage = 1;
         renderCurrentPage();
@@ -734,16 +734,16 @@
         currentPage = page;
         renderCurrentPage();
         // Scroll to top of vulnerabilities container
-        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
+        SK.DOM.get('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
     }
 
     function renderCurrentPage() {
-        const container = document.getElementById('vulnerabilitiesContainer');
+        const container = SK.DOM.get('vulnerabilitiesContainer');
         const total = currentVulnerabilities.length;
 
         if (total === 0) {
             // Check if we have any products tracked
-            const productsTracked = document.getElementById('productsTracked').textContent;
+            const productsTracked = SK.DOM.get('productsTracked').textContent;
             const hasProducts = productsTracked && productsTracked !== '-' && parseInt(productsTracked) > 0;
 
             if (!hasProducts) {
@@ -766,7 +766,7 @@
                     </div>
                 `;
             }
-            document.getElementById('paginationControls').style.display = 'none';
+            SK.DOM.get('paginationControls').style.display = 'none';
             return;
         }
 
@@ -792,9 +792,9 @@
         });
 
         // Update pagination info and controls
-        const paginationControls = document.getElementById('paginationControls');
-        const paginationInfo = document.getElementById('paginationInfo');
-        const paginationNav = document.getElementById('paginationNav');
+        const paginationControls = SK.DOM.get('paginationControls');
+        const paginationInfo = SK.DOM.get('paginationInfo');
+        const paginationNav = SK.DOM.get('paginationNav');
 
         if (totalPages > 1) {
             paginationControls.style.display = 'flex';
@@ -854,52 +854,52 @@
 
             const stats = await response.json();
 
-            document.getElementById('totalVulns').textContent = formatNumber(stats.total_vulnerabilities);
-            document.getElementById('totalMatches').textContent = formatNumber(stats.total_matches);
-            document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
-            document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
+            SK.DOM.get('totalVulns').textContent = formatNumber(stats.total_vulnerabilities);
+            SK.DOM.get('totalMatches').textContent = formatNumber(stats.total_matches);
+            SK.DOM.get('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
+            SK.DOM.get('productsTracked').textContent = formatNumber(stats.products_tracked);
 
             // Update priority counts - CVE counts and match counts
-            document.getElementById('criticalCves').textContent = formatNumber(stats.critical_cves || 0);
-            document.getElementById('criticalCount').textContent = formatNumber(stats.critical_count || 0);
-            document.getElementById('highCves').textContent = formatNumber(stats.high_cves || 0);
-            document.getElementById('highCount').textContent = formatNumber(stats.high_count || 0);
-            document.getElementById('mediumCves').textContent = formatNumber(stats.medium_cves || 0);
-            document.getElementById('mediumCount').textContent = formatNumber(stats.medium_count || 0);
-            document.getElementById('lowCves').textContent = formatNumber(stats.low_cves || 0);
-            document.getElementById('lowCount').textContent = formatNumber(stats.low_count || 0);
+            SK.DOM.get('criticalCves').textContent = formatNumber(stats.critical_cves || 0);
+            SK.DOM.get('criticalCount').textContent = formatNumber(stats.critical_count || 0);
+            SK.DOM.get('highCves').textContent = formatNumber(stats.high_cves || 0);
+            SK.DOM.get('highCount').textContent = formatNumber(stats.high_count || 0);
+            SK.DOM.get('mediumCves').textContent = formatNumber(stats.medium_cves || 0);
+            SK.DOM.get('mediumCount').textContent = formatNumber(stats.medium_count || 0);
+            SK.DOM.get('lowCves').textContent = formatNumber(stats.low_cves || 0);
+            SK.DOM.get('lowCount').textContent = formatNumber(stats.low_count || 0);
         } catch (error) {
             console.error('Error loading stats:', error);
             // Show error in cards instead of just toast
-            document.getElementById('totalVulns').textContent = '-';
-            document.getElementById('totalMatches').textContent = '-';
-            document.getElementById('unacknowledged').textContent = '-';
-            document.getElementById('productsTracked').textContent = '-';
-            document.getElementById('criticalCves').textContent = '-';
-            document.getElementById('criticalCount').textContent = '-';
-            document.getElementById('highCves').textContent = '-';
-            document.getElementById('highCount').textContent = '-';
-            document.getElementById('mediumCves').textContent = '-';
-            document.getElementById('mediumCount').textContent = '-';
-            document.getElementById('lowCves').textContent = '-';
-            document.getElementById('lowCount').textContent = '-';
+            SK.DOM.get('totalVulns').textContent = '-';
+            SK.DOM.get('totalMatches').textContent = '-';
+            SK.DOM.get('unacknowledged').textContent = '-';
+            SK.DOM.get('productsTracked').textContent = '-';
+            SK.DOM.get('criticalCves').textContent = '-';
+            SK.DOM.get('criticalCount').textContent = '-';
+            SK.DOM.get('highCves').textContent = '-';
+            SK.DOM.get('highCount').textContent = '-';
+            SK.DOM.get('mediumCves').textContent = '-';
+            SK.DOM.get('mediumCount').textContent = '-';
+            SK.DOM.get('lowCves').textContent = '-';
+            SK.DOM.get('lowCount').textContent = '-';
             showToast('Failed to load statistics. Try refreshing.', 'danger');
         }
     }
 
     async function loadVulnerabilities() {
         showLoading();
-        const container = document.getElementById('vulnerabilitiesContainer');
+        const container = SK.DOM.get('vulnerabilitiesContainer');
         selectedVulns.clear();
         updateBulkActions();
 
         try {
             const params = new URLSearchParams();
-            const cve = document.getElementById('filterCVE').value;
-            const vendor = document.getElementById('filterVendor').value;
-            const product = document.getElementById('filterProduct').value;
-            const ransomware = document.getElementById('filterRansomware').checked;
-            const unack = document.getElementById('filterUnack').checked;
+            const cve = SK.DOM.get('filterCVE').value;
+            const vendor = SK.DOM.get('filterVendor').value;
+            const product = SK.DOM.get('filterProduct').value;
+            const ransomware = SK.DOM.get('filterRansomware').checked;
+            const unack = SK.DOM.get('filterUnack').checked;
 
             if (cve) params.append('cve_id', cve);
             if (vendor) params.append('vendor', vendor);
@@ -926,7 +926,7 @@
             // Apply sorting
             sortVulnerabilities();
 
-            document.getElementById('vulnCount').textContent = currentVulnerabilities.length;
+            SK.DOM.get('vulnCount').textContent = currentVulnerabilities.length;
 
             // Reset to page 1 and render
             currentPage = 1;
@@ -944,7 +944,7 @@
 
     function applyClientFilters() {
         // Filter by priority
-        const priorityFilter = document.getElementById('filterPriority').value;
+        const priorityFilter = SK.DOM.get('filterPriority').value;
         if (priorityFilter) {
             const priorityOrder = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1};
             const minLevel = priorityOrder[priorityFilter];
@@ -955,7 +955,7 @@
         }
 
         // Filter by CVE severity (from CVSS score)
-        const severityFilter = document.getElementById('filterSeverity').value;
+        const severityFilter = SK.DOM.get('filterSeverity').value;
         if (severityFilter) {
             currentVulnerabilities = currentVulnerabilities.filter(match => {
                 const vuln = match.vulnerability;
@@ -964,7 +964,7 @@
         }
 
         // Filter by CISA urgency (based on due date)
-        const urgencyFilter = document.getElementById('filterUrgency').value;
+        const urgencyFilter = SK.DOM.get('filterUrgency').value;
         if (urgencyFilter) {
             currentVulnerabilities = currentVulnerabilities.filter(match => {
                 const vuln = match.vulnerability;
@@ -996,7 +996,7 @@
         }
 
         // Filter by age
-        const ageFilter = document.getElementById('filterAge').value;
+        const ageFilter = SK.DOM.get('filterAge').value;
         if (ageFilter) {
             const maxDays = parseInt(ageFilter);
             currentVulnerabilities = currentVulnerabilities.filter(match => {
@@ -1007,7 +1007,7 @@
     }
 
     function sortVulnerabilities() {
-        const sortBy = document.getElementById('sortBy')?.value || 'priority-asc';
+        const sortBy = SK.DOM.get('sortBy')?.value || 'priority-asc';
         const priorityOrder = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1};
 
         switch(sortBy) {
@@ -1180,7 +1180,7 @@
             selectedVulns.add(matchId);
         } else {
             selectedVulns.delete(matchId);
-            document.getElementById('selectAll').checked = false;
+            SK.DOM.get('selectAll').checked = false;
         }
         updateBulkActions();
     }
@@ -1201,11 +1201,11 @@
 
     function updateBulkActions() {
         const count = selectedVulns.size;
-        const bulkActionsBar = document.getElementById('bulkActionsBar');
-        const selectedCountEl = document.getElementById('selectedCount');
-        const bulkAckBtnEl = document.getElementById('bulkAckBtn');
-        const bulkUnackBtnEl = document.getElementById('bulkUnackBtn');
-        const bulkExportBtnEl = document.getElementById('bulkExportBtn');
+        const bulkActionsBar = SK.DOM.get('bulkActionsBar');
+        const selectedCountEl = SK.DOM.get('selectedCount');
+        const bulkAckBtnEl = SK.DOM.get('bulkAckBtn');
+        const bulkUnackBtnEl = SK.DOM.get('bulkUnackBtn');
+        const bulkExportBtnEl = SK.DOM.get('bulkExportBtn');
 
         // Show/hide bulk actions bar
         if (bulkActionsBar) {
@@ -1223,7 +1223,7 @@
         document.querySelectorAll('.vuln-card input[type="checkbox"]').forEach(cb => {
             cb.checked = false;
         });
-        document.getElementById('selectAll').checked = false;
+        SK.DOM.get('selectAll').checked = false;
         updateBulkActions();
     }
 
@@ -1360,7 +1360,7 @@
                 const statusBadge = sync.status === 'success' ?
                     '<span class="badge bg-success">Success</span>' :
                     '<span class="badge bg-danger">Failed</span>';
-                document.getElementById('lastSync').innerHTML = `
+                SK.DOM.get('lastSync').innerHTML = `
                     ${date.toLocaleString()} ${statusBadge} |
                     ${sync.matches_found || 0} matches found in ${(sync.duration_seconds || 0).toFixed(2)}s
                 `;
@@ -1375,7 +1375,7 @@
             const response = await fetch('/api/sync/history?limit=20');
             const history = await response.json();
 
-            const tbody = document.getElementById('syncHistoryTable');
+            const tbody = SK.DOM.get('syncHistoryTable');
             tbody.innerHTML = history.map(sync => {
                 const date = new Date(sync.sync_date);
                 const statusBadge = sync.status === 'success' ?
@@ -1393,23 +1393,23 @@
                 `;
             }).join('');
 
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('syncHistoryModal')).show();
+            bootstrap.Modal.getOrCreateInstance(SK.DOM.get('syncHistoryModal')).show();
         } catch (error) {
             showToast('Failed to load sync history', 'danger');
         }
     }
 
     function resetFilters() {
-        document.getElementById('filterPriority').value = '';
-        document.getElementById('filterSeverity').value = '';
-        document.getElementById('filterUrgency').value = '';
-        document.getElementById('filterAge').value = '';
-        document.getElementById('filterCVE').value = '';
-        document.getElementById('filterVendor').value = '';
-        document.getElementById('filterProduct').value = '';
-        document.getElementById('filterRansomware').checked = false;
-        document.getElementById('filterUnack').checked = false;
-        document.getElementById('sortBy').value = 'priority';
+        SK.DOM.get('filterPriority').value = '';
+        SK.DOM.get('filterSeverity').value = '';
+        SK.DOM.get('filterUrgency').value = '';
+        SK.DOM.get('filterAge').value = '';
+        SK.DOM.get('filterCVE').value = '';
+        SK.DOM.get('filterVendor').value = '';
+        SK.DOM.get('filterProduct').value = '';
+        SK.DOM.get('filterRansomware').checked = false;
+        SK.DOM.get('filterUnack').checked = false;
+        SK.DOM.get('sortBy').value = 'priority';
         loadVulnerabilities();
     }
 
@@ -1473,7 +1473,7 @@
 
         if (sharedCVE) {
             // Auto-fill CVE filter and apply
-            document.getElementById('filterCVE').value = sharedCVE;
+            SK.DOM.get('filterCVE').value = sharedCVE;
         }
 
         // Always use grouped view by default
@@ -1495,13 +1495,13 @@
     });
 
     // Handle filter changes - use grouped view
-    document.getElementById('filterPriority').addEventListener('change', loadGroupedVulnerabilities);
-    document.getElementById('filterSeverity').addEventListener('change', loadGroupedVulnerabilities);
-    document.getElementById('filterUrgency').addEventListener('change', loadGroupedVulnerabilities);
-    document.getElementById('filterAge').addEventListener('change', loadGroupedVulnerabilities);
+    SK.DOM.get('filterPriority').addEventListener('change', loadGroupedVulnerabilities);
+    SK.DOM.get('filterSeverity').addEventListener('change', loadGroupedVulnerabilities);
+    SK.DOM.get('filterUrgency').addEventListener('change', loadGroupedVulnerabilities);
+    SK.DOM.get('filterAge').addEventListener('change', loadGroupedVulnerabilities);
 
     // Handle sort change
-    document.getElementById('sortBy').addEventListener('change', function() {
+    SK.DOM.get('sortBy').addEventListener('change', function() {
         if (currentGroupedVulnerabilities.length > 0) {
             loadGroupedVulnerabilities();
         }
@@ -1516,15 +1516,15 @@
      */
     function getCurrentFilters() {
         return {
-            priority: document.getElementById('filterPriority').value,
-            severity: document.getElementById('filterSeverity').value,
-            urgency: document.getElementById('filterUrgency').value,
-            age: document.getElementById('filterAge').value,
-            cve: document.getElementById('filterCVE').value,
-            vendor: document.getElementById('filterVendor').value,
-            product: document.getElementById('filterProduct').value,
-            ransomware: document.getElementById('filterRansomware').checked,
-            unack: document.getElementById('filterUnack').checked
+            priority: SK.DOM.get('filterPriority').value,
+            severity: SK.DOM.get('filterSeverity').value,
+            urgency: SK.DOM.get('filterUrgency').value,
+            age: SK.DOM.get('filterAge').value,
+            cve: SK.DOM.get('filterCVE').value,
+            vendor: SK.DOM.get('filterVendor').value,
+            product: SK.DOM.get('filterProduct').value,
+            ransomware: SK.DOM.get('filterRansomware').checked,
+            unack: SK.DOM.get('filterUnack').checked
         };
     }
 
@@ -1550,17 +1550,17 @@
             summary.push('No filters applied (all vulnerabilities)');
         }
 
-        document.getElementById('shareFiltersSummary').innerHTML = summary.map(s => `• ${s}`).join('<br>');
+        SK.DOM.get('shareFiltersSummary').innerHTML = summary.map(s => `• ${s}`).join('<br>');
 
         // Reset modal state
-        document.getElementById('shareName').value = '';
-        document.getElementById('shareDescription').value = '';
-        document.getElementById('shareExpiration').value = '30';
-        document.getElementById('shareResult').style.display = 'none';
-        document.getElementById('createShareBtn').style.display = 'block';
+        SK.DOM.get('shareName').value = '';
+        SK.DOM.get('shareDescription').value = '';
+        SK.DOM.get('shareExpiration').value = '30';
+        SK.DOM.get('shareResult').style.display = 'none';
+        SK.DOM.get('createShareBtn').style.display = 'block';
 
         // Show modal
-        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('shareModal'));
+        const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('shareModal'));
         modal.show();
     }
 
@@ -1568,16 +1568,16 @@
      * Create share link via API
      */
     async function createShareLink() {
-        const btn = document.getElementById('createShareBtn');
+        const btn = SK.DOM.get('createShareBtn');
         const originalHtml = btn.innerHTML;
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
 
         try {
             const filters = getCurrentFilters();
-            const name = document.getElementById('shareName').value;
-            const description = document.getElementById('shareDescription').value;
-            const expiresDays = document.getElementById('shareExpiration').value;
+            const name = SK.DOM.get('shareName').value;
+            const description = SK.DOM.get('shareDescription').value;
+            const expiresDays = SK.DOM.get('shareExpiration').value;
 
             const response = await fetch('/api/shared/create', {
                 method: 'POST',
@@ -1593,8 +1593,8 @@
 
             if (response.ok) {
                 const result = await response.json();
-                document.getElementById('shareUrl').value = result.share_url;
-                document.getElementById('shareResult').style.display = 'block';
+                SK.DOM.get('shareUrl').value = result.share_url;
+                SK.DOM.get('shareResult').style.display = 'block';
                 btn.style.display = 'none';
             } else {
                 const error = await response.json();
@@ -1614,7 +1614,7 @@
      * Copy share URL to clipboard
      */
     function copyShareUrl() {
-        const input = document.getElementById('shareUrl');
+        const input = SK.DOM.get('shareUrl');
         input.select();
         document.execCommand('copy');
 
@@ -1669,15 +1669,15 @@
                 const filters = result.shared_view.filters;
 
                 // Apply filters to form
-                if (filters.priority) document.getElementById('filterPriority').value = filters.priority;
-                if (filters.severity) document.getElementById('filterSeverity').value = filters.severity;
-                if (filters.urgency) document.getElementById('filterUrgency').value = filters.urgency;
-                if (filters.age) document.getElementById('filterAge').value = filters.age;
-                if (filters.cve) document.getElementById('filterCVE').value = filters.cve || '';
-                if (filters.vendor) document.getElementById('filterVendor').value = filters.vendor || '';
-                if (filters.product) document.getElementById('filterProduct').value = filters.product || '';
-                document.getElementById('filterRansomware').checked = filters.ransomware || false;
-                document.getElementById('filterUnack').checked = filters.unack || false;
+                if (filters.priority) SK.DOM.get('filterPriority').value = filters.priority;
+                if (filters.severity) SK.DOM.get('filterSeverity').value = filters.severity;
+                if (filters.urgency) SK.DOM.get('filterUrgency').value = filters.urgency;
+                if (filters.age) SK.DOM.get('filterAge').value = filters.age;
+                if (filters.cve) SK.DOM.get('filterCVE').value = filters.cve || '';
+                if (filters.vendor) SK.DOM.get('filterVendor').value = filters.vendor || '';
+                if (filters.product) SK.DOM.get('filterProduct').value = filters.product || '';
+                SK.DOM.get('filterRansomware').checked = filters.ransomware || false;
+                SK.DOM.get('filterUnack').checked = filters.unack || false;
 
                 // Show notification
                 const notification = document.createElement('div');
@@ -1712,16 +1712,16 @@
     // Load grouped vulnerabilities from API
     async function loadGroupedVulnerabilities() {
         showLoading();
-        const container = document.getElementById('vulnerabilitiesContainer');
+        const container = SK.DOM.get('vulnerabilitiesContainer');
         selectedVulns.clear();
         updateBulkActions();
 
         try {
             const params = new URLSearchParams();
-            const cve = document.getElementById('filterCVE').value;
-            const ransomware = document.getElementById('filterRansomware').checked;
-            const unack = document.getElementById('filterUnack').checked;
-            const priority = document.getElementById('filterPriority').value;
+            const cve = SK.DOM.get('filterCVE').value;
+            const ransomware = SK.DOM.get('filterRansomware').checked;
+            const unack = SK.DOM.get('filterUnack').checked;
+            const priority = SK.DOM.get('filterPriority').value;
 
             if (cve) params.append('search', cve);
             if (ransomware) params.append('ransomware_only', 'true');
@@ -1743,7 +1743,7 @@
             const data = await response.json();
             currentGroupedVulnerabilities = data.items;
 
-            document.getElementById('vulnCount').textContent = data.total;
+            SK.DOM.get('vulnCount').textContent = data.total;
             renderGroupedPage(data);
         } catch (error) {
             container.innerHTML = `
@@ -1757,7 +1757,7 @@
     }
 
     function renderGroupedPage(data) {
-        const container = document.getElementById('vulnerabilitiesContainer');
+        const container = SK.DOM.get('vulnerabilitiesContainer');
 
         if (data.items.length === 0) {
             container.innerHTML = `
@@ -1767,16 +1767,16 @@
                     <p class="text-muted">No matches found with the current filter criteria.</p>
                 </div>
             `;
-            document.getElementById('paginationControls').style.display = 'none';
+            SK.DOM.get('paginationControls').style.display = 'none';
             return;
         }
 
         container.innerHTML = data.items.map(group => createGroupedCVECard(group)).join('');
 
         // Update pagination
-        const paginationControls = document.getElementById('paginationControls');
-        const paginationInfo = document.getElementById('paginationInfo');
-        const paginationNav = document.getElementById('paginationNav');
+        const paginationControls = SK.DOM.get('paginationControls');
+        const paginationInfo = SK.DOM.get('paginationInfo');
+        const paginationNav = SK.DOM.get('paginationNav');
 
         if (data.pages > 1) {
             paginationControls.style.display = 'flex';
@@ -1821,7 +1821,7 @@
     function goToGroupedPage(page) {
         currentPage = page;
         loadGroupedVulnerabilities();
-        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
+        SK.DOM.get('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
     }
 
     function createGroupedCVECard(group) {

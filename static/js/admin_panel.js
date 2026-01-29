@@ -1,50 +1,9 @@
 /**
  * Admin Panel JavaScript
  * Handles user management, organization management, and settings
+ *
+ * This module uses SK.DOM utilities from sentrikat-core.js for safe DOM access.
  */
-
-// ============================================================================
-// SAFE ELEMENT ACCESS HELPERS - Prevent null reference errors
-// ============================================================================
-
-function safeGetElement(id) {
-    return document.getElementById(id);
-}
-
-function safeSetValue(id, value) {
-    const el = document.getElementById(id);
-    if (el) el.value = value;
-}
-
-function safeSetHtml(id, html) {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = html;
-}
-
-function safeSetChecked(id, checked) {
-    const el = document.getElementById(id);
-    if (el) el.checked = checked;
-}
-
-function safeSetDisplay(id, display) {
-    const el = document.getElementById(id);
-    if (el) el.style.display = display;
-}
-
-function safeSetText(id, text) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-}
-
-function safeSetRequired(id, required) {
-    const el = document.getElementById(id);
-    if (el) el.required = required;
-}
-
-function safeSetDisabled(id, disabled) {
-    const el = document.getElementById(id);
-    if (el) el.disabled = disabled;
-}
 
 // ============================================================================
 // STATE VARIABLES
@@ -148,7 +107,7 @@ async function safeParseJSON(response, context = 'data') {
  * @param {string} errorMessage - Message to show on failure
  */
 async function loadWithRetry(elementId, loadFn, errorMessage = 'Failed to load') {
-    const element = document.getElementById(elementId);
+    const element = SK.DOM.get(elementId);
 
     try {
         await loadFn();
@@ -164,37 +123,16 @@ async function loadWithRetry(elementId, loadFn, errorMessage = 'Failed to load')
 }
 
 // ============================================================================
-// MODAL CLEANUP UTILITY - Prevent grey backdrop issues
+// MODAL UTILITIES - Use SK.Modal from sentrikat-core.js
 // ============================================================================
 
 /**
- * Clean up all modal backdrops and body classes
- * Call this after hiding any modal to ensure no grey overlay remains
- */
-function cleanupModalBackdrops() {
-    // Remove all backdrop elements
-    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-    // Remove modal-open class from body
-    document.body.classList.remove('modal-open');
-    // Remove any padding added for scrollbar
-    document.body.style.removeProperty('padding-right');
-    document.body.style.overflow = '';
-}
-
-/**
  * Safely hide a modal and clean up
+ * Uses SK.Modal.hideById from sentrikat-core.js
  * @param {string} modalId - The ID of the modal element
  */
 function safeHideModal(modalId) {
-    const modalEl = document.getElementById(modalId);
-    if (modalEl) {
-        const modalInstance = bootstrap.Modal.getInstance(modalEl);
-        if (modalInstance) {
-            modalInstance.hide();
-        }
-    }
-    // Always clean up after a short delay to ensure Bootstrap has finished
-    setTimeout(cleanupModalBackdrops, 300);
+    SK.Modal.hideById(modalId);
 }
 
 /**
@@ -203,7 +141,7 @@ function safeHideModal(modalId) {
  * @param {boolean} removeElement - Whether to remove the modal element from DOM
  */
 function safeDisposeModal(modalId, removeElement = false) {
-    const modalEl = document.getElementById(modalId);
+    const modalEl = SK.DOM.get(modalId);
     if (modalEl) {
         const modalInstance = bootstrap.Modal.getInstance(modalEl);
         if (modalInstance) {
@@ -211,27 +149,15 @@ function safeDisposeModal(modalId, removeElement = false) {
                 modalInstance.hide();
                 modalInstance.dispose();
             } catch (e) {
-                console.warn('Error disposing modal:', e);
+                SK.warn('Error disposing modal:', e);
             }
         }
         if (removeElement) {
             modalEl.remove();
         }
     }
-    cleanupModalBackdrops();
+    SK.Modal.cleanupBackdrops();
 }
-
-// Global event listener to clean up backdrops when any modal is hidden
-document.addEventListener('hidden.bs.modal', function(event) {
-    // Small delay to ensure Bootstrap has finished its cleanup
-    setTimeout(() => {
-        // Check if any modal is still open
-        const openModals = document.querySelectorAll('.modal.show');
-        if (openModals.length === 0) {
-            cleanupModalBackdrops();
-        }
-    }, 100);
-});
 
 // ============================================================================
 // CURRENT USER INFO - For permission-aware API calls
@@ -289,7 +215,7 @@ function toggleUserSelect(userId, checkbox) {
 }
 
 function toggleSelectAllUsers() {
-    const selectAll = document.getElementById('selectAllUsers');
+    const selectAll = SK.DOM.get('selectAllUsers');
     const checkboxes = document.querySelectorAll('.user-checkbox');
 
     checkboxes.forEach(cb => {
@@ -311,16 +237,16 @@ function toggleSelectAllUsers() {
 function clearUserSelection() {
     selectedUsers.clear();
     document.querySelectorAll('.user-checkbox').forEach(cb => cb.checked = false);
-    const selectAllUsers = document.getElementById('selectAllUsers');
+    const selectAllUsers = SK.DOM.get('selectAllUsers');
     if (selectAllUsers) selectAllUsers.checked = false;
     updateUsersBulkToolbar();
 }
 
 function updateUsersBulkToolbar() {
-    const toolbar = document.getElementById('usersBulkActions');
+    const toolbar = SK.DOM.get('usersBulkActions');
     if (!toolbar) return;
     const count = selectedUsers.size;
-    const countEl = document.getElementById('usersSelectedCount');
+    const countEl = SK.DOM.get('usersSelectedCount');
     if (countEl) countEl.textContent = count;
     toolbar.style.display = count > 0 ? 'block' : 'none';
 }
@@ -442,7 +368,7 @@ function toggleOrgSelect(orgId, checkbox) {
 }
 
 function toggleSelectAllOrgs() {
-    const selectAll = document.getElementById('selectAllOrgs');
+    const selectAll = SK.DOM.get('selectAllOrgs');
     const checkboxes = document.querySelectorAll('.org-checkbox');
 
     checkboxes.forEach(cb => {
@@ -464,16 +390,16 @@ function toggleSelectAllOrgs() {
 function clearOrgSelection() {
     selectedOrgs.clear();
     document.querySelectorAll('.org-checkbox').forEach(cb => cb.checked = false);
-    const selectAllOrgs = document.getElementById('selectAllOrgs');
+    const selectAllOrgs = SK.DOM.get('selectAllOrgs');
     if (selectAllOrgs) selectAllOrgs.checked = false;
     updateOrgsBulkToolbar();
 }
 
 function updateOrgsBulkToolbar() {
-    const toolbar = document.getElementById('orgsBulkActions');
+    const toolbar = SK.DOM.get('orgsBulkActions');
     if (!toolbar) return;
     const count = selectedOrgs.size;
-    const countEl = document.getElementById('orgsSelectedCount');
+    const countEl = SK.DOM.get('orgsSelectedCount');
     if (countEl) countEl.textContent = count;
     toolbar.style.display = count > 0 ? 'block' : 'none';
 }
@@ -595,7 +521,7 @@ function toggleMappingSelect(mappingId, checkbox) {
 }
 
 function toggleSelectAllMappings() {
-    const selectAll = document.getElementById('selectAllMappings');
+    const selectAll = SK.DOM.get('selectAllMappings');
     const checkboxes = document.querySelectorAll('.mapping-checkbox');
 
     checkboxes.forEach(cb => {
@@ -615,8 +541,8 @@ function toggleSelectAllMappings() {
 }
 
 function updateMappingsBulkToolbar() {
-    const toolbar = document.getElementById('mappingsBulkActions');
-    const count = document.getElementById('mappingsSelectedCount');
+    const toolbar = SK.DOM.get('mappingsBulkActions');
+    const count = SK.DOM.get('mappingsSelectedCount');
     if (toolbar && count) {
         count.textContent = selectedMappings.size;
         toolbar.style.display = selectedMappings.size > 0 ? 'block' : 'none';
@@ -626,7 +552,7 @@ function updateMappingsBulkToolbar() {
 function clearMappingSelection() {
     selectedMappings.clear();
     document.querySelectorAll('.mapping-checkbox').forEach(cb => cb.checked = false);
-    const selectAllMappings = document.getElementById('selectAllMappings');
+    const selectAllMappings = SK.DOM.get('selectAllMappings');
     if (selectAllMappings) selectAllMappings.checked = false;
     updateMappingsBulkToolbar();
 }
@@ -765,7 +691,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }, 300);
 
         // Tab change handlers
-        const orgTab = document.getElementById('organizations-tab');
+        const orgTab = SK.DOM.get('organizations-tab');
         if (orgTab) {
             orgTab.addEventListener('shown.bs.tab', function() {
                 loadOrganizationsWithRetry();
@@ -775,7 +701,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         // Settings tab handler
-        const settingsTab = document.getElementById('settings-tab');
+        const settingsTab = SK.DOM.get('settings-tab');
         if (settingsTab) {
             settingsTab.addEventListener('shown.bs.tab', function() {
                 loadAllSettings();
@@ -785,7 +711,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         // LDAP Users tab handler - auto-load users when tab is shown
-        const ldapUsersTab = document.getElementById('ldapUsers-tab');
+        const ldapUsersTab = SK.DOM.get('ldapUsers-tab');
         if (ldapUsersTab) {
             ldapUsersTab.addEventListener('shown.bs.tab', function() {
                 loadLDAPUsersDefault();
@@ -793,12 +719,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         // LDAP Groups tab handler
-        const ldapGroupsTab = document.getElementById('ldapGroups-tab');
+        const ldapGroupsTab = SK.DOM.get('ldapGroups-tab');
         if (ldapGroupsTab) {
             ldapGroupsTab.addEventListener('shown.bs.tab', function() {
                 // Pre-fill Group Search Base DN from LDAP settings if empty
-                const groupSearchBaseInline = document.getElementById('groupSearchBaseInline');
-                const ldapBaseDN = document.getElementById('ldapBaseDN');
+                const groupSearchBaseInline = SK.DOM.get('groupSearchBaseInline');
+                const ldapBaseDN = SK.DOM.get('ldapBaseDN');
                 if (groupSearchBaseInline && !groupSearchBaseInline.value && ldapBaseDN && ldapBaseDN.value) {
                     groupSearchBaseInline.value = ldapBaseDN.value;
                 }
@@ -809,14 +735,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         // LDAP Groups sub-tab handlers
-        const groupMappingsTab = document.getElementById('group-mappings-tab');
+        const groupMappingsTab = SK.DOM.get('group-mappings-tab');
         if (groupMappingsTab) {
             groupMappingsTab.addEventListener('shown.bs.pill', function() {
                 loadGroupMappings();
             });
         }
 
-        const syncDashboardTab = document.getElementById('sync-dashboard-tab');
+        const syncDashboardTab = SK.DOM.get('sync-dashboard-tab');
         if (syncDashboardTab) {
             syncDashboardTab.addEventListener('shown.bs.pill', function() {
                 loadSyncStats();
@@ -874,7 +800,7 @@ async function loadOrganizationsWithRetry() {
 // ============================================================================
 
 async function loadUsers() {
-    const tbody = document.getElementById('usersTable');
+    const tbody = SK.DOM.get('usersTable');
     tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
     // Clear selection state
@@ -992,7 +918,7 @@ async function loadUsers() {
         }
 
         // Reset select all checkbox
-        const selectAllUsers = document.getElementById('selectAllUsers');
+        const selectAllUsers = SK.DOM.get('selectAllUsers');
         if (selectAllUsers) selectAllUsers.checked = false;
 
         // Initialize sortable table after rendering
@@ -1019,30 +945,30 @@ function showCreateUserModal() {
     try {
         console.log('showCreateUserModal called');
         currentUserId = null;
-        safeSetHtml('userModalTitle', '<i class="bi bi-person-plus me-2"></i>Create User');
+        SK.DOM.setHtml('userModalTitle', '<i class="bi bi-person-plus me-2"></i>Create User');
 
-        const userForm = safeGetElement('userForm');
+        const userForm = SK.DOM.get('userForm');
         if (userForm) userForm.reset();
 
         // Reset to local auth and completely hide LDAP option for creation
-        safeSetChecked('authLocal', true);
-        safeSetDisplay('authLdap', 'none');
-        safeSetDisplay('authLdapLabel', 'none');
-        safeSetChecked('isActive', true);
-        safeSetValue('userRole', 'user');
-        safeSetChecked('canManageProducts', true);
+        SK.DOM.setChecked('authLocal', true);
+        SK.DOM.setDisplay('authLdap', 'none');
+        SK.DOM.setDisplay('authLdapLabel', 'none');
+        SK.DOM.setChecked('isActive', true);
+        SK.DOM.setValue('userRole', 'user');
+        SK.DOM.setChecked('canManageProducts', true);
 
         // Hide org memberships section (only shown when editing)
-        safeSetDisplay('orgMembershipsSection', 'none');
+        SK.DOM.setDisplay('orgMembershipsSection', 'none');
 
         // Show primary org field (for new users)
-        safeSetDisplay('primaryOrgField', 'block');
-        safeSetRequired('organization', true);
+        SK.DOM.setDisplay('primaryOrgField', 'block');
+        SK.DOM.setRequired('organization', true);
 
         toggleAuthFields();
         updateRoleDescription();
 
-        const modalElement = safeGetElement('userModal');
+        const modalElement = SK.DOM.get('userModal');
         if (!modalElement) {
             console.error('userModal element not found');
             return;
@@ -1059,54 +985,54 @@ function showCreateUserModal() {
 
 async function editUser(userId) {
     currentUserId = userId;
-    safeSetHtml('userModalTitle', '<i class="bi bi-pencil me-2"></i>Edit User');
+    SK.DOM.setHtml('userModalTitle', '<i class="bi bi-pencil me-2"></i>Edit User');
 
     try {
         const response = await fetch(`/api/users/${userId}`);
         const user = await response.json();
 
-        safeSetValue('username', user.username);
-        safeSetValue('email', user.email);
-        safeSetValue('fullName', user.full_name || '');
-        safeSetValue('organization', user.organization_id || '');
-        safeSetValue('userRole', user.role || 'user');
-        safeSetChecked('canManageProducts', user.can_manage_products);
-        safeSetChecked('canViewAllOrgs', user.can_view_all_orgs);
-        safeSetChecked('isActive', user.is_active);
+        SK.DOM.setValue('username', user.username);
+        SK.DOM.setValue('email', user.email);
+        SK.DOM.setValue('fullName', user.full_name || '');
+        SK.DOM.setValue('organization', user.organization_id || '');
+        SK.DOM.setValue('userRole', user.role || 'user');
+        SK.DOM.setChecked('canManageProducts', user.can_manage_products);
+        SK.DOM.setChecked('canViewAllOrgs', user.can_view_all_orgs);
+        SK.DOM.setChecked('isActive', user.is_active);
 
         // Set auth type and show/hide LDAP option for editing
         if (user.auth_type === 'ldap') {
-            safeSetChecked('authLdap', true);
+            SK.DOM.setChecked('authLdap', true);
             // Show LDAP option for existing LDAP users (read-only display)
-            safeSetDisplay('authLdap', '');
-            safeSetDisplay('authLdapLabel', '');
-            safeSetDisabled('authLdap', false);
-            safeSetDisabled('authLocal', true);  // Can't change LDAP user to local
+            SK.DOM.setDisplay('authLdap', '');
+            SK.DOM.setDisplay('authLdapLabel', '');
+            SK.DOM.setDisabled('authLdap', false);
+            SK.DOM.setDisabled('authLocal', true);  // Can't change LDAP user to local
         } else {
-            safeSetChecked('authLocal', true);
+            SK.DOM.setChecked('authLocal', true);
             // Hide LDAP option (can't convert local to LDAP)
-            safeSetDisplay('authLdap', 'none');
-            safeSetDisplay('authLdapLabel', 'none');
-            safeSetDisabled('authLocal', false);
+            SK.DOM.setDisplay('authLdap', 'none');
+            SK.DOM.setDisplay('authLdapLabel', 'none');
+            SK.DOM.setDisabled('authLocal', false);
         }
 
         toggleAuthFields();
         updateRoleDescription();
 
         // For edit mode, password is optional
-        safeSetRequired('password', false);
-        safeSetRequired('passwordConfirm', false);
+        SK.DOM.setRequired('password', false);
+        SK.DOM.setRequired('passwordConfirm', false);
 
         // Hide primary org field (managed via memberships when editing)
-        safeSetDisplay('primaryOrgField', 'none');
-        safeSetRequired('organization', false);
+        SK.DOM.setDisplay('primaryOrgField', 'none');
+        SK.DOM.setRequired('organization', false);
 
         // Show organization memberships section and load memberships
-        safeSetDisplay('orgMembershipsSection', 'block');
+        SK.DOM.setDisplay('orgMembershipsSection', 'block');
         loadUserOrgMemberships(userId);
 
         // Show security settings section for local users and load 2FA status
-        const securitySection = safeGetElement('securitySettingsSection');
+        const securitySection = SK.DOM.get('securitySettingsSection');
         if (securitySection) {
             if (user.auth_type === 'local') {
                 securitySection.style.display = 'block';
@@ -1117,7 +1043,7 @@ async function editUser(userId) {
             }
         }
 
-        const userModal = safeGetElement('userModal');
+        const userModal = SK.DOM.get('userModal');
         if (userModal) {
             bootstrap.Modal.getOrCreateInstance(userModal).show();
         }
@@ -1128,8 +1054,8 @@ async function editUser(userId) {
 
 // Update 2FA status display in user modal
 function updateUser2FAStatus(user) {
-    const statusDiv = document.getElementById('user2FAStatus');
-    const actionsDiv = document.getElementById('user2FAActions');
+    const statusDiv = SK.DOM.get('user2FAStatus');
+    const actionsDiv = SK.DOM.get('user2FAActions');
 
     if (user.totp_enabled) {
         statusDiv.innerHTML = '<span class="badge bg-success"><i class="bi bi-shield-check me-1"></i>Enabled</span>';
@@ -1150,8 +1076,8 @@ function updateUser2FAStatus(user) {
 
 // Update password status display in user modal
 function updateUserPasswordStatus(user) {
-    const statusDiv = document.getElementById('userPasswordStatus');
-    const forceBtn = document.getElementById('forcePasswordChangeBtn');
+    const statusDiv = SK.DOM.get('userPasswordStatus');
+    const forceBtn = SK.DOM.get('forcePasswordChangeBtn');
 
     if (user.must_change_password) {
         statusDiv.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Change Required</span>';
@@ -1229,7 +1155,7 @@ async function require2FAForUser(userId, username) {
 // =============================================================================
 
 async function loadUserOrgMemberships(userId) {
-    const tbody = document.getElementById('orgMembershipsTable');
+    const tbody = SK.DOM.get('orgMembershipsTable');
     tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Loading...</td></tr>';
 
     try {
@@ -1290,7 +1216,7 @@ async function showAddOrgMembershipModal() {
         return;
     }
 
-    document.getElementById('addOrgMembershipUserId').value = currentUserId;
+    SK.DOM.get('addOrgMembershipUserId').value = currentUserId;
 
     // Load available organizations
     try {
@@ -1302,7 +1228,7 @@ async function showAddOrgMembershipModal() {
         const memberships = await membershipsResponse.json();
         const memberOrgIds = new Set(memberships.map(m => m.organization_id));
 
-        const select = document.getElementById('addOrgMembershipOrg');
+        const select = SK.DOM.get('addOrgMembershipOrg');
         select.innerHTML = '<option value="">Select organization...</option>';
 
         orgs.filter(org => !memberOrgIds.has(org.id)).forEach(org => {
@@ -1313,16 +1239,16 @@ async function showAddOrgMembershipModal() {
             select.innerHTML = '<option value="">No available organizations</option>';
         }
 
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('addOrgMembershipModal')).show();
+        bootstrap.Modal.getOrCreateInstance(SK.DOM.get('addOrgMembershipModal')).show();
     } catch (error) {
         showToast('Error loading organizations: ' + error.message, 'danger');
     }
 }
 
 async function addOrgMembership() {
-    const userId = document.getElementById('addOrgMembershipUserId').value;
-    const orgId = document.getElementById('addOrgMembershipOrg').value;
-    const role = document.getElementById('addOrgMembershipRole').value;
+    const userId = SK.DOM.get('addOrgMembershipUserId').value;
+    const orgId = SK.DOM.get('addOrgMembershipOrg').value;
+    const role = SK.DOM.get('addOrgMembershipRole').value;
 
     if (!orgId) {
         showToast('Please select an organization', 'warning');
@@ -1364,7 +1290,7 @@ async function updateOrgMembershipRole(userId, orgId, newRole, isPrimary) {
             showToast(result.message || 'Role updated successfully', 'success');
             // If this is the primary org, also update the role dropdown in the main form
             if (isPrimary) {
-                document.getElementById('userRole').value = newRole;
+                SK.DOM.get('userRole').value = newRole;
             }
             loadUserOrgMemberships(userId);
         } else {
@@ -1400,31 +1326,31 @@ async function removeOrgMembership(userId, orgId, orgName) {
 }
 
 function toggleAuthFields() {
-    const isLocal = document.getElementById('authLocal').checked;
-    const passwordField = document.getElementById('passwordField');
-    const passwordConfirmField = document.getElementById('passwordConfirmField');
-    const usernameHelp = document.getElementById('usernameHelp');
+    const isLocal = SK.DOM.get('authLocal').checked;
+    const passwordField = SK.DOM.get('passwordField');
+    const passwordConfirmField = SK.DOM.get('passwordConfirmField');
+    const usernameHelp = SK.DOM.get('usernameHelp');
 
     if (isLocal) {
         passwordField.style.display = 'block';
         passwordConfirmField.style.display = 'block';
-        document.getElementById('password').required = currentUserId === null; // Required for new users
-        document.getElementById('passwordConfirm').required = currentUserId === null;
+        SK.DOM.get('password').required = currentUserId === null; // Required for new users
+        SK.DOM.get('passwordConfirm').required = currentUserId === null;
         usernameHelp.textContent = 'Unique username for login';
     } else {
         passwordField.style.display = 'none';
         passwordConfirmField.style.display = 'none';
-        document.getElementById('password').required = false;
-        document.getElementById('passwordConfirm').required = false;
+        SK.DOM.get('password').required = false;
+        SK.DOM.get('passwordConfirm').required = false;
         usernameHelp.textContent = 'For LDAP: Use AD sAMAccountName (e.g., jdoe)';
     }
 }
 
 async function saveUser() {
-    const username = document.getElementById('username').value.trim();
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const passwordConfirm = document.getElementById('passwordConfirm').value;
+    const username = SK.DOM.get('username').value.trim();
+    const email = SK.DOM.get('email').value.trim();
+    const password = SK.DOM.get('password').value;
+    const passwordConfirm = SK.DOM.get('passwordConfirm').value;
     const authType = document.querySelector('input[name="authType"]:checked').value;
 
     // Validation
@@ -1461,14 +1387,14 @@ async function saveUser() {
     const userData = {
         username: username,
         email: email,
-        full_name: document.getElementById('fullName').value.trim(),
-        organization_id: parseInt(document.getElementById('organization').value) || null,
+        full_name: SK.DOM.get('fullName').value.trim(),
+        organization_id: parseInt(SK.DOM.get('organization').value) || null,
         auth_type: authType,
-        role: document.getElementById('userRole').value,
-        is_admin: document.getElementById('userRole').value !== 'user' && document.getElementById('userRole').value !== 'manager',
-        can_manage_products: document.getElementById('canManageProducts').checked,
-        can_view_all_orgs: document.getElementById('canViewAllOrgs').checked,
-        is_active: document.getElementById('isActive').checked
+        role: SK.DOM.get('userRole').value,
+        is_admin: SK.DOM.get('userRole').value !== 'user' && SK.DOM.get('userRole').value !== 'manager',
+        can_manage_products: SK.DOM.get('canManageProducts').checked,
+        can_view_all_orgs: SK.DOM.get('canViewAllOrgs').checked,
+        is_active: SK.DOM.get('isActive').checked
     };
 
     // Only include password for local auth and if provided
@@ -1674,7 +1600,7 @@ async function forcePasswordChange(userId, username) {
 // ============================================================================
 
 async function loadOrganizations() {
-    const tbody = document.getElementById('orgsTable');
+    const tbody = SK.DOM.get('orgsTable');
     if (!tbody) return;
 
     tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
@@ -1746,7 +1672,7 @@ async function loadOrganizations() {
         }
 
         // Reset select all checkbox
-        const selectAllOrgs = document.getElementById('selectAllOrgs');
+        const selectAllOrgs = SK.DOM.get('selectAllOrgs');
         if (selectAllOrgs) selectAllOrgs.checked = false;
 
         // Initialize sortable table after rendering
@@ -1770,7 +1696,7 @@ async function loadOrganizations() {
 }
 
 async function loadOrganizationsDropdown() {
-    const select = document.getElementById('organization');
+    const select = SK.DOM.get('organization');
     if (!select) {
         console.warn('Organization select element not found');
         return;
@@ -1804,27 +1730,27 @@ function showCreateOrgModal() {
     try {
         console.log('showCreateOrgModal called');
         currentOrgId = null;
-        safeSetHtml('orgModalTitle', '<i class="bi bi-building me-2"></i>Create Organization');
+        SK.DOM.setHtml('orgModalTitle', '<i class="bi bi-building me-2"></i>Create Organization');
 
-        const orgForm = safeGetElement('orgForm');
+        const orgForm = SK.DOM.get('orgForm');
         if (orgForm) orgForm.reset();
 
         // Make sure orgName is enabled and editable for new organizations
-        const orgNameField = safeGetElement('orgName');
+        const orgNameField = SK.DOM.get('orgName');
         if (orgNameField) {
             orgNameField.disabled = false;
             orgNameField.readOnly = false;
             orgNameField.value = '';
         }
 
-        safeSetChecked('orgActive', true);
-        safeSetChecked('alertCritical', true);
-        safeSetChecked('alertNewCVE', true);
-        safeSetChecked('alertRansomware', true);
-        safeSetChecked('smtpUseTls', true);
-        safeSetValue('smtpPort', 587);
+        SK.DOM.setChecked('orgActive', true);
+        SK.DOM.setChecked('alertCritical', true);
+        SK.DOM.setChecked('alertNewCVE', true);
+        SK.DOM.setChecked('alertRansomware', true);
+        SK.DOM.setChecked('smtpUseTls', true);
+        SK.DOM.setValue('smtpPort', 587);
 
-        const modalElement = safeGetElement('orgModal');
+        const modalElement = SK.DOM.get('orgModal');
         if (!modalElement) {
             console.error('orgModal element not found');
             return;
@@ -1841,16 +1767,16 @@ function showCreateOrgModal() {
 
 async function editOrganization(orgId) {
     currentOrgId = orgId;
-    document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Organization';
+    SK.DOM.get('orgModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Organization';
 
     try {
         const response = await fetch(`/api/organizations/${orgId}`);
         const org = await response.json();
 
         // Basic info
-        document.getElementById('orgName').value = org.name;
-        document.getElementById('orgDisplayName').value = org.display_name;
-        document.getElementById('orgDescription').value = org.description || '';
+        SK.DOM.get('orgName').value = org.name;
+        SK.DOM.get('orgDisplayName').value = org.display_name;
+        SK.DOM.get('orgDescription').value = org.description || '';
 
         // Parse emails
         let emails = [];
@@ -1859,53 +1785,53 @@ async function editOrganization(orgId) {
         } catch (e) {
             emails = [];
         }
-        document.getElementById('orgEmails').value = emails.join(', ');
-        document.getElementById('orgActive').checked = org.active;
+        SK.DOM.get('orgEmails').value = emails.join(', ');
+        SK.DOM.get('orgActive').checked = org.active;
 
         // SMTP settings
-        document.getElementById('smtpHost').value = org.smtp_host || '';
-        document.getElementById('smtpPort').value = org.smtp_port || 587;
-        document.getElementById('smtpUsername').value = org.smtp_username || '';
+        SK.DOM.get('smtpHost').value = org.smtp_host || '';
+        SK.DOM.get('smtpPort').value = org.smtp_port || 587;
+        SK.DOM.get('smtpUsername').value = org.smtp_username || '';
         // Don't pre-fill masked password - leave blank so user can enter new one if needed
-        document.getElementById('smtpPassword').value = '';
-        document.getElementById('smtpPassword').placeholder = org.smtp_password ? '(password saved - leave blank to keep)' : 'Password';
-        document.getElementById('smtpFromEmail').value = org.smtp_from_email || '';
-        document.getElementById('smtpFromName').value = org.smtp_from_name || 'SentriKat Alerts';
-        document.getElementById('smtpUseTls').checked = org.smtp_use_tls !== false;
-        document.getElementById('smtpUseSsl').checked = org.smtp_use_ssl === true;
+        SK.DOM.get('smtpPassword').value = '';
+        SK.DOM.get('smtpPassword').placeholder = org.smtp_password ? '(password saved - leave blank to keep)' : 'Password';
+        SK.DOM.get('smtpFromEmail').value = org.smtp_from_email || '';
+        SK.DOM.get('smtpFromName').value = org.smtp_from_name || 'SentriKat Alerts';
+        SK.DOM.get('smtpUseTls').checked = org.smtp_use_tls !== false;
+        SK.DOM.get('smtpUseSsl').checked = org.smtp_use_ssl === true;
 
         // Alert settings
-        document.getElementById('alertCritical').checked = org.alert_on_critical;
-        document.getElementById('alertHigh').checked = org.alert_on_high;
-        document.getElementById('alertNewCVE').checked = org.alert_on_new_cve;
-        document.getElementById('alertRansomware').checked = org.alert_on_ransomware;
+        SK.DOM.get('alertCritical').checked = org.alert_on_critical;
+        SK.DOM.get('alertHigh').checked = org.alert_on_high;
+        SK.DOM.get('alertNewCVE').checked = org.alert_on_new_cve;
+        SK.DOM.get('alertRansomware').checked = org.alert_on_ransomware;
 
         // Alert mode settings (org.alert_settings contains nested values)
         const alertMode = org.alert_settings?.mode || '';
         const escalationDays = org.alert_settings?.escalation_days || '';
-        document.getElementById('orgAlertMode').value = alertMode;
-        document.getElementById('orgEscalationDays').value = escalationDays;
+        SK.DOM.get('orgAlertMode').value = alertMode;
+        SK.DOM.get('orgEscalationDays').value = escalationDays;
 
         // Webhook settings
-        document.getElementById('orgWebhookEnabled').checked = org.webhook_enabled || false;
-        document.getElementById('orgWebhookUrl').value = org.webhook_url || '';
-        document.getElementById('orgWebhookFormat').value = org.webhook_format || 'slack';
-        document.getElementById('orgWebhookName').value = org.webhook_name || '';
-        document.getElementById('orgWebhookToken').value = '';
-        document.getElementById('orgWebhookToken').placeholder = org.webhook_token ? '(token saved - leave blank to keep)' : 'Leave empty if not needed';
+        SK.DOM.get('orgWebhookEnabled').checked = org.webhook_enabled || false;
+        SK.DOM.get('orgWebhookUrl').value = org.webhook_url || '';
+        SK.DOM.get('orgWebhookFormat').value = org.webhook_format || 'slack';
+        SK.DOM.get('orgWebhookName').value = org.webhook_name || '';
+        SK.DOM.get('orgWebhookToken').value = '';
+        SK.DOM.get('orgWebhookToken').placeholder = org.webhook_token ? '(token saved - leave blank to keep)' : 'Leave empty if not needed';
 
         // Disable name field for existing orgs
-        document.getElementById('orgName').readOnly = true;
+        SK.DOM.get('orgName').readOnly = true;
 
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('orgModal')).show();
+        bootstrap.Modal.getOrCreateInstance(SK.DOM.get('orgModal')).show();
     } catch (error) {
         showToast(`Error loading organization: ${error.message}`, 'danger');
     }
 }
 
 async function saveOrganization() {
-    const name = document.getElementById('orgName').value.trim();
-    const displayName = document.getElementById('orgDisplayName').value.trim();
+    const name = SK.DOM.get('orgName').value.trim();
+    const displayName = SK.DOM.get('orgDisplayName').value.trim();
 
     if (!name || !displayName) {
         showToast('Organization name and display name are required', 'warning');
@@ -1913,42 +1839,42 @@ async function saveOrganization() {
     }
 
     // Parse emails
-    const emailsText = document.getElementById('orgEmails').value;
+    const emailsText = SK.DOM.get('orgEmails').value;
     const emails = emailsText ? emailsText.split(',').map(e => e.trim()).filter(e => e) : [];
 
     const orgData = {
         name: name.toLowerCase().replace(/\s+/g, '_'),
         display_name: displayName,
-        description: document.getElementById('orgDescription').value.trim(),
+        description: SK.DOM.get('orgDescription').value.trim(),
         notification_emails: JSON.stringify(emails),
-        active: document.getElementById('orgActive').checked,
+        active: SK.DOM.get('orgActive').checked,
 
         // SMTP settings
-        smtp_host: document.getElementById('smtpHost').value.trim() || null,
-        smtp_port: parseInt(document.getElementById('smtpPort').value) || 587,
-        smtp_username: document.getElementById('smtpUsername').value.trim() || null,
-        smtp_password: document.getElementById('smtpPassword').value.trim() || null,
-        smtp_from_email: document.getElementById('smtpFromEmail').value.trim() || null,
-        smtp_from_name: document.getElementById('smtpFromName').value.trim() || 'SentriKat Alerts',
-        smtp_use_tls: document.getElementById('smtpUseTls').checked,
-        smtp_use_ssl: document.getElementById('smtpUseSsl').checked,
+        smtp_host: SK.DOM.get('smtpHost').value.trim() || null,
+        smtp_port: parseInt(SK.DOM.get('smtpPort').value) || 587,
+        smtp_username: SK.DOM.get('smtpUsername').value.trim() || null,
+        smtp_password: SK.DOM.get('smtpPassword').value.trim() || null,
+        smtp_from_email: SK.DOM.get('smtpFromEmail').value.trim() || null,
+        smtp_from_name: SK.DOM.get('smtpFromName').value.trim() || 'SentriKat Alerts',
+        smtp_use_tls: SK.DOM.get('smtpUseTls').checked,
+        smtp_use_ssl: SK.DOM.get('smtpUseSsl').checked,
 
         // Alert settings
-        alert_on_critical: document.getElementById('alertCritical').checked,
-        alert_on_high: document.getElementById('alertHigh').checked,
-        alert_on_new_cve: document.getElementById('alertNewCVE').checked,
-        alert_on_ransomware: document.getElementById('alertRansomware').checked,
+        alert_on_critical: SK.DOM.get('alertCritical').checked,
+        alert_on_high: SK.DOM.get('alertHigh').checked,
+        alert_on_new_cve: SK.DOM.get('alertNewCVE').checked,
+        alert_on_ransomware: SK.DOM.get('alertRansomware').checked,
 
         // Alert mode settings (empty = use global default)
-        alert_mode: document.getElementById('orgAlertMode').value || null,
-        escalation_days: document.getElementById('orgEscalationDays').value ? parseInt(document.getElementById('orgEscalationDays').value) : null,
+        alert_mode: SK.DOM.get('orgAlertMode').value || null,
+        escalation_days: SK.DOM.get('orgEscalationDays').value ? parseInt(SK.DOM.get('orgEscalationDays').value) : null,
 
         // Webhook settings
-        webhook_enabled: document.getElementById('orgWebhookEnabled').checked,
-        webhook_url: document.getElementById('orgWebhookUrl').value.trim() || null,
-        webhook_format: document.getElementById('orgWebhookFormat').value,
-        webhook_name: document.getElementById('orgWebhookName').value.trim() || null,
-        webhook_token: document.getElementById('orgWebhookToken').value.trim() || null
+        webhook_enabled: SK.DOM.get('orgWebhookEnabled').checked,
+        webhook_url: SK.DOM.get('orgWebhookUrl').value.trim() || null,
+        webhook_format: SK.DOM.get('orgWebhookFormat').value,
+        webhook_name: SK.DOM.get('orgWebhookName').value.trim() || null,
+        webhook_token: SK.DOM.get('orgWebhookToken').value.trim() || null
     };
 
     try {
@@ -2008,7 +1934,7 @@ async function testSMTP() {
 }
 
 async function testOrgWebhook() {
-    const webhookUrl = document.getElementById('orgWebhookUrl').value.trim();
+    const webhookUrl = SK.DOM.get('orgWebhookUrl').value.trim();
 
     if (!webhookUrl) {
         showToast('Please enter a webhook URL first', 'warning');
@@ -2024,9 +1950,9 @@ async function testOrgWebhook() {
             body: JSON.stringify({
                 type: 'org',
                 webhook_url: webhookUrl,
-                webhook_format: document.getElementById('orgWebhookFormat').value,
-                webhook_name: document.getElementById('orgWebhookName').value || 'Organization Webhook',
-                webhook_token: document.getElementById('orgWebhookToken').value || null
+                webhook_format: SK.DOM.get('orgWebhookFormat').value,
+                webhook_name: SK.DOM.get('orgWebhookName').value || 'Organization Webhook',
+                webhook_token: SK.DOM.get('orgWebhookToken').value || null
             })
         });
 
@@ -2083,7 +2009,7 @@ function showToast(message, type = 'info') {
      * @param {string} type - Type of toast: 'success', 'danger', 'warning', 'info'
      */
     // Create toast container if it doesn't exist
-    let toastContainer = document.getElementById('toastContainer');
+    let toastContainer = SK.DOM.get('toastContainer');
     if (!toastContainer) {
         toastContainer = document.createElement('div');
         toastContainer.id = 'toastContainer';
@@ -2122,7 +2048,7 @@ function showToast(message, type = 'info') {
     toastContainer.insertAdjacentHTML('beforeend', toastHtml);
 
     // Show the toast with longer delay for errors
-    const toastElement = document.getElementById(toastId);
+    const toastElement = SK.DOM.get(toastId);
     const delay = (type === 'danger' || type === 'warning') ? 8000 : 3000;
     const toast = new bootstrap.Toast(toastElement, {
         autohide: true,
@@ -2138,10 +2064,10 @@ function showToast(message, type = 'info') {
 }
 
 function updateRoleDescription() {
-    const role = document.getElementById('userRole').value;
-    const descDiv = document.getElementById('roleDescription');
-    const viewAllOrgsCheck = document.getElementById('viewAllOrgsCheck');
-    const canManageProducts = document.getElementById('canManageProducts');
+    const role = SK.DOM.get('userRole').value;
+    const descDiv = SK.DOM.get('roleDescription');
+    const viewAllOrgsCheck = SK.DOM.get('viewAllOrgsCheck');
+    const canManageProducts = SK.DOM.get('canManageProducts');
 
     const descriptions = {
         'user': {
@@ -2184,8 +2110,8 @@ function escapeHtml(text) {
 }
 
 function autoConfigureSmtpSecurity() {
-    const port = parseInt(document.getElementById('smtpPort').value);
-    const tlsCheckbox = document.getElementById('smtpUseTls');
+    const port = parseInt(SK.DOM.get('smtpPort').value);
+    const tlsCheckbox = SK.DOM.get('smtpUseTls');
 
     // Auto-configure based on common SMTP ports
     switch(port) {
@@ -2217,18 +2143,18 @@ function autoConfigureSmtpSecurity() {
 // LDAP Settings
 async function saveLDAPSettings() {
     const settings = {
-        ldap_enabled: document.getElementById('ldapEnabled').checked,
-        ldap_server: document.getElementById('ldapServer').value,
-        ldap_port: document.getElementById('ldapPort').value,
-        ldap_base_dn: document.getElementById('ldapBaseDN').value,
-        ldap_bind_dn: document.getElementById('ldapBindDN').value,
-        ldap_bind_password: document.getElementById('ldapBindPassword').value,
-        ldap_search_filter: document.getElementById('ldapSearchFilter').value,
-        ldap_username_attr: document.getElementById('ldapUsernameAttr').value,
-        ldap_email_attr: document.getElementById('ldapEmailAttr').value,
-        ldap_use_tls: document.getElementById('ldapUseTLS').checked,
-        ldap_sync_enabled: document.getElementById('ldapSyncEnabled').checked,
-        ldap_sync_interval_hours: document.getElementById('ldapSyncInterval').value
+        ldap_enabled: SK.DOM.get('ldapEnabled').checked,
+        ldap_server: SK.DOM.get('ldapServer').value,
+        ldap_port: SK.DOM.get('ldapPort').value,
+        ldap_base_dn: SK.DOM.get('ldapBaseDN').value,
+        ldap_bind_dn: SK.DOM.get('ldapBindDN').value,
+        ldap_bind_password: SK.DOM.get('ldapBindPassword').value,
+        ldap_search_filter: SK.DOM.get('ldapSearchFilter').value,
+        ldap_username_attr: SK.DOM.get('ldapUsernameAttr').value,
+        ldap_email_attr: SK.DOM.get('ldapEmailAttr').value,
+        ldap_use_tls: SK.DOM.get('ldapUseTLS').checked,
+        ldap_sync_enabled: SK.DOM.get('ldapSyncEnabled').checked,
+        ldap_sync_interval_hours: SK.DOM.get('ldapSyncInterval').value
     };
 
     try {
@@ -2279,14 +2205,14 @@ async function testLDAPConnection() {
 // Global SMTP Settings
 async function saveGlobalSMTPSettings() {
     const settings = {
-        smtp_host: document.getElementById('globalSmtpHost').value,
-        smtp_port: document.getElementById('globalSmtpPort').value,
-        smtp_username: document.getElementById('globalSmtpUsername').value,
-        smtp_password: document.getElementById('globalSmtpPassword').value,
-        smtp_from_email: document.getElementById('globalSmtpFromEmail').value,
-        smtp_from_name: document.getElementById('globalSmtpFromName').value,
-        smtp_use_tls: document.getElementById('globalSmtpUseTLS').checked,
-        smtp_use_ssl: document.getElementById('globalSmtpUseSSL').checked
+        smtp_host: SK.DOM.get('globalSmtpHost').value,
+        smtp_port: SK.DOM.get('globalSmtpPort').value,
+        smtp_username: SK.DOM.get('globalSmtpUsername').value,
+        smtp_password: SK.DOM.get('globalSmtpPassword').value,
+        smtp_from_email: SK.DOM.get('globalSmtpFromEmail').value,
+        smtp_from_name: SK.DOM.get('globalSmtpFromName').value,
+        smtp_use_tls: SK.DOM.get('globalSmtpUseTLS').checked,
+        smtp_use_ssl: SK.DOM.get('globalSmtpUseSSL').checked
     };
 
     try {
@@ -2312,8 +2238,8 @@ async function testGlobalSMTP() {
     const originalText = btn.innerHTML;
 
     // Check if required fields are filled
-    const host = document.getElementById('globalSmtpHost').value;
-    const fromEmail = document.getElementById('globalSmtpFromEmail').value;
+    const host = SK.DOM.get('globalSmtpHost').value;
+    const fromEmail = SK.DOM.get('globalSmtpFromEmail').value;
 
     if (!host || !fromEmail) {
         showToast('⚠️ Please fill in SMTP Host and From Email fields before testing', 'warning');
@@ -2347,11 +2273,11 @@ async function testGlobalSMTP() {
 // Sync Settings
 async function saveSyncSettings() {
     const settings = {
-        auto_sync_enabled: document.getElementById('autoSyncEnabled').checked,
-        sync_interval: document.getElementById('syncInterval').value,
-        sync_time: document.getElementById('syncTime').value,
-        nvd_api_key: document.getElementById('nvdApiKey').value,
-        cisa_kev_url: document.getElementById('cisaKevUrl').value
+        auto_sync_enabled: SK.DOM.get('autoSyncEnabled').checked,
+        sync_interval: SK.DOM.get('syncInterval').value,
+        sync_time: SK.DOM.get('syncTime').value,
+        nvd_api_key: SK.DOM.get('nvdApiKey').value,
+        cisa_kev_url: SK.DOM.get('cisaKevUrl').value
     };
 
     try {
@@ -2395,9 +2321,9 @@ async function loadSyncStatus() {
             lastSyncHtml = `${statusIcon}${status.last_sync}${statsText}`;
         }
 
-        document.getElementById('lastSyncTime').innerHTML = lastSyncHtml;
-        document.getElementById('nextSyncTime').textContent = status.next_sync || 'Not scheduled';
-        document.getElementById('totalVulns').textContent = status.total_vulnerabilities || '0';
+        SK.DOM.get('lastSyncTime').innerHTML = lastSyncHtml;
+        SK.DOM.get('nextSyncTime').textContent = status.next_sync || 'Not scheduled';
+        SK.DOM.get('totalVulns').textContent = status.total_vulnerabilities || '0';
     } catch (error) {
         console.error('Error loading sync status:', error);
     }
@@ -2465,8 +2391,8 @@ async function triggerCriticalCVEAlerts() {
 
             html += '</ul>';
 
-            document.getElementById('alertResultsContent').innerHTML = html;
-            document.getElementById('alertResultsContainer').style.display = 'block';
+            SK.DOM.get('alertResultsContent').innerHTML = html;
+            SK.DOM.get('alertResultsContainer').style.display = 'block';
 
             showToast(`Critical CVE alerts processed: ${summary.emails_sent} emails sent`, 'success');
         } else {
@@ -2482,10 +2408,10 @@ async function triggerCriticalCVEAlerts() {
 // Proxy Settings
 async function saveProxySettings() {
     const settings = {
-        verify_ssl: document.getElementById('verifySSL').checked,
-        http_proxy: document.getElementById('httpProxy').value,
-        https_proxy: document.getElementById('httpsProxy').value,
-        no_proxy: document.getElementById('noProxy').value
+        verify_ssl: SK.DOM.get('verifySSL').checked,
+        http_proxy: SK.DOM.get('httpProxy').value,
+        https_proxy: SK.DOM.get('httpsProxy').value,
+        no_proxy: SK.DOM.get('noProxy').value
     };
 
     try {
@@ -2536,16 +2462,16 @@ async function testProxyConnection() {
 
 async function saveSecuritySettings() {
     const settings = {
-        session_timeout: parseInt(document.getElementById('sessionTimeout').value) || 480,
-        max_failed_logins: parseInt(document.getElementById('maxFailedLogins').value) || 5,
-        lockout_duration: parseInt(document.getElementById('lockoutDuration').value) || 30,
-        password_min_length: parseInt(document.getElementById('passwordMinLength').value) || 8,
-        password_require_uppercase: document.getElementById('passwordRequireUppercase').checked,
-        password_require_lowercase: document.getElementById('passwordRequireLowercase').checked,
-        password_require_numbers: document.getElementById('passwordRequireNumbers').checked,
-        password_require_special: document.getElementById('passwordRequireSpecial').checked,
-        password_expiry_days: parseInt(document.getElementById('passwordExpiryDays').value) || 0,
-        require_2fa: document.getElementById('require2FA').checked
+        session_timeout: parseInt(SK.DOM.get('sessionTimeout').value) || 480,
+        max_failed_logins: parseInt(SK.DOM.get('maxFailedLogins').value) || 5,
+        lockout_duration: parseInt(SK.DOM.get('lockoutDuration').value) || 30,
+        password_min_length: parseInt(SK.DOM.get('passwordMinLength').value) || 8,
+        password_require_uppercase: SK.DOM.get('passwordRequireUppercase').checked,
+        password_require_lowercase: SK.DOM.get('passwordRequireLowercase').checked,
+        password_require_numbers: SK.DOM.get('passwordRequireNumbers').checked,
+        password_require_special: SK.DOM.get('passwordRequireSpecial').checked,
+        password_expiry_days: parseInt(SK.DOM.get('passwordExpiryDays').value) || 0,
+        require_2fa: SK.DOM.get('require2FA').checked
     };
 
     try {
@@ -2571,14 +2497,14 @@ async function loadSecuritySettings() {
         const response = await fetch('/api/settings/security');
         if (response.ok) {
             const settings = await response.json();
-            const sessionTimeout = document.getElementById('sessionTimeout');
-            const maxFailedLogins = document.getElementById('maxFailedLogins');
-            const lockoutDuration = document.getElementById('lockoutDuration');
-            const passwordMinLength = document.getElementById('passwordMinLength');
-            const passwordRequireUppercase = document.getElementById('passwordRequireUppercase');
-            const passwordRequireLowercase = document.getElementById('passwordRequireLowercase');
-            const passwordRequireNumbers = document.getElementById('passwordRequireNumbers');
-            const passwordRequireSpecial = document.getElementById('passwordRequireSpecial');
+            const sessionTimeout = SK.DOM.get('sessionTimeout');
+            const maxFailedLogins = SK.DOM.get('maxFailedLogins');
+            const lockoutDuration = SK.DOM.get('lockoutDuration');
+            const passwordMinLength = SK.DOM.get('passwordMinLength');
+            const passwordRequireUppercase = SK.DOM.get('passwordRequireUppercase');
+            const passwordRequireLowercase = SK.DOM.get('passwordRequireLowercase');
+            const passwordRequireNumbers = SK.DOM.get('passwordRequireNumbers');
+            const passwordRequireSpecial = SK.DOM.get('passwordRequireSpecial');
 
             if (sessionTimeout) sessionTimeout.value = settings.session_timeout || 480;
             if (maxFailedLogins) maxFailedLogins.value = settings.max_failed_logins || 5;
@@ -2590,8 +2516,8 @@ async function loadSecuritySettings() {
             if (passwordRequireSpecial) passwordRequireSpecial.checked = settings.password_require_special === true;
 
             // Password expiration and 2FA settings
-            const passwordExpiryDays = document.getElementById('passwordExpiryDays');
-            const require2FA = document.getElementById('require2FA');
+            const passwordExpiryDays = SK.DOM.get('passwordExpiryDays');
+            const require2FA = SK.DOM.get('require2FA');
             if (passwordExpiryDays) passwordExpiryDays.value = settings.password_expiry_days || 0;
             if (require2FA) require2FA.checked = settings.require_2fa === true;
         }
@@ -2696,12 +2622,12 @@ async function confirmFullRestore() {
         'btn-danger'
     );
     if (!confirmed) return;
-    document.getElementById('restoreFullFile').click();
+    SK.DOM.get('restoreFullFile').click();
 }
 
 // Setup restore file input listeners
 document.addEventListener('DOMContentLoaded', function() {
-    const restoreFile = document.getElementById('restoreFile');
+    const restoreFile = SK.DOM.get('restoreFile');
     if (restoreFile) {
         restoreFile.addEventListener('change', function(e) {
             if (e.target.files.length > 0) {
@@ -2711,7 +2637,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    const restoreFullFile = document.getElementById('restoreFullFile');
+    const restoreFullFile = SK.DOM.get('restoreFullFile');
     if (restoreFullFile) {
         restoreFullFile.addEventListener('change', function(e) {
             if (e.target.files.length > 0) {
@@ -2728,10 +2654,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function saveBrandingSettings() {
     const settings = {
-        app_name: document.getElementById('appName').value || 'SentriKat',
-        login_message: document.getElementById('loginMessage').value || '',
-        support_email: document.getElementById('supportEmail').value || '',
-        show_version: document.getElementById('showVersion').checked
+        app_name: SK.DOM.get('appName').value || 'SentriKat',
+        login_message: SK.DOM.get('loginMessage').value || '',
+        support_email: SK.DOM.get('supportEmail').value || '',
+        show_version: SK.DOM.get('showVersion').checked
     };
 
     try {
@@ -2757,12 +2683,12 @@ async function loadBrandingSettings() {
         const response = await fetch('/api/settings/branding');
         if (response.ok) {
             const settings = await response.json();
-            const appName = document.getElementById('appName');
-            const loginMessage = document.getElementById('loginMessage');
-            const supportEmail = document.getElementById('supportEmail');
-            const showVersion = document.getElementById('showVersion');
-            const logoPreview = document.getElementById('currentLogoPreview');
-            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
+            const appName = SK.DOM.get('appName');
+            const loginMessage = SK.DOM.get('loginMessage');
+            const supportEmail = SK.DOM.get('supportEmail');
+            const showVersion = SK.DOM.get('showVersion');
+            const logoPreview = SK.DOM.get('currentLogoPreview');
+            const deleteLogoBtn = SK.DOM.get('deleteLogoBtn');
 
             if (appName) appName.value = settings.app_name || 'SentriKat';
             if (loginMessage) loginMessage.value = settings.login_message || '';
@@ -2783,7 +2709,7 @@ async function loadBrandingSettings() {
 }
 
 async function uploadLogo() {
-    const fileInput = document.getElementById('logoUpload');
+    const fileInput = SK.DOM.get('logoUpload');
     if (!fileInput.files || fileInput.files.length === 0) {
         showToast('Please select a file to upload', 'warning');
         return;
@@ -2805,8 +2731,8 @@ async function uploadLogo() {
         if (response.ok && data.success) {
             showToast('Logo uploaded successfully', 'success');
             // Update preview
-            const logoPreview = document.getElementById('currentLogoPreview');
-            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
+            const logoPreview = SK.DOM.get('currentLogoPreview');
+            const deleteLogoBtn = SK.DOM.get('deleteLogoBtn');
             if (logoPreview) logoPreview.src = data.logo_url + '?t=' + Date.now();
             if (deleteLogoBtn) deleteLogoBtn.style.display = 'inline-block';
             // Clear input
@@ -2836,8 +2762,8 @@ async function deleteLogo() {
         if (response.ok && data.success) {
             showToast('Logo removed, reverted to default', 'success');
             // Reset preview
-            const logoPreview = document.getElementById('currentLogoPreview');
-            const deleteLogoBtn = document.getElementById('deleteLogoBtn');
+            const logoPreview = SK.DOM.get('currentLogoPreview');
+            const deleteLogoBtn = SK.DOM.get('deleteLogoBtn');
             if (logoPreview) logoPreview.src = '/static/images/favicon-128x128.png';
             if (deleteLogoBtn) deleteLogoBtn.style.display = 'none';
         } else {
@@ -2856,24 +2782,24 @@ async function deleteLogo() {
 
 async function saveNotificationSettings() {
     const settings = {
-        slack_enabled: document.getElementById('slackEnabled').checked,
-        slack_webhook_url: document.getElementById('slackWebhookUrl').value || '',
-        teams_enabled: document.getElementById('teamsEnabled').checked,
-        teams_webhook_url: document.getElementById('teamsWebhookUrl').value || '',
+        slack_enabled: SK.DOM.get('slackEnabled').checked,
+        slack_webhook_url: SK.DOM.get('slackWebhookUrl').value || '',
+        teams_enabled: SK.DOM.get('teamsEnabled').checked,
+        teams_webhook_url: SK.DOM.get('teamsWebhookUrl').value || '',
         // Generic webhook settings
-        generic_webhook_enabled: document.getElementById('genericWebhookEnabled').checked,
-        generic_webhook_url: document.getElementById('genericWebhookUrl').value || '',
-        generic_webhook_name: document.getElementById('genericWebhookName').value || 'Custom Webhook',
-        generic_webhook_format: document.getElementById('genericWebhookFormat').value || 'slack',
-        generic_webhook_custom_template: document.getElementById('genericWebhookTemplate').value || '',
-        generic_webhook_token: document.getElementById('genericWebhookToken').value || '',
+        generic_webhook_enabled: SK.DOM.get('genericWebhookEnabled').checked,
+        generic_webhook_url: SK.DOM.get('genericWebhookUrl').value || '',
+        generic_webhook_name: SK.DOM.get('genericWebhookName').value || 'Custom Webhook',
+        generic_webhook_format: SK.DOM.get('genericWebhookFormat').value || 'slack',
+        generic_webhook_custom_template: SK.DOM.get('genericWebhookTemplate').value || '',
+        generic_webhook_token: SK.DOM.get('genericWebhookToken').value || '',
         // Email settings
-        critical_email_enabled: document.getElementById('criticalEmailEnabled').checked,
-        critical_email_time: document.getElementById('criticalEmailTime').value || '09:00',
-        critical_email_max_age_days: parseInt(document.getElementById('criticalEmailMaxAge').value) || 30,
+        critical_email_enabled: SK.DOM.get('criticalEmailEnabled').checked,
+        critical_email_time: SK.DOM.get('criticalEmailTime').value || '09:00',
+        critical_email_max_age_days: parseInt(SK.DOM.get('criticalEmailMaxAge').value) || 30,
         // Alert mode defaults
-        default_alert_mode: document.getElementById('defaultAlertMode').value || 'daily_reminder',
-        default_escalation_days: parseInt(document.getElementById('defaultEscalationDays').value) || 3
+        default_alert_mode: SK.DOM.get('defaultAlertMode').value || 'daily_reminder',
+        default_escalation_days: parseInt(SK.DOM.get('defaultEscalationDays').value) || 3
     };
 
     try {
@@ -2899,20 +2825,20 @@ async function loadNotificationSettings() {
         const response = await fetch('/api/settings/notifications');
         if (response.ok) {
             const settings = await response.json();
-            const slackEnabled = document.getElementById('slackEnabled');
-            const slackWebhookUrl = document.getElementById('slackWebhookUrl');
-            const teamsEnabled = document.getElementById('teamsEnabled');
-            const teamsWebhookUrl = document.getElementById('teamsWebhookUrl');
-            const genericWebhookEnabled = document.getElementById('genericWebhookEnabled');
-            const genericWebhookUrl = document.getElementById('genericWebhookUrl');
-            const genericWebhookName = document.getElementById('genericWebhookName');
-            const genericWebhookFormat = document.getElementById('genericWebhookFormat');
-            const genericWebhookTemplate = document.getElementById('genericWebhookTemplate');
-            const genericWebhookToken = document.getElementById('genericWebhookToken');
-            const customTemplateContainer = document.getElementById('customTemplateContainer');
-            const criticalEmailEnabled = document.getElementById('criticalEmailEnabled');
-            const criticalEmailTime = document.getElementById('criticalEmailTime');
-            const criticalEmailMaxAge = document.getElementById('criticalEmailMaxAge');
+            const slackEnabled = SK.DOM.get('slackEnabled');
+            const slackWebhookUrl = SK.DOM.get('slackWebhookUrl');
+            const teamsEnabled = SK.DOM.get('teamsEnabled');
+            const teamsWebhookUrl = SK.DOM.get('teamsWebhookUrl');
+            const genericWebhookEnabled = SK.DOM.get('genericWebhookEnabled');
+            const genericWebhookUrl = SK.DOM.get('genericWebhookUrl');
+            const genericWebhookName = SK.DOM.get('genericWebhookName');
+            const genericWebhookFormat = SK.DOM.get('genericWebhookFormat');
+            const genericWebhookTemplate = SK.DOM.get('genericWebhookTemplate');
+            const genericWebhookToken = SK.DOM.get('genericWebhookToken');
+            const customTemplateContainer = SK.DOM.get('customTemplateContainer');
+            const criticalEmailEnabled = SK.DOM.get('criticalEmailEnabled');
+            const criticalEmailTime = SK.DOM.get('criticalEmailTime');
+            const criticalEmailMaxAge = SK.DOM.get('criticalEmailMaxAge');
 
             if (slackEnabled) slackEnabled.checked = settings.slack_enabled === true;
             if (slackWebhookUrl) slackWebhookUrl.value = settings.slack_webhook_url || '';
@@ -2938,8 +2864,8 @@ async function loadNotificationSettings() {
             if (criticalEmailMaxAge) criticalEmailMaxAge.value = settings.critical_email_max_age_days || 30;
 
             // Alert mode defaults
-            const defaultAlertMode = document.getElementById('defaultAlertMode');
-            const defaultEscalationDays = document.getElementById('defaultEscalationDays');
+            const defaultAlertMode = SK.DOM.get('defaultAlertMode');
+            const defaultEscalationDays = SK.DOM.get('defaultEscalationDays');
             if (defaultAlertMode) defaultAlertMode.value = settings.default_alert_mode || 'daily_reminder';
             if (defaultEscalationDays) defaultEscalationDays.value = settings.default_escalation_days || 3;
 
@@ -2986,9 +2912,9 @@ async function testWebhook(type) {
 
 async function saveRetentionSettings() {
     const settings = {
-        audit_log_retention_days: parseInt(document.getElementById('auditLogRetention').value) || 365,
-        sync_history_retention_days: parseInt(document.getElementById('syncHistoryRetention').value) || 90,
-        session_log_retention_days: parseInt(document.getElementById('sessionLogRetention').value) || 30
+        audit_log_retention_days: parseInt(SK.DOM.get('auditLogRetention').value) || 365,
+        sync_history_retention_days: parseInt(SK.DOM.get('syncHistoryRetention').value) || 90,
+        session_log_retention_days: parseInt(SK.DOM.get('sessionLogRetention').value) || 30
     };
 
     try {
@@ -3014,9 +2940,9 @@ async function loadRetentionSettings() {
         const response = await fetch('/api/settings/retention');
         if (response.ok) {
             const settings = await response.json();
-            const auditLogRetention = document.getElementById('auditLogRetention');
-            const syncHistoryRetention = document.getElementById('syncHistoryRetention');
-            const sessionLogRetention = document.getElementById('sessionLogRetention');
+            const auditLogRetention = SK.DOM.get('auditLogRetention');
+            const syncHistoryRetention = SK.DOM.get('syncHistoryRetention');
+            const sessionLogRetention = SK.DOM.get('sessionLogRetention');
 
             if (auditLogRetention) auditLogRetention.value = settings.audit_log_retention_days || 365;
             if (syncHistoryRetention) syncHistoryRetention.value = settings.sync_history_retention_days || 90;
@@ -3032,9 +2958,9 @@ async function loadRetentionSettings() {
 // ============================================================================
 
 async function loadAuditLogs() {
-    const tbody = document.getElementById('auditLogsTable');
-    const statsDiv = document.getElementById('auditLogsStats');
-    const countSpan = document.getElementById('auditLogsCount');
+    const tbody = SK.DOM.get('auditLogsTable');
+    const statsDiv = SK.DOM.get('auditLogsStats');
+    const countSpan = SK.DOM.get('auditLogsCount');
 
     // Show loading
     tbody.innerHTML = `
@@ -3047,9 +2973,9 @@ async function loadAuditLogs() {
     `;
 
     // Get filter values
-    const action = document.getElementById('auditActionFilter')?.value || '';
-    const resource = document.getElementById('auditResourceFilter')?.value || '';
-    const limit = document.getElementById('auditLimitFilter')?.value || '100';
+    const action = SK.DOM.get('auditActionFilter')?.value || '';
+    const resource = SK.DOM.get('auditResourceFilter')?.value || '';
+    const limit = SK.DOM.get('auditLimitFilter')?.value || '100';
 
     // Build query string
     const params = new URLSearchParams();
@@ -3177,17 +3103,17 @@ async function loadAllSettings() {
             .then(async response => {
                 if (response.ok) {
                     const ldap = await response.json();
-                    const ldapEnabled = document.getElementById('ldapEnabled');
-                    const ldapServer = document.getElementById('ldapServer');
-                    const ldapPort = document.getElementById('ldapPort');
-                    const ldapBaseDN = document.getElementById('ldapBaseDN');
-                    const ldapBindDN = document.getElementById('ldapBindDN');
-                    const ldapSearchFilter = document.getElementById('ldapSearchFilter');
-                    const ldapUsernameAttr = document.getElementById('ldapUsernameAttr');
-                    const ldapEmailAttr = document.getElementById('ldapEmailAttr');
-                    const ldapUseTLS = document.getElementById('ldapUseTLS');
-                    const ldapSyncEnabled = document.getElementById('ldapSyncEnabled');
-                    const ldapSyncInterval = document.getElementById('ldapSyncInterval');
+                    const ldapEnabled = SK.DOM.get('ldapEnabled');
+                    const ldapServer = SK.DOM.get('ldapServer');
+                    const ldapPort = SK.DOM.get('ldapPort');
+                    const ldapBaseDN = SK.DOM.get('ldapBaseDN');
+                    const ldapBindDN = SK.DOM.get('ldapBindDN');
+                    const ldapSearchFilter = SK.DOM.get('ldapSearchFilter');
+                    const ldapUsernameAttr = SK.DOM.get('ldapUsernameAttr');
+                    const ldapEmailAttr = SK.DOM.get('ldapEmailAttr');
+                    const ldapUseTLS = SK.DOM.get('ldapUseTLS');
+                    const ldapSyncEnabled = SK.DOM.get('ldapSyncEnabled');
+                    const ldapSyncInterval = SK.DOM.get('ldapSyncInterval');
 
                     if (ldapEnabled) ldapEnabled.checked = ldap.ldap_enabled || false;
                     if (ldapServer) ldapServer.value = ldap.ldap_server || '';
@@ -3202,8 +3128,8 @@ async function loadAllSettings() {
                     if (ldapSyncInterval) ldapSyncInterval.value = ldap.ldap_sync_interval_hours || '24';
 
                     // Populate Group Search Base DN with LDAP Base DN as default
-                    const groupSearchBaseInline = document.getElementById('groupSearchBaseInline');
-                    const groupSearchBase = document.getElementById('groupSearchBase');
+                    const groupSearchBaseInline = SK.DOM.get('groupSearchBaseInline');
+                    const groupSearchBase = SK.DOM.get('groupSearchBase');
                     if (groupSearchBaseInline && !groupSearchBaseInline.value && ldap.ldap_base_dn) {
                         groupSearchBaseInline.value = ldap.ldap_base_dn;
                     }
@@ -3224,13 +3150,13 @@ async function loadAllSettings() {
             .then(async response => {
                 if (response.ok) {
                     const smtp = await response.json();
-                    const globalSmtpHost = document.getElementById('globalSmtpHost');
-                    const globalSmtpPort = document.getElementById('globalSmtpPort');
-                    const globalSmtpUsername = document.getElementById('globalSmtpUsername');
-                    const globalSmtpFromEmail = document.getElementById('globalSmtpFromEmail');
-                    const globalSmtpFromName = document.getElementById('globalSmtpFromName');
-                    const globalSmtpUseTLS = document.getElementById('globalSmtpUseTLS');
-                    const globalSmtpUseSSL = document.getElementById('globalSmtpUseSSL');
+                    const globalSmtpHost = SK.DOM.get('globalSmtpHost');
+                    const globalSmtpPort = SK.DOM.get('globalSmtpPort');
+                    const globalSmtpUsername = SK.DOM.get('globalSmtpUsername');
+                    const globalSmtpFromEmail = SK.DOM.get('globalSmtpFromEmail');
+                    const globalSmtpFromName = SK.DOM.get('globalSmtpFromName');
+                    const globalSmtpUseTLS = SK.DOM.get('globalSmtpUseTLS');
+                    const globalSmtpUseSSL = SK.DOM.get('globalSmtpUseSSL');
 
                     if (globalSmtpHost) globalSmtpHost.value = smtp.smtp_host || '';
                     if (globalSmtpPort) globalSmtpPort.value = smtp.smtp_port || 587;
@@ -3251,11 +3177,11 @@ async function loadAllSettings() {
             .then(async response => {
                 if (response.ok) {
                     const sync = await response.json();
-                    const autoSyncEnabled = document.getElementById('autoSyncEnabled');
-                    const syncInterval = document.getElementById('syncInterval');
-                    const syncTime = document.getElementById('syncTime');
-                    const cisaKevUrl = document.getElementById('cisaKevUrl');
-                    const nvdKeyInput = document.getElementById('nvdApiKey');
+                    const autoSyncEnabled = SK.DOM.get('autoSyncEnabled');
+                    const syncInterval = SK.DOM.get('syncInterval');
+                    const syncTime = SK.DOM.get('syncTime');
+                    const cisaKevUrl = SK.DOM.get('cisaKevUrl');
+                    const nvdKeyInput = SK.DOM.get('nvdApiKey');
 
                     if (autoSyncEnabled) autoSyncEnabled.checked = sync.auto_sync_enabled || false;
                     if (syncInterval) syncInterval.value = sync.sync_interval || 'daily';
@@ -3279,10 +3205,10 @@ async function loadAllSettings() {
             .then(async response => {
                 if (response.ok) {
                     const general = await response.json();
-                    const verifySSL = document.getElementById('verifySSL');
-                    const httpProxy = document.getElementById('httpProxy');
-                    const httpsProxy = document.getElementById('httpsProxy');
-                    const noProxy = document.getElementById('noProxy');
+                    const verifySSL = SK.DOM.get('verifySSL');
+                    const httpProxy = SK.DOM.get('httpProxy');
+                    const httpsProxy = SK.DOM.get('httpsProxy');
+                    const noProxy = SK.DOM.get('noProxy');
                     if (verifySSL) verifySSL.checked = general.verify_ssl !== false;
                     if (httpProxy) httpProxy.value = general.http_proxy || '';
                     if (httpsProxy) httpsProxy.value = general.https_proxy || '';
@@ -3315,9 +3241,9 @@ async function loadAllSettings() {
  * Load LDAP users by default when tab is shown (uses wildcard search)
  */
 async function loadLDAPUsersDefault() {
-    const resultsDiv = document.getElementById('ldapSearchResultsTable');
-    const statsDiv = document.getElementById('ldapSearchStats');
-    const searchInput = document.getElementById('ldapUserSearchQuery');
+    const resultsDiv = SK.DOM.get('ldapSearchResultsTable');
+    const statsDiv = SK.DOM.get('ldapSearchStats');
+    const searchInput = SK.DOM.get('ldapUserSearchQuery');
 
     // Set default search to wildcard if empty
     if (searchInput && !searchInput.value.trim()) {
@@ -3376,9 +3302,9 @@ async function loadLDAPUsersDefault() {
  * Display paginated LDAP user results from cache
  */
 function displayLDAPUserResults(page = 1) {
-    const resultsDiv = document.getElementById('ldapSearchResultsTable');
-    const statsDiv = document.getElementById('ldapSearchStats');
-    const pageSize = parseInt(document.getElementById('ldapSearchPageSize')?.value) || 25;
+    const resultsDiv = SK.DOM.get('ldapSearchResultsTable');
+    const statsDiv = SK.DOM.get('ldapSearchStats');
+    const pageSize = parseInt(SK.DOM.get('ldapSearchPageSize')?.value) || 25;
 
     const allResults = ldapSearchCache.results || [];
     ldapSearchCache.currentPage = page;
@@ -3402,8 +3328,8 @@ function displayLDAPUserResults(page = 1) {
     const pageResults = allResults.slice(startIdx, endIdx);
 
     // Update stats
-    if (document.getElementById('ldapResultCount')) {
-        document.getElementById('ldapResultCount').textContent =
+    if (SK.DOM.get('ldapResultCount')) {
+        SK.DOM.get('ldapResultCount').textContent =
             `${startIdx + 1}-${endIdx} of ${allResults.length}`;
     }
     if (statsDiv) {
@@ -3412,8 +3338,8 @@ function displayLDAPUserResults(page = 1) {
 
     // Build pagination controls
     const paginationHtml = buildLdapPagination(page, totalPages);
-    if (document.getElementById('ldapPagination')) {
-        document.getElementById('ldapPagination').innerHTML = paginationHtml;
+    if (SK.DOM.get('ldapPagination')) {
+        SK.DOM.get('ldapPagination').innerHTML = paginationHtml;
     }
 
     // Display results in table
@@ -3487,8 +3413,8 @@ async function checkLdapPermissions() {
             // LDAP Groups tab: only visible to super_admin (system-level config)
             const canAccessLdapGroups = user.role === 'super_admin' || user.is_admin === true;
 
-            const ldapUsersTab = document.getElementById('ldap-users-tab-item');
-            const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+            const ldapUsersTab = SK.DOM.get('ldap-users-tab-item');
+            const ldapGroupsTab = SK.DOM.get('ldap-groups-tab-item');
 
             if (ldapUsersTab && canAccessLdapUsers) {
                 ldapUsersTab.style.display = 'block';
@@ -3514,16 +3440,16 @@ let ldapSearchCache = {
  * Inline LDAP user search with pagination
  */
 async function searchLdapUsersInline(page = 1) {
-    const query = document.getElementById('ldapUserSearchQuery').value.trim();
-    const pageSize = parseInt(document.getElementById('ldapSearchPageSize').value) || 25;
+    const query = SK.DOM.get('ldapUserSearchQuery').value.trim();
+    const pageSize = parseInt(SK.DOM.get('ldapSearchPageSize').value) || 25;
 
     if (!query) {
         showToast('Please enter a search query', 'warning');
         return;
     }
 
-    const resultsDiv = document.getElementById('ldapSearchResultsTable');
-    const statsDiv = document.getElementById('ldapSearchStats');
+    const resultsDiv = SK.DOM.get('ldapSearchResultsTable');
+    const statsDiv = SK.DOM.get('ldapSearchStats');
 
     // Show loading
     resultsDiv.innerHTML = `
@@ -3576,13 +3502,13 @@ async function searchLdapUsersInline(page = 1) {
         const pageResults = allResults.slice(startIdx, endIdx);
 
         // Update stats
-        document.getElementById('ldapResultCount').textContent =
+        SK.DOM.get('ldapResultCount').textContent =
             `${startIdx + 1}-${endIdx} of ${allResults.length}`;
         statsDiv.style.display = 'block';
 
         // Build pagination controls
         const paginationHtml = buildLdapPagination(page, totalPages);
-        document.getElementById('ldapPagination').innerHTML = paginationHtml;
+        SK.DOM.get('ldapPagination').innerHTML = paginationHtml;
 
         // Display results in table
         const tableHtml = `
@@ -3707,13 +3633,13 @@ function buildLdapPagination(currentPage, totalPages) {
  */
 async function showInviteLdapUserModalInline(user) {
     // Use correct field IDs matching the modal
-    document.getElementById('ldapInviteUsername').value = user.username;
-    document.getElementById('ldapInviteEmail').value = user.email;
-    document.getElementById('ldapInviteFullName').value = user.full_name || '';
-    document.getElementById('ldapUserDN').value = user.dn;
+    SK.DOM.get('ldapInviteUsername').value = user.username;
+    SK.DOM.get('ldapInviteEmail').value = user.email;
+    SK.DOM.get('ldapInviteFullName').value = user.full_name || '';
+    SK.DOM.get('ldapUserDN').value = user.dn;
 
     // Set groups loading state
-    const groupsSpan = document.getElementById('ldapGroupsList');
+    const groupsSpan = SK.DOM.get('ldapGroupsList');
     if (groupsSpan) {
         groupsSpan.textContent = 'Loading...';
     }
@@ -3723,7 +3649,7 @@ async function showInviteLdapUserModalInline(user) {
         const response = await fetch('/api/organizations');
         if (response.ok) {
             const orgs = await response.json();
-            const select = document.getElementById('ldapInviteOrganization');
+            const select = SK.DOM.get('ldapInviteOrganization');
             if (select) {
                 select.innerHTML = '<option value="">Select organization...</option>' +
                     orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
@@ -3780,7 +3706,7 @@ async function showInviteLdapUserModalInline(user) {
         }
     }
 
-    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('ldapInviteModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('ldapInviteModal'));
     modal.show();
 }
 
@@ -3791,13 +3717,13 @@ function showLdapSearchModal() {
 }
 
 async function searchLdapUsers() {
-    const query = document.getElementById('ldapSearchQuery').value.trim();
+    const query = SK.DOM.get('ldapSearchQuery').value.trim();
     if (!query) {
         showToast('Please enter a search query', 'warning');
         return;
     }
 
-    const resultsDiv = document.getElementById('ldapSearchResultsTable');
+    const resultsDiv = SK.DOM.get('ldapSearchResultsTable');
     resultsDiv.innerHTML = `
         <div class="text-center py-4">
             <div class="spinner-border text-primary" role="status"></div>
@@ -3894,20 +3820,20 @@ async function searchLdapUsers() {
 async function showInviteLdapUserModal(userData) {
     try {
         // Populate form with user data
-        document.getElementById('ldapUserDN').value = userData.dn;
-        document.getElementById('ldapInviteUsername').value = userData.username;
-        document.getElementById('ldapInviteEmail').value = userData.email;
-        document.getElementById('ldapInviteFullName').value = userData.full_name || '';
+        SK.DOM.get('ldapUserDN').value = userData.dn;
+        SK.DOM.get('ldapInviteUsername').value = userData.username;
+        SK.DOM.get('ldapInviteEmail').value = userData.email;
+        SK.DOM.get('ldapInviteFullName').value = userData.full_name || '';
 
         // Load organizations into dropdown
         const orgResponse = await fetch('/api/organizations');
         const orgs = await orgResponse.json();
-        const orgSelect = document.getElementById('ldapInviteOrganization');
+        const orgSelect = SK.DOM.get('ldapInviteOrganization');
         orgSelect.innerHTML = '<option value="">Select organization...</option>' +
             orgs.map(org => `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`).join('');
 
         // Load user's LDAP groups
-        document.getElementById('ldapGroupsList').textContent = 'Loading...';
+        SK.DOM.get('ldapGroupsList').textContent = 'Loading...';
 
         const groupsResponse = await fetch('/api/ldap/user-groups', {
             method: 'POST',
@@ -3920,13 +3846,13 @@ async function showInviteLdapUserModal(userData) {
             const groupsList = groupsData.groups.length > 0
                 ? groupsData.groups.join(', ')
                 : 'No groups found';
-            document.getElementById('ldapGroupsList').textContent = groupsList;
+            SK.DOM.get('ldapGroupsList').textContent = groupsList;
         } else {
-            document.getElementById('ldapGroupsList').textContent = 'Could not load groups';
+            SK.DOM.get('ldapGroupsList').textContent = 'Could not load groups';
         }
 
         // Show the modal
-        const modalElement = document.getElementById('ldapInviteModal');
+        const modalElement = SK.DOM.get('ldapInviteModal');
         const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
         modal.show();
 
@@ -3937,12 +3863,12 @@ async function showInviteLdapUserModal(userData) {
 }
 
 async function inviteLdapUser() {
-    const username = document.getElementById('ldapInviteUsername').value;
-    const email = document.getElementById('ldapInviteEmail').value;
-    const fullName = document.getElementById('ldapInviteFullName').value;
-    const dn = document.getElementById('ldapUserDN').value;
-    const organizationId = parseInt(document.getElementById('ldapInviteOrganization').value);
-    const role = document.getElementById('ldapInviteRole').value;
+    const username = SK.DOM.get('ldapInviteUsername').value;
+    const email = SK.DOM.get('ldapInviteEmail').value;
+    const fullName = SK.DOM.get('ldapInviteFullName').value;
+    const dn = SK.DOM.get('ldapUserDN').value;
+    const organizationId = parseInt(SK.DOM.get('ldapInviteOrganization').value);
+    const role = SK.DOM.get('ldapInviteRole').value;
 
     if (!organizationId) {
         showToast('Please select an organization', 'warning');
@@ -4005,7 +3931,7 @@ async function inviteLdapUser() {
             loadUsers();
 
             // Refresh search results if search is active
-            const searchQuery = document.getElementById('ldapUserSearchQuery')?.value;
+            const searchQuery = SK.DOM.get('ldapUserSearchQuery')?.value;
             if (searchQuery) {
                 // Clear cache to force refresh and show updated status
                 ldapSearchCache.query = '';
@@ -4041,7 +3967,7 @@ async function inviteLdapUser() {
  * Load all LDAP group mappings
  */
 async function loadGroupMappings() {
-    const tableBody = document.getElementById('groupMappingsTable');
+    const tableBody = SK.DOM.get('groupMappingsTable');
     if (!tableBody) return;
 
     // Check if LDAP feature is licensed before attempting to load
@@ -4139,7 +4065,7 @@ async function loadGroupMappings() {
             }).join('');
 
             // Reset select all checkbox
-            const selectAllMappings = document.getElementById('selectAllMappings');
+            const selectAllMappings = SK.DOM.get('selectAllMappings');
             if (selectAllMappings) selectAllMappings.checked = false;
 
             // Clear selection state
@@ -4195,24 +4121,24 @@ async function loadGroupMappings() {
 async function showCreateMappingModal() {
     try {
         // Reset form
-        const form = document.getElementById('groupMappingForm');
+        const form = SK.DOM.get('groupMappingForm');
         if (form) {
             form.reset();
             // Clear member count data attribute
             delete form.dataset.memberCount;
         }
 
-        const mappingIdEl = document.getElementById('mappingId');
+        const mappingIdEl = SK.DOM.get('mappingId');
         if (mappingIdEl) mappingIdEl.value = '';
 
-        const titleEl = document.getElementById('groupMappingModalTitle');
+        const titleEl = SK.DOM.get('groupMappingModalTitle');
         if (titleEl) titleEl.textContent = 'Create Group Mapping';
 
         // Load organizations dropdown
         await loadOrganizationsForMapping();
 
         // Show modal
-        const modalEl = document.getElementById('groupMappingModal');
+        const modalEl = SK.DOM.get('groupMappingModal');
         if (!modalEl) {
             console.error('groupMappingModal element not found');
             showToast('Error: Modal not found', 'danger');
@@ -4242,23 +4168,23 @@ async function editGroupMapping(mappingId) {
             }
 
             // Populate form
-            document.getElementById('mappingId').value = mapping.id;
-            document.getElementById('ldapGroupDn').value = mapping.ldap_group_dn;
-            document.getElementById('ldapGroupCn').value = mapping.ldap_group_cn;
-            document.getElementById('ldapGroupDescription').value = mapping.ldap_group_description || '';
-            document.getElementById('mappingRole').value = mapping.role;
-            document.getElementById('mappingPriority').value = mapping.priority;
-            document.getElementById('autoProvision').checked = mapping.auto_provision;
-            document.getElementById('autoDeprovision').checked = mapping.auto_deprovision;
-            document.getElementById('syncEnabled').checked = mapping.sync_enabled;
+            SK.DOM.get('mappingId').value = mapping.id;
+            SK.DOM.get('ldapGroupDn').value = mapping.ldap_group_dn;
+            SK.DOM.get('ldapGroupCn').value = mapping.ldap_group_cn;
+            SK.DOM.get('ldapGroupDescription').value = mapping.ldap_group_description || '';
+            SK.DOM.get('mappingRole').value = mapping.role;
+            SK.DOM.get('mappingPriority').value = mapping.priority;
+            SK.DOM.get('autoProvision').checked = mapping.auto_provision;
+            SK.DOM.get('autoDeprovision').checked = mapping.auto_deprovision;
+            SK.DOM.get('syncEnabled').checked = mapping.sync_enabled;
 
             // Load organizations and set selected
             await loadOrganizationsForMapping();
-            document.getElementById('mappingOrganization').value = mapping.organization_id || '';
+            SK.DOM.get('mappingOrganization').value = mapping.organization_id || '';
 
-            document.getElementById('groupMappingModalTitle').textContent = 'Edit Group Mapping';
+            SK.DOM.get('groupMappingModalTitle').textContent = 'Edit Group Mapping';
 
-            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('groupMappingModal'));
+            const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('groupMappingModal'));
             modal.show();
         }
     } catch (error) {
@@ -4271,18 +4197,18 @@ async function editGroupMapping(mappingId) {
  * Save group mapping (create or update)
  */
 async function saveGroupMapping() {
-    const mappingId = document.getElementById('mappingId').value;
-    const form = document.getElementById('groupMappingForm');
+    const mappingId = SK.DOM.get('mappingId').value;
+    const form = SK.DOM.get('groupMappingForm');
     const data = {
-        ldap_group_dn: document.getElementById('ldapGroupDn').value.trim(),
-        ldap_group_cn: document.getElementById('ldapGroupCn').value.trim(),
-        ldap_group_description: document.getElementById('ldapGroupDescription').value.trim(),
-        organization_id: document.getElementById('mappingOrganization').value || null,
-        role: document.getElementById('mappingRole').value,
-        priority: parseInt(document.getElementById('mappingPriority').value),
-        auto_provision: document.getElementById('autoProvision').checked,
-        auto_deprovision: document.getElementById('autoDeprovision').checked,
-        sync_enabled: document.getElementById('syncEnabled').checked
+        ldap_group_dn: SK.DOM.get('ldapGroupDn').value.trim(),
+        ldap_group_cn: SK.DOM.get('ldapGroupCn').value.trim(),
+        ldap_group_description: SK.DOM.get('ldapGroupDescription').value.trim(),
+        organization_id: SK.DOM.get('mappingOrganization').value || null,
+        role: SK.DOM.get('mappingRole').value,
+        priority: parseInt(SK.DOM.get('mappingPriority').value),
+        auto_provision: SK.DOM.get('autoProvision').checked,
+        auto_deprovision: SK.DOM.get('autoDeprovision').checked,
+        sync_enabled: SK.DOM.get('syncEnabled').checked
     };
 
     // Include member_count if creating a new mapping (from discovered groups)
@@ -4360,7 +4286,7 @@ async function deleteGroupMapping(mappingId) {
  * Load organizations for the mapping dropdown
  */
 async function loadOrganizationsForMapping() {
-    const select = document.getElementById('mappingOrganization');
+    const select = SK.DOM.get('mappingOrganization');
     if (!select) return;
 
     try {
@@ -4382,8 +4308,8 @@ async function loadOrganizationsForMapping() {
  * Toggle group discovery panel visibility
  */
 function toggleGroupDiscovery() {
-    const panel = document.getElementById('groupDiscoveryPanel');
-    const icon = document.getElementById('discoveryToggleIcon');
+    const panel = SK.DOM.get('groupDiscoveryPanel');
+    const icon = SK.DOM.get('discoveryToggleIcon');
 
     if (panel.style.display === 'none') {
         panel.style.display = 'block';
@@ -4398,8 +4324,8 @@ function toggleGroupDiscovery() {
  * Inline LDAP group discovery (replaces modal)
  */
 async function performGroupDiscoveryInline() {
-    const searchBase = document.getElementById('groupSearchBaseInline').value.trim();
-    const container = document.getElementById('discoveredGroupsContainerInline');
+    const searchBase = SK.DOM.get('groupSearchBaseInline').value.trim();
+    const container = SK.DOM.get('discoveredGroupsContainerInline');
 
     if (!searchBase) {
         showToast('Please enter a search base DN', 'warning');
@@ -4512,10 +4438,10 @@ async function createMappingFromDiscoveryInline(dn, cn, description, memberCount
     await showCreateMappingModal();
 
     // Pre-fill the form with discovered group info
-    const form = document.getElementById('groupMappingForm');
-    const dnField = document.getElementById('ldapGroupDn');
-    const cnField = document.getElementById('ldapGroupCn');
-    const descField = document.getElementById('ldapGroupDescription');
+    const form = SK.DOM.get('groupMappingForm');
+    const dnField = SK.DOM.get('ldapGroupDn');
+    const cnField = SK.DOM.get('ldapGroupCn');
+    const descField = SK.DOM.get('ldapGroupDescription');
 
     if (dnField) dnField.value = dn;
     if (cnField) cnField.value = cn;
@@ -4525,12 +4451,12 @@ async function createMappingFromDiscoveryInline(dn, cn, description, memberCount
     if (form) form.dataset.memberCount = memberCount || 0;
 
     // Update modal title
-    const titleEl = document.getElementById('groupMappingModalTitle');
+    const titleEl = SK.DOM.get('groupMappingModalTitle');
     if (titleEl) titleEl.textContent = 'Create Group Mapping';
 
     // Optionally collapse the discovery panel
-    const panel = document.getElementById('groupDiscoveryPanel');
-    const icon = document.getElementById('discoveryToggleIcon');
+    const panel = SK.DOM.get('groupDiscoveryPanel');
+    const icon = SK.DOM.get('discoveryToggleIcon');
     if (panel) panel.style.display = 'none';
     if (icon) icon.className = 'bi bi-chevron-down';
 }
@@ -4545,8 +4471,8 @@ function discoverLdapGroups() {
  * Perform LDAP group discovery
  */
 async function performGroupDiscovery() {
-    const searchBase = document.getElementById('groupSearchBase').value.trim();
-    const container = document.getElementById('discoveredGroupsContainer');
+    const searchBase = SK.DOM.get('groupSearchBase').value.trim();
+    const container = SK.DOM.get('discoveredGroupsContainer');
 
     if (!searchBase) {
         showToast('Please enter a search base DN', 'warning');
@@ -4655,21 +4581,21 @@ function createMappingFromDiscovery(dn, cn, description, memberCount) {
     safeHideModal('ldapDiscoveryModal');
 
     // Pre-fill mapping form
-    const form = document.getElementById('groupMappingForm');
+    const form = SK.DOM.get('groupMappingForm');
     form.reset();
-    document.getElementById('mappingId').value = '';
-    document.getElementById('ldapGroupDn').value = dn;
-    document.getElementById('ldapGroupCn').value = cn;
-    document.getElementById('ldapGroupDescription').value = description;
+    SK.DOM.get('mappingId').value = '';
+    SK.DOM.get('ldapGroupDn').value = dn;
+    SK.DOM.get('ldapGroupCn').value = cn;
+    SK.DOM.get('ldapGroupDescription').value = description;
     // Store member count in data attribute for submission
     form.dataset.memberCount = memberCount || 0;
-    document.getElementById('groupMappingModalTitle').textContent = 'Create Group Mapping';
+    SK.DOM.get('groupMappingModalTitle').textContent = 'Create Group Mapping';
 
     // Load organizations
     loadOrganizationsForMapping();
 
     // Show mapping modal
-    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('groupMappingModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('groupMappingModal'));
     modal.show();
 }
 
@@ -4677,8 +4603,8 @@ function createMappingFromDiscovery(dn, cn, description, memberCount) {
  * Trigger manual LDAP sync
  */
 async function triggerManualSync() {
-    const button = document.getElementById('syncButton');
-    const statusDiv = document.getElementById('syncStatus');
+    const button = SK.DOM.get('syncButton');
+    const statusDiv = SK.DOM.get('syncStatus');
 
     if (!button || !statusDiv) return;
 
@@ -4778,7 +4704,7 @@ async function loadSyncStats() {
 
             // Update stats displays - use 'timestamp' field from backend
             if (latestSync && latestSync.timestamp) {
-                document.getElementById('syncStatsLastSync').textContent =
+                SK.DOM.get('syncStatsLastSync').textContent =
                     new Date(latestSync.timestamp).toLocaleString();
             }
 
@@ -4787,7 +4713,7 @@ async function loadSyncStats() {
             if (usersResponse.ok) {
                 const users = await usersResponse.json();
                 const ldapUsers = users.filter(u => u.auth_type === 'ldap');
-                document.getElementById('syncStatsTotal').textContent = ldapUsers.length;
+                SK.DOM.get('syncStatsTotal').textContent = ldapUsers.length;
             }
 
             // Count successful syncs and errors from history
@@ -4799,8 +4725,8 @@ async function loadSyncStats() {
                 const successCount = allHistory.filter(s => s.status === 'success').length;
                 const errorCount = allHistory.filter(s => s.status === 'failed').length;
 
-                document.getElementById('syncStatsSuccess').textContent = successCount;
-                document.getElementById('syncStatsErrors').textContent = errorCount;
+                SK.DOM.get('syncStatsSuccess').textContent = successCount;
+                SK.DOM.get('syncStatsErrors').textContent = errorCount;
             }
         }
     } catch (error) {
@@ -4812,7 +4738,7 @@ async function loadSyncStats() {
  * Load sync history
  */
 async function loadSyncHistory() {
-    const tableBody = document.getElementById('syncHistoryTable');
+    const tableBody = SK.DOM.get('syncHistoryTable');
     if (!tableBody) return;
 
     // Skip if LDAP is not licensed
@@ -4910,7 +4836,7 @@ async function loadSyncHistory() {
  * Load audit logs
  */
 async function loadAuditLogs(page = 1, search = '') {
-    const tableBody = document.getElementById('auditLogTable');
+    const tableBody = SK.DOM.get('auditLogTable');
     if (!tableBody) return;
 
     tableBody.innerHTML = `
@@ -5005,7 +4931,7 @@ async function loadAuditLogs(page = 1, search = '') {
  * Update audit log pagination
  */
 function updateAuditPagination(currentPage, totalPages) {
-    const pagination = document.getElementById('auditPagination');
+    const pagination = SK.DOM.get('auditPagination');
     if (!pagination) return;
 
     if (totalPages <= 1) {
@@ -5030,7 +4956,7 @@ function updateAuditPagination(currentPage, totalPages) {
  * Search audit logs
  */
 function searchAuditLogs() {
-    const searchInput = document.getElementById('auditSearchInput');
+    const searchInput = SK.DOM.get('auditSearchInput');
     if (searchInput) {
         loadAuditLogs(1, searchInput.value);
     }
@@ -5044,7 +4970,7 @@ async function loadLastScheduledSync() {
         const response = await fetch('/api/ldap/groups/sync/history?limit=1');
         if (response.ok) {
             const history = await response.json();
-            const displayElement = document.getElementById('ldapLastScheduledSync');
+            const displayElement = SK.DOM.get('ldapLastScheduledSync');
 
             if (displayElement) {
                 if (history.length > 0) {
@@ -5086,20 +5012,20 @@ function escapeHtml(text) {
 let currentAuditPage = 1;
 
 async function loadAuditLogs(page = 1) {
-    const tbody = document.getElementById('auditLogsTable');
+    const tbody = SK.DOM.get('auditLogsTable');
     if (!tbody) return;
 
     currentAuditPage = page;
 
     // Get filter values
-    const action = document.getElementById('auditActionFilter')?.value || '';
-    const resource = document.getElementById('auditResourceFilter')?.value || '';
-    const search = document.getElementById('auditSearchInput')?.value || '';
-    const startDate = document.getElementById('auditStartDate')?.value || '';
-    const endDate = document.getElementById('auditEndDate')?.value || '';
-    const perPage = document.getElementById('auditPerPage')?.value || '50';
-    const sortField = document.getElementById('auditSortField')?.value || 'timestamp';
-    const sortOrder = document.getElementById('auditSortOrder')?.value || 'desc';
+    const action = SK.DOM.get('auditActionFilter')?.value || '';
+    const resource = SK.DOM.get('auditResourceFilter')?.value || '';
+    const search = SK.DOM.get('auditSearchInput')?.value || '';
+    const startDate = SK.DOM.get('auditStartDate')?.value || '';
+    const endDate = SK.DOM.get('auditEndDate')?.value || '';
+    const perPage = SK.DOM.get('auditPerPage')?.value || '50';
+    const sortField = SK.DOM.get('auditSortField')?.value || 'timestamp';
+    const sortOrder = SK.DOM.get('auditSortOrder')?.value || 'desc';
 
     tbody.innerHTML = `
         <tr>
@@ -5141,7 +5067,7 @@ async function loadAuditLogs(page = 1) {
         const data = await response.json();
 
         // Update info display
-        const infoEl = document.getElementById('auditPaginationInfo');
+        const infoEl = SK.DOM.get('auditPaginationInfo');
         if (infoEl) {
             const start = (data.page - 1) * data.per_page + 1;
             const end = Math.min(data.page * data.per_page, data.total);
@@ -5216,7 +5142,7 @@ async function loadAuditLogs(page = 1) {
 }
 
 function updateAuditPagination(currentPage, totalPages, total) {
-    const pagination = document.getElementById('auditPagination');
+    const pagination = SK.DOM.get('auditPagination');
     if (!pagination) return;
 
     if (totalPages <= 1) {
@@ -5275,8 +5201,8 @@ function updateAuditPagination(currentPage, totalPages, total) {
 }
 
 function sortAuditLogs(field) {
-    const sortFieldEl = document.getElementById('auditSortField');
-    const sortOrderEl = document.getElementById('auditSortOrder');
+    const sortFieldEl = SK.DOM.get('auditSortField');
+    const sortOrderEl = SK.DOM.get('auditSortOrder');
 
     if (sortFieldEl.value === field) {
         // Toggle order if same field
@@ -5290,14 +5216,14 @@ function sortAuditLogs(field) {
 }
 
 function clearAuditFilters() {
-    document.getElementById('auditSearchInput').value = '';
-    document.getElementById('auditActionFilter').value = '';
-    document.getElementById('auditResourceFilter').value = '';
-    document.getElementById('auditStartDate').value = '';
-    document.getElementById('auditEndDate').value = '';
-    document.getElementById('auditPerPage').value = '50';
-    document.getElementById('auditSortField').value = 'timestamp';
-    document.getElementById('auditSortOrder').value = 'desc';
+    SK.DOM.get('auditSearchInput').value = '';
+    SK.DOM.get('auditActionFilter').value = '';
+    SK.DOM.get('auditResourceFilter').value = '';
+    SK.DOM.get('auditStartDate').value = '';
+    SK.DOM.get('auditEndDate').value = '';
+    SK.DOM.get('auditPerPage').value = '50';
+    SK.DOM.get('auditSortField').value = 'timestamp';
+    SK.DOM.get('auditSortOrder').value = 'desc';
     loadAuditLogs(1);
 }
 
@@ -5322,9 +5248,9 @@ function getActionBadge(action) {
 }
 
 function exportAuditLogs(format, days) {
-    const action = document.getElementById('auditActionFilter')?.value || '';
-    const resource = document.getElementById('auditResourceFilter')?.value || '';
-    const search = document.getElementById('auditSearchInput')?.value || '';
+    const action = SK.DOM.get('auditActionFilter')?.value || '';
+    const resource = SK.DOM.get('auditResourceFilter')?.value || '';
+    const search = SK.DOM.get('auditSearchInput')?.value || '';
 
     let url = `/api/audit-logs/export?format=${format}&days=${days}`;
     if (action) url += `&action=${encodeURIComponent(action)}`;
@@ -5338,7 +5264,7 @@ function exportAuditLogs(format, days) {
 
 // Load audit logs when the tab is shown
 document.addEventListener('DOMContentLoaded', function() {
-    const auditLogsTab = document.getElementById('audit-logs-tab');
+    const auditLogsTab = SK.DOM.get('audit-logs-tab');
     if (auditLogsTab) {
         auditLogsTab.addEventListener('shown.bs.tab', function() {
             loadAuditLogs(1);
@@ -5346,7 +5272,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Load license info when tab is shown
-    const licenseTab = document.getElementById('license-tab');
+    const licenseTab = SK.DOM.get('license-tab');
     if (licenseTab) {
         licenseTab.addEventListener('shown.bs.tab', function() {
             loadLicenseInfo();
@@ -5354,7 +5280,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Load integrations data when main tab is shown
-    const integrationsTab = document.getElementById('integrations-tab');
+    const integrationsTab = SK.DOM.get('integrations-tab');
     if (integrationsTab) {
         integrationsTab.addEventListener('shown.bs.tab', function() {
             loadIntegrationsSummary();
@@ -5363,28 +5289,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Integrations sub-tab handlers (new unified structure)
-    const overviewSubTab = document.getElementById('integrations-overview-tab');
+    const overviewSubTab = SK.DOM.get('integrations-overview-tab');
     if (overviewSubTab) {
         overviewSubTab.addEventListener('shown.bs.tab', function() {
             loadIntegrationsSummary();
         });
     }
 
-    const importQueueSubTab = document.getElementById('import-queue-tab');
+    const importQueueSubTab = SK.DOM.get('import-queue-tab');
     if (importQueueSubTab) {
         importQueueSubTab.addEventListener('shown.bs.tab', function() {
             loadImportQueue();
         });
     }
 
-    const pullSourcesSubTab = document.getElementById('pull-sources-tab');
+    const pullSourcesSubTab = SK.DOM.get('pull-sources-tab');
     if (pullSourcesSubTab) {
         pullSourcesSubTab.addEventListener('shown.bs.tab', function() {
             loadIntegrations();
         });
     }
 
-    const pushAgentsSubTab = document.getElementById('push-agents-tab');
+    const pushAgentsSubTab = SK.DOM.get('push-agents-tab');
     if (pushAgentsSubTab) {
         pushAgentsSubTab.addEventListener('shown.bs.tab', function() {
             loadAgentKeys();
@@ -5428,14 +5354,14 @@ async function loadLicenseAndApplyRestrictions() {
  * Update UI elements that show "Loading..." for license data
  */
 function updateLicenseLoadingState(status) {
-    const installIdEl = document.getElementById('installationIdDisplay');
+    const installIdEl = SK.DOM.get('installationIdDisplay');
 
     if (status === 'error') {
         if (installIdEl && (installIdEl.value === 'Loading...' || !installIdEl.value)) {
             installIdEl.value = 'Error loading - click License tab to retry';
         }
 
-        const licenseDetails = document.getElementById('licenseDetails');
+        const licenseDetails = SK.DOM.get('licenseDetails');
         if (licenseDetails && licenseDetails.innerHTML.includes('Loading')) {
             licenseDetails.innerHTML = `
                 <div class="alert alert-warning mb-0 py-2">
@@ -5445,7 +5371,7 @@ function updateLicenseLoadingState(status) {
             `;
         }
 
-        const licenseUsage = document.getElementById('licenseUsage');
+        const licenseUsage = SK.DOM.get('licenseUsage');
         if (licenseUsage && licenseUsage.innerHTML.includes('Loading')) {
             licenseUsage.innerHTML = `<span class="text-muted">Click License tab to load</span>`;
         }
@@ -5471,19 +5397,19 @@ function applyLicenseRestrictions() {
     // ========================================
     if (hasFeature('ldap')) {
         // SHOW LDAP tabs when user has license (they start hidden)
-        const ldapUsersTab = document.getElementById('ldap-users-tab-item');
-        const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+        const ldapUsersTab = SK.DOM.get('ldap-users-tab-item');
+        const ldapGroupsTab = SK.DOM.get('ldap-groups-tab-item');
         if (ldapUsersTab) ldapUsersTab.style.display = '';
         if (ldapGroupsTab) ldapGroupsTab.style.display = '';
     } else {
         // Hide LDAP tabs completely for Community
-        const ldapUsersTab = document.getElementById('ldap-users-tab-item');
-        const ldapGroupsTab = document.getElementById('ldap-groups-tab-item');
+        const ldapUsersTab = SK.DOM.get('ldap-users-tab-item');
+        const ldapGroupsTab = SK.DOM.get('ldap-groups-tab-item');
         if (ldapUsersTab) ldapUsersTab.style.display = 'none';
         if (ldapGroupsTab) ldapGroupsTab.style.display = 'none';
 
         // Hide LDAP settings section completely
-        const ldapSettingsPane = document.getElementById('ldapSettings');
+        const ldapSettingsPane = SK.DOM.get('ldapSettings');
         if (ldapSettingsPane) {
             ldapSettingsPane.style.display = 'none';
         }
@@ -5494,7 +5420,7 @@ function applyLicenseRestrictions() {
     // ========================================
     if (!hasFeature('backup_restore')) {
         // Hide the Backup & Restore card completely
-        const backupCard = document.getElementById('backupRestoreCard');
+        const backupCard = SK.DOM.get('backupRestoreCard');
         if (backupCard) {
             backupCard.style.display = 'none';
         }
@@ -5505,13 +5431,13 @@ function applyLicenseRestrictions() {
     // ========================================
     if (!hasFeature('email_alerts')) {
         // Hide notifications settings completely
-        const notificationsPane = document.getElementById('notificationsSettings');
+        const notificationsPane = SK.DOM.get('notificationsSettings');
         if (notificationsPane) {
             notificationsPane.style.display = 'none';
         }
 
         // Also hide the org webhook tab in organization modal
-        const orgWebhookTab = document.getElementById('webhook-tab');
+        const orgWebhookTab = SK.DOM.get('webhook-tab');
         if (orgWebhookTab) {
             orgWebhookTab.closest('li')?.style.setProperty('display', 'none');
         }
@@ -5522,7 +5448,7 @@ function applyLicenseRestrictions() {
     // ========================================
     if (!hasFeature('white_label')) {
         // Hide branding settings completely
-        const brandingPane = document.getElementById('brandingSettings');
+        const brandingPane = SK.DOM.get('brandingSettings');
         if (brandingPane) {
             brandingPane.style.display = 'none';
         }
@@ -5550,8 +5476,8 @@ function isFeatureLicensed(feature) {
 }
 
 async function loadLicenseInfo() {
-    const detailsEl = document.getElementById('licenseDetails');
-    const usageEl = document.getElementById('licenseUsage');
+    const detailsEl = SK.DOM.get('licenseDetails');
+    const usageEl = SK.DOM.get('licenseUsage');
 
     // Show loading state
     if (detailsEl) detailsEl.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm"></div> Loading...</div>';
@@ -5584,10 +5510,10 @@ async function loadLicenseInfo() {
 }
 
 function displayLicenseInfo(data) {
-    const detailsEl = document.getElementById('licenseDetails');
-    const usageEl = document.getElementById('licenseUsage');
-    const badgeEl = document.getElementById('licenseEditionBadge');
-    const removeBtn = document.getElementById('removeLicenseBtn');
+    const detailsEl = SK.DOM.get('licenseDetails');
+    const usageEl = SK.DOM.get('licenseUsage');
+    const badgeEl = SK.DOM.get('licenseEditionBadge');
+    const removeBtn = SK.DOM.get('removeLicenseBtn');
 
     // Update edition badge
     if (data.is_professional) {
@@ -5601,7 +5527,7 @@ function displayLicenseInfo(data) {
     }
 
     // Display installation ID
-    const installIdEl = document.getElementById('installationIdDisplay');
+    const installIdEl = SK.DOM.get('installationIdDisplay');
     if (installIdEl && data.installation_id) {
         installIdEl.value = data.installation_id;
     }
@@ -5646,7 +5572,7 @@ function displayLicenseInfo(data) {
             </div>
             <p class="text-muted small mb-2">Free for personal and small team use.</p>
             <p class="mb-0">
-                <a href="#" class="text-primary" onclick="document.getElementById('licenseKeyInput').focus(); return false;">
+                <a href="#" class="text-primary" onclick="SK.DOM.get('licenseKeyInput').focus(); return false;">
                     <i class="bi bi-arrow-up-circle me-1"></i>Upgrade to Professional
                 </a>
             </p>
@@ -5693,7 +5619,7 @@ function displayLicenseInfo(data) {
 }
 
 async function activateLicense() {
-    const licenseKey = document.getElementById('licenseKeyInput').value.trim();
+    const licenseKey = SK.DOM.get('licenseKeyInput').value.trim();
 
     if (!licenseKey) {
         showToast('Please enter a license key', 'warning');
@@ -5713,7 +5639,7 @@ async function activateLicense() {
 
         if (response.ok && data.success) {
             showToast(data.message, 'success');
-            document.getElementById('licenseKeyInput').value = '';
+            SK.DOM.get('licenseKeyInput').value = '';
             loadLicenseInfo();
             // Reload page to apply license changes (like removing "Powered by")
             setTimeout(() => window.location.reload(), 1500);
@@ -5782,7 +5708,7 @@ function formatRelativeTime(dateStr) {
 // ============================================================================
 
 function copyInstallationId() {
-    const installIdEl = document.getElementById('installationIdDisplay');
+    const installIdEl = SK.DOM.get('installationIdDisplay');
     if (!installIdEl) {
         showToast('Installation ID element not found', 'error');
         return;
@@ -5835,7 +5761,7 @@ let agentKeysLoaded = false;
 const recentlyCreatedKeys = new Map();
 
 async function loadAgentKeys() {
-    const tbody = document.getElementById('agentKeysTableBody');
+    const tbody = SK.DOM.get('agentKeysTableBody');
     if (!tbody) return;
 
     try {
@@ -5906,7 +5832,7 @@ async function loadAgentKeys() {
 
 async function showCreateAgentKeyModal() {
     // Populate organizations dropdown
-    const orgSelect = document.getElementById('agentKeyOrg');
+    const orgSelect = SK.DOM.get('agentKeyOrg');
     if (orgSelect && organizations.length > 0) {
         orgSelect.innerHTML = '<option value="">Select organization...</option>' +
             organizations.map(org => `<option value="${org.id}">${escapeHtml(org.name)}</option>`).join('');
@@ -5926,19 +5852,19 @@ async function showCreateAgentKeyModal() {
     }
 
     // Reset form
-    document.getElementById('agentKeyForm').reset();
+    SK.DOM.get('agentKeyForm').reset();
 
     // Show modal
-    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('agentKeyModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('agentKeyModal'));
     modal.show();
 }
 
 async function createAgentKey() {
-    const name = document.getElementById('agentKeyName').value.trim();
-    const orgId = document.getElementById('agentKeyOrg').value;
-    const maxAssets = parseInt(document.getElementById('agentKeyMaxAssets').value) || 0;
-    const expiresAt = document.getElementById('agentKeyExpires').value || null;
-    const autoApprove = document.getElementById('agentKeyAutoApprove')?.checked || false;
+    const name = SK.DOM.get('agentKeyName').value.trim();
+    const orgId = SK.DOM.get('agentKeyOrg').value;
+    const maxAssets = parseInt(SK.DOM.get('agentKeyMaxAssets').value) || 0;
+    const expiresAt = SK.DOM.get('agentKeyExpires').value || null;
+    const autoApprove = SK.DOM.get('agentKeyAutoApprove')?.checked || false;
 
     if (!name) {
         showToast('Please enter a key name', 'warning');
@@ -5979,8 +5905,8 @@ async function createAgentKey() {
         safeHideModal('agentKeyModal');
 
         // Show the key to user
-        const keyValueField = document.getElementById('newAgentKeyValue');
-        const showModalEl = document.getElementById('showAgentKeyModal');
+        const keyValueField = SK.DOM.get('newAgentKeyValue');
+        const showModalEl = SK.DOM.get('showAgentKeyModal');
         if (keyValueField) keyValueField.value = data.api_key;
         if (showModalEl) {
             const showModal = bootstrap.Modal.getOrCreateInstance(showModalEl);
@@ -6028,7 +5954,7 @@ async function deleteAgentKey(keyId, keyName) {
 }
 
 function copyAgentKey() {
-    const keyInput = document.getElementById('newAgentKeyValue');
+    const keyInput = SK.DOM.get('newAgentKeyValue');
     if (!keyInput) return;
 
     const key = keyInput.value;
@@ -6040,7 +5966,7 @@ function copyAgentKey() {
  * This is called when user clicks download in the modal where we have the full key.
  */
 async function downloadAgentFromModal(platform) {
-    const keyInput = document.getElementById('newAgentKeyValue');
+    const keyInput = SK.DOM.get('newAgentKeyValue');
     if (!keyInput || !keyInput.value) {
         showToast('No API key found', 'warning');
         return;
@@ -6173,12 +6099,12 @@ function updateAssetsSortIndicators() {
 
 async function loadAssets(page = 1) {
     assetsPage = page;
-    const tbody = document.getElementById('assetsTableBody');
-    const countEl = document.getElementById('assetsCount');
-    const paginationEl = document.getElementById('assetsPagination');
+    const tbody = SK.DOM.get('assetsTableBody');
+    const countEl = SK.DOM.get('assetsCount');
+    const paginationEl = SK.DOM.get('assetsPagination');
     if (!tbody) return;
 
-    const search = document.getElementById('assetSearchInput')?.value || '';
+    const search = SK.DOM.get('assetSearchInput')?.value || '';
 
     tbody.innerHTML = `
         <tr>
@@ -6338,7 +6264,7 @@ function changeAssetProductsPage(newPage) {
 }
 
 function renderAssetProductsTable() {
-    const container = document.getElementById('assetProductsTableContainer');
+    const container = SK.DOM.get('assetProductsTableContainer');
     if (!container || assetProductsData.length === 0) return;
 
     // Sort products
@@ -6449,7 +6375,7 @@ function renderAssetProductsTable() {
 }
 
 async function showAssetDetails(assetId) {
-    const modalBody = document.getElementById('assetDetailsBody');
+    const modalBody = SK.DOM.get('assetDetailsBody');
     if (!modalBody) return;
 
     // Reset pagination state
@@ -6464,7 +6390,7 @@ async function showAssetDetails(assetId) {
         </div>
     `;
 
-    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('assetDetailsModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('assetDetailsModal'));
     modal.show();
 
     try {
@@ -6581,8 +6507,8 @@ async function loadImportQueueCount() {
         if (response.ok) {
             const data = await response.json();
             const count = data.pending || 0;
-            const badge = document.getElementById('importQueueBadge');
-            const countEl = document.getElementById('importQueueCount');
+            const badge = SK.DOM.get('importQueueBadge');
+            const countEl = SK.DOM.get('importQueueCount');
 
             if (badge) {
                 badge.textContent = count;
@@ -6620,8 +6546,8 @@ function getImportQueueSortIcon(field) {
 }
 
 function renderImportQueue() {
-    const tbody = document.getElementById('importQueueTable');
-    const paginationContainer = document.getElementById('importQueuePagination');
+    const tbody = SK.DOM.get('importQueueTable');
+    const paginationContainer = SK.DOM.get('importQueuePagination');
     if (!tbody) return;
 
     if (importQueueData.length === 0) {
@@ -6775,9 +6701,9 @@ function renderImportQueue() {
 
 // Load import queue
 async function loadImportQueue() {
-    const status = document.getElementById('queueFilterStatus')?.value || 'pending';
-    const perPage = parseInt(document.getElementById('queuePerPage')?.value) || 25;
-    const tbody = document.getElementById('importQueueTable');
+    const status = SK.DOM.get('queueFilterStatus')?.value || 'pending';
+    const perPage = parseInt(SK.DOM.get('queuePerPage')?.value) || 25;
+    const tbody = SK.DOM.get('importQueueTable');
 
     if (!tbody) return;
 
@@ -6785,7 +6711,7 @@ async function loadImportQueue() {
     importQueuePageSize = perPage;  // Update page size from dropdown
 
     // Reset select-all checkbox and clear selection
-    const selectAllCheckbox = document.getElementById('selectAllQueue');
+    const selectAllCheckbox = SK.DOM.get('selectAllQueue');
     if (selectAllCheckbox) selectAllCheckbox.checked = false;
     selectedQueueItems.clear();
     updateQueueBulkButtons();
@@ -6835,7 +6761,7 @@ function toggleQueueSelect(itemId, checkbox) {
 }
 
 function toggleSelectAllQueue() {
-    const selectAll = document.getElementById('selectAllQueue');
+    const selectAll = SK.DOM.get('selectAllQueue');
     const checkboxes = document.querySelectorAll('.queue-item-checkbox:not(:disabled)');
 
     checkboxes.forEach(cb => {
@@ -6852,8 +6778,8 @@ function toggleSelectAllQueue() {
 
 function updateQueueBulkButtons() {
     const count = selectedQueueItems.size;
-    const approveBtn = document.getElementById('bulkApproveBtn');
-    const rejectBtn = document.getElementById('bulkRejectBtn');
+    const approveBtn = SK.DOM.get('bulkApproveBtn');
+    const rejectBtn = SK.DOM.get('bulkRejectBtn');
     if (approveBtn) approveBtn.disabled = count === 0;
     if (rejectBtn) rejectBtn.disabled = count === 0;
 }
@@ -6996,19 +6922,19 @@ async function loadIntegrationsSummary() {
         const data = await response.json();
 
         // Update stats cards
-        const pullSources = document.getElementById('statPullSources');
+        const pullSources = SK.DOM.get('statPullSources');
         if (pullSources) pullSources.textContent = data.pull_sources?.total || 0;
 
-        const endpointsOnline = document.getElementById('statEndpointsOnline');
+        const endpointsOnline = SK.DOM.get('statEndpointsOnline');
         if (endpointsOnline) endpointsOnline.textContent = data.push_agents?.online || 0;
 
-        const endpointsTotal = document.getElementById('statEndpointsTotal');
+        const endpointsTotal = SK.DOM.get('statEndpointsTotal');
         if (endpointsTotal) endpointsTotal.textContent = data.push_agents?.endpoints || 0;
 
-        const pendingImports = document.getElementById('statPendingImports');
+        const pendingImports = SK.DOM.get('statPendingImports');
         if (pendingImports) pendingImports.textContent = data.import_queue?.pending || 0;
 
-        const recentCheckins = document.getElementById('statRecentCheckins');
+        const recentCheckins = SK.DOM.get('statRecentCheckins');
         if (recentCheckins) recentCheckins.textContent = data.activity?.recent_checkins || 0;
 
     } catch (error) {
@@ -7047,13 +6973,13 @@ function getPullSourcesSortIcon(field) {
 }
 
 function renderPullSources() {
-    const tbody = document.getElementById('integrationsTable');
-    const paginationContainer = document.getElementById('pullSourcesPagination');
+    const tbody = SK.DOM.get('integrationsTable');
+    const paginationContainer = SK.DOM.get('pullSourcesPagination');
     if (!tbody) return;
 
     // Update sort icons
     ['name', 'type', 'organization', 'last_sync', 'status'].forEach(field => {
-        const iconEl = document.getElementById(`pullSourcesSort${field.charAt(0).toUpperCase() + field.slice(1).replace('_', '')}`);
+        const iconEl = SK.DOM.get(`pullSourcesSort${field.charAt(0).toUpperCase() + field.slice(1).replace('_', '')}`);
         if (iconEl) iconEl.innerHTML = getPullSourcesSortIcon(field);
     });
 
@@ -7180,7 +7106,7 @@ function renderPullSources() {
 }
 
 async function loadIntegrations() {
-    const tbody = document.getElementById('integrationsTable');
+    const tbody = SK.DOM.get('integrationsTable');
     if (!tbody) return;
 
     pullSourcesPage = 1;  // Reset to first page on reload
@@ -7327,12 +7253,12 @@ function showCreateIntegrationModal() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
     // Handle auth type change
-    document.getElementById('configAuthType').addEventListener('change', function() {
+    SK.DOM.get('configAuthType').addEventListener('change', function() {
         const authType = this.value;
-        const headerField = document.getElementById('authHeaderField');
-        const credentialsRow = document.getElementById('authCredentialsRow');
-        const passwordField = document.getElementById('basicAuthPasswordField');
-        const fieldLabel = document.getElementById('authFieldLabel');
+        const headerField = SK.DOM.get('authHeaderField');
+        const credentialsRow = SK.DOM.get('authCredentialsRow');
+        const passwordField = SK.DOM.get('basicAuthPasswordField');
+        const fieldLabel = SK.DOM.get('authFieldLabel');
 
         if (authType === 'none') {
             headerField.style.display = 'none';
@@ -7350,21 +7276,21 @@ function showCreateIntegrationModal() {
         }
     });
 
-    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('createIntegrationModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('createIntegrationModal'));
     modal.show();
 }
 
 async function saveIntegration() {
-    const name = document.getElementById('integrationName').value.trim();
-    const orgId = document.getElementById('integrationOrg').value;
-    const autoApprove = document.getElementById('integrationAutoApprove').checked;
+    const name = SK.DOM.get('integrationName').value.trim();
+    const orgId = SK.DOM.get('integrationOrg').value;
+    const autoApprove = SK.DOM.get('integrationAutoApprove').checked;
 
     if (!name) {
         showToast('Please enter a name', 'warning');
         return;
     }
 
-    const apiUrl = document.getElementById('configApiUrl')?.value.trim() || '';
+    const apiUrl = SK.DOM.get('configApiUrl')?.value.trim() || '';
     if (!apiUrl) {
         showToast('Please enter an API URL', 'warning');
         return;
@@ -7373,15 +7299,15 @@ async function saveIntegration() {
     // Build configuration object
     const config = {
         api_url: apiUrl,
-        auth_type: document.getElementById('configAuthType')?.value || 'none',
-        auth_header: document.getElementById('configAuthHeader')?.value || 'X-API-Key',
-        api_key: document.getElementById('configApiKey')?.value || '',
-        username: document.getElementById('configApiKey')?.value || '',  // Reuse field for basic auth
-        password: document.getElementById('configPassword')?.value || '',
-        response_path: document.getElementById('configResponsePath')?.value || '',
-        vendor_field: document.getElementById('configVendorField')?.value || 'vendor',
-        product_field: document.getElementById('configProductField')?.value || 'product',
-        version_field: document.getElementById('configVersionField')?.value || 'version',
+        auth_type: SK.DOM.get('configAuthType')?.value || 'none',
+        auth_header: SK.DOM.get('configAuthHeader')?.value || 'X-API-Key',
+        api_key: SK.DOM.get('configApiKey')?.value || '',
+        username: SK.DOM.get('configApiKey')?.value || '',  // Reuse field for basic auth
+        password: SK.DOM.get('configPassword')?.value || '',
+        response_path: SK.DOM.get('configResponsePath')?.value || '',
+        vendor_field: SK.DOM.get('configVendorField')?.value || 'vendor',
+        product_field: SK.DOM.get('configProductField')?.value || 'product',
+        version_field: SK.DOM.get('configVersionField')?.value || 'version',
         verify_ssl: true
     };
 
@@ -7439,9 +7365,9 @@ async function showIntegrationApiKey(integrationId) {
         const integration = await response.json();
 
         if (integration.api_key) {
-            document.getElementById('viewApiKeyTitle').textContent = `API Key - ${integration.name}`;
-            document.getElementById('viewApiKeyValue').value = integration.api_key;
-            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('viewApiKeyModal'));
+            SK.DOM.get('viewApiKeyTitle').textContent = `API Key - ${integration.name}`;
+            SK.DOM.get('viewApiKeyValue').value = integration.api_key;
+            const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('viewApiKeyModal'));
             modal.show();
         } else {
             showToast('No API key available', 'info');
@@ -7452,7 +7378,7 @@ async function showIntegrationApiKey(integrationId) {
 }
 
 function copyViewedApiKey() {
-    const keyInput = document.getElementById('viewApiKeyValue');
+    const keyInput = SK.DOM.get('viewApiKeyValue');
     if (!keyInput || !keyInput.value) {
         showToast('No API key to copy', 'warning');
         return;
@@ -7629,7 +7555,7 @@ async function showEditIntegrationModal(integrationId) {
         safeDisposeModal('editIntegrationModal', true);
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editIntegrationModal'));
+        const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('editIntegrationModal'));
         modal.show();
 
     } catch (error) {
@@ -7638,17 +7564,17 @@ async function showEditIntegrationModal(integrationId) {
 }
 
 async function saveEditIntegration() {
-    const integrationId = document.getElementById('editIntegrationId').value;
-    const name = document.getElementById('editIntegrationName').value.trim();
-    const orgId = document.getElementById('editIntegrationOrg').value;
-    const autoApprove = document.getElementById('editIntegrationAutoApprove').checked;
+    const integrationId = SK.DOM.get('editIntegrationId').value;
+    const name = SK.DOM.get('editIntegrationName').value.trim();
+    const orgId = SK.DOM.get('editIntegrationOrg').value;
+    const autoApprove = SK.DOM.get('editIntegrationAutoApprove').checked;
 
     if (!name) {
         showToast('Please enter a name', 'warning');
         return;
     }
 
-    const apiUrl = document.getElementById('editConfigApiUrl')?.value.trim() || '';
+    const apiUrl = SK.DOM.get('editConfigApiUrl')?.value.trim() || '';
     if (!apiUrl) {
         showToast('Please enter an API URL', 'warning');
         return;
@@ -7656,18 +7582,18 @@ async function saveEditIntegration() {
 
     const config = {
         api_url: apiUrl,
-        auth_type: document.getElementById('editConfigAuthType')?.value || 'none',
-        auth_header: document.getElementById('editConfigAuthHeader')?.value || 'X-API-Key',
-        response_path: document.getElementById('editConfigResponsePath')?.value || '',
-        vendor_field: document.getElementById('editConfigVendorField')?.value || 'vendor',
-        product_field: document.getElementById('editConfigProductField')?.value || 'product',
-        version_field: document.getElementById('editConfigVersionField')?.value || 'version',
+        auth_type: SK.DOM.get('editConfigAuthType')?.value || 'none',
+        auth_header: SK.DOM.get('editConfigAuthHeader')?.value || 'X-API-Key',
+        response_path: SK.DOM.get('editConfigResponsePath')?.value || '',
+        vendor_field: SK.DOM.get('editConfigVendorField')?.value || 'vendor',
+        product_field: SK.DOM.get('editConfigProductField')?.value || 'product',
+        version_field: SK.DOM.get('editConfigVersionField')?.value || 'version',
         verify_ssl: true
     };
 
     // Only include credentials if provided (to avoid overwriting with empty)
-    const apiKey = document.getElementById('editConfigApiKey')?.value;
-    const password = document.getElementById('editConfigPassword')?.value;
+    const apiKey = SK.DOM.get('editConfigApiKey')?.value;
+    const password = SK.DOM.get('editConfigPassword')?.value;
     if (apiKey) {
         config.api_key = apiKey;
         config.username = apiKey;  // For basic auth
@@ -7707,7 +7633,7 @@ async function saveEditIntegration() {
 // ============================================================================
 
 async function loadDiscoveryAgents() {
-    const tbody = document.getElementById('discoveryAgentsTable');
+    const tbody = SK.DOM.get('discoveryAgentsTable');
     if (!tbody) return;
 
     try {
@@ -7784,7 +7710,7 @@ async function deleteDiscoveryAgent(agentId) {
 
 // Load organizations for agent script dropdown
 async function loadAgentScriptOrganizations() {
-    const orgSelect = document.getElementById('agentScriptOrg');
+    const orgSelect = SK.DOM.get('agentScriptOrg');
     if (!orgSelect) return;
 
     try {
@@ -7799,8 +7725,8 @@ async function loadAgentScriptOrganizations() {
 
 // Generate a new agent API key and set it in the input
 async function generateAndSetAgentKey() {
-    const orgSelect = document.getElementById('agentScriptOrg');
-    const keyInput = document.getElementById('agentScriptApiKey');
+    const orgSelect = SK.DOM.get('agentScriptOrg');
+    const keyInput = SK.DOM.get('agentScriptApiKey');
 
     const orgId = orgSelect?.value;
     if (!orgId) {
@@ -7839,7 +7765,7 @@ async function generateAndSetAgentKey() {
 }
 
 async function downloadWindowsAgent() {
-    const apiKey = document.getElementById('agentScriptApiKey')?.value?.trim() || '';
+    const apiKey = SK.DOM.get('agentScriptApiKey')?.value?.trim() || '';
 
     try {
         // Fetch script from server with embedded API key
@@ -7859,7 +7785,7 @@ async function downloadWindowsAgent() {
 }
 
 async function downloadLinuxAgent() {
-    const apiKey = document.getElementById('agentScriptApiKey')?.value?.trim() || '';
+    const apiKey = SK.DOM.get('agentScriptApiKey')?.value?.trim() || '';
 
     try {
         // Fetch script from server with embedded API key
@@ -7944,7 +7870,7 @@ function handleUrlHash() {
 
     const tabButtonId = adminTabMap[tabName];
     if (tabButtonId) {
-        const tabButton = document.getElementById(tabButtonId);
+        const tabButton = SK.DOM.get(tabButtonId);
         if (tabButton) {
             // Use Bootstrap's Tab API to switch tabs
             const tab = new bootstrap.Tab(tabButton);
@@ -7966,7 +7892,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window.addEventListener('hashchange', handleUrlHash);
 
     // Save tab to localStorage whenever a main tab is clicked
-    const adminTabs = document.getElementById('adminTabs');
+    const adminTabs = SK.DOM.get('adminTabs');
     if (adminTabs) {
         adminTabs.querySelectorAll('button[data-bs-toggle="tab"]').forEach(tabButton => {
             tabButton.addEventListener('shown.bs.tab', function(e) {
