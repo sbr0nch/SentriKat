@@ -368,8 +368,8 @@ def get_products():
                 'cpe_uri': p.cpe_uri,
                 'source': getattr(p, 'source', 'manual'),
                 'created_at': p.created_at.isoformat() if p.created_at else None,
-                'vulnerability_count': len(p.vulnerability_matches) if p.vulnerability_matches else 0,
-                'is_vulnerable': any(not m.acknowledged for m in p.vulnerability_matches) if p.vulnerability_matches else False
+                'vulnerability_count': len(p.matches) if p.matches else 0,
+                'is_vulnerable': any(not m.acknowledged for m in p.matches) if p.matches else False
             }
             grouped_products[key]['versions'].append(version_entry)
 
