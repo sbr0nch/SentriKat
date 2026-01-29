@@ -352,6 +352,10 @@ def search_cpe_grouped(
     text_terms = [t for t in all_terms if not t.isdigit() and not re.match(r'^\d+\.\d+', t)]
     version_hints = [t for t in all_terms if t.isdigit() or re.match(r'^\d+\.?\d*', t)]
 
+    # Detect "product version" pattern (e.g., "windows 11", "office 2019", "chrome 120")
+    # In this case, the number is part of the product identity, not a version filter
+    is_product_version_search = len(text_terms) >= 1 and len(version_hints) >= 1
+
     def calculate_relevance_score(vendor: str, product: str, title: str) -> int:
         """
         Calculate relevance score for a CPE entry.
@@ -361,6 +365,7 @@ def search_cpe_grouped(
         # Normalize strings for comparison
         vendor_lower = (vendor or '').lower().replace('_', ' ')
         product_lower = (product or '').lower().replace('_', ' ')
+        title_lower = (title or '').lower()
         combined = f"{vendor_lower} {product_lower}"
 
         score = 0
@@ -371,13 +376,31 @@ def search_cpe_grouped(
                 return -1  # Filter out - doesn't match
             score += 10  # Base score for matching
 
-        # Bonus: version hints matching in product name (e.g., "windows 11" -> windows_11)
-        # This helps "Windows 11" score higher than "Windows Media Player" when searching "windows 11"
-        for hint in version_hints:
-            if hint in product_lower:
-                score += 20  # Big bonus for number in product name
-            elif hint in vendor_lower:
-                score += 5
+        # When searching "windows 11", "office 2019", etc. - the number is part of product identity
+        # REQUIRE the version hint to appear in either product name OR title
+        # This filters out "Windows Media Player" when searching "Windows 11"
+        if is_product_version_search:
+            version_found = False
+            for hint in version_hints:
+                # Check if version hint is in product name (e.g., "windows_11" contains "11")
+                if hint in product_lower:
+                    version_found = True
+                    score += 50  # Strong bonus - exact product match
+                    break
+                # Check if version hint is in title (e.g., "Windows 11 Version 22H2")
+                elif hint in title_lower:
+                    version_found = True
+                    score += 30  # Good bonus - title match
+                    break
+                # Check vendor too (less common but possible)
+                elif hint in vendor_lower:
+                    version_found = True
+                    score += 10
+                    break
+
+            # If user searched "windows 11" but product is "windows_media_player" - filter it out
+            if not version_found:
+                return -1  # Filter out - version hint not found in product/title
 
         # Bonus: exact product name match
         for term in text_terms:
@@ -385,6 +408,9 @@ def search_cpe_grouped(
                 score += 15
             elif product_lower.startswith(term):
                 score += 8
+            # Check if term is a word boundary match (not substring)
+            elif re.search(r'(?:^|[\s_\-])' + re.escape(term) + r'(?:[\s_\-]|$)', product_lower):
+                score += 5
 
         return score
 

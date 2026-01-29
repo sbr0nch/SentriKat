@@ -2451,6 +2451,11 @@ async function triggerCriticalCVEAlerts() {
 
             html += '</ul>';
 
+            // Update the results container with appropriate styling
+            const alertContainer = SK.DOM.get('alertResultsAlert');
+            if (alertContainer) {
+                alertContainer.className = 'alert alert-danger';
+            }
             SK.DOM.get('alertResultsContent').innerHTML = html;
             SK.DOM.get('alertResultsContainer').style.display = 'block';
 
@@ -2460,6 +2465,87 @@ async function triggerCriticalCVEAlerts() {
         }
     } catch (error) {
         showToast(`Error triggering alerts: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Manual Webhook Alert Trigger
+async function triggerWebhookAlerts() {
+    const confirmed = await showConfirm(
+        'This will send webhook notifications for all unacknowledged critical and high priority CVEs to all organizations with webhooks configured.\n\nAre you sure you want to proceed?',
+        'Send Webhook Alerts',
+        'Send Webhooks',
+        'btn-primary'
+    );
+
+    if (!confirmed) return;
+
+    showLoading();
+
+    try {
+        const response = await fetch('/api/alerts/trigger-webhooks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            const summary = result.summary;
+            let html = `
+                <div class="mb-2">
+                    <strong>Webhook Summary:</strong><br>
+                    Organizations processed: ${summary.total_orgs}<br>
+                    Webhooks sent: <span class="text-success">${summary.webhooks_sent}</span><br>
+                    Skipped: <span class="text-muted">${summary.skipped}</span><br>
+                    Errors: <span class="text-danger">${summary.errors}</span>
+                </div>
+                <hr>
+                <strong>Details by Organization:</strong>
+                <ul class="mb-0 mt-2">
+            `;
+
+            for (const detail of result.details) {
+                let statusIcon = '';
+                let statusClass = '';
+
+                if (detail.status === 'success') {
+                    statusIcon = '<i class="bi bi-check-circle text-success"></i>';
+                    statusClass = 'text-success';
+                } else if (detail.status === 'skipped') {
+                    statusIcon = '<i class="bi bi-dash-circle text-muted"></i>';
+                    statusClass = 'text-muted';
+                } else {
+                    statusIcon = '<i class="bi bi-x-circle text-danger"></i>';
+                    statusClass = 'text-danger';
+                }
+
+                html += `<li class="${statusClass}">${statusIcon} <strong>${detail.organization}</strong>: `;
+                if (detail.status === 'success') {
+                    html += `Sent ${detail.new_cves || 0} CVEs`;
+                } else {
+                    html += detail.reason || detail.status;
+                }
+                html += '</li>';
+            }
+
+            html += '</ul>';
+
+            // Update the results container with appropriate styling
+            const alertContainer = SK.DOM.get('alertResultsAlert');
+            if (alertContainer) {
+                alertContainer.className = 'alert alert-primary';
+            }
+            SK.DOM.get('alertResultsContent').innerHTML = html;
+            SK.DOM.get('alertResultsContainer').style.display = 'block';
+
+            showToast(`Webhook alerts processed: ${summary.webhooks_sent} webhooks sent`, 'success');
+        } else {
+            showToast(`Error: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error triggering webhooks: ${error.message}`, 'danger');
     } finally {
         hideLoading();
     }

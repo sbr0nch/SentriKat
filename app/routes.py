@@ -1958,6 +1958,122 @@ def trigger_critical_cve_alerts():
             'error': ERROR_MSGS['smtp']
         }), 500
 
+
+@bp.route('/api/alerts/trigger-webhooks', methods=['POST'])
+@admin_required
+def trigger_webhook_alerts():
+    """
+    Manually trigger webhook alerts for all organizations
+
+    Permissions:
+    - Super Admin only: Can manually trigger webhook notifications
+    """
+    from app.cisa_sync import send_org_webhook
+
+    try:
+        results = []
+        organizations = Organization.query.filter_by(active=True).all()
+
+        for org in organizations:
+            # Check if org has webhooks enabled
+            if not org.webhook_enabled or not org.webhook_url:
+                results.append({
+                    'organization': org.name,
+                    'status': 'skipped',
+                    'reason': 'Webhook not configured'
+                })
+                continue
+
+            # Get unacknowledged matches for this org
+            org_product_ids = db.session.query(Product.id).filter(
+                Product.organization_id == org.id
+            ).scalar_subquery()
+
+            unack_matches = (
+                VulnerabilityMatch.query
+                .filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.acknowledged == False
+                )
+                .all()
+            )
+
+            # Filter for critical/high priority matches
+            priority_matches = [
+                m for m in unack_matches
+                if m.calculate_effective_priority() in ('critical', 'high')
+            ]
+
+            if not priority_matches:
+                results.append({
+                    'organization': org.name,
+                    'status': 'skipped',
+                    'reason': 'No unacknowledged critical/high CVEs'
+                })
+                continue
+
+            # Count critical
+            critical_count = sum(1 for m in priority_matches if m.calculate_effective_priority() == 'critical')
+
+            # Send webhook
+            result = send_org_webhook(
+                org=org,
+                new_cves_count=len(priority_matches),
+                critical_count=critical_count,
+                matches_count=len(priority_matches),
+                matches=priority_matches
+            )
+
+            if result:
+                if result.get('skipped'):
+                    results.append({
+                        'organization': org.name,
+                        'status': 'skipped',
+                        'reason': result.get('reason', 'No new CVEs to alert')
+                    })
+                elif result.get('success'):
+                    results.append({
+                        'organization': org.name,
+                        'status': 'success',
+                        'new_cves': result.get('new_cves', 0)
+                    })
+                else:
+                    results.append({
+                        'organization': org.name,
+                        'status': 'error',
+                        'reason': result.get('error', 'Unknown error')
+                    })
+            else:
+                results.append({
+                    'organization': org.name,
+                    'status': 'skipped',
+                    'reason': 'No webhook configured'
+                })
+
+        # Count successes
+        sent_count = sum(1 for r in results if r['status'] == 'success')
+        skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+        error_count = sum(1 for r in results if r['status'] == 'error')
+
+        return jsonify({
+            'status': 'success',
+            'summary': {
+                'total_orgs': len(organizations),
+                'webhooks_sent': sent_count,
+                'skipped': skipped_count,
+                'errors': error_count
+            },
+            'details': results
+        })
+
+    except Exception as e:
+        logger.exception("Error triggering webhook alerts")
+        return jsonify({
+            'status': 'error',
+            'error': 'Failed to send webhook notifications'
+        }), 500
+
+
 # ============================================================================
 # SERVICE CATALOG API ENDPOINTS
 # ============================================================================
