@@ -41,13 +41,10 @@ class Config:
         SQLALCHEMY_DATABASE_URI = 'postgresql://sentrikat:sentrikat@db:5432/sentrikat'
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Use NullPool to avoid connection pooling issues with gunicorn workers
+    # Each request gets a fresh connection - slightly slower but more reliable
     SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_pre_ping': True,      # Verify connections before use (handles stale connections)
-        'pool_recycle': 300,        # Recycle connections every 5 minutes
-        'pool_size': 5,             # Reduced pool size to minimize stale connection issues
-        'max_overflow': 10,         # Allow up to 10 additional connections when needed
-        'pool_timeout': 30,         # Wait up to 30s for a connection from pool
-        'pool_reset_on_return': 'rollback',  # Always rollback on connection return to clear state
+        'poolclass': __import__('sqlalchemy.pool', fromlist=['NullPool']).NullPool,
         'connect_args': {
             'connect_timeout': 10,  # Connection timeout
             'options': '-c statement_timeout=60000'  # 60s query timeout
