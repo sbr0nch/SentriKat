@@ -990,13 +990,11 @@
         // Initialize toast container
         SK.Toast.init();
 
-        // Setup global modal cleanup
+        // Setup global modal cleanup - only on modal hide, not periodically
+        // Periodic cleanup was causing race conditions during modal show animation
         document.addEventListener('hidden.bs.modal', () => {
-            setTimeout(() => SK.Modal.cleanupBackdrops(), 100);
+            setTimeout(() => SK.Modal.cleanupBackdrops(), 300);
         });
-
-        // Periodic cleanup
-        setInterval(() => SK.Modal.cleanupBackdrops(), 5000);
 
         this.initialized = true;
         SK.log('SentriKat Core initialized');
