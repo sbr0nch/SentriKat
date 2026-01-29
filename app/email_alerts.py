@@ -59,9 +59,10 @@ class EmailAlertManager:
         if not new_matches:
             return {'status': 'skipped', 'reason': 'No new matches'}
 
-        # Check if we should send alerts now
-        if not EmailAlertManager.should_send_alert_now(organization):
-            return {'status': 'skipped', 'reason': 'Outside alert time window'}
+        # Note: Time window check removed - alerts are sent immediately when CVEs are detected.
+        # The previous time window logic caused alerts to be lost when sync ran outside
+        # business hours. Users can configure email notification rules on their email
+        # client/server if they need quiet hours.
 
         # Get SMTP config - try organization first, then fall back to global
         smtp_config = organization.get_smtp_config()
