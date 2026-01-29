@@ -353,9 +353,8 @@
             if (overlay) {
                 overlay.classList.remove('show');
             }
-
-            // Also cleanup any modal backdrops
-            SK.Modal.cleanupBackdrops();
+            // Note: Do NOT call cleanupBackdrops() here - loading and modals are independent
+            // Calling cleanup here caused race conditions when modals were opening
         }
     };
 
@@ -611,9 +610,7 @@
             }
 
             this.active = null;
-
-            // Cleanup after animation
-            setTimeout(() => this.cleanupBackdrops(), 300);
+            // Let Bootstrap handle backdrop cleanup naturally
         },
 
         /**
@@ -952,7 +949,7 @@
                     confirmBtn.removeEventListener('click', handleConfirm);
                     modal.removeEventListener('hidden.bs.modal', handleCancel);
                     bsModal.hide();
-                    setTimeout(() => SK.Modal.cleanupBackdrops(), 100);
+                    // Bootstrap handles backdrop cleanup automatically
                 };
 
                 confirmBtn.addEventListener('click', handleConfirm);
@@ -990,11 +987,9 @@
         // Initialize toast container
         SK.Toast.init();
 
-        // Setup global modal cleanup - only on modal hide, not periodically
-        // Periodic cleanup was causing race conditions during modal show animation
-        document.addEventListener('hidden.bs.modal', () => {
-            setTimeout(() => SK.Modal.cleanupBackdrops(), 300);
-        });
+        // Note: We no longer auto-cleanup backdrops on modal hide
+        // Bootstrap handles its own backdrop management - our interference caused race conditions
+        // The fixGreyScreen() function remains available for manual recovery if needed
 
         this.initialized = true;
         SK.log('SentriKat Core initialized');

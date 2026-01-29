@@ -454,8 +454,7 @@
         if (instance) {
             instance.hide();
         }
-
-        setTimeout(() => this.cleanupBackdrops(), 300);
+        // Let Bootstrap handle backdrop cleanup - no manual intervention needed
     };
 
     SK.log('Modal configurations loaded:', Object.keys(SK.Modal.registry).length, 'modals registered');

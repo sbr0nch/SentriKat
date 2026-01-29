@@ -219,7 +219,7 @@ function safeDisposeModal(modalId, removeElement = false) {
             modalEl.remove();
         }
     }
-    SK.Modal.cleanupBackdrops();
+    // Bootstrap handles backdrop cleanup when modals are properly disposed
 }
 
 // ============================================================================
@@ -1006,7 +1006,6 @@ async function loadUsers() {
 
 function showCreateUserModal() {
     try {
-        console.log('showCreateUserModal called');
         currentUserId = null;
         SK.DOM.setHtml('userModalTitle', '<i class="bi bi-person-plus me-2"></i>Create User');
 
@@ -1038,15 +1037,7 @@ function showCreateUserModal() {
         }
 
         const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
-        console.log('Modal created, showing...');
         modal.show();
-
-        // Debug: Check modal state after short delay
-        setTimeout(() => {
-            console.log('Modal element classes:', modalElement.className);
-            console.log('Modal display style:', window.getComputedStyle(modalElement).display);
-            console.log('Backdrop count:', document.querySelectorAll('.modal-backdrop').length);
-        }, 500);
     } catch (error) {
         console.error('Error in showCreateUserModal:', error);
         showToast('Error opening user modal: ' + error.message, 'danger');
