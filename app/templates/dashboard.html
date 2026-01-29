@@ -417,6 +417,16 @@
                     <button class="btn btn-sm btn-success" id="bulkAckBtn" onclick="bulkAcknowledge()" disabled>
                         <i class="bi bi-check-circle me-1"></i>Acknowledge
                     </button>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-outline-warning dropdown-toggle" id="bulkSnoozeBtn" data-bs-toggle="dropdown" disabled>
+                            <i class="bi bi-clock me-1"></i>Snooze
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="bulkSnooze(24); return false;">24 hours</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="bulkSnooze(72); return false;">3 days</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="bulkSnooze(168); return false;">1 week</a></li>
+                        </ul>
+                    </div>
                     <button class="btn btn-sm btn-outline-secondary" id="bulkUnackBtn" onclick="bulkUnacknowledge()" disabled>
                         <i class="bi bi-x-circle me-1"></i>Unacknowledge
                     </button>
@@ -1152,7 +1162,17 @@
                                 ${!match.acknowledged ?
                                     `<button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${match.id})">
                                         <i class="bi bi-check-circle"></i> Acknowledge
-                                    </button>` :
+                                    </button>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-warning dropdown-toggle" data-bs-toggle="dropdown">
+                                            <i class="bi bi-clock"></i> Snooze
+                                        </button>
+                                        <ul class="dropdown-menu">
+                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 24); return false;">24 hours</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 72); return false;">3 days</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 168); return false;">1 week</a></li>
+                                        </ul>
+                                    </div>` :
                                     `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${match.id})">
                                         <i class="bi bi-arrow-counterclockwise"></i> Unacknowledge
                                     </button>`
@@ -1203,6 +1223,7 @@
         const bulkAckBtnEl = document.getElementById('bulkAckBtn');
         const bulkUnackBtnEl = document.getElementById('bulkUnackBtn');
         const bulkExportBtnEl = document.getElementById('bulkExportBtn');
+        const bulkSnoozeBtnEl = document.getElementById('bulkSnoozeBtn');
 
         // Show/hide bulk actions bar
         if (bulkActionsBar) {
@@ -1213,6 +1234,7 @@
         if (bulkAckBtnEl) bulkAckBtnEl.disabled = count === 0;
         if (bulkUnackBtnEl) bulkUnackBtnEl.disabled = count === 0;
         if (bulkExportBtnEl) bulkExportBtnEl.disabled = count === 0;
+        if (bulkSnoozeBtnEl) bulkSnoozeBtnEl.disabled = count === 0;
     }
 
     function clearSelection() {
@@ -1291,6 +1313,47 @@
         loadStats();
     }
 
+    async function bulkSnooze(hours) {
+        if (selectedVulns.size === 0) return;
+
+        const timeLabel = hours >= 168 ? '1 week' : hours >= 72 ? '3 days' : '24 hours';
+        const confirmed = await showConfirm(
+            `Snooze ${selectedVulns.size} vulnerabilities for ${timeLabel}?`,
+            'Bulk Snooze',
+            'Snooze',
+            'btn-warning'
+        );
+
+        if (!confirmed) return;
+
+        showLoading();
+        let success = 0;
+        let failed = 0;
+
+        for (const matchId of selectedVulns) {
+            try {
+                const response = await fetch(`/api/matches/${matchId}/snooze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hours: hours })
+                });
+                if (response.ok) {
+                    success++;
+                } else {
+                    failed++;
+                }
+            } catch {
+                failed++;
+            }
+        }
+
+        hideLoading();
+        showToast(`Snoozed ${success} vulnerabilities for ${timeLabel}${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'warning' : 'danger');
+        selectedVulns.clear();
+        updateBulkActions();
+        loadVulnerabilities();
+    }
+
     async function bulkExport() {
         if (selectedVulns.size === 0) return;
 
@@ -1342,6 +1405,23 @@
             showToast('Vulnerability unacknowledged', 'info');
             loadVulnerabilities();
             loadStats();
+        } catch (error) {
+            showToast(`✗ Error: ${error.message}`, 'danger');
+        }
+    }
+
+    async function snoozeMatch(matchId, hours) {
+        try {
+            const response = await fetch(`/api/matches/${matchId}/snooze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hours: hours })
+            });
+            if (!response.ok) throw new Error('Failed to snooze');
+            const data = await response.json();
+            const snoozeUntil = new Date(data.snoozed_until);
+            showToast(`✓ Snoozed until ${snoozeUntil.toLocaleString()}`, 'warning');
+            loadVulnerabilities();
         } catch (error) {
             showToast(`✗ Error: ${error.message}`, 'danger');
         }
