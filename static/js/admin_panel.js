@@ -6,6 +6,61 @@
  */
 
 // ============================================================================
+// SK NAMESPACE FALLBACK - Ensure SK.DOM is available
+// ============================================================================
+
+if (typeof SK === 'undefined' || !SK.DOM) {
+    console.warn('[AdminPanel] SK namespace not found, creating fallback');
+    window.SK = window.SK || {};
+    SK.DOM = {
+        get: function(id) { return document.getElementById(id); },
+        setValue: function(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.value = value ?? '';
+        },
+        setHtml: function(id, html) {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = html ?? '';
+        },
+        setChecked: function(id, checked) {
+            const el = document.getElementById(id);
+            if (el) el.checked = !!checked;
+        },
+        setDisplay: function(id, display) {
+            const el = document.getElementById(id);
+            if (el) {
+                if (typeof display === 'boolean') {
+                    el.style.display = display ? '' : 'none';
+                } else {
+                    el.style.display = display;
+                }
+            }
+        },
+        setText: function(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text ?? '';
+        },
+        setRequired: function(id, required) {
+            const el = document.getElementById(id);
+            if (el) el.required = !!required;
+        },
+        setDisabled: function(id, disabled) {
+            const el = document.getElementById(id);
+            if (el) el.disabled = !!disabled;
+        }
+    };
+    SK.Modal = SK.Modal || {
+        cleanupBackdrops: function() {
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.removeProperty('padding-right');
+            document.body.style.overflow = '';
+        }
+    };
+    SK.warn = function(...args) { console.warn('[SentriKat]', ...args); };
+}
+
+// ============================================================================
 // STATE VARIABLES
 // ============================================================================
 

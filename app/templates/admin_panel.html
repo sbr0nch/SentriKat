@@ -548,7 +548,7 @@
                     <div class="row mb-4" id="integrationStatsRow">
                         <!-- Pull Sources stat card hidden - coming soon
                         <div class="col-md-3">
-                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="SK.DOM.get('pull-sources-tab').click()">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('pull-sources-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -565,7 +565,7 @@
                         </div>
                         -->
                         <div class="col-md-4">
-                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="SK.DOM.get('push-agents-tab').click()">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('push-agents-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -581,7 +581,7 @@
                             </div>
                         </div>
                         <div class="col-md-4">
-                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="SK.DOM.get('import-queue-tab').click()">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('import-queue-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -648,7 +648,7 @@
                                         <span class="badge bg-light text-dark border"><i class="bi bi-ubuntu me-1"></i>Linux</span>
                                         <span class="badge bg-light text-dark border"><i class="bi bi-terminal me-1"></i>PowerShell/Bash</span>
                                     </div>
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="SK.DOM.get('push-agents-tab').click()">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('push-agents-tab').click()">
                                         <i class="bi bi-download me-1"></i>Deploy Agents
                                     </button>
                                 </div>
@@ -1438,7 +1438,7 @@
                                             <input type="file" class="form-control mb-2" id="restoreFile" accept=".json" style="display: none;">
                                             <input type="file" class="form-control mb-2" id="restoreFullFile" accept=".json" style="display: none;">
                                             <div class="d-grid gap-2">
-                                                <button type="button" class="btn btn-outline-secondary" onclick="SK.DOM.get('restoreFile').click()">
+                                                <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('restoreFile').click()">
                                                     <i class="bi bi-sliders me-1"></i>Settings Only
                                                 </button>
                                                 <button type="button" class="btn btn-outline-primary" onclick="confirmFullRestore()">
@@ -2977,7 +2977,7 @@ function activateTabFromHash() {
     let hash = window.location.hash.replace('#', '') || 'users';
 
     // Validate that the tab exists
-    const tabButton = SK.DOM.get(hash + '-tab');
+    const tabButton = document.getElementById(hash + '-tab');
     if (tabButton) {
         // Hide all main tab panes first (only direct children of adminTabsContent)
         document.querySelectorAll('#adminTabsContent > .tab-pane').forEach(pane => {
@@ -2985,7 +2985,7 @@ function activateTabFromHash() {
         });
 
         // Show the target pane
-        const targetPane = SK.DOM.get(hash);
+        const targetPane = document.getElementById(hash);
         if (targetPane) {
             targetPane.classList.add('show', 'active');
 

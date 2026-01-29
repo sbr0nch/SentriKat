@@ -2847,6 +2847,21 @@
          */
 
         /**
+         * Clean up modal backdrops - fallback function
+         */
+        function cleanupModalBackdrops() {
+            if (typeof SK !== 'undefined' && SK.Modal) {
+                SK.Modal.cleanupBackdrops();
+            } else {
+                // Fallback cleanup
+                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('padding-right');
+                document.body.style.overflow = '';
+            }
+        }
+
+        /**
          * Safely close and dispose of a Bootstrap modal
          */
         function safeCloseModal(modalElement) {
@@ -2854,7 +2869,7 @@
             const instance = bootstrap.Modal.getInstance(modalElement);
             if (instance) {
                 instance.hide();
-                setTimeout(() => SK.Modal.cleanupBackdrops(), 300);
+                setTimeout(cleanupModalBackdrops, 300);
             }
         }
 
@@ -2862,14 +2877,14 @@
          * Safely remove a dynamic modal element from the DOM
          */
         function safeRemoveModal(modalId) {
-            const modalElement = SK.DOM.get(modalId);
+            const modalElement = document.getElementById(modalId);
             if (!modalElement) return;
             const instance = bootstrap.Modal.getInstance(modalElement);
             if (instance) {
                 try { instance.dispose(); } catch (e) {}
             }
             modalElement.remove();
-            SK.Modal.cleanupBackdrops();
+            cleanupModalBackdrops();
         }
 
         /**
@@ -2880,15 +2895,17 @@
                 window.location.href = '/admin-panel#' + tabId;
                 return;
             }
-            const tabButton = SK.DOM.get(tabId + '-tab');
+            const tabButton = document.getElementById(tabId + '-tab');
             if (tabButton) {
                 const tab = new bootstrap.Tab(tabButton);
                 tab.show();
             }
         }
 
-        // Initialize SK with debug mode for development
-        SK.init({ debug: true });
+        // Initialize SK if available
+        if (typeof SK !== 'undefined') {
+            SK.init({ debug: true });
+        }
 
         /**
          * Check CVE service status and update the status indicator

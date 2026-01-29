@@ -580,7 +580,7 @@
     }
 
     function clearSearch() {
-        SK.DOM.get('productSearch').value = '';
+        document.getElementById('productSearch').value = '';
         currentPage = 1;
         loadProducts();
     }
@@ -591,9 +591,9 @@
     }
 
     function renderPagination(total, currentPage, pages, perPage) {
-        const container = SK.DOM.get('paginationContainer');
-        const nav = SK.DOM.get('paginationNav');
-        const countEl = SK.DOM.get('productCount');
+        const container = document.getElementById('paginationContainer');
+        const nav = document.getElementById('paginationNav');
+        const countEl = document.getElementById('productCount');
 
         // Update count display
         const start = (currentPage - 1) * perPage + 1;
@@ -660,24 +660,24 @@
         // Clear any existing selection when reloading products
         clearSelection();
         showLoading();
-        const tbody = SK.DOM.get('productsTable');
+        const tbody = document.getElementById('productsTable');
 
         // Build query parameters
         const params = new URLSearchParams();
 
-        const search = SK.DOM.get('productSearch')?.value?.trim();
+        const search = document.getElementById('productSearch')?.value?.trim();
         if (search) params.append('search', search);
 
-        const filterOrgEl = SK.DOM.get('filterOrg');
+        const filterOrgEl = document.getElementById('filterOrg');
         if (filterOrgEl && filterOrgEl.value) params.append('filter_org', filterOrgEl.value);
 
-        const criticality = SK.DOM.get('filterCriticality')?.value;
+        const criticality = document.getElementById('filterCriticality')?.value;
         if (criticality) params.append('criticality', criticality);
 
-        const status = SK.DOM.get('filterStatus')?.value;
+        const status = document.getElementById('filterStatus')?.value;
         if (status) params.append('status', status);
 
-        const perPage = parseInt(SK.DOM.get('perPage')?.value || '25');
+        const perPage = parseInt(document.getElementById('perPage')?.value || '25');
         params.append('page', currentPage);
         params.append('per_page', perPage);
 
@@ -695,8 +695,8 @@
                 renderPagination(total, data.page, pages, perPage);
             } else {
                 // Non-paginated response (backward compatibility)
-                SK.DOM.get('productCount').textContent = `${products.length} products`;
-                SK.DOM.get('paginationContainer').style.display = 'none';
+                document.getElementById('productCount').textContent = `${products.length} products`;
+                document.getElementById('paginationContainer').style.display = 'none';
             }
 
             if (products.length === 0) {
@@ -787,18 +787,18 @@
     }
 
     function resetFilters() {
-        SK.DOM.get('productSearch').value = '';
-        const filterOrgEl = SK.DOM.get('filterOrg');
+        document.getElementById('productSearch').value = '';
+        const filterOrgEl = document.getElementById('filterOrg');
         if (filterOrgEl) filterOrgEl.value = '';
-        SK.DOM.get('filterCriticality').value = '';
-        SK.DOM.get('filterStatus').value = '';
+        document.getElementById('filterCriticality').value = '';
+        document.getElementById('filterStatus').value = '';
         currentPage = 1;
         loadProducts();
     }
 
     // Load organizations for filter dropdown (super admin only)
     async function loadFilterOrganizations() {
-        const filterOrgEl = SK.DOM.get('filterOrg');
+        const filterOrgEl = document.getElementById('filterOrg');
         if (!filterOrgEl) return; // Not super admin
 
         try {
@@ -812,18 +812,38 @@
         }
     }
 
-    // DOM utilities now provided by SK.DOM from sentrikat-core.js
+    // Safe DOM helpers - use SK.DOM if available, otherwise fallback to native
+    function safeSetValue(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value ?? '';
+    }
+    function safeSetHtml(id, html) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html ?? '';
+    }
+    function safeSetChecked(id, checked) {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!checked;
+    }
+    function safeSetDisplay(id, display) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = display;
+    }
+    function safeSetText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text ?? '';
+    }
 
     async function showAddProduct() {
         currentProductId = null;
-        SK.DOM.setHtml('productModalTitle', '<i class="bi bi-plus-circle me-2"></i>Add Product');
+        safeSetHtml('productModalTitle', '<i class="bi bi-plus-circle me-2"></i>Add Product');
 
-        const productForm = SK.DOM.get('productForm');
+        const productForm = document.getElementById('productForm');
         if (productForm) productForm.reset();
 
-        SK.DOM.setChecked('active', true);
-        SK.DOM.setValue('criticality', 'medium');
-        SK.DOM.setValue('matchType', 'auto');
+        safeSetChecked('active', true);
+        safeSetValue('criticality', 'medium');
+        safeSetValue('matchType', 'auto');
 
         // Reset NVD search UI (primary method)
         resetNVDSearch();
@@ -832,11 +852,11 @@
         resetCPEForm();
 
         // Collapse advanced options
-        const advancedCollapse = SK.DOM.get('advancedOptionsCollapse');
+        const advancedCollapse = document.getElementById('advancedOptionsCollapse');
         if (advancedCollapse) advancedCollapse.classList.remove('show');
 
         // Show manual entry toggle
-        SK.DOM.setDisplay('manualEntryToggle', 'block');
+        safeSetDisplay('manualEntryToggle', 'block');
 
         // Check NVD API key status and show rate limit warning if needed
         checkNvdApiKeyStatus();
@@ -845,7 +865,7 @@
         await loadOrganizationsIntoProductForm();
 
         // Show the modal - reuse or create instance
-        const modalEl = SK.DOM.get('productModal');
+        const modalEl = document.getElementById('productModal');
         if (modalEl) {
             const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
             modal.show();
@@ -853,7 +873,7 @@
     }
 
     async function checkNvdApiKeyStatus() {
-        const warningEl = SK.DOM.get('nvdRateLimitWarning');
+        const warningEl = document.getElementById('nvdRateLimitWarning');
         if (!warningEl) return;
 
         try {
@@ -873,7 +893,7 @@
 
     async function editProduct(productId) {
         currentProductId = productId;
-        SK.DOM.setHtml('productModalTitle', '<i class="bi bi-pencil me-2"></i>Edit Product');
+        safeSetHtml('productModalTitle', '<i class="bi bi-pencil me-2"></i>Edit Product');
 
         // Reset NVD search UI
         resetNVDSearch();
@@ -885,27 +905,27 @@
             const response = await fetch(`/api/products/${productId}`);
             const product = await response.json();
 
-            SK.DOM.setValue('vendor', product.vendor);
-            SK.DOM.setValue('productName', product.product_name);
-            SK.DOM.setValue('version', product.version || '');
-            SK.DOM.setValue('criticality', product.criticality || 'medium');
-            SK.DOM.setValue('keywords', product.keywords || '');
-            SK.DOM.setValue('description', product.description || '');
-            SK.DOM.setChecked('active', product.active);
-            SK.DOM.setValue('productOrganization', product.organization_id || '');
+            safeSetValue('vendor', product.vendor);
+            safeSetValue('productName', product.product_name);
+            safeSetValue('version', product.version || '');
+            safeSetValue('criticality', product.criticality || 'medium');
+            safeSetValue('keywords', product.keywords || '');
+            safeSetValue('description', product.description || '');
+            safeSetChecked('active', product.active);
+            safeSetValue('productOrganization', product.organization_id || '');
 
             // Load CPE data and update NVD selection display
             loadCPEIntoForm(product);
 
             // Hide manual entry toggle when editing (data is already filled)
-            SK.DOM.setDisplay('manualEntryToggle', 'none');
+            safeSetDisplay('manualEntryToggle', 'none');
 
             // Collapse advanced options by default
-            const advancedCollapse = SK.DOM.get('advancedOptionsCollapse');
+            const advancedCollapse = document.getElementById('advancedOptionsCollapse');
             if (advancedCollapse) advancedCollapse.classList.remove('show');
 
             // Show the modal - reuse or create instance
-            const modalEl = SK.DOM.get('productModal');
+            const modalEl = document.getElementById('productModal');
             if (modalEl) {
                 const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
                 modal.show();
@@ -919,9 +939,9 @@
         // Clear previous validation
         clearFormValidation('productForm');
 
-        const vendor = SK.DOM.get('vendor').value.trim();
-        const productName = SK.DOM.get('productName').value.trim();
-        const criticality = SK.DOM.get('criticality').value;
+        const vendor = document.getElementById('vendor').value.trim();
+        const productName = document.getElementById('productName').value.trim();
+        const criticality = document.getElementById('criticality').value;
 
         // Validate required fields
         let isValid = true;
@@ -939,21 +959,21 @@
             return;
         }
 
-        const orgId = SK.DOM.get('productOrganization').value;
+        const orgId = document.getElementById('productOrganization').value;
 
         const productData = {
             vendor: vendor,
             product_name: productName,
-            version: SK.DOM.get('version').value.trim(),
+            version: document.getElementById('version').value.trim(),
             criticality: criticality,
-            keywords: SK.DOM.get('keywords').value.trim(),
-            description: SK.DOM.get('description').value.trim(),
-            active: SK.DOM.get('active').checked,
+            keywords: document.getElementById('keywords').value.trim(),
+            description: document.getElementById('description').value.trim(),
+            active: document.getElementById('active').checked,
             // CPE fields
-            cpe_vendor: SK.DOM.get('cpeVendor').value.trim() || null,
-            cpe_product: SK.DOM.get('cpeProduct').value.trim() || null,
-            cpe_uri: SK.DOM.get('cpeUri').value.trim() || null,
-            match_type: SK.DOM.get('matchType').value || 'auto'
+            cpe_vendor: document.getElementById('cpeVendor').value.trim() || null,
+            cpe_product: document.getElementById('cpeProduct').value.trim() || null,
+            cpe_uri: document.getElementById('cpeUri').value.trim() || null,
+            match_type: document.getElementById('matchType').value || 'auto'
         };
 
         if (orgId) {
@@ -983,7 +1003,7 @@
                     'success'
                 );
                 // Safely close modal
-                const modalEl = SK.DOM.get('productModal');
+                const modalEl = document.getElementById('productModal');
                 const modal = bootstrap.Modal.getInstance(modalEl);
                 if (modal) {
                     modal.hide();
@@ -1044,7 +1064,7 @@
     }
 
     async function loadOrganizationsIntoProductForm() {
-        const select = SK.DOM.get('productOrganization');
+        const select = document.getElementById('productOrganization');
         if (!select) return;
 
         select.innerHTML = '<option value="">Loading...</option>';
@@ -1100,7 +1120,7 @@
             const response = await fetch('/api/organizations');
             if (response.ok) {
                 const orgs = await response.json();
-                const select = SK.DOM.get('catalogOrgSelect');
+                const select = document.getElementById('catalogOrgSelect');
                 select.innerHTML = orgs.map(org =>
                     `<option value="${org.id}">${escapeHtml(org.display_name)}</option>`
                 ).join('');
@@ -1110,7 +1130,7 @@
         }
 
         // Show modal - reuse existing instance or create new one
-        const modalElement = SK.DOM.get('serviceCatalogModal');
+        const modalElement = document.getElementById('serviceCatalogModal');
         let modal = bootstrap.Modal.getInstance(modalElement);
         if (!modal) {
             modal = new bootstrap.Modal(modalElement);
@@ -1119,7 +1139,7 @@
     }
 
     async function loadServiceCatalog() {
-        const tbody = SK.DOM.get('catalogTable');
+        const tbody = document.getElementById('catalogTable');
 
         try {
             const response = await fetch('/api/catalog');
@@ -1138,7 +1158,7 @@
     }
 
     function renderCatalog(catalog) {
-        const tbody = SK.DOM.get('catalogTable');
+        const tbody = document.getElementById('catalogTable');
 
         if (catalog.length === 0) {
             tbody.innerHTML = `
@@ -1229,7 +1249,7 @@
     }
 
     function toggleCatalogSelectAll() {
-        const selectAllCheckbox = SK.DOM.get('catalogSelectAll');
+        const selectAllCheckbox = document.getElementById('catalogSelectAll');
         const checkboxes = document.querySelectorAll('.catalog-item-checkbox');
 
         checkboxes.forEach(checkbox => {
@@ -1248,8 +1268,8 @@
 
     function updateCatalogSelectionUI() {
         const count = selectedCatalogItems.size;
-        const countBadge = SK.DOM.get('catalogSelectionCount');
-        const addBtn = SK.DOM.get('addSelectedBtn');
+        const countBadge = document.getElementById('catalogSelectionCount');
+        const addBtn = document.getElementById('addSelectedBtn');
 
         if (count > 0) {
             countBadge.textContent = `${count} selected`;
@@ -1267,10 +1287,10 @@
             return;
         }
 
-        const orgSelect = SK.DOM.get('catalogOrgSelect');
+        const orgSelect = document.getElementById('catalogOrgSelect');
         const selectedOrgIds = Array.from(orgSelect.selectedOptions).map(opt => parseInt(opt.value)).filter(id => !isNaN(id));
 
-        const addBtn = SK.DOM.get('addSelectedBtn');
+        const addBtn = document.getElementById('addSelectedBtn');
         const originalText = addBtn.innerHTML;
 
         addBtn.disabled = true;
@@ -1348,10 +1368,10 @@
             // Clear selection and close modals
             selectedCatalogItems.clear();
             updateCatalogSelectionUI();
-            bootstrap.Modal.getInstance(SK.DOM.get('serviceCatalogModal')).hide();
+            bootstrap.Modal.getInstance(document.getElementById('serviceCatalogModal')).hide();
 
             // Also close the product modal if it's open
-            const productModal = bootstrap.Modal.getInstance(SK.DOM.get('productModal'));
+            const productModal = bootstrap.Modal.getInstance(document.getElementById('productModal'));
             if (productModal) {
                 productModal.hide();
             }
@@ -1383,13 +1403,13 @@
             const service = await response.json();
 
             // Fill form fields with catalog data
-            SK.DOM.get('vendor').value = service.vendor;
-            SK.DOM.get('productName').value = service.product_name;
-            SK.DOM.get('keywords').value = service.keywords || '';
-            SK.DOM.get('serviceCatalogId').value = catalogId;
+            document.getElementById('vendor').value = service.vendor;
+            document.getElementById('productName').value = service.product_name;
+            document.getElementById('keywords').value = service.keywords || '';
+            document.getElementById('serviceCatalogId').value = catalogId;
 
             // Close catalog modal
-            bootstrap.Modal.getInstance(SK.DOM.get('serviceCatalogModal')).hide();
+            bootstrap.Modal.getInstance(document.getElementById('serviceCatalogModal')).hide();
 
             // Automatically save the product and close the form modal
             setTimeout(async () => {
@@ -1402,7 +1422,7 @@
 
     async function searchVendors(query) {
         if (!query || query.length < 2) {
-            SK.DOM.get('vendorSuggestions').innerHTML = '';
+            document.getElementById('vendorSuggestions').innerHTML = '';
             return;
         }
 
@@ -1410,7 +1430,7 @@
             const response = await fetch(`/api/catalog/search?type=vendor&q=${encodeURIComponent(query)}`);
             const vendors = await response.json();
 
-            const datalist = SK.DOM.get('vendorSuggestions');
+            const datalist = document.getElementById('vendorSuggestions');
             datalist.innerHTML = vendors.map(vendor =>
                 `<option value="${escapeHtml(vendor)}">`
             ).join('');
@@ -1421,7 +1441,7 @@
 
     async function searchProducts(query) {
         if (!query || query.length < 2) {
-            SK.DOM.get('productSuggestions').innerHTML = '';
+            document.getElementById('productSuggestions').innerHTML = '';
             return;
         }
 
@@ -1429,7 +1449,7 @@
             const response = await fetch(`/api/catalog/search?type=product&q=${encodeURIComponent(query)}`);
             const products = await response.json();
 
-            const datalist = SK.DOM.get('productSuggestions');
+            const datalist = document.getElementById('productSuggestions');
             datalist.innerHTML = products.map(product =>
                 `<option value="${escapeHtml(product)}">`
             ).join('');
@@ -1445,9 +1465,9 @@
     let selectedProducts = new Map(); // Map of productId -> { id, active, name }
 
     function updateBulkToolbar() {
-        const toolbar = SK.DOM.get('bulkActionsToolbar');
+        const toolbar = document.getElementById('bulkActionsToolbar');
         const count = selectedProducts.size;
-        SK.DOM.get('selectedCount').textContent = count;
+        document.getElementById('selectedCount').textContent = count;
 
         if (count > 0) {
             toolbar.style.display = 'block';
@@ -1517,7 +1537,7 @@
     }
 
     function toggleSelectAll() {
-        const selectAllCheckbox = SK.DOM.get('selectAllCheckbox');
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
         if (!selectAllCheckbox) {
             console.error('Select all checkbox not found');
             return;
@@ -1559,7 +1579,7 @@
     function clearSelection() {
         selectedProducts.clear();
         document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
-        SK.DOM.get('selectAllCheckbox').checked = false;
+        document.getElementById('selectAllCheckbox').checked = false;
         updateBulkToolbar();
     }
 
@@ -1859,7 +1879,7 @@
             const productResponse = await fetch(`/api/products/${productId}`);
             const product = await productResponse.json();
             currentOrgProductName = `${product.vendor} ${product.product_name}`;
-            SK.DOM.get('orgModalProductName').textContent = currentOrgProductName;
+            document.getElementById('orgModalProductName').textContent = currentOrgProductName;
 
             // Load assigned organizations
             await loadAssignedOrganizations(productId);
@@ -1868,7 +1888,7 @@
             await loadAllOrganizations();
 
             // Dispose of any existing modal instance and create fresh
-            const modalElement = SK.DOM.get('orgManagementModal');
+            const modalElement = document.getElementById('orgManagementModal');
             const existingModal = bootstrap.Modal.getInstance(modalElement);
             if (existingModal) {
                 existingModal.dispose();
@@ -1887,7 +1907,7 @@
     }
 
     async function loadAssignedOrganizations(productId) {
-        const container = SK.DOM.get('assignedOrgsList');
+        const container = document.getElementById('assignedOrgsList');
         container.innerHTML = '<div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div>';
 
         try {
@@ -1927,7 +1947,7 @@
             // Filter out already-assigned organizations
             const availableOrgs = allOrganizations.filter(org => !assignedOrgIds.has(org.id));
 
-            const select = SK.DOM.get('addOrgSelect');
+            const select = document.getElementById('addOrgSelect');
             if (availableOrgs.length === 0) {
                 select.innerHTML = '<option value="" disabled>All organizations already assigned</option>';
             } else {
@@ -1941,7 +1961,7 @@
     }
 
     async function assignOrganizations() {
-        const select = SK.DOM.get('addOrgSelect');
+        const select = document.getElementById('addOrgSelect');
         const selectedOptions = Array.from(select.selectedOptions);
         const orgIds = selectedOptions.map(opt => parseInt(opt.value));
 
@@ -1975,16 +1995,16 @@
     }
 
     function showConfirmation(message, onConfirm) {
-        SK.DOM.get('confirmationMessage').textContent = message;
+        document.getElementById('confirmationMessage').textContent = message;
 
         // Reuse existing modal instance or create new one
-        const modalElement = SK.DOM.get('confirmationModal');
+        const modalElement = document.getElementById('confirmationModal');
         let modal = bootstrap.Modal.getInstance(modalElement);
         if (!modal) {
             modal = new bootstrap.Modal(modalElement);
         }
 
-        const confirmBtn = SK.DOM.get('confirmActionBtn');
+        const confirmBtn = document.getElementById('confirmActionBtn');
 
         // Remove any existing event listeners by cloning the button
         const newConfirmBtn = confirmBtn.cloneNode(true);
@@ -2001,7 +2021,7 @@
 
     function showRemoveConfirm(orgId, orgName) {
         // Show inline confirmation buttons
-        const actionsDiv = SK.DOM.get(`org-actions-${orgId}`);
+        const actionsDiv = document.getElementById(`org-actions-${orgId}`);
         actionsDiv.innerHTML = `
             <div class="alert alert-danger p-2 mb-0 d-flex align-items-center" style="font-size: 0.875rem;">
                 <span class="me-2">Remove? Org admins will be notified.</span>
@@ -2034,7 +2054,7 @@
 
                 // If product was deleted (no orgs left), close the modal
                 if (data.product_deleted) {
-                    const modalElement = SK.DOM.get('orgManagementModal');
+                    const modalElement = document.getElementById('orgManagementModal');
                     const modal = bootstrap.Modal.getInstance(modalElement);
                     if (modal) {
                         modal.hide();
@@ -2061,7 +2081,7 @@
 
     function showLastOrgConfirmation(orgId, message) {
         // Show a modal asking user what to do with the last organization
-        const actionsDiv = SK.DOM.get(`org-actions-${orgId}`);
+        const actionsDiv = document.getElementById(`org-actions-${orgId}`);
         actionsDiv.innerHTML = `
             <div class="alert alert-warning p-2 mb-0" style="font-size: 0.875rem;">
                 <div class="mb-2"><i class="bi bi-exclamation-triangle"></i> <strong>Last Organization</strong></div>
@@ -2088,25 +2108,25 @@
 
     function debounceNVDSearch() {
         if (nvdSearchTimeout) clearTimeout(nvdSearchTimeout);
-        const statusEl = SK.DOM.get('nvdSearchStatus');
+        const statusEl = document.getElementById('nvdSearchStatus');
         statusEl.textContent = 'Typing...';
         statusEl.style.display = 'block';
 
         nvdSearchTimeout = setTimeout(() => {
-            const query = SK.DOM.get('nvdSearchInput').value.trim();
+            const query = document.getElementById('nvdSearchInput').value.trim();
             if (query.length >= 2) {
                 performNVDSearchNow();
             } else {
                 statusEl.textContent = 'Enter at least 2 characters to search';
-                SK.DOM.get('nvdResultsList').style.display = 'none';
+                document.getElementById('nvdResultsList').style.display = 'none';
             }
         }, 400);
     }
 
     async function performNVDSearchNow() {
-        const query = SK.DOM.get('nvdSearchInput').value.trim();
-        const statusEl = SK.DOM.get('nvdSearchStatus');
-        const resultsList = SK.DOM.get('nvdResultsList');
+        const query = document.getElementById('nvdSearchInput').value.trim();
+        const statusEl = document.getElementById('nvdSearchStatus');
+        const resultsList = document.getElementById('nvdResultsList');
 
         if (query.length < 2) {
             statusEl.textContent = 'Enter at least 2 characters to search';
@@ -2212,12 +2232,12 @@
     let currentExpandedProduct = null;
 
     function toggleVersionPicker(productId, vendor, product, displayName, versions) {
-        const group = SK.DOM.get(productId);
+        const group = document.getElementById(productId);
         const picker = group.querySelector('.version-picker');
 
         // Close any other open picker
         if (currentExpandedProduct && currentExpandedProduct !== productId) {
-            const prevGroup = SK.DOM.get(currentExpandedProduct);
+            const prevGroup = document.getElementById(currentExpandedProduct);
             if (prevGroup) {
                 prevGroup.querySelector('.version-picker').style.display = 'none';
             }
@@ -2270,39 +2290,39 @@
         const formattedVendor = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
         // Set hidden CPE fields
-        SK.DOM.setValue('cpeVendor', vendor);
-        SK.DOM.setValue('cpeProduct', product);
-        SK.DOM.setValue('cpeUri', `cpe:2.3:a:${vendor}:${product}:${versionStr}:*:*:*:*:*:*:*`);
+        safeSetValue('cpeVendor', vendor);
+        safeSetValue('cpeProduct', product);
+        safeSetValue('cpeUri', `cpe:2.3:a:${vendor}:${product}:${versionStr}:*:*:*:*:*:*:*`);
 
         // Show selected product card with full vendor - product name
         const fullSelectedName = `${formattedVendor} - ${displayName}`;
-        SK.DOM.setText('nvdSelectedName', fullSelectedName);
-        const versionBadge = SK.DOM.get('nvdSelectedVersion');
+        safeSetText('nvdSelectedName', fullSelectedName);
+        const versionBadge = document.getElementById('nvdSelectedVersion');
         if (versionBadge) {
             versionBadge.textContent = version ? `v${version}` : 'All versions';
             versionBadge.className = version ? 'badge bg-primary ms-1' : 'badge bg-secondary ms-1';
         }
-        SK.DOM.setText('nvdSelectedCpe', `CPE: ${vendor}:${product}:${versionStr}`);
-        SK.DOM.setDisplay('nvdSelectedProduct', 'block');
+        safeSetText('nvdSelectedCpe', `CPE: ${vendor}:${product}:${versionStr}`);
+        safeSetDisplay('nvdSelectedProduct', 'block');
 
         // Hide search results and manual entry toggle
-        SK.DOM.setDisplay('nvdResultsList', 'none');
-        SK.DOM.setDisplay('nvdSearchStatus', 'none');
-        SK.DOM.setDisplay('manualEntryToggle', 'none');
+        safeSetDisplay('nvdResultsList', 'none');
+        safeSetDisplay('nvdSearchStatus', 'none');
+        safeSetDisplay('manualEntryToggle', 'none');
 
         // Auto-fill vendor and product name fields
         // Format product for display (capitalize words, replace underscores)
         const formattedProduct = product.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
-        SK.DOM.setValue('vendor', formattedVendor);
-        SK.DOM.setValue('productName', formattedProduct);
-        SK.DOM.setValue('version', version || '');
+        safeSetValue('vendor', formattedVendor);
+        safeSetValue('productName', formattedProduct);
+        safeSetValue('version', version || '');
 
         // Update CPE status in advanced options
-        SK.DOM.setDisplay('cpeSelectedInfo', 'block');
-        SK.DOM.setText('cpeDisplayUri', `${vendor}:${product}`);
-        SK.DOM.setDisplay('cpeNotLinkedInfo', 'none');
-        SK.DOM.setDisplay('clearCpeBtn', 'inline-block');
+        safeSetDisplay('cpeSelectedInfo', 'block');
+        safeSetText('cpeDisplayUri', `${vendor}:${product}`);
+        safeSetDisplay('cpeNotLinkedInfo', 'none');
+        safeSetDisplay('clearCpeBtn', 'inline-block');
 
         currentExpandedProduct = null;
     }
@@ -2312,54 +2332,54 @@
         nvdSelectedProduct = null;
 
         // Clear hidden fields
-        SK.DOM.setValue('cpeVendor', '');
-        SK.DOM.setValue('cpeProduct', '');
-        SK.DOM.setValue('cpeUri', '');
+        safeSetValue('cpeVendor', '');
+        safeSetValue('cpeProduct', '');
+        safeSetValue('cpeUri', '');
 
         // Hide selected product card
-        SK.DOM.setDisplay('nvdSelectedProduct', 'none');
-        SK.DOM.setText('nvdSelectedName', '');
-        SK.DOM.setText('nvdSelectedCpe', '');
-        const versionBadge = SK.DOM.get('nvdSelectedVersion');
+        safeSetDisplay('nvdSelectedProduct', 'none');
+        safeSetText('nvdSelectedName', '');
+        safeSetText('nvdSelectedCpe', '');
+        const versionBadge = document.getElementById('nvdSelectedVersion');
         if (versionBadge) versionBadge.textContent = '';
 
         // Clear form fields
-        SK.DOM.setValue('vendor', '');
-        SK.DOM.setValue('productName', '');
-        SK.DOM.setValue('version', '');
-        const versionSuggestions = SK.DOM.get('versionSuggestions');
+        safeSetValue('vendor', '');
+        safeSetValue('productName', '');
+        safeSetValue('version', '');
+        const versionSuggestions = document.getElementById('versionSuggestions');
         if (versionSuggestions) versionSuggestions.innerHTML = '';
-        SK.DOM.setDisplay('loadVersionsBtn', 'none');
+        safeSetDisplay('loadVersionsBtn', 'none');
 
         // Reset CPE status in advanced options
-        SK.DOM.setDisplay('cpeSelectedInfo', 'none');
-        SK.DOM.setDisplay('cpeNotLinkedInfo', 'block');
-        SK.DOM.setDisplay('clearCpeBtn', 'none');
+        safeSetDisplay('cpeSelectedInfo', 'none');
+        safeSetDisplay('cpeNotLinkedInfo', 'block');
+        safeSetDisplay('clearCpeBtn', 'none');
 
         // Show search input and results (don't clear, let user refine)
-        SK.DOM.setDisplay('nvdSearchStatus', 'block');
-        SK.DOM.setDisplay('nvdResultsList', 'block');
+        safeSetDisplay('nvdSearchStatus', 'block');
+        safeSetDisplay('nvdResultsList', 'block');
 
         // Hide manual fields section
-        SK.DOM.setDisplay('manualFieldsSection', 'none');
+        safeSetDisplay('manualFieldsSection', 'none');
 
         // Show manual entry toggle again
-        SK.DOM.setDisplay('manualEntryToggle', 'block');
+        safeSetDisplay('manualEntryToggle', 'block');
 
         currentExpandedProduct = null;
     }
 
     function toggleManualEntry() {
         // Hide the toggle button
-        const toggle = SK.DOM.get('manualEntryToggle');
+        const toggle = document.getElementById('manualEntryToggle');
         if (toggle) toggle.style.display = 'none';
 
         // Show manual fields section
-        const manualFields = SK.DOM.get('manualFieldsSection');
+        const manualFields = document.getElementById('manualFieldsSection');
         if (manualFields) manualFields.style.display = 'block';
 
         // Focus on the vendor field for manual entry
-        const vendorInput = SK.DOM.get('vendor');
+        const vendorInput = document.getElementById('vendor');
         if (vendorInput) {
             vendorInput.focus();
         }
@@ -2371,7 +2391,7 @@
             return;
         }
 
-        const btn = SK.DOM.get('loadVersionsBtn');
+        const btn = document.getElementById('loadVersionsBtn');
         const originalHtml = btn.innerHTML;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         btn.disabled = true;
@@ -2381,7 +2401,7 @@
             const data = await response.json();
 
             if (response.ok && data.versions) {
-                const datalist = SK.DOM.get('versionSuggestions');
+                const datalist = document.getElementById('versionSuggestions');
                 datalist.innerHTML = data.versions.map(v => `<option value="${escapeHtml(v)}">`).join('');
                 showToast(`Loaded ${data.versions.length} versions`, 'success');
             } else {
@@ -2400,16 +2420,16 @@
         nvdSelectedProduct = null;
 
         // Safe element access with null checks
-        const nvdSearchInput = SK.DOM.get('nvdSearchInput');
-        const nvdSearchStatus = SK.DOM.get('nvdSearchStatus');
-        const nvdResultsList = SK.DOM.get('nvdResultsList');
-        const nvdSelectedProduct = SK.DOM.get('nvdSelectedProduct');
-        const versionSuggestions = SK.DOM.get('versionSuggestions');
-        const loadVersionsBtn = SK.DOM.get('loadVersionsBtn');
-        const cpeSelectedInfo = SK.DOM.get('cpeSelectedInfo');
-        const cpeNotLinkedInfo = SK.DOM.get('cpeNotLinkedInfo');
-        const clearCpeBtn = SK.DOM.get('clearCpeBtn');
-        const toggle = SK.DOM.get('manualEntryToggle');
+        const nvdSearchInput = document.getElementById('nvdSearchInput');
+        const nvdSearchStatus = document.getElementById('nvdSearchStatus');
+        const nvdResultsList = document.getElementById('nvdResultsList');
+        const nvdSelectedProduct = document.getElementById('nvdSelectedProduct');
+        const versionSuggestions = document.getElementById('versionSuggestions');
+        const loadVersionsBtn = document.getElementById('loadVersionsBtn');
+        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
+        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
+        const clearCpeBtn = document.getElementById('clearCpeBtn');
+        const toggle = document.getElementById('manualEntryToggle');
 
         if (nvdSearchInput) nvdSearchInput.value = '';
         if (nvdSearchStatus) nvdSearchStatus.style.display = 'none';
@@ -2438,14 +2458,14 @@
 
     function searchCPE() {
         // Pre-populate search with vendor + product name
-        const vendor = SK.DOM.get('vendor').value.trim();
-        const productName = SK.DOM.get('productName').value.trim();
-        const searchInput = SK.DOM.get('cpeSearchInput');
+        const vendor = document.getElementById('vendor').value.trim();
+        const productName = document.getElementById('productName').value.trim();
+        const searchInput = document.getElementById('cpeSearchInput');
 
         searchInput.value = `${vendor} ${productName}`.trim();
 
-        SK.DOM.get('cpeSearchResults').style.display = 'block';
-        SK.DOM.get('cpeResultsList').innerHTML = `
+        document.getElementById('cpeSearchResults').style.display = 'block';
+        document.getElementById('cpeResultsList').innerHTML = `
             <div class="text-center py-3">
                 <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
                 <span class="ms-2 small">Searching NVD database...</span>
@@ -2458,13 +2478,13 @@
     }
 
     function closeCPESearch() {
-        SK.DOM.get('cpeSearchResults').style.display = 'none';
+        document.getElementById('cpeSearchResults').style.display = 'none';
     }
 
     function debounceCPESearch() {
         if (cpeSearchTimeout) clearTimeout(cpeSearchTimeout);
         cpeSearchTimeout = setTimeout(() => {
-            const query = SK.DOM.get('cpeSearchInput').value.trim();
+            const query = document.getElementById('cpeSearchInput').value.trim();
             if (query.length >= 2) {
                 performCPESearch(query);
             }
@@ -2472,7 +2492,7 @@
     }
 
     async function performCPESearch(query) {
-        const resultsList = SK.DOM.get('cpeResultsList');
+        const resultsList = document.getElementById('cpeResultsList');
 
         try {
             const response = await fetch(`/api/cpe/search?q=${encodeURIComponent(query)}&grouped=true&limit=50`);
@@ -2535,20 +2555,20 @@
 
     function selectCPE(vendor, product, displayName) {
         // Set hidden fields
-        SK.DOM.get('cpeVendor').value = vendor;
-        SK.DOM.get('cpeProduct').value = product;
-        SK.DOM.get('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:*:*:*:*:*:*:*:*`;
+        document.getElementById('cpeVendor').value = vendor;
+        document.getElementById('cpeProduct').value = product;
+        document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:*:*:*:*:*:*:*:*`;
 
         // Show selected info
-        SK.DOM.get('cpeSelectedInfo').style.display = 'block';
-        SK.DOM.get('cpeDisplayUri').textContent = `${vendor}:${product}`;
+        document.getElementById('cpeSelectedInfo').style.display = 'block';
+        document.getElementById('cpeDisplayUri').textContent = `${vendor}:${product}`;
 
         // Hide search results
-        SK.DOM.get('cpeSearchResults').style.display = 'none';
+        document.getElementById('cpeSearchResults').style.display = 'none';
 
         // If vendor/product fields are empty, populate them
-        const vendorInput = SK.DOM.get('vendor');
-        const productInput = SK.DOM.get('productName');
+        const vendorInput = document.getElementById('vendor');
+        const productInput = document.getElementById('productName');
 
         if (!vendorInput.value.trim()) {
             vendorInput.value = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -2561,11 +2581,11 @@
     }
 
     function clearCPE() {
-        const cpeVendor = SK.DOM.get('cpeVendor');
-        const cpeProduct = SK.DOM.get('cpeProduct');
-        const cpeUri = SK.DOM.get('cpeUri');
-        const cpeSelectedInfo = SK.DOM.get('cpeSelectedInfo');
-        const matchType = SK.DOM.get('matchType');
+        const cpeVendor = document.getElementById('cpeVendor');
+        const cpeProduct = document.getElementById('cpeProduct');
+        const cpeUri = document.getElementById('cpeUri');
+        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
+        const matchType = document.getElementById('matchType');
 
         if (cpeVendor) cpeVendor.value = '';
         if (cpeProduct) cpeProduct.value = '';
@@ -2576,9 +2596,9 @@
 
     function resetCPEForm() {
         clearCPE();
-        const cpeSearchResults = SK.DOM.get('cpeSearchResults');
-        const cpeSearchInput = SK.DOM.get('cpeSearchInput');
-        const cpeResultsList = SK.DOM.get('cpeResultsList');
+        const cpeSearchResults = document.getElementById('cpeSearchResults');
+        const cpeSearchInput = document.getElementById('cpeSearchInput');
+        const cpeResultsList = document.getElementById('cpeResultsList');
 
         if (cpeSearchResults) cpeSearchResults.style.display = 'none';
         if (cpeSearchInput) cpeSearchInput.value = '';
@@ -2593,52 +2613,52 @@
             nvdSelectedProduct = product.cpe_product;
 
             // Set hidden fields
-            SK.DOM.setValue('cpeVendor', product.cpe_vendor);
-            SK.DOM.setValue('cpeProduct', product.cpe_product);
-            SK.DOM.setValue('cpeUri', product.cpe_uri || '');
+            safeSetValue('cpeVendor', product.cpe_vendor);
+            safeSetValue('cpeProduct', product.cpe_product);
+            safeSetValue('cpeUri', product.cpe_uri || '');
 
             // Show NVD selected product display (primary UI)
             const displayName = `${product.vendor} ${product.product_name}`;
-            SK.DOM.setText('nvdSelectedName', displayName);
-            SK.DOM.setText('nvdSelectedCpe', `cpe:2.3:a:${product.cpe_vendor}:${product.cpe_product}:*`);
-            SK.DOM.setDisplay('nvdSelectedProduct', 'block');
-            SK.DOM.setDisplay('loadVersionsBtn', 'inline-block');
+            safeSetText('nvdSelectedName', displayName);
+            safeSetText('nvdSelectedCpe', `cpe:2.3:a:${product.cpe_vendor}:${product.cpe_product}:*`);
+            safeSetDisplay('nvdSelectedProduct', 'block');
+            safeSetDisplay('loadVersionsBtn', 'inline-block');
 
             // Update CPE status in advanced options
-            SK.DOM.setDisplay('cpeSelectedInfo', 'block');
-            SK.DOM.setText('cpeDisplayUri', `${product.cpe_vendor}:${product.cpe_product}`);
-            SK.DOM.setDisplay('cpeNotLinkedInfo', 'none');
-            SK.DOM.setDisplay('clearCpeBtn', 'inline-block');
+            safeSetDisplay('cpeSelectedInfo', 'block');
+            safeSetText('cpeDisplayUri', `${product.cpe_vendor}:${product.cpe_product}`);
+            safeSetDisplay('cpeNotLinkedInfo', 'none');
+            safeSetDisplay('clearCpeBtn', 'inline-block');
         } else if (product.effective_cpe_vendor && product.effective_cpe_product) {
             // Show effective CPE from catalog (linked via ServiceCatalog)
             nvdSelectedVendor = product.effective_cpe_vendor;
             nvdSelectedProduct = product.effective_cpe_product;
 
             const displayName = `${product.vendor} ${product.product_name}`;
-            SK.DOM.setText('nvdSelectedName', `${displayName} (from catalog)`);
-            SK.DOM.setText('nvdSelectedCpe', `cpe:2.3:a:${product.effective_cpe_vendor}:${product.effective_cpe_product}:*`);
-            SK.DOM.setDisplay('nvdSelectedProduct', 'block');
-            SK.DOM.setDisplay('loadVersionsBtn', 'inline-block');
+            safeSetText('nvdSelectedName', `${displayName} (from catalog)`);
+            safeSetText('nvdSelectedCpe', `cpe:2.3:a:${product.effective_cpe_vendor}:${product.effective_cpe_product}:*`);
+            safeSetDisplay('nvdSelectedProduct', 'block');
+            safeSetDisplay('loadVersionsBtn', 'inline-block');
 
             // Update CPE status in advanced options
-            SK.DOM.setDisplay('cpeSelectedInfo', 'block');
-            SK.DOM.setText('cpeDisplayUri', `${product.effective_cpe_vendor}:${product.effective_cpe_product} (from catalog)`);
-            SK.DOM.setDisplay('cpeNotLinkedInfo', 'none');
+            safeSetDisplay('cpeSelectedInfo', 'block');
+            safeSetText('cpeDisplayUri', `${product.effective_cpe_vendor}:${product.effective_cpe_product} (from catalog)`);
+            safeSetDisplay('cpeNotLinkedInfo', 'none');
         } else {
             // No CPE data - show manual entry state
             resetNVDSearch();
             resetCPEForm();
         }
 
-        SK.DOM.setValue('matchType', product.match_type || 'auto');
+        safeSetValue('matchType', product.match_type || 'auto');
     }
 
     // Admin Tools Modal Functions
     function showAdminResult(title, body, type = 'success') {
-        const modal = SK.DOM.get('adminResultModal');
-        const icon = SK.DOM.get('adminResultIcon');
-        const titleEl = SK.DOM.get('adminResultTitle');
-        const bodyEl = SK.DOM.get('adminResultBody');
+        const modal = document.getElementById('adminResultModal');
+        const icon = document.getElementById('adminResultIcon');
+        const titleEl = document.getElementById('adminResultTitle');
+        const bodyEl = document.getElementById('adminResultBody');
 
         titleEl.textContent = title;
         bodyEl.innerHTML = body;
@@ -2658,10 +2678,10 @@
     }
 
     function showAdminConfirm(title, body, onConfirm) {
-        const modal = SK.DOM.get('adminConfirmModal');
-        const titleEl = SK.DOM.get('adminConfirmTitle');
-        const bodyEl = SK.DOM.get('adminConfirmBody');
-        const okBtn = SK.DOM.get('adminConfirmOk');
+        const modal = document.getElementById('adminConfirmModal');
+        const titleEl = document.getElementById('adminConfirmTitle');
+        const bodyEl = document.getElementById('adminConfirmBody');
+        const okBtn = document.getElementById('adminConfirmOk');
 
         titleEl.textContent = title;
         bodyEl.innerHTML = body;
@@ -2841,11 +2861,11 @@
         // TableEnhancements auto-initializes via data-enhanced="true"
 
         // Load organizations when product modal is shown (backup trigger)
-        const productModal = SK.DOM.get('productModal');
+        const productModal = document.getElementById('productModal');
         if (productModal) {
             productModal.addEventListener('shown.bs.modal', function() {
                 // Retry loading organizations if still showing "Loading"
-                const select = SK.DOM.get('productOrganization');
+                const select = document.getElementById('productOrganization');
                 if (select && select.innerHTML.includes('Loading')) {
                     loadOrganizationsIntoProductForm();
                 }
