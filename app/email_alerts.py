@@ -446,8 +446,13 @@ class EmailAlertManager:
         return html
 
     @staticmethod
-    def _send_email(smtp_config, recipients, subject, html_body):
-        """Send HTML email via SMTP (supports Gmail, Office365, Internal SMTP)"""
+    def _send_email(smtp_config, recipients, subject, html_body, max_retries=3):
+        """Send HTML email via SMTP with retry logic (supports Gmail, Office365, Internal SMTP)
+
+        Retries up to max_retries times with exponential backoff for transient failures.
+        """
+        import time
+
         msg = MIMEMultipart('alternative')
         msg['From'] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
         msg['To'] = ', '.join(recipients)
@@ -457,23 +462,37 @@ class EmailAlertManager:
         html_part = MIMEText(html_body, 'html', 'utf-8')
         msg.attach(html_part)
 
-        # Determine connection type
-        if smtp_config['use_ssl']:
-            # Use SSL (typically port 465)
-            server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
-        else:
-            # Use plain connection, possibly with STARTTLS
-            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
-            if smtp_config['use_tls']:
-                server.starttls()
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                # Determine connection type
+                if smtp_config['use_ssl']:
+                    # Use SSL (typically port 465)
+                    server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
+                else:
+                    # Use plain connection, possibly with STARTTLS
+                    server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
+                    if smtp_config['use_tls']:
+                        server.starttls()
 
-        # Authenticate if credentials provided
-        if smtp_config['username'] and smtp_config['password']:
-            server.login(smtp_config['username'], smtp_config['password'])
+                # Authenticate if credentials provided
+                if smtp_config['username'] and smtp_config['password']:
+                    server.login(smtp_config['username'], smtp_config['password'])
 
-        # Send email
-        server.sendmail(smtp_config['from_email'], recipients, msg.as_string())
-        server.quit()
+                # Send email
+                server.sendmail(smtp_config['from_email'], recipients, msg.as_string())
+                server.quit()
+                return  # Success
+
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 2s, 4s, 8s
+                    wait_time = 2 ** (attempt + 1)
+                    time.sleep(wait_time)
+                else:
+                    # Final attempt failed, raise the error
+                    raise last_error
 
     @staticmethod
     def _log_alert(org_id, alert_type, matches_count, recipients_count, status, error_msg):
