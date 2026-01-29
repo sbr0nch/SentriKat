@@ -3,6 +3,53 @@
  * Handles user management, organization management, and settings
  */
 
+// ============================================================================
+// SAFE ELEMENT ACCESS HELPERS - Prevent null reference errors
+// ============================================================================
+
+function safeGetElement(id) {
+    return document.getElementById(id);
+}
+
+function safeSetValue(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+}
+
+function safeSetHtml(id, html) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+}
+
+function safeSetChecked(id, checked) {
+    const el = document.getElementById(id);
+    if (el) el.checked = checked;
+}
+
+function safeSetDisplay(id, display) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = display;
+}
+
+function safeSetText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
+function safeSetRequired(id, required) {
+    const el = document.getElementById(id);
+    if (el) el.required = required;
+}
+
+function safeSetDisabled(id, disabled) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = disabled;
+}
+
+// ============================================================================
+// STATE VARIABLES
+// ============================================================================
+
 let currentUserId = null;
 let currentOrgId = null;
 let organizations = [];
@@ -972,28 +1019,30 @@ function showCreateUserModal() {
     try {
         console.log('showCreateUserModal called');
         currentUserId = null;
-        document.getElementById('userModalTitle').innerHTML = '<i class="bi bi-person-plus me-2"></i>Create User';
-        document.getElementById('userForm').reset();
+        safeSetHtml('userModalTitle', '<i class="bi bi-person-plus me-2"></i>Create User');
+
+        const userForm = safeGetElement('userForm');
+        if (userForm) userForm.reset();
 
         // Reset to local auth and completely hide LDAP option for creation
-        document.getElementById('authLocal').checked = true;
-        document.getElementById('authLdap').style.display = 'none';
-        document.getElementById('authLdapLabel').style.display = 'none';
-        document.getElementById('isActive').checked = true;
-        document.getElementById('userRole').value = 'user';
-        document.getElementById('canManageProducts').checked = true;
+        safeSetChecked('authLocal', true);
+        safeSetDisplay('authLdap', 'none');
+        safeSetDisplay('authLdapLabel', 'none');
+        safeSetChecked('isActive', true);
+        safeSetValue('userRole', 'user');
+        safeSetChecked('canManageProducts', true);
 
         // Hide org memberships section (only shown when editing)
-        document.getElementById('orgMembershipsSection').style.display = 'none';
+        safeSetDisplay('orgMembershipsSection', 'none');
 
         // Show primary org field (for new users)
-        document.getElementById('primaryOrgField').style.display = 'block';
-        document.getElementById('organization').required = true;
+        safeSetDisplay('primaryOrgField', 'block');
+        safeSetRequired('organization', true);
 
         toggleAuthFields();
         updateRoleDescription();
 
-        const modalElement = document.getElementById('userModal');
+        const modalElement = safeGetElement('userModal');
         if (!modalElement) {
             console.error('userModal element not found');
             return;
@@ -1010,63 +1059,68 @@ function showCreateUserModal() {
 
 async function editUser(userId) {
     currentUserId = userId;
-    document.getElementById('userModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit User';
+    safeSetHtml('userModalTitle', '<i class="bi bi-pencil me-2"></i>Edit User');
 
     try {
         const response = await fetch(`/api/users/${userId}`);
         const user = await response.json();
 
-        document.getElementById('username').value = user.username;
-        document.getElementById('email').value = user.email;
-        document.getElementById('fullName').value = user.full_name || '';
-        document.getElementById('organization').value = user.organization_id || '';
-        document.getElementById('userRole').value = user.role || 'user';
-        document.getElementById('canManageProducts').checked = user.can_manage_products;
-        document.getElementById('canViewAllOrgs').checked = user.can_view_all_orgs;
-        document.getElementById('isActive').checked = user.is_active;
+        safeSetValue('username', user.username);
+        safeSetValue('email', user.email);
+        safeSetValue('fullName', user.full_name || '');
+        safeSetValue('organization', user.organization_id || '');
+        safeSetValue('userRole', user.role || 'user');
+        safeSetChecked('canManageProducts', user.can_manage_products);
+        safeSetChecked('canViewAllOrgs', user.can_view_all_orgs);
+        safeSetChecked('isActive', user.is_active);
 
         // Set auth type and show/hide LDAP option for editing
         if (user.auth_type === 'ldap') {
-            document.getElementById('authLdap').checked = true;
+            safeSetChecked('authLdap', true);
             // Show LDAP option for existing LDAP users (read-only display)
-            document.getElementById('authLdap').style.display = '';
-            document.getElementById('authLdapLabel').style.display = '';
-            document.getElementById('authLdap').disabled = false;
-            document.getElementById('authLocal').disabled = true;  // Can't change LDAP user to local
+            safeSetDisplay('authLdap', '');
+            safeSetDisplay('authLdapLabel', '');
+            safeSetDisabled('authLdap', false);
+            safeSetDisabled('authLocal', true);  // Can't change LDAP user to local
         } else {
-            document.getElementById('authLocal').checked = true;
+            safeSetChecked('authLocal', true);
             // Hide LDAP option (can't convert local to LDAP)
-            document.getElementById('authLdap').style.display = 'none';
-            document.getElementById('authLdapLabel').style.display = 'none';
-            document.getElementById('authLocal').disabled = false;
+            safeSetDisplay('authLdap', 'none');
+            safeSetDisplay('authLdapLabel', 'none');
+            safeSetDisabled('authLocal', false);
         }
 
         toggleAuthFields();
         updateRoleDescription();
 
         // For edit mode, password is optional
-        document.getElementById('password').required = false;
-        document.getElementById('passwordConfirm').required = false;
+        safeSetRequired('password', false);
+        safeSetRequired('passwordConfirm', false);
 
         // Hide primary org field (managed via memberships when editing)
-        document.getElementById('primaryOrgField').style.display = 'none';
-        document.getElementById('organization').required = false;
+        safeSetDisplay('primaryOrgField', 'none');
+        safeSetRequired('organization', false);
 
         // Show organization memberships section and load memberships
-        document.getElementById('orgMembershipsSection').style.display = 'block';
+        safeSetDisplay('orgMembershipsSection', 'block');
         loadUserOrgMemberships(userId);
 
         // Show security settings section for local users and load 2FA status
-        const securitySection = document.getElementById('securitySettingsSection');
-        if (user.auth_type === 'local') {
-            securitySection.style.display = 'block';
-            updateUser2FAStatus(user);
-            updateUserPasswordStatus(user);
-        } else {
-            securitySection.style.display = 'none';
+        const securitySection = safeGetElement('securitySettingsSection');
+        if (securitySection) {
+            if (user.auth_type === 'local') {
+                securitySection.style.display = 'block';
+                updateUser2FAStatus(user);
+                updateUserPasswordStatus(user);
+            } else {
+                securitySection.style.display = 'none';
+            }
         }
 
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
+        const userModal = safeGetElement('userModal');
+        if (userModal) {
+            bootstrap.Modal.getOrCreateInstance(userModal).show();
+        }
     } catch (error) {
         showToast(`Error loading user: ${error.message}`, 'danger');
     }
@@ -1750,23 +1804,27 @@ function showCreateOrgModal() {
     try {
         console.log('showCreateOrgModal called');
         currentOrgId = null;
-        document.getElementById('orgModalTitle').innerHTML = '<i class="bi bi-building me-2"></i>Create Organization';
-        document.getElementById('orgForm').reset();
+        safeSetHtml('orgModalTitle', '<i class="bi bi-building me-2"></i>Create Organization');
+
+        const orgForm = safeGetElement('orgForm');
+        if (orgForm) orgForm.reset();
 
         // Make sure orgName is enabled and editable for new organizations
-        const orgNameField = document.getElementById('orgName');
-        orgNameField.disabled = false;
-        orgNameField.readOnly = false;
-        orgNameField.value = '';
+        const orgNameField = safeGetElement('orgName');
+        if (orgNameField) {
+            orgNameField.disabled = false;
+            orgNameField.readOnly = false;
+            orgNameField.value = '';
+        }
 
-        document.getElementById('orgActive').checked = true;
-        document.getElementById('alertCritical').checked = true;
-        document.getElementById('alertNewCVE').checked = true;
-        document.getElementById('alertRansomware').checked = true;
-        document.getElementById('smtpUseTls').checked = true;
-        document.getElementById('smtpPort').value = 587;
+        safeSetChecked('orgActive', true);
+        safeSetChecked('alertCritical', true);
+        safeSetChecked('alertNewCVE', true);
+        safeSetChecked('alertRansomware', true);
+        safeSetChecked('smtpUseTls', true);
+        safeSetValue('smtpPort', 587);
 
-        const modalElement = document.getElementById('orgModal');
+        const modalElement = safeGetElement('orgModal');
         if (!modalElement) {
             console.error('orgModal element not found');
             return;
