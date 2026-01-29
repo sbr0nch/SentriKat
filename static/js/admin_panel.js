@@ -6639,11 +6639,6 @@ function renderImportQueue() {
                 aVal = (a.organization_name || '').toLowerCase();
                 bVal = (b.organization_name || '').toLowerCase();
                 break;
-            case 'criticality':
-                const critOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-                aVal = critOrder[a.criticality] ?? 4;
-                bVal = critOrder[b.criticality] ?? 4;
-                break;
             case 'source':
                 aVal = (a.integration_name || 'zzz').toLowerCase();
                 bVal = (b.integration_name || 'zzz').toLowerCase();
@@ -6696,17 +6691,6 @@ function renderImportQueue() {
                             ${organizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}
                         </select>
                     ` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}
-                </td>
-                <td>
-                    ${item.status === 'pending' ? `
-                        <select class="form-select form-select-sm" style="width: 100px;"
-                                onchange="updateQueueItemCriticality(${item.id}, this.value)">
-                            <option value="critical" ${item.criticality === 'critical' ? 'selected' : ''}>Critical</option>
-                            <option value="high" ${item.criticality === 'high' ? 'selected' : ''}>High</option>
-                            <option value="medium" ${item.criticality === 'medium' ? 'selected' : ''}>Medium</option>
-                            <option value="low" ${item.criticality === 'low' ? 'selected' : ''}>Low</option>
-                        </select>
-                    ` : `<span class="badge bg-${getCriticalityColor(item.criticality)}">${item.criticality || 'medium'}</span>`}
                 </td>
                 <td>
                     <small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small>
@@ -6806,11 +6790,6 @@ async function loadImportQueue() {
     }
 }
 
-function getCriticalityColor(criticality) {
-    const colors = { critical: 'danger', high: 'warning', medium: 'info', low: 'secondary' };
-    return colors[criticality] || 'secondary';
-}
-
 function toggleQueueSelect(itemId, checkbox) {
     if (checkbox.checked) {
         selectedQueueItems.add(itemId);
@@ -6865,18 +6844,6 @@ async function updateQueueItemOrg(itemId, orgId) {
         });
     } catch (error) {
         showToast('Error updating organization: ' + error.message, 'danger');
-    }
-}
-
-async function updateQueueItemCriticality(itemId, criticality) {
-    try {
-        await fetch(`/api/import/queue/${itemId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ criticality: criticality })
-        });
-    } catch (error) {
-        showToast('Error updating criticality: ' + error.message, 'danger');
     }
 }
 

@@ -74,17 +74,6 @@
                 <button class="btn btn-outline-secondary" onclick="bulkDeactivate()">
                     <i class="bi bi-pause-circle me-1"></i>Deactivate
                 </button>
-                <div class="btn-group">
-                    <button class="btn btn-outline-warning dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="bi bi-flag me-1"></i>Set Priority
-                    </button>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item text-danger" href="#" onclick="bulkChangePriority('critical'); return false;"><i class="bi bi-exclamation-octagon me-1"></i>Critical</a></li>
-                        <li><a class="dropdown-item text-warning" href="#" onclick="bulkChangePriority('high'); return false;"><i class="bi bi-exclamation-triangle me-1"></i>High</a></li>
-                        <li><a class="dropdown-item text-info" href="#" onclick="bulkChangePriority('medium'); return false;"><i class="bi bi-exclamation-circle me-1"></i>Medium</a></li>
-                        <li><a class="dropdown-item text-secondary" href="#" onclick="bulkChangePriority('low'); return false;"><i class="bi bi-dash-circle me-1"></i>Low</a></li>
-                    </ul>
-                </div>
                 <button class="btn btn-outline-danger" onclick="bulkDelete()">
                     <i class="bi bi-trash me-1"></i>Delete
                 </button>
@@ -122,15 +111,6 @@
                 </div>
                 {% endif %}
                 <div class="col-md-2">
-                    <select class="form-select form-select-sm" id="filterCriticality" onchange="loadProducts()">
-                        <option value="">All Criticalities</option>
-                        <option value="critical">Critical</option>
-                        <option value="high">High</option>
-                        <option value="medium">Medium</option>
-                        <option value="low">Low</option>
-                    </select>
-                </div>
-                <div class="col-md-2">
                     <select class="form-select form-select-sm" id="filterStatus" onchange="loadProducts()">
                         <option value="">All Statuses</option>
                         <option value="active">Active</option>
@@ -155,14 +135,13 @@
                             <th data-column="version" data-column-label="Version" data-sort-key="version" data-sort-type="string">Version</th>
                             <th data-column="platform" data-column-label="Platform" data-sort-key="platform" data-sort-type="string">Platform</th>
                             <th data-column="organization" data-column-label="Organization" data-sort-key="organization" data-sort-type="string">Organization</th>
-                            <th data-column="criticality" data-column-label="Criticality" data-sort-key="criticality" data-sort-type="priority">Criticality</th>
                             <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="boolean">Status</th>
                             <th data-column="actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="productsTable">
                         <tr>
-                            <td colspan="9" class="text-center py-4">
+                            <td colspan="8" class="text-center py-4">
                                 <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
@@ -287,19 +266,10 @@
                             <h6 class="mb-0 fw-bold">Settings</h6>
                         </div>
                         <div class="row g-2">
-                            <div class="col-md-6">
+                            <div class="col-12">
                                 <label for="productOrganization" class="form-label small">Organization</label>
                                 <select class="form-select form-select-sm" id="productOrganization">
                                     <option value="">All / Global</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="criticality" class="form-label small">Criticality</label>
-                                <select class="form-select form-select-sm" id="criticality" required>
-                                    <option value="critical">Critical</option>
-                                    <option value="high">High</option>
-                                    <option value="medium" selected>Medium</option>
-                                    <option value="low">Low</option>
                                 </select>
                             </div>
                         </div>
@@ -671,9 +641,6 @@
         const filterOrgEl = document.getElementById('filterOrg');
         if (filterOrgEl && filterOrgEl.value) params.append('filter_org', filterOrgEl.value);
 
-        const criticality = document.getElementById('filterCriticality')?.value;
-        if (criticality) params.append('criticality', criticality);
-
         const status = document.getElementById('filterStatus')?.value;
         if (status) params.append('status', status);
 
@@ -700,7 +667,7 @@
             }
 
             if (products.length === 0) {
-                const hasFilters = search || criticality || status || (filterOrgEl && filterOrgEl.value);
+                const hasFilters = search || status || (filterOrgEl && filterOrgEl.value);
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="8" class="text-center py-5">
@@ -713,7 +680,6 @@
                 `;
             } else {
                 tbody.innerHTML = products.map(product => {
-                    const criticalityBadge = `<span class="badge ${getPriorityBadgeClass(product.criticality || 'medium')}">${(product.criticality || 'medium').toUpperCase()}</span>`;
                     const statusBadge = product.active
                         ? '<span class="badge badge-status-active">Active</span>'
                         : '<span class="badge badge-status-inactive">Inactive</span>';
@@ -747,7 +713,6 @@
                                 return `<span class="badge bg-${color}" title="${escapeHtml(p)}"><i class="bi ${icon}"></i></span>`;
                             }).join(' ') : '<span class="text-muted">-</span>'}</td>
                             <td data-column="organization">${orgDisplay}</td>
-                            <td data-column="criticality">${criticalityBadge}</td>
                             <td data-column="status">${statusBadge}</td>
                             <td data-column="actions" onclick="event.stopPropagation();">
                                 <div class="d-flex gap-1">
@@ -790,7 +755,6 @@
         document.getElementById('productSearch').value = '';
         const filterOrgEl = document.getElementById('filterOrg');
         if (filterOrgEl) filterOrgEl.value = '';
-        document.getElementById('filterCriticality').value = '';
         document.getElementById('filterStatus').value = '';
         currentPage = 1;
         loadProducts();
@@ -941,7 +905,6 @@
 
         const vendor = document.getElementById('vendor').value.trim();
         const productName = document.getElementById('productName').value.trim();
-        const criticality = document.getElementById('criticality').value;
 
         // Validate required fields
         let isValid = true;
@@ -965,7 +928,6 @@
             vendor: vendor,
             product_name: productName,
             version: document.getElementById('version').value.trim(),
-            criticality: criticality,
             keywords: document.getElementById('keywords').value.trim(),
             description: document.getElementById('description').value.trim(),
             active: document.getElementById('active').checked,
@@ -1322,8 +1284,7 @@
                         version: version,
                         keywords: service.keywords || '',
                         service_catalog_id: catalogId,
-                        active: true,
-                        criticality: 'medium'
+                        active: true
                     };
 
                     // Don't set organization_id when creating - we'll use multi-org assignment
@@ -1804,53 +1765,6 @@
                 showToast(`Failed to delete ${failCount} product(s)`, 'danger');
             } else {
                 showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
-            }
-            clearSelection();
-            loadProducts();
-        } catch (error) {
-            showToast(`Error: ${error.message}`, 'danger');
-        } finally {
-            hideLoading();
-        }
-    }
-
-    async function bulkChangePriority(newPriority) {
-        if (selectedProducts.size === 0) return;
-
-        const priorityLabel = newPriority.charAt(0).toUpperCase() + newPriority.slice(1);
-        const priorityColors = {
-            critical: 'text-danger',
-            high: 'text-warning',
-            medium: 'text-info',
-            low: 'text-secondary'
-        };
-
-        const confirmed = await showConfirm(
-            `Set priority to <strong class="${priorityColors[newPriority]}">${priorityLabel}</strong> for <strong>${selectedProducts.size}</strong> product(s)?`,
-            'Change Priority',
-            'Change',
-            'btn-warning'
-        );
-
-        if (!confirmed) return;
-
-        showLoading();
-        try {
-            const promises = Array.from(selectedProducts.keys()).map(productId =>
-                fetch(`/api/products/${productId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ criticality: newPriority })
-                })
-            );
-
-            const results = await Promise.all(promises);
-            const successCount = results.filter(r => r.ok).length;
-
-            if (successCount === selectedProducts.size) {
-                showToast(`✓ Priority set to ${priorityLabel} for ${successCount} product(s)`, 'success');
-            } else {
-                showToast(`Priority changed for ${successCount}/${selectedProducts.size} products`, 'warning');
             }
             clearSelection();
             loadProducts();

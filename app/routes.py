@@ -419,7 +419,6 @@ def create_product():
         keywords=data.get('keywords'),
         description=data.get('description'),
         active=data.get('active', True),
-        criticality=data.get('criticality', 'medium'),
         # CPE fields for NVD matching
         cpe_vendor=data.get('cpe_vendor'),
         cpe_product=data.get('cpe_product'),
@@ -522,8 +521,6 @@ def update_product(product_id):
         product.description = data['description']
     if 'active' in data:
         product.active = data['active']
-    if 'criticality' in data:
-        product.criticality = data['criticality']
     # CPE fields for NVD matching
     if 'cpe_vendor' in data:
         product.cpe_vendor = data['cpe_vendor']
@@ -711,94 +708,6 @@ def delete_product(product_id):
         return jsonify({'success': False, 'error': ERROR_MSGS['database']}), 500
 
 
-@bp.route('/api/products/bulk-update-criticality', methods=['POST'])
-@manager_required
-def bulk_update_product_criticality():
-    """
-    Bulk update criticality for multiple products.
-
-    Request body:
-    {
-        "product_ids": [1, 2, 3, ...],
-        "criticality": "high"  // critical, high, medium, low
-    }
-
-    Permissions:
-    - Super Admin: Can update any product
-    - Org Admin/Manager: Can only update products in their org
-    """
-    from app.logging_config import log_audit_event
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'Request body required'}), 400
-
-    product_ids = data.get('product_ids', [])
-    new_criticality = data.get('criticality', '').lower()
-
-    if not product_ids:
-        return jsonify({'error': 'No products specified'}), 400
-
-    valid_criticalities = ['critical', 'high', 'medium', 'low']
-    if new_criticality not in valid_criticalities:
-        return jsonify({'error': f'Invalid criticality. Must be one of: {", ".join(valid_criticalities)}'}), 400
-
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
-    user_org_id = session.get('organization_id') or current_user.organization_id
-
-    updated = 0
-    skipped = 0
-    errors = []
-
-    for product_id in product_ids:
-        try:
-            product = Product.query.get(product_id)
-            if not product:
-                skipped += 1
-                continue
-
-            # Permission check for non-super-admins
-            if not current_user.is_super_admin():
-                product_org_ids = [org.id for org in product.organizations.all()]
-                if user_org_id not in product_org_ids:
-                    skipped += 1
-                    continue
-
-            old_criticality = product.criticality
-            if old_criticality != new_criticality:
-                product.criticality = new_criticality
-                updated += 1
-
-                log_audit_event(
-                    'BULK_UPDATE_CRITICALITY',
-                    'products',
-                    product_id,
-                    old_value={'criticality': old_criticality},
-                    new_value={'criticality': new_criticality},
-                    details=f"Bulk updated {product.vendor} {product.product_name} criticality"
-                )
-            else:
-                skipped += 1
-
-        except Exception as e:
-            logger.warning(f"Failed to update product {product_id}: {e}")
-            errors.append({'product_id': product_id, 'error': 'Update failed'})
-
-    try:
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        logger.exception("Database error during bulk criticality update")
-        return jsonify({'error': ERROR_MSGS['database']}), 500
-
-    return jsonify({
-        'success': True,
-        'updated': updated,
-        'skipped': skipped,
-        'errors': errors,
-        'message': f'Updated {updated} products to {new_criticality} criticality'
-    })
 
 
 @bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
