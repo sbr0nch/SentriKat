@@ -2420,34 +2420,35 @@
         nvdSelectedProduct = null;
 
         // Safe element access with null checks
-        const nvdSearchInput = document.getElementById('nvdSearchInput');
-        const nvdSearchStatus = document.getElementById('nvdSearchStatus');
-        const nvdResultsList = document.getElementById('nvdResultsList');
-        const nvdSelectedProduct = document.getElementById('nvdSelectedProduct');
-        const versionSuggestions = document.getElementById('versionSuggestions');
-        const loadVersionsBtn = document.getElementById('loadVersionsBtn');
-        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
-        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
-        const clearCpeBtn = document.getElementById('clearCpeBtn');
-        const toggle = document.getElementById('manualEntryToggle');
+        // Use different names to avoid shadowing the state variables
+        const nvdSearchInputEl = document.getElementById('nvdSearchInput');
+        const nvdSearchStatusEl = document.getElementById('nvdSearchStatus');
+        const nvdResultsListEl = document.getElementById('nvdResultsList');
+        const nvdSelectedProductEl = document.getElementById('nvdSelectedProduct');
+        const versionSuggestionsEl = document.getElementById('versionSuggestions');
+        const loadVersionsBtnEl = document.getElementById('loadVersionsBtn');
+        const cpeSelectedInfoEl = document.getElementById('cpeSelectedInfo');
+        const cpeNotLinkedInfoEl = document.getElementById('cpeNotLinkedInfo');
+        const clearCpeBtnEl = document.getElementById('clearCpeBtn');
+        const toggleEl = document.getElementById('manualEntryToggle');
 
-        if (nvdSearchInput) nvdSearchInput.value = '';
-        if (nvdSearchStatus) nvdSearchStatus.style.display = 'none';
-        if (nvdResultsList) {
-            nvdResultsList.style.display = 'none';
-            nvdResultsList.innerHTML = '';
+        if (nvdSearchInputEl) nvdSearchInputEl.value = '';
+        if (nvdSearchStatusEl) nvdSearchStatusEl.style.display = 'none';
+        if (nvdResultsListEl) {
+            nvdResultsListEl.style.display = 'none';
+            nvdResultsListEl.innerHTML = '';
         }
-        if (nvdSelectedProduct) nvdSelectedProduct.style.display = 'none';
-        if (versionSuggestions) versionSuggestions.innerHTML = '';
-        if (loadVersionsBtn) loadVersionsBtn.style.display = 'none';
+        if (nvdSelectedProductEl) nvdSelectedProductEl.style.display = 'none';
+        if (versionSuggestionsEl) versionSuggestionsEl.innerHTML = '';
+        if (loadVersionsBtnEl) loadVersionsBtnEl.style.display = 'none';
 
         // Reset CPE status display
-        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'none';
-        if (cpeNotLinkedInfo) cpeNotLinkedInfo.style.display = 'block';
-        if (clearCpeBtn) clearCpeBtn.style.display = 'none';
+        if (cpeSelectedInfoEl) cpeSelectedInfoEl.style.display = 'none';
+        if (cpeNotLinkedInfoEl) cpeNotLinkedInfoEl.style.display = 'block';
+        if (clearCpeBtnEl) clearCpeBtnEl.style.display = 'none';
 
         // Show manual entry toggle
-        if (toggle) toggle.style.display = 'block';
+        if (toggleEl) toggleEl.style.display = 'block';
     }
 
     // =========================================================================
