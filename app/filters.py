@@ -380,57 +380,75 @@ def get_filtered_vulnerabilities(filters=None):
     from sqlalchemy.orm import selectinload
     from sqlalchemy import select
 
-    # Use selectinload to eagerly load relationships in separate queries
-    # This avoids column mapping issues that occur with joined eager loading
+    # Build base query - NO joins to avoid column mapping issues
+    # Use selectinload for eager loading in separate queries
     query = db.session.query(VulnerabilityMatch).options(
         selectinload(VulnerabilityMatch.product),
         selectinload(VulnerabilityMatch.vulnerability)
     )
 
     if filters:
-        # Filter by organization - fetch IDs first to avoid subquery issues
+        # Filter by organization - fetch IDs first
         if filters.get('organization_id'):
-            org_product_ids_result = db.session.execute(
+            org_product_ids = db.session.execute(
                 select(product_organizations.c.product_id).where(
                     product_organizations.c.organization_id == filters['organization_id']
                 )
             ).scalars().all()
-            if org_product_ids_result:
-                query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids_result))
+            if org_product_ids:
+                query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
             else:
-                # No products in org - return empty
                 return []
 
         # Filter by product ID
         if filters.get('product_id'):
             query = query.filter(VulnerabilityMatch.product_id == filters['product_id'])
 
-        # Filter by CVE ID - use join instead of subquery
+        # Filter by CVE ID - fetch matching vuln IDs first, NO join
         if filters.get('cve_id'):
-            query = query.join(VulnerabilityMatch.vulnerability).filter(
-                Vulnerability.cve_id.ilike(f"%{filters['cve_id']}%")
-            )
+            vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(
+                    Vulnerability.cve_id.ilike(f"%{filters['cve_id']}%")
+                )
+            ).scalars().all()
+            if vuln_ids:
+                query = query.filter(VulnerabilityMatch.vulnerability_id.in_(vuln_ids))
+            else:
+                return []
 
-        # Filter by vendor - use join
+        # Filter by vendor - fetch matching vuln IDs first
         if filters.get('vendor'):
-            # Only join if not already joined
-            if not filters.get('cve_id'):
-                query = query.join(VulnerabilityMatch.vulnerability)
-            query = query.filter(Vulnerability.vendor_project.ilike(f"%{filters['vendor']}%"))
+            vendor_vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(
+                    Vulnerability.vendor_project.ilike(f"%{filters['vendor']}%")
+                )
+            ).scalars().all()
+            if vendor_vuln_ids:
+                query = query.filter(VulnerabilityMatch.vulnerability_id.in_(vendor_vuln_ids))
+            else:
+                return []
 
         # Filter by product name in vulnerability
         if filters.get('product'):
-            # Only join if not already joined
-            if not filters.get('cve_id') and not filters.get('vendor'):
-                query = query.join(VulnerabilityMatch.vulnerability)
-            query = query.filter(Vulnerability.product.ilike(f"%{filters['product']}%"))
+            product_vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(
+                    Vulnerability.product.ilike(f"%{filters['product']}%")
+                )
+            ).scalars().all()
+            if product_vuln_ids:
+                query = query.filter(VulnerabilityMatch.vulnerability_id.in_(product_vuln_ids))
+            else:
+                return []
 
         # Filter by ransomware
         if filters.get('ransomware_only'):
-            # Only join if not already joined
-            if not filters.get('cve_id') and not filters.get('vendor') and not filters.get('product'):
-                query = query.join(VulnerabilityMatch.vulnerability)
-            query = query.filter(Vulnerability.known_ransomware == True)
+            ransomware_vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(Vulnerability.known_ransomware == True)
+            ).scalars().all()
+            if ransomware_vuln_ids:
+                query = query.filter(VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids))
+            else:
+                return []
 
         # Filter by acknowledged status
         if filters.get('acknowledged') is not None:
