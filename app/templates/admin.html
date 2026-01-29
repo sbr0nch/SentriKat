@@ -1871,10 +1871,11 @@
             const existingModal = bootstrap.Modal.getInstance(modalElement);
             if (existingModal) {
                 existingModal.dispose();
+                cleanupModalBackdrops();
             }
 
             // Create and show new modal
-            const modal = new bootstrap.Modal(modalElement, {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElement, {
                 backdrop: true,
                 keyboard: true
             });
@@ -2641,7 +2642,7 @@
             icon.classList.add('bi-info-circle-fill', 'text-info');
         }
 
-        const bsModal = new bootstrap.Modal(modal);
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
         bsModal.show();
     }
 
@@ -2654,7 +2655,7 @@
         titleEl.textContent = title;
         bodyEl.innerHTML = body;
 
-        const bsModal = new bootstrap.Modal(modal);
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
 
         // Remove old event listeners
         const newOkBtn = okBtn.cloneNode(true);
@@ -2662,6 +2663,7 @@
 
         newOkBtn.addEventListener('click', () => {
             bsModal.hide();
+            setTimeout(cleanupModalBackdrops, 100);
             onConfirm();
         });
 

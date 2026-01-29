@@ -999,7 +999,7 @@ function showCreateUserModal() {
             return;
         }
 
-        const modal = new bootstrap.Modal(modalElement);
+        const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
         console.log('Modal created, showing...');
         modal.show();
     } catch (error) {
@@ -1066,7 +1066,7 @@ async function editUser(userId) {
             securitySection.style.display = 'none';
         }
 
-        new bootstrap.Modal(document.getElementById('userModal')).show();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
     } catch (error) {
         showToast(`Error loading user: ${error.message}`, 'danger');
     }
@@ -1259,7 +1259,7 @@ async function showAddOrgMembershipModal() {
             select.innerHTML = '<option value="">No available organizations</option>';
         }
 
-        new bootstrap.Modal(document.getElementById('addOrgMembershipModal')).show();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('addOrgMembershipModal')).show();
     } catch (error) {
         showToast('Error loading organizations: ' + error.message, 'danger');
     }
@@ -1772,7 +1772,7 @@ function showCreateOrgModal() {
             return;
         }
 
-        const modal = new bootstrap.Modal(modalElement);
+        const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
         console.log('Modal created, showing...');
         modal.show();
     } catch (error) {
@@ -1839,7 +1839,7 @@ async function editOrganization(orgId) {
         // Disable name field for existing orgs
         document.getElementById('orgName').readOnly = true;
 
-        new bootstrap.Modal(document.getElementById('orgModal')).show();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('orgModal')).show();
     } catch (error) {
         showToast(`Error loading organization: ${error.message}`, 'danger');
     }
@@ -3723,7 +3723,7 @@ async function showInviteLdapUserModalInline(user) {
         }
     }
 
-    const modal = new bootstrap.Modal(document.getElementById('ldapInviteModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('ldapInviteModal'));
     modal.show();
 }
 
@@ -3870,7 +3870,7 @@ async function showInviteLdapUserModal(userData) {
 
         // Show the modal
         const modalElement = document.getElementById('ldapInviteModal');
-        const modal = new bootstrap.Modal(modalElement);
+        const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
         modal.show();
 
     } catch (error) {
@@ -4161,7 +4161,7 @@ async function showCreateMappingModal() {
             showToast('Error: Modal not found', 'danger');
             return;
         }
-        const modal = new bootstrap.Modal(modalEl);
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         modal.show();
     } catch (error) {
         console.error('Error showing create mapping modal:', error);
@@ -4201,7 +4201,7 @@ async function editGroupMapping(mappingId) {
 
             document.getElementById('groupMappingModalTitle').textContent = 'Edit Group Mapping';
 
-            const modal = new bootstrap.Modal(document.getElementById('groupMappingModal'));
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('groupMappingModal'));
             modal.show();
         }
     } catch (error) {
@@ -4612,7 +4612,7 @@ function createMappingFromDiscovery(dn, cn, description, memberCount) {
     loadOrganizationsForMapping();
 
     // Show mapping modal
-    const modal = new bootstrap.Modal(document.getElementById('groupMappingModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('groupMappingModal'));
     modal.show();
 }
 
@@ -5872,7 +5872,7 @@ async function showCreateAgentKeyModal() {
     document.getElementById('agentKeyForm').reset();
 
     // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('agentKeyModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('agentKeyModal'));
     modal.show();
 }
 
@@ -5923,7 +5923,7 @@ async function createAgentKey() {
 
         // Show the key to user
         document.getElementById('newAgentKeyValue').value = data.api_key;
-        const showModal = new bootstrap.Modal(document.getElementById('showAgentKeyModal'));
+        const showModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('showAgentKeyModal'));
         showModal.show();
 
         // Refresh the keys table to show the new key
@@ -6403,7 +6403,7 @@ async function showAssetDetails(assetId) {
         </div>
     `;
 
-    const modal = new bootstrap.Modal(document.getElementById('assetDetailsModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('assetDetailsModal'));
     modal.show();
 
     try {
@@ -7289,7 +7289,7 @@ function showCreateIntegrationModal() {
         }
     });
 
-    const modal = new bootstrap.Modal(document.getElementById('createIntegrationModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('createIntegrationModal'));
     modal.show();
 }
 
@@ -7380,7 +7380,7 @@ async function showIntegrationApiKey(integrationId) {
         if (integration.api_key) {
             document.getElementById('viewApiKeyTitle').textContent = `API Key - ${integration.name}`;
             document.getElementById('viewApiKeyValue').value = integration.api_key;
-            const modal = new bootstrap.Modal(document.getElementById('viewApiKeyModal'));
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('viewApiKeyModal'));
             modal.show();
         } else {
             showToast('No API key available', 'info');
@@ -7568,7 +7568,7 @@ async function showEditIntegrationModal(integrationId) {
         safeDisposeModal('editIntegrationModal', true);
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        const modal = new bootstrap.Modal(document.getElementById('editIntegrationModal'));
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editIntegrationModal'));
         modal.show();
 
     } catch (error) {

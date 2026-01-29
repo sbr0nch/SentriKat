@@ -3046,7 +3046,8 @@
                 confirmBtn.textContent = confirmText;
                 confirmBtn.className = `btn ${confirmClass}`;
 
-                const bsModal = new bootstrap.Modal(modal);
+                // Use getOrCreateInstance to avoid creating duplicate modal instances
+                const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
 
                 // Handle confirm
                 const handleConfirm = () => {
@@ -3064,6 +3065,8 @@
                     confirmBtn.removeEventListener('click', handleConfirm);
                     modal.removeEventListener('hidden.bs.modal', handleCancel);
                     bsModal.hide();
+                    // Clean up any lingering backdrops
+                    setTimeout(cleanupModalBackdrops, 100);
                 };
 
                 confirmBtn.addEventListener('click', handleConfirm);
@@ -3099,10 +3102,13 @@
                 modalTitle.innerHTML = `<i class="bi ${icon} me-2"></i>${title}`;
                 modalBody.innerHTML = message.replace(/\n/g, '<br>');
 
-                const bsModal = new bootstrap.Modal(modal);
+                // Use getOrCreateInstance to avoid creating duplicate modal instances
+                const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
 
                 const handleClose = () => {
                     modal.removeEventListener('hidden.bs.modal', handleClose);
+                    // Clean up any lingering backdrops
+                    setTimeout(cleanupModalBackdrops, 100);
                     resolve();
                 };
 
@@ -3131,7 +3137,8 @@
                 modalBody.innerHTML = message.replace(/\n/g, '<br>');
                 input.value = defaultValue;
 
-                const bsModal = new bootstrap.Modal(modal);
+                // Use getOrCreateInstance to avoid creating duplicate modal instances
+                const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
 
                 // Handle submit
                 const handleSubmit = () => {
@@ -3158,6 +3165,8 @@
                     input.removeEventListener('keypress', handleEnter);
                     modal.removeEventListener('hidden.bs.modal', handleCancel);
                     bsModal.hide();
+                    // Clean up any lingering backdrops
+                    setTimeout(cleanupModalBackdrops, 100);
                 };
 
                 submitBtn.addEventListener('click', handleSubmit);

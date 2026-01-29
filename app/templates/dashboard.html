@@ -1393,7 +1393,7 @@
                 `;
             }).join('');
 
-            new bootstrap.Modal(document.getElementById('syncHistoryModal')).show();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('syncHistoryModal')).show();
         } catch (error) {
             showToast('Failed to load sync history', 'danger');
         }
@@ -1560,7 +1560,7 @@
         document.getElementById('createShareBtn').style.display = 'block';
 
         // Show modal
-        const modal = new bootstrap.Modal(document.getElementById('shareModal'));
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('shareModal'));
         modal.show();
     }
 
