@@ -532,8 +532,8 @@ def get_sync_status():
         return jsonify({
             'last_sync': last_sync.sync_date.strftime('%Y-%m-%d %H:%M:%S UTC') if last_sync else None,
             'last_sync_status': last_sync.status if last_sync else None,
-            'last_sync_added': last_sync.vulnerabilities_added if last_sync else 0,
-            'last_sync_updated': last_sync.vulnerabilities_updated if last_sync else 0,
+            'last_sync_added': last_sync.vulnerabilities_count if last_sync else 0,
+            'last_sync_updated': 0,  # Not tracked in current model
             'next_sync': next_sync,
             'total_vulnerabilities': total_vulns,
             'auto_sync_enabled': auto_sync
