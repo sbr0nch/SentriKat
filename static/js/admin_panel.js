@@ -2366,8 +2366,6 @@ async function triggerCriticalCVEAlerts() {
 
         const result = await response.json();
 
-        hideLoading();
-
         if (result.status === 'success') {
             const summary = result.summary;
             let html = `
@@ -2417,8 +2415,9 @@ async function triggerCriticalCVEAlerts() {
             showToast(`Error: ${result.error}`, 'danger');
         }
     } catch (error) {
-        hideLoading();
         showToast(`Error triggering alerts: ${error.message}`, 'danger');
+    } finally {
+        hideLoading();
     }
 }
 

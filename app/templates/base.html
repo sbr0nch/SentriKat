@@ -1739,7 +1739,7 @@
             bottom: 0;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(5px);
-            display: none;
+            display: none !important;
             justify-content: center;
             align-items: center;
             z-index: 9999;
@@ -1748,7 +1748,7 @@
         }
 
         .loading-overlay.show {
-            display: flex;
+            display: flex !important;
         }
 
         /* Toast Notifications */
@@ -2511,8 +2511,13 @@
 <body>
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
-        <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div>
-        <p class="text-secondary fw-semibold">Processing...</p>
+        <div class="text-center">
+            <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div>
+            <p class="text-secondary fw-semibold mt-3">Processing...</p>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-3" onclick="fixGreyScreen()" style="opacity: 0.5;">
+                Click here if stuck
+            </button>
+        </div>
     </div>
 
     <!-- Top Navigation Bar -->
@@ -2833,42 +2838,222 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        let loadingTimeout = null;
+        /**
+         * ========================================
+         * SENTRIKAT OVERLAY MANAGER
+         * Centralized management for all overlays
+         * ========================================
+         */
+        const OverlayManager = {
+            // Configuration
+            LOADING_TIMEOUT_MS: 30000,  // Auto-hide loading after 30s
+            CLEANUP_INTERVAL_MS: 3000,  // Check for orphans every 3s
+            DEBUG: true,  // Enable console logging
 
+            // State tracking
+            loadingCount: 0,
+            loadingTimer: null,
+            cleanupInterval: null,
+
+            /**
+             * Initialize the overlay manager
+             */
+            init: function() {
+                this.log('OverlayManager initialized');
+
+                // Start periodic cleanup
+                this.cleanupInterval = setInterval(() => this.periodicCleanup(), this.CLEANUP_INTERVAL_MS);
+
+                // Listen for all modal hidden events
+                document.addEventListener('hidden.bs.modal', (e) => this.onModalHidden(e));
+
+                // Emergency cleanup on escape key
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        setTimeout(() => this.emergencyCleanup(), 100);
+                    }
+                });
+
+                // Cleanup on page visibility change (user switches tabs and back)
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden) {
+                        setTimeout(() => this.periodicCleanup(), 500);
+                    }
+                });
+            },
+
+            /**
+             * Show loading overlay
+             */
+            showLoading: function() {
+                this.loadingCount++;
+                this.log('showLoading called, count:', this.loadingCount);
+
+                const overlay = document.getElementById('loadingOverlay');
+                if (overlay) {
+                    overlay.classList.add('show');
+                }
+
+                // Clear any existing timeout
+                if (this.loadingTimer) {
+                    clearTimeout(this.loadingTimer);
+                }
+
+                // Set safety timeout
+                this.loadingTimer = setTimeout(() => {
+                    this.log('Loading timeout reached - forcing hide');
+                    this.forceHideLoading();
+                }, this.LOADING_TIMEOUT_MS);
+            },
+
+            /**
+             * Hide loading overlay
+             */
+            hideLoading: function() {
+                this.loadingCount = Math.max(0, this.loadingCount - 1);
+                this.log('hideLoading called, count:', this.loadingCount);
+
+                if (this.loadingCount === 0) {
+                    this.forceHideLoading();
+                }
+            },
+
+            /**
+             * Force hide loading regardless of count
+             */
+            forceHideLoading: function() {
+                this.loadingCount = 0;
+
+                if (this.loadingTimer) {
+                    clearTimeout(this.loadingTimer);
+                    this.loadingTimer = null;
+                }
+
+                const overlay = document.getElementById('loadingOverlay');
+                if (overlay) {
+                    overlay.classList.remove('show');
+                }
+
+                this.log('Loading overlay hidden');
+            },
+
+            /**
+             * Clean up all modal backdrops
+             */
+            cleanupBackdrops: function() {
+                const backdrops = document.querySelectorAll('.modal-backdrop');
+                const count = backdrops.length;
+
+                if (count > 0) {
+                    this.log('Removing', count, 'modal backdrops');
+                    backdrops.forEach(b => b.remove());
+                }
+
+                // Reset body state
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('padding-right');
+                document.body.style.removeProperty('overflow');
+                document.body.style.overflow = '';
+                document.body.style.paddingRight = '';
+            },
+
+            /**
+             * Called when any Bootstrap modal is hidden
+             */
+            onModalHidden: function(event) {
+                this.log('Modal hidden:', event.target.id);
+
+                // Check if any modals are still open
+                setTimeout(() => {
+                    const openModals = document.querySelectorAll('.modal.show');
+                    if (openModals.length === 0) {
+                        this.cleanupBackdrops();
+                    }
+                }, 100);
+            },
+
+            /**
+             * Periodic cleanup - runs every few seconds
+             */
+            periodicCleanup: function() {
+                const openModals = document.querySelectorAll('.modal.show');
+                const backdrops = document.querySelectorAll('.modal-backdrop');
+                const loadingOverlay = document.getElementById('loadingOverlay');
+                const isLoadingVisible = loadingOverlay && loadingOverlay.classList.contains('show');
+
+                // Clean orphaned backdrops
+                if (openModals.length === 0 && backdrops.length > 0) {
+                    this.log('Periodic: cleaning orphaned backdrops');
+                    this.cleanupBackdrops();
+                }
+
+                // Check for stuck loading overlay
+                if (isLoadingVisible && this.loadingCount === 0) {
+                    this.log('Periodic: fixing stuck loading overlay');
+                    this.forceHideLoading();
+                }
+            },
+
+            /**
+             * Emergency cleanup - removes ALL overlays
+             */
+            emergencyCleanup: function() {
+                const openModals = document.querySelectorAll('.modal.show');
+
+                // Only do emergency cleanup if no modals are legitimately open
+                if (openModals.length === 0) {
+                    this.log('Emergency cleanup triggered');
+                    this.forceHideLoading();
+                    this.cleanupBackdrops();
+
+                    // Also hide sidebar overlay
+                    document.body.classList.remove('sidebar-open');
+
+                    // Also hide security settings backdrop
+                    const secBackdrop = document.getElementById('securitySettingsBackdrop');
+                    if (secBackdrop) {
+                        secBackdrop.classList.remove('show');
+                        secBackdrop.style.display = 'none';
+                    }
+                }
+            },
+
+            /**
+             * Debug logging
+             */
+            log: function(...args) {
+                if (this.DEBUG) {
+                    console.log('[OverlayManager]', ...args);
+                }
+            }
+        };
+
+        // Initialize on DOM ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => OverlayManager.init());
+        } else {
+            OverlayManager.init();
+        }
+
+        // Global functions for backwards compatibility
         function showLoading() {
-            document.getElementById('loadingOverlay').classList.add('show');
-            // Safety timeout - auto-hide loading after 30 seconds to prevent stuck grey screen
-            if (loadingTimeout) clearTimeout(loadingTimeout);
-            loadingTimeout = setTimeout(function() {
-                console.warn('Loading overlay auto-hidden after 30s timeout');
-                hideLoading();
-            }, 30000);
+            OverlayManager.showLoading();
         }
 
         function hideLoading() {
-            if (loadingTimeout) {
-                clearTimeout(loadingTimeout);
-                loadingTimeout = null;
-            }
-            document.getElementById('loadingOverlay').classList.remove('show');
-            // Clean up any lingering modal backdrops
-            cleanupModalBackdrops();
+            OverlayManager.hideLoading();
         }
 
-        /**
-         * Remove any lingering modal backdrops from the DOM
-         * This fixes the issue where grey backdrop layers remain after bulk operations
-         */
         function cleanupModalBackdrops() {
-            // Remove all modal backdrops
-            document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
-                backdrop.remove();
-            });
-            // Remove modal-open class from body to restore scrolling
-            document.body.classList.remove('modal-open');
-            // Reset body padding that Bootstrap adds
-            document.body.style.removeProperty('padding-right');
-            document.body.style.removeProperty('overflow');
+            OverlayManager.cleanupBackdrops();
+        }
+
+        // Emergency cleanup function - can be called from console
+        function fixGreyScreen() {
+            console.log('Manual grey screen fix triggered');
+            OverlayManager.forceHideLoading();
+            OverlayManager.cleanupBackdrops();
+            OverlayManager.emergencyCleanup();
         }
 
         /**
@@ -2882,11 +3067,8 @@
             if (instance) {
                 try {
                     instance.hide();
-                    // Let Bootstrap finish its animation before disposing
+                    // Let Bootstrap finish its animation before cleanup
                     setTimeout(() => {
-                        try {
-                            instance.dispose();
-                        } catch (e) {}
                         cleanupModalBackdrops();
                     }, 300);
                 } catch (e) {
@@ -2918,55 +3100,6 @@
             modalElement.remove();
             cleanupModalBackdrops();
         }
-
-        // Global event listener to clean up modal backdrops when ANY modal is fully hidden
-        document.addEventListener('hidden.bs.modal', function(event) {
-            // Check if any other modals are still open
-            const openModals = document.querySelectorAll('.modal.show');
-            if (openModals.length === 0) {
-                // No modals open, clean up all backdrops
-                setTimeout(cleanupModalBackdrops, 50);
-            }
-        });
-
-        // AGGRESSIVE CLEANUP: Watch for orphaned backdrops and remove them
-        // This catches cases where modals are closed but backdrops remain
-        const backdropObserver = new MutationObserver(function(mutations) {
-            mutations.forEach(function(mutation) {
-                // Check for added nodes that might be orphaned backdrops
-                mutation.addedNodes.forEach(function(node) {
-                    if (node.classList && node.classList.contains('modal-backdrop')) {
-                        // Verify if there's actually a visible modal for this backdrop
-                        setTimeout(function() {
-                            const visibleModals = document.querySelectorAll('.modal.show');
-                            const backdrops = document.querySelectorAll('.modal-backdrop');
-                            // If more backdrops than visible modals, clean up
-                            if (backdrops.length > visibleModals.length) {
-                                cleanupModalBackdrops();
-                                // Re-add backdrop for any still-open modal
-                                visibleModals.forEach(function(modal) {
-                                    const instance = bootstrap.Modal.getInstance(modal);
-                                    if (instance) {
-                                        // Force Bootstrap to manage its own backdrop
-                                    }
-                                });
-                            }
-                        }, 500);
-                    }
-                });
-            });
-        });
-        backdropObserver.observe(document.body, { childList: true });
-
-        // Periodic cleanup every 5 seconds - catches any missed orphan backdrops
-        setInterval(function() {
-            const visibleModals = document.querySelectorAll('.modal.show');
-            const backdrops = document.querySelectorAll('.modal-backdrop');
-            if (visibleModals.length === 0 && backdrops.length > 0) {
-                console.log('Cleaning up orphaned modal backdrops');
-                cleanupModalBackdrops();
-            }
-        }, 5000);
 
         /**
          * Switch to a specific admin panel tab
