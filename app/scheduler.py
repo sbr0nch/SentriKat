@@ -175,9 +175,14 @@ def critical_cve_reminder_job(app):
             max_age_days = int(max_age_setting.value) if max_age_setting else 30
             cutoff_date = datetime.utcnow() - timedelta(days=max_age_days)
 
-            # Get all organizations with email alerts enabled
+            # Get all organizations with ANY alert setting enabled
             organizations = Organization.query.filter(
-                Organization.alert_on_critical == True
+                db.or_(
+                    Organization.alert_on_critical == True,
+                    Organization.alert_on_high == True,
+                    Organization.alert_on_ransomware == True,
+                    Organization.alert_on_new_cve == True
+                )
             ).all()
 
             total_sent = 0
@@ -186,7 +191,7 @@ def critical_cve_reminder_job(app):
 
             for org in organizations:
                 try:
-                    # Get unacknowledged critical vulnerabilities for this org using scalar_subquery
+                    # Get unacknowledged vulnerabilities for this org
                     # Filter by match creation date to only include recent ones
                     org_product_ids = db.session.query(Product.id).filter(
                         Product.organization_id == org.id
@@ -202,19 +207,13 @@ def critical_cve_reminder_job(app):
                         .all()
                     )
 
-                    # Filter for CRITICAL priority ONLY
-                    critical_matches = [
-                        m for m in unack_matches
-                        if m.calculate_effective_priority() == 'critical'
-                    ]
-
-                    if not critical_matches:
-                        logger.info(f"No recent unacknowledged critical CVEs for {org.name}, skipping")
+                    if not unack_matches:
+                        logger.info(f"No recent unacknowledged CVEs for {org.name}, skipping")
                         total_skipped += 1
                         continue
 
-                    # Send reminder email
-                    result = EmailAlertManager.send_critical_cve_alert(org, critical_matches)
+                    # Send alert - filtering by severity/settings is done in send_critical_cve_alert
+                    result = EmailAlertManager.send_critical_cve_alert(org, unack_matches)
 
                     if result['status'] == 'success':
                         logger.info(f"Sent critical CVE reminder to {org.name}: {result['matches_count']} CVEs to {result['sent_to']} recipients")

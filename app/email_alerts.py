@@ -102,27 +102,23 @@ class EmailAlertManager:
         # Filter matches by alert settings
         filtered_matches = []
         for match in new_matches:
-            priority = match.calculate_effective_priority()
+            severity = match.calculate_effective_priority()  # Now returns CVE severity directly
             vuln = match.vulnerability
-
-            # Calculate urgency based on due date (days until remediation deadline)
-            # This matches the dashboard "Urgency" filter behavior
-            if vuln.due_date:
-                days_until_due = (vuln.due_date - date.today()).days
-            else:
-                days_until_due = 999  # No due date = not urgent
 
             should_alert = False
 
-            # Check alert settings - CRITICAL + URGENT (due within 7 days)
-            # This matches dashboard filter: Severity=Critical, Urgency=≤7 Days
-            if organization.alert_on_critical and priority == 'critical' and days_until_due <= 7:
+            # Alert based on CVE severity and user's alert preferences
+            # alert_on_critical: Alert for all critical severity CVEs
+            if organization.alert_on_critical and severity == 'critical':
                 should_alert = True
-            # Ransomware alerts for urgent critical vulnerabilities
-            elif organization.alert_on_ransomware and vuln.known_ransomware and priority == 'critical' and days_until_due <= 7:
+            # alert_on_high: Alert for all high severity CVEs
+            elif organization.alert_on_high and severity == 'high':
                 should_alert = True
-            # New CVE alert - also use urgency filter
-            elif organization.alert_on_new_cve and priority == 'critical' and days_until_due <= 7:
+            # alert_on_ransomware: Alert for any CVE with known ransomware usage
+            elif organization.alert_on_ransomware and vuln.known_ransomware:
+                should_alert = True
+            # alert_on_new_cve: Alert for any new CVE (first time seen)
+            elif organization.alert_on_new_cve and match.first_alerted_at is None:
                 should_alert = True
 
             if should_alert:
