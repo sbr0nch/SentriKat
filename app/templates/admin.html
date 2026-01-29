@@ -647,6 +647,7 @@
         const perPage = parseInt(document.getElementById('perPage')?.value || '25');
         params.append('page', currentPage);
         params.append('per_page', perPage);
+        params.append('grouped', 'true');  // Use grouped mode
 
         try {
             const response = await fetch(`/api/products?${params.toString()}`);
@@ -679,53 +680,89 @@
                     </tr>
                 `;
             } else {
-                tbody.innerHTML = products.map(product => {
-                    const statusBadge = product.active
+                tbody.innerHTML = products.map(group => {
+                    // For grouped products
+                    const statusBadge = group.active
                         ? '<span class="badge badge-status-active">Active</span>'
                         : '<span class="badge badge-status-inactive">Inactive</span>';
 
-                    // Display multiple organizations
+                    // Display organizations
                     let orgDisplay;
-                    if (product.organizations && product.organizations.length > 0) {
-                        orgDisplay = product.organizations.map(org =>
-                            `<span class="badge bg-primary me-1">${escapeHtml(org.display_name)}</span>`
+                    if (group.organization_names && group.organization_names.length > 0) {
+                        orgDisplay = group.organization_names.map(name =>
+                            `<span class="badge bg-primary me-1">${escapeHtml(name)}</span>`
                         ).join('');
-                    } else if (product.organization_name) {
-                        // Legacy single org support
-                        orgDisplay = `<span class="badge bg-primary">${escapeHtml(product.organization_name)}</span>`;
                     } else {
                         orgDisplay = '<span class="text-muted">-</span>';
                     }
 
+                    // Build version badges - show vulnerable versions in red
+                    const versions = group.versions || [];
+                    let versionDisplay;
+                    if (versions.length === 0) {
+                        versionDisplay = '<span class="text-muted">-</span>';
+                    } else if (versions.length === 1) {
+                        const v = versions[0];
+                        const badgeClass = v.is_vulnerable ? 'bg-danger' : 'bg-info';
+                        const vulnIcon = v.is_vulnerable ? '<i class="bi bi-exclamation-triangle-fill me-1"></i>' : '';
+                        versionDisplay = `<span class="badge ${badgeClass}" title="${v.is_vulnerable ? 'Vulnerable' : 'OK'}">${vulnIcon}${escapeHtml(v.version)}</span>`;
+                    } else {
+                        // Multiple versions - show compact with expand option
+                        const vulnerableVersions = versions.filter(v => v.is_vulnerable);
+                        const safeVersions = versions.filter(v => !v.is_vulnerable);
+
+                        let badges = [];
+                        // Show vulnerable versions first (up to 2)
+                        vulnerableVersions.slice(0, 2).forEach(v => {
+                            badges.push(`<span class="badge bg-danger" title="Vulnerable: ${escapeHtml(v.version)}"><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(v.version)}</span>`);
+                        });
+                        // Then safe versions (up to 2 if space)
+                        const safeSlots = Math.max(0, 3 - badges.length);
+                        safeVersions.slice(0, safeSlots).forEach(v => {
+                            badges.push(`<span class="badge bg-info" title="${escapeHtml(v.version)}">${escapeHtml(v.version)}</span>`);
+                        });
+
+                        const remaining = versions.length - badges.length;
+                        if (remaining > 0) {
+                            badges.push(`<span class="badge bg-secondary" title="Click to see all versions">+${remaining} more</span>`);
+                        }
+
+                        versionDisplay = `<div class="d-flex flex-wrap gap-1">${badges.join('')}</div>`;
+                    }
+
+                    // Get the first version ID for actions (or use a group identifier)
+                    const firstVersionId = versions.length > 0 ? versions[0].id : null;
+                    const allVersionIds = versions.map(v => v.id);
+                    const groupKey = `${escapeHtml(group.vendor)}|${escapeHtml(group.product_name)}`;
+
                     return `
-                        <tr onclick="toggleProductRow(${product.id}, event)" style="cursor: pointer;">
+                        <tr data-group-key="${groupKey}" data-version-ids="${allVersionIds.join(',')}" style="cursor: pointer;">
                             <td onclick="event.stopPropagation();">
                                 <input type="checkbox" class="form-check-input product-checkbox"
-                                       data-product-id="${product.id}"
-                                       onchange="toggleProductSelect(${product.id}, this)">
+                                       data-product-ids="${allVersionIds.join(',')}"
+                                       onchange="toggleGroupSelect('${allVersionIds.join(',')}', this)">
                             </td>
-                            <td data-column="product" class="fw-semibold">${escapeHtml(product.product_name)}</td>
-                            <td data-column="vendor">${escapeHtml(product.vendor)}</td>
-                            <td data-column="version">${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
-                            <td data-column="platform">${product.platforms && product.platforms.length > 0 ? product.platforms.map(p => {
-                                const icon = p === 'Windows' ? 'bi-windows' : (p === 'Linux' ? 'bi-ubuntu' : (p === 'macOS' ? 'bi-apple' : 'bi-pc-display'));
-                                const color = p === 'Windows' ? 'primary' : (p === 'Linux' ? 'warning' : (p === 'macOS' ? 'secondary' : 'info'));
-                                return `<span class="badge bg-${color}" title="${escapeHtml(p)}"><i class="bi ${icon}"></i></span>`;
-                            }).join(' ') : '<span class="text-muted">-</span>'}</td>
+                            <td data-column="product" class="fw-semibold">
+                                ${escapeHtml(group.product_name)}
+                                ${group.has_vulnerable_version ? '<i class="bi bi-exclamation-triangle-fill text-danger ms-1" title="Has vulnerable versions"></i>' : ''}
+                            </td>
+                            <td data-column="vendor">${escapeHtml(group.vendor)}</td>
+                            <td data-column="version">${versionDisplay}</td>
+                            <td data-column="platform"><span class="text-muted">-</span></td>
                             <td data-column="organization">${orgDisplay}</td>
                             <td data-column="status">${statusBadge}</td>
                             <td data-column="actions" onclick="event.stopPropagation();">
                                 <div class="d-flex gap-1">
-                                    ${userPermissions.canManageProducts ? `
-                                    <button class="btn-action btn-action-edit" onclick="editProduct(${product.id})" title="Edit">
+                                    ${versions.length > 1 ? `
+                                    <button class="btn-action btn-action-edit" onclick="showVersionsModal('${escapeHtml(group.vendor)}', '${escapeHtml(group.product_name)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})" title="Manage Versions">
+                                        <i class="bi bi-layers"></i>
+                                    </button>` : ''}
+                                    ${userPermissions.canManageProducts && firstVersionId ? `
+                                    <button class="btn-action btn-action-edit" onclick="editProduct(${firstVersionId})" title="Edit">
                                         <i class="bi bi-pencil"></i>
                                     </button>` : ''}
-                                    ${userPermissions.canAssignOrgs ? `
-                                    <button class="btn-action btn-action-edit" onclick="manageOrganizations(${product.id})" title="Organizations">
-                                        <i class="bi bi-building"></i>
-                                    </button>` : ''}
-                                    ${userPermissions.canManageProducts ? `
-                                    <button class="btn-action btn-action-delete" onclick="deleteProduct(${product.id}, '${escapeHtml(product.vendor)} ${escapeHtml(product.product_name)}')" title="Delete">
+                                    ${userPermissions.canManageProducts && firstVersionId ? `
+                                    <button class="btn-action btn-action-delete" onclick="deleteProductGroup('${allVersionIds.join(',')}', '${escapeHtml(group.vendor)} ${escapeHtml(group.product_name)}')" title="Delete All Versions">
                                         <i class="bi bi-trash3"></i>
                                     </button>` : ''}
                                 </div>
@@ -1017,6 +1054,173 @@
                 loadProducts();
             } else {
                 showToast('✗ Error deleting product', 'danger');
+            }
+        } catch (error) {
+            showToast(`✗ Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Delete all versions of a product group
+    async function deleteProductGroup(versionIds, productName) {
+        const ids = versionIds.split(',').filter(id => id);
+        const versionCount = ids.length;
+
+        const confirmed = await showConfirm(
+            `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove <strong>${versionCount} version(s)</strong> and all vulnerability matches.`,
+            'Delete Product',
+            'Delete All',
+            'btn-danger'
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        showLoading();
+        let deleted = 0;
+        let errors = 0;
+
+        for (const id of ids) {
+            try {
+                const response = await fetch(`/api/products/${id}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    deleted++;
+                } else {
+                    errors++;
+                }
+            } catch (error) {
+                errors++;
+            }
+        }
+
+        hideLoading();
+
+        if (errors === 0) {
+            showToast(`✓ Deleted ${deleted} version(s) successfully`, 'success');
+        } else {
+            showToast(`Deleted ${deleted} version(s), ${errors} failed`, 'warning');
+        }
+
+        loadProducts();
+    }
+
+    // Toggle selection for a group of products
+    function toggleGroupSelect(versionIds, checkbox) {
+        const ids = versionIds.split(',').filter(id => id);
+        ids.forEach(id => {
+            if (checkbox.checked) {
+                selectedProducts.add(parseInt(id));
+            } else {
+                selectedProducts.delete(parseInt(id));
+            }
+        });
+        updateBulkActionButtons();
+    }
+
+    // Show modal with all versions of a product
+    function showVersionsModal(vendor, productName, versions) {
+        // Create or get modal
+        let modalEl = document.getElementById('versionsModal');
+        if (!modalEl) {
+            modalEl = document.createElement('div');
+            modalEl.id = 'versionsModal';
+            modalEl.className = 'modal fade';
+            modalEl.tabIndex = -1;
+            modalEl.innerHTML = `
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-layers me-2"></i>Product Versions</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" id="versionsModalBody"></div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modalEl);
+        }
+
+        const modalBody = document.getElementById('versionsModalBody');
+        modalBody.innerHTML = `
+            <h6 class="mb-3">${escapeHtml(vendor)} - ${escapeHtml(productName)}</h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>Version</th>
+                            <th>Status</th>
+                            <th>Vulnerabilities</th>
+                            <th>Source</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${versions.map(v => `
+                            <tr>
+                                <td>
+                                    <span class="badge ${v.is_vulnerable ? 'bg-danger' : 'bg-info'}">
+                                        ${v.is_vulnerable ? '<i class="bi bi-exclamation-triangle-fill me-1"></i>' : ''}
+                                        ${escapeHtml(v.version)}
+                                    </span>
+                                </td>
+                                <td>${v.active ? '<span class="badge badge-status-active">Active</span>' : '<span class="badge badge-status-inactive">Inactive</span>'}</td>
+                                <td>${v.vulnerability_count > 0 ? `<span class="badge bg-danger">${v.vulnerability_count} CVEs</span>` : '<span class="text-success">None</span>'}</td>
+                                <td><span class="badge bg-secondary">${escapeHtml(v.source || 'manual')}</span></td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        ${userPermissions.canManageProducts ? `
+                                        <button class="btn btn-sm btn-outline-primary" onclick="editProduct(${v.id}); bootstrap.Modal.getInstance(document.getElementById('versionsModal')).hide();" title="Edit">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" onclick="deleteVersionFromModal(${v.id}, '${escapeHtml(v.version)}')" title="Delete">
+                                            <i class="bi bi-trash3"></i>
+                                        </button>` : ''}
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+    }
+
+    // Delete a single version from the versions modal
+    async function deleteVersionFromModal(versionId, versionName) {
+        const confirmed = await showConfirm(
+            `Delete version "<strong>${escapeHtml(versionName)}</strong>"?`,
+            'Delete Version',
+            'Delete',
+            'btn-danger'
+        );
+
+        if (!confirmed) return;
+
+        showLoading();
+        try {
+            const response = await fetch(`/api/products/${versionId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                showToast('✓ Version deleted', 'success');
+                // Close modal and refresh
+                const modalEl = document.getElementById('versionsModal');
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                if (modal) modal.hide();
+                loadProducts();
+            } else {
+                showToast('✗ Error deleting version', 'danger');
             }
         } catch (error) {
             showToast(`✗ Error: ${error.message}`, 'danger');

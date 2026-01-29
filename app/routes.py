@@ -225,6 +225,7 @@ def get_products():
     - status: Filter by status (active, inactive)
     - page: Page number (1-indexed)
     - per_page: Items per page (default 25, max 100)
+    - grouped: If 'true', group products by vendor+product_name with versions as array
 
     - Super Admin: See all products (can filter by any org)
     - Others: Only see products assigned to their organization
@@ -248,6 +249,7 @@ def get_products():
     page = request.args.get('page', type=int)
     per_page = request.args.get('per_page', 25, type=int)
     per_page = min(per_page, 100)  # Limit max items per page
+    grouped = request.args.get('grouped', '').lower() == 'true'
 
     logger.info(f"get_products: user={current_user.username}, role={current_user.role}, is_super_admin={current_user.is_super_admin()}")
 
@@ -333,6 +335,82 @@ def get_products():
 
     # Order by vendor, product name (no distinct needed with subquery approach)
     query = query.order_by(Product.vendor, Product.product_name)
+
+    # If grouped mode requested, group by vendor+product_name
+    if grouped:
+        products = query.all()
+        grouped_products = {}
+
+        for p in products:
+            # Create unique key from vendor + product_name (case-insensitive)
+            key = f"{(p.vendor or '').lower()}|{(p.product_name or '').lower()}"
+
+            if key not in grouped_products:
+                grouped_products[key] = {
+                    'vendor': p.vendor,
+                    'product_name': p.product_name,
+                    'cpe_vendor': p.cpe_vendor,
+                    'cpe_product': p.cpe_product,
+                    'keywords': p.keywords,
+                    'active': p.active,
+                    'versions': [],
+                    'organization_ids': set(),
+                    'organization_names': set(),
+                    'total_vulnerabilities': 0,
+                    'has_vulnerable_version': False
+                }
+
+            # Add this version entry
+            version_entry = {
+                'id': p.id,
+                'version': p.version or 'Any',
+                'active': p.active,
+                'cpe_string': p.cpe_string,
+                'source': getattr(p, 'source', 'manual'),
+                'created_at': p.created_at.isoformat() if p.created_at else None,
+                'vulnerability_count': len(p.vulnerability_matches) if p.vulnerability_matches else 0,
+                'is_vulnerable': any(not m.acknowledged for m in p.vulnerability_matches) if p.vulnerability_matches else False
+            }
+            grouped_products[key]['versions'].append(version_entry)
+
+            # Aggregate organization info
+            if p.organization_id:
+                grouped_products[key]['organization_ids'].add(p.organization_id)
+                if p.organization:
+                    grouped_products[key]['organization_names'].add(p.organization.display_name or p.organization.name)
+
+            # Track vulnerability status
+            if version_entry['is_vulnerable']:
+                grouped_products[key]['has_vulnerable_version'] = True
+            grouped_products[key]['total_vulnerabilities'] += version_entry['vulnerability_count']
+
+        # Convert to list and clean up sets
+        result = []
+        for key, group in grouped_products.items():
+            group['organization_ids'] = list(group['organization_ids'])
+            group['organization_names'] = list(group['organization_names'])
+            # Sort versions - put specific versions first, 'Any' last
+            group['versions'].sort(key=lambda v: (v['version'] == 'Any', v['version'] or ''))
+            result.append(group)
+
+        # Sort by vendor, then product_name
+        result.sort(key=lambda g: (g['vendor'] or '', g['product_name'] or ''))
+
+        # Apply pagination if requested
+        if page:
+            total = len(result)
+            start = (page - 1) * per_page
+            end = start + per_page
+            return jsonify({
+                'products': result[start:end],
+                'total': total,
+                'page': page,
+                'per_page': per_page,
+                'pages': (total + per_page - 1) // per_page
+            })
+
+        logger.info(f"get_products (grouped): returning {len(result)} product groups")
+        return jsonify(result)
 
     # If pagination requested, return paginated result
     if page:
