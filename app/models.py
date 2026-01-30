@@ -1628,8 +1628,14 @@ class AgentLicense(db.Model):
     max_api_keys = db.Column(db.Integer, default=2, nullable=False)  # Max API keys per org
 
     # Current usage (cached, updated on agent changes)
-    current_agents = db.Column(db.Integer, default=0)  # Active agents count
+    current_agents = db.Column(db.Integer, default=0)  # Active agents count (total)
     peak_agents = db.Column(db.Integer, default=0)  # Peak usage in current period
+
+    # Server vs Client breakdown (for tiered pricing like S1)
+    server_count = db.Column(db.Integer, default=0)  # Servers, appliances, containers
+    client_count = db.Column(db.Integer, default=0)  # Workstations, desktops, laptops
+    peak_servers = db.Column(db.Integer, default=0)  # Peak server count
+    peak_clients = db.Column(db.Integer, default=0)  # Peak client count
 
     # License status
     status = db.Column(db.String(20), default='active', index=True)  # active, trial, suspended, expired, grace_period
@@ -1712,19 +1718,66 @@ class AgentLicense(db.Model):
             return 100
         return round((self.current_agents / self.max_agents) * 100, 1)
 
+    # Asset types considered as "servers" (higher cost/value)
+    SERVER_TYPES = ['server', 'container', 'appliance', 'virtual_machine', 'vm']
+    # Asset types considered as "clients" (lower cost/value)
+    CLIENT_TYPES = ['workstation', 'desktop', 'laptop', 'endpoint', 'client']
+
     def update_agent_count(self):
-        """Update current_agents count from database."""
+        """
+        Update current_agents count from database with server/client breakdown.
+
+        Server vs Client pricing model (similar to SentinelOne):
+        - Servers: Higher value, typically 1 full unit
+        - Clients: Lower value, typically 0.5 units
+        """
         from app.models import Asset
-        self.current_agents = Asset.query.filter_by(
+
+        # Get all active assets for this org
+        active_assets = Asset.query.filter_by(
             organization_id=self.organization_id,
             active=True
-        ).filter(Asset.status.in_(['online', 'offline'])).count()
+        ).filter(Asset.status.in_(['online', 'offline'])).all()
 
-        # Update peak if needed
+        # Count by type
+        server_count = 0
+        client_count = 0
+
+        for asset in active_assets:
+            asset_type = (asset.asset_type or 'server').lower()
+            if asset_type in self.CLIENT_TYPES:
+                client_count += 1
+            else:
+                # Default to server for unknown types (conservative approach)
+                server_count += 1
+
+        # Update counts
+        self.server_count = server_count
+        self.client_count = client_count
+        self.current_agents = server_count + client_count
+
+        # Update peaks if needed
+        if self.server_count > self.peak_servers:
+            self.peak_servers = self.server_count
+        if self.client_count > self.peak_clients:
+            self.peak_clients = self.client_count
         if self.current_agents > self.peak_agents:
             self.peak_agents = self.current_agents
 
         return self.current_agents
+
+    def get_weighted_units(self, server_weight=1.0, client_weight=0.5):
+        """
+        Calculate weighted license units based on server/client breakdown.
+
+        Args:
+            server_weight: Weight per server (default 1.0)
+            client_weight: Weight per client/workstation (default 0.5)
+
+        Returns:
+            float: Total weighted units
+        """
+        return (self.server_count * server_weight) + (self.client_count * client_weight)
 
     def to_dict(self):
         return {
@@ -1735,6 +1788,12 @@ class AgentLicense(db.Model):
             'max_api_keys': self.max_api_keys,
             'current_agents': self.current_agents,
             'peak_agents': self.peak_agents,
+            # Server vs Client breakdown
+            'server_count': self.server_count,
+            'client_count': self.client_count,
+            'peak_servers': self.peak_servers,
+            'peak_clients': self.peak_clients,
+            'weighted_units': self.get_weighted_units(),
             'usage_percent': self.get_usage_percent(),
             'status': self.status,
             'is_active': self.is_active(),

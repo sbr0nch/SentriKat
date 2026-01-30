@@ -5922,6 +5922,11 @@ function displayLicenseInfo(data) {
         return `<span class="${colorClass}">${current}</span> / ${max}`;
     };
 
+    // Agent usage with server/client breakdown
+    const agentUsage = data.agent_usage || {};
+    const agents = agentUsage.agents || {};
+    const breakdown = agentUsage.breakdown || {};
+
     usageEl.innerHTML = `
         <table class="table table-sm table-borderless mb-0">
             <tr>
@@ -5936,6 +5941,33 @@ function displayLicenseInfo(data) {
                 <td class="text-muted">Products</td>
                 <td>${formatLimit(usage.products || 0, limits.max_products)}</td>
             </tr>
+            ${agents.current > 0 || limits.max_agents > 0 ? `
+            <tr>
+                <td colspan="2" class="pt-2"><small class="text-muted fw-bold">Agents</small></td>
+            </tr>
+            <tr>
+                <td class="text-muted ps-2">Total</td>
+                <td>${formatLimit(agents.current || 0, limits.max_agents)}</td>
+            </tr>
+            ${breakdown.servers !== undefined ? `
+            <tr>
+                <td class="text-muted ps-2">
+                    <i class="bi bi-hdd-rack text-primary me-1"></i>Servers
+                </td>
+                <td>${breakdown.servers || 0}</td>
+            </tr>
+            <tr>
+                <td class="text-muted ps-2">
+                    <i class="bi bi-pc-display text-info me-1"></i>Workstations
+                </td>
+                <td>${breakdown.clients || 0}</td>
+            </tr>
+            <tr>
+                <td class="text-muted ps-2">Weighted Units</td>
+                <td><span class="badge bg-secondary">${(breakdown.weighted_units || 0).toFixed(1)}</span></td>
+            </tr>
+            ` : ''}
+            ` : ''}
         </table>
         ${!data.is_professional && (
             (usage.users >= limits.max_users) ||
