@@ -1843,7 +1843,7 @@ async function editOrganization(orgId) {
             emails = [];
         }
         SK.DOM.setValue('orgEmails', emails.join(', '));
-        SK.DOM.getChecked('orgActive') = org.active;
+        SK.DOM.setChecked('orgActive', org.active);
 
         // SMTP settings
         SK.DOM.setValue('smtpHost', org.smtp_host || '');
@@ -1854,14 +1854,14 @@ async function editOrganization(orgId) {
         SK.DOM.get('smtpPassword').placeholder = org.smtp_password ? '(password saved - leave blank to keep)' : 'Password';
         SK.DOM.setValue('smtpFromEmail', org.smtp_from_email || '');
         SK.DOM.setValue('smtpFromName', org.smtp_from_name || 'SentriKat Alerts');
-        SK.DOM.getChecked('smtpUseTls') = org.smtp_use_tls !== false;
-        SK.DOM.getChecked('smtpUseSsl') = org.smtp_use_ssl === true;
+        SK.DOM.setChecked('smtpUseTls', org.smtp_use_tls !== false);
+        SK.DOM.setChecked('smtpUseSsl', org.smtp_use_ssl === true);
 
         // Alert settings
-        SK.DOM.getChecked('alertCritical') = org.alert_on_critical;
-        SK.DOM.getChecked('alertHigh') = org.alert_on_high;
-        SK.DOM.getChecked('alertNewCVE') = org.alert_on_new_cve;
-        SK.DOM.getChecked('alertRansomware') = org.alert_on_ransomware;
+        SK.DOM.setChecked('alertCritical', org.alert_on_critical);
+        SK.DOM.setChecked('alertHigh', org.alert_on_high);
+        SK.DOM.setChecked('alertNewCVE', org.alert_on_new_cve);
+        SK.DOM.setChecked('alertRansomware', org.alert_on_ransomware);
 
         // Alert mode settings (org.alert_settings contains nested values)
         const alertMode = org.alert_settings?.mode || '';
@@ -1870,7 +1870,7 @@ async function editOrganization(orgId) {
         SK.DOM.setValue('orgEscalationDays', escalationDays);
 
         // Webhook settings
-        SK.DOM.getChecked('orgWebhookEnabled') = org.webhook_enabled || false;
+        SK.DOM.setChecked('orgWebhookEnabled', org.webhook_enabled || false);
         SK.DOM.setValue('orgWebhookUrl', org.webhook_url || '');
         SK.DOM.setValue('orgWebhookFormat', org.webhook_format || 'slack');
         SK.DOM.setValue('orgWebhookName', org.webhook_name || '');
@@ -4320,9 +4320,9 @@ async function editGroupMapping(mappingId) {
             SK.DOM.setValue('ldapGroupDescription', mapping.ldap_group_description || '');
             SK.DOM.setValue('mappingRole', mapping.role);
             SK.DOM.setValue('mappingPriority', mapping.priority);
-            SK.DOM.getChecked('autoProvision') = mapping.auto_provision;
-            SK.DOM.getChecked('autoDeprovision') = mapping.auto_deprovision;
-            SK.DOM.getChecked('syncEnabled') = mapping.sync_enabled;
+            SK.DOM.setChecked('autoProvision', mapping.auto_provision);
+            SK.DOM.setChecked('autoDeprovision', mapping.auto_deprovision);
+            SK.DOM.setChecked('syncEnabled', mapping.sync_enabled);
 
             // Load organizations and set selected
             await loadOrganizationsForMapping();
