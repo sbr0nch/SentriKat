@@ -563,14 +563,135 @@ def save_sync_settings():
         set_setting('sync_time', data.get('sync_time', '02:00'), 'sync', 'Preferred sync time (UTC)')
         set_setting('cisa_kev_url', data.get('cisa_kev_url', ''), 'sync', 'CISA KEV feed URL')
 
-        # Encrypt NVD API key
-        if data.get('nvd_api_key'):
-            set_setting('nvd_api_key', data['nvd_api_key'], 'sync', 'NVD API key', is_encrypted=True)
+        # Handle NVD API key - validate before saving
+        nvd_key = data.get('nvd_api_key', '').strip()
+        if nvd_key and nvd_key != '********':
+            # Validate the API key by making a test request
+            is_valid, error_msg = _validate_nvd_api_key(nvd_key)
+            if not is_valid:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid NVD API key: {error_msg}. Key was not saved.'
+                }), 400
+
+            set_setting('nvd_api_key', nvd_key, 'sync', 'NVD API key', is_encrypted=True)
+        elif nvd_key == '':
+            # User cleared the API key
+            set_setting('nvd_api_key', '', 'sync', 'NVD API key')
 
         return jsonify({'success': True, 'message': 'Sync settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save sync settings")
         return jsonify({'error': ERROR_MSGS['config']}), 500
+
+
+def _validate_nvd_api_key(api_key):
+    """
+    Validate an NVD API key by making a test request.
+    Returns (is_valid, error_message)
+    """
+    import requests
+    from config import Config
+
+    try:
+        url = 'https://services.nvd.nist.gov/rest/json/cpes/2.0'
+        params = {'keywordSearch': 'test', 'resultsPerPage': 1}
+        headers = {'apiKey': api_key}
+
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+
+        response = requests.get(
+            url,
+            params=params,
+            headers=headers,
+            proxies=proxies,
+            verify=verify_ssl,
+            timeout=15
+        )
+
+        if response.status_code == 200:
+            return True, None
+        elif response.status_code == 403:
+            return False, 'API key rejected (403 Forbidden)'
+        elif response.status_code == 404:
+            return False, 'API key invalid or expired (404 Not Found)'
+        else:
+            return False, f'Unexpected response: {response.status_code}'
+
+    except requests.exceptions.Timeout:
+        return False, 'Connection timeout - check network/proxy settings'
+    except requests.exceptions.ConnectionError as e:
+        return False, f'Connection error: {str(e)}'
+    except Exception as e:
+        return False, f'Validation failed: {str(e)}'
+
+
+@settings_bp.route('/sync/nvd-status', methods=['GET'])
+@admin_required
+def get_nvd_status():
+    """
+    Check NVD API connectivity and key status.
+    Returns status for display in UI health indicator.
+    """
+    import requests
+    from config import Config
+
+    result = {
+        'api_key_configured': False,
+        'api_key_valid': None,
+        'connection_ok': False,
+        'rate_limit': '5 req/30s',
+        'error': None
+    }
+
+    try:
+        nvd_key = get_setting('nvd_api_key', '')
+        result['api_key_configured'] = bool(nvd_key)
+
+        if nvd_key:
+            result['rate_limit'] = '50 req/30s'
+
+        # Test connection
+        url = 'https://services.nvd.nist.gov/rest/json/cpes/2.0'
+        params = {'keywordSearch': 'test', 'resultsPerPage': 1}
+        headers = {'apiKey': nvd_key} if nvd_key else {}
+
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+
+        response = requests.get(
+            url,
+            params=params,
+            headers=headers,
+            proxies=proxies,
+            verify=verify_ssl,
+            timeout=15
+        )
+
+        if response.status_code == 200:
+            result['connection_ok'] = True
+            result['api_key_valid'] = True if nvd_key else None
+        elif response.status_code == 403:
+            result['connection_ok'] = True
+            result['api_key_valid'] = False
+            result['error'] = 'API key rejected or rate limited'
+        elif response.status_code == 404:
+            result['connection_ok'] = True
+            result['api_key_valid'] = False
+            result['error'] = 'API key invalid or expired'
+        else:
+            result['error'] = f'Unexpected status: {response.status_code}'
+
+    except requests.exceptions.Timeout:
+        result['error'] = 'Connection timeout'
+    except requests.exceptions.ConnectionError:
+        result['error'] = 'Cannot connect to NVD API'
+    except Exception as e:
+        result['error'] = str(e)
+
+    return jsonify(result)
+
 
 @settings_bp.route('/sync/status', methods=['GET'])
 @admin_required
