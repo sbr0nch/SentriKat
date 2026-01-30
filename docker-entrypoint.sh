@@ -36,7 +36,12 @@ if [ -d "$CUSTOM_CERTS_DIR" ] && [ "$(ls -A $CUSTOM_CERTS_DIR/*.crt 2>/dev/null)
         done
     fi
 
+    # Set REQUESTS_CA_BUNDLE to use system CA store
+    # This is critical for requests library when proxies are explicitly passed
+    export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+    export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
     echo "Custom CA certificates installed successfully."
+    echo "REQUESTS_CA_BUNDLE set to: $REQUESTS_CA_BUNDLE"
 else
     echo "No custom CA certificates found in $CUSTOM_CERTS_DIR"
 fi
