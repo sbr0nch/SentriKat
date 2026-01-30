@@ -243,44 +243,34 @@ def import_software():
 def attempt_cpe_match(vendor, product_name):
     """
     Attempt to find matching CPE vendor/product for given software.
+    Uses a multi-tier approach:
+    1. User-learned mappings (from confirmed assignments)
+    2. Curated mapping database (fast, reliable)
+    3. NVD API search (slow, less reliable fallback)
+
     Returns (cpe_vendor, cpe_product, confidence) tuple.
     """
     try:
-        from app.nvd_cpe_api import search_cpe_grouped
+        from app.cpe_mappings import get_cpe_for_software, get_user_mapping
 
-        # Search NVD for matching products
-        query = f"{vendor} {product_name}"
-        results = search_cpe_grouped(query, limit=10)
+        # First check user-learned mappings
+        user_cpe_vendor, user_cpe_product = get_user_mapping(vendor, product_name)
+        if user_cpe_vendor and user_cpe_product:
+            return user_cpe_vendor, user_cpe_product, 0.98  # High confidence for user mappings
 
-        if not results:
-            return None, None, 0.0
+        # Use curated mappings with NVD fallback
+        cpe_vendor, cpe_product, confidence = get_cpe_for_software(
+            vendor, product_name, use_nvd_fallback=True
+        )
 
-        # Look for best match
-        vendor_lower = vendor.lower().replace(' ', '_')
-        product_lower = product_name.lower().replace(' ', '_')
-
-        best_match = None
-        best_confidence = 0.0
-
-        for cpe_vendor, vendor_data in results.items():
-            vendor_sim = calculate_similarity(vendor_lower, cpe_vendor)
-
-            for cpe_product, product_data in vendor_data.get('products', {}).items():
-                product_sim = calculate_similarity(product_lower, cpe_product)
-
-                # Combined confidence
-                confidence = (vendor_sim * 0.4 + product_sim * 0.6)
-
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_match = (cpe_vendor, cpe_product)
-
-        if best_match and best_confidence > 0.5:
-            return best_match[0], best_match[1], best_confidence
+        if cpe_vendor and cpe_product:
+            return cpe_vendor, cpe_product, confidence
 
         return None, None, 0.0
 
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"CPE match failed for {vendor} {product_name}: {e}")
         return None, None, 0.0
 
 

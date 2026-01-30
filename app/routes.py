@@ -488,6 +488,25 @@ def create_product():
             'error': 'A product with the same vendor, name, and version already exists. You can assign it to additional organizations from the product list.'
         }), 409
 
+    # Auto-match CPE if not provided
+    cpe_vendor = data.get('cpe_vendor')
+    cpe_product = data.get('cpe_product')
+    cpe_confidence = 0.0
+
+    if not cpe_vendor or not cpe_product:
+        try:
+            from app.integrations_api import attempt_cpe_match
+            matched_vendor, matched_product, cpe_confidence = attempt_cpe_match(
+                data['vendor'].strip(),
+                data['product_name'].strip()
+            )
+            if matched_vendor and matched_product:
+                cpe_vendor = matched_vendor
+                cpe_product = matched_product
+                current_app.logger.info(f"Auto-matched CPE: {data['product_name']} -> {cpe_vendor}:{cpe_product} ({cpe_confidence:.2f})")
+        except Exception as e:
+            current_app.logger.warning(f"CPE auto-match failed: {e}")
+
     product = Product(
         organization_id=data.get('organization_id', org_id),
         service_catalog_id=data.get('service_catalog_id'),
@@ -498,8 +517,8 @@ def create_product():
         description=data.get('description'),
         active=data.get('active', True),
         # CPE fields for NVD matching
-        cpe_vendor=data.get('cpe_vendor'),
-        cpe_product=data.get('cpe_product'),
+        cpe_vendor=cpe_vendor,
+        cpe_product=cpe_product,
         cpe_uri=data.get('cpe_uri'),
         match_type=data.get('match_type', 'auto')
     )
@@ -600,10 +619,21 @@ def update_product(product_id):
     if 'active' in data:
         product.active = data['active']
     # CPE fields for NVD matching
+    old_cpe_vendor = product.cpe_vendor
+    old_cpe_product = product.cpe_product
     if 'cpe_vendor' in data:
         product.cpe_vendor = data['cpe_vendor']
     if 'cpe_product' in data:
         product.cpe_product = data['cpe_product']
+
+    # Learn from user CPE assignments - save for future auto-matching
+    if (product.cpe_vendor and product.cpe_product and
+        (product.cpe_vendor != old_cpe_vendor or product.cpe_product != old_cpe_product)):
+        try:
+            from app.cpe_mappings import save_user_mapping
+            save_user_mapping(product.vendor, product.product_name, product.cpe_vendor, product.cpe_product)
+        except Exception as e:
+            current_app.logger.warning(f"Failed to save user CPE mapping: {e}")
     if 'cpe_uri' in data:
         product.cpe_uri = data['cpe_uri']
     if 'match_type' in data:
