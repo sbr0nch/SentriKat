@@ -248,6 +248,14 @@
         </div>
     </div>
 
+    <!-- Unmapped Products Warning -->
+    <div id="unmappedWarning" class="alert alert-warning d-none mb-3" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
+        These cannot be checked for vulnerabilities.
+        <a href="/admin#products" class="alert-link">Review and assign CPE mappings</a> to ensure complete coverage.
+    </div>
+
     <!-- Advanced Filters Panel -->
     <div class="card mb-3">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
@@ -868,6 +876,16 @@
             document.getElementById('totalMatches').textContent = formatNumber(stats.total_matches);
             document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
             document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
+
+            // Show/hide unmapped products warning
+            const unmappedWarning = document.getElementById('unmappedWarning');
+            const unmappedCount = document.getElementById('unmappedCount');
+            if (unmappedWarning && stats.products_unmapped > 0) {
+                unmappedCount.textContent = stats.products_unmapped;
+                unmappedWarning.classList.remove('d-none');
+            } else if (unmappedWarning) {
+                unmappedWarning.classList.add('d-none');
+            }
 
             // Update priority counts - CVE counts and match counts
             document.getElementById('criticalCves').textContent = formatNumber(stats.critical_cves || 0);

@@ -1141,6 +1141,17 @@ def get_vulnerability_stats():
     ransomware = ransomware_query.count()
     products_tracked = products_tracked_query.count()
 
+    # Count products without CPE mapping (blind spots)
+    products_unmapped = Product.query.filter(
+        Product.active == True,
+        db.or_(
+            Product.cpe_vendor.is_(None),
+            Product.cpe_vendor == '',
+            Product.cpe_product.is_(None),
+            Product.cpe_product == ''
+        )
+    ).count()
+
     # Calculate priority-based stats (both CVE counts and match counts)
     # Use selectinload to eagerly load relationships and avoid column mapping issues
     all_matches = unacknowledged_query.options(
@@ -1177,16 +1188,17 @@ def get_vulnerability_stats():
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
         'unacknowledged': unacknowledged,
-        'unacknowledged_cves': total_cves,  # NEW: unique CVE count
+        'unacknowledged_cves': total_cves,  # Unique CVE count
         'ransomware_related': ransomware,
         'products_tracked': products_tracked,
+        'products_unmapped': products_unmapped,  # Products without CPE (blind spots)
         'priority_breakdown': priority_counts,
-        'cve_priority_breakdown': cve_priority_counts,  # NEW: CVE-level counts
+        'cve_priority_breakdown': cve_priority_counts,  # CVE-level counts
         'critical_count': priority_counts['critical'],
         'high_count': priority_counts['high'],
         'medium_count': priority_counts['medium'],
         'low_count': priority_counts['low'],
-        # NEW: CVE counts for dashboard display
+        # CVE counts for dashboard display
         'critical_cves': cve_priority_counts['critical'],
         'high_cves': cve_priority_counts['high'],
         'medium_cves': cve_priority_counts['medium'],

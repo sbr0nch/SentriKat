@@ -225,19 +225,39 @@ class EmailAlertManager:
         """
         total_count = len(matches)
 
-        # Group by priority
+        # Group by priority (CVE-based, not match-based)
+        # One CVE affecting 20 products = 1 critical CVE, not 20 matches
         by_priority = {'critical': [], 'high': [], 'medium': [], 'low': []}
+        cve_priority_seen = {}  # Track which CVEs we've counted
+
         for match in matches:
             priority = match.calculate_effective_priority()
-            by_priority[priority].append(match)
+            cve_id = match.vulnerability.cve_id
+
+            # Only count each CVE once at its highest priority
+            if cve_id not in cve_priority_seen:
+                cve_priority_seen[cve_id] = priority
+                by_priority[priority].append(match)
+            elif priority == 'critical' and cve_priority_seen[cve_id] != 'critical':
+                # Upgrade to critical if we see a critical match for same CVE
+                by_priority[cve_priority_seen[cve_id]] = [m for m in by_priority[cve_priority_seen[cve_id]] if m.vulnerability.cve_id != cve_id]
+                by_priority['critical'].append(match)
+                cve_priority_seen[cve_id] = 'critical'
+
+        # Unique CVE counts (what users care about)
+        unique_cve_count = len(cve_priority_seen)
 
         # Group by product for executive summary
         by_product = {}
+        product_cves = {}  # Track unique CVEs per product
         for match in matches:
             product_key = f"{match.product.vendor} {match.product.product_name}"
+            cve_id = match.vulnerability.cve_id
             if product_key not in by_product:
-                by_product[product_key] = {'product': match.product, 'matches': []}
-            by_product[product_key]['matches'].append(match)
+                by_product[product_key] = {'product': match.product, 'matches': [], 'cve_ids': set()}
+            if cve_id not in by_product[product_key]['cve_ids']:
+                by_product[product_key]['matches'].append(match)
+                by_product[product_key]['cve_ids'].add(cve_id)
 
         priority_colors = {
             'critical': '#dc2626',
@@ -304,7 +324,7 @@ class EmailAlertManager:
                                     <tr>
                                         <td>
                                             <span style="font-size: 18px; font-weight: 700; color: #991b1b;">
-                                                {f'{new_count} New CVE{"s" if new_count != 1 else ""} ({total_count} total)' if new_count > 0 else f'{total_count} Critical Vulnerabilities'}
+                                                {f'{new_count} New CVE{"s" if new_count != 1 else ""} ({unique_cve_count} total CVEs)' if new_count > 0 else f'{unique_cve_count} Unique CVEs Detected'}
                                             </span>
                                             <p style="margin: 4px 0 0 0; font-size: 14px; color: #7f1d1d;">
                                                 Affecting <strong>{organization.display_name}</strong> - Immediate action required
