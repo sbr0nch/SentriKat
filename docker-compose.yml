@@ -41,6 +41,8 @@ services:
       - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,db}
     volumes:
       - sentrikat_data:/app/data
+      # Custom CA certificates for trusting internal/corporate PKI
+      - ./certs:/app/custom-certs:ro
     depends_on:
       db:
         condition: service_healthy

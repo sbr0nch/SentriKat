@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
@@ -35,8 +36,12 @@ ENV https_proxy=""
 # Copy application code
 COPY . .
 
-# Create data directory for uploads/backups
-RUN mkdir -p /app/data
+# Create data directory for uploads/backups and custom CA certs directory
+RUN mkdir -p /app/data /app/custom-certs
+
+# Copy and prepare entrypoint script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 # Expose port
 EXPOSE 5000
@@ -44,6 +49,9 @@ EXPOSE 5000
 # Environment variables
 ENV FLASK_APP=run.py
 ENV PYTHONUNBUFFERED=1
+
+# Use entrypoint script to install custom CA certs before starting app
+ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Run the application with gunicorn
 # --preload loads app once before forking workers (prevents race condition in db.create_all)
