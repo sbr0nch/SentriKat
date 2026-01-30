@@ -338,6 +338,14 @@ def create_product_from_queue(queue_item):
         )
         db.session.add(product)
         db.session.flush()  # Get the ID
+
+        # Add to product_organizations many-to-many table for proper org tracking
+        if queue_item.organization_id:
+            from app.models import Organization
+            org = Organization.query.get(queue_item.organization_id)
+            if org and org not in product.organizations:
+                product.organizations.append(org)
+
         return product
     except Exception as e:
         return None
