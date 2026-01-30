@@ -1161,7 +1161,7 @@ def create_backup():
 
         backup_data = {
             'backup_info': {
-                'version': '1.0',
+                'version': '1.1',  # Updated version for CPE mappings support
                 'created_at': datetime.utcnow().isoformat(),
                 'created_by': current_user.username,
                 'app_name': get_setting('app_name', 'SentriKat')
@@ -1170,7 +1170,8 @@ def create_backup():
             'organizations': [],
             'users': [],
             'products': [],
-            'service_catalog': []
+            'service_catalog': [],
+            'user_cpe_mappings': []  # User-learned CPE mappings
         }
 
         # Export settings
@@ -1249,6 +1250,15 @@ def create_backup():
                 'is_popular': catalog.is_popular
             }
             backup_data['service_catalog'].append(catalog_data)
+
+        # Export user CPE mappings
+        try:
+            from app.models import UserCpeMapping
+            for mapping in UserCpeMapping.query.all():
+                mapping_data = mapping.to_export_dict()
+                backup_data['user_cpe_mappings'].append(mapping_data)
+        except Exception as e:
+            logger.warning(f"Could not export CPE mappings: {e}")
 
         # Generate filename
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
@@ -1531,6 +1541,21 @@ def restore_full_backup():
                         value.get('description', '')
                     )
                     stats['settings'] += 1
+
+        # 6. Restore user CPE mappings
+        stats['cpe_mappings'] = 0
+        if 'user_cpe_mappings' in backup_data:
+            try:
+                from app.cpe_mappings import import_user_mappings
+                result = import_user_mappings(
+                    backup_data['user_cpe_mappings'],
+                    user_id=current_user.id,
+                    overwrite=False  # Don't overwrite existing
+                )
+                stats['cpe_mappings'] = result.get('imported', 0)
+                stats['skipped'] += result.get('skipped', 0)
+            except Exception as e:
+                logger.warning(f"Could not restore CPE mappings: {e}")
 
         db.session.commit()
 

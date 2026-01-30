@@ -6757,7 +6757,13 @@ function renderImportQueue() {
                            ${item.status !== 'pending' ? 'disabled' : ''}>
                 </td>
                 <td>
-                    <div class="fw-semibold">${escapeHtml(item.vendor)}</div>
+                    <div class="fw-semibold">
+                        ${escapeHtml(item.vendor)}
+                        ${item.cpe_vendor && item.cpe_product
+                            ? `<span class="badge bg-success-subtle text-success ms-1" title="CPE matched: ${escapeHtml(item.cpe_vendor)}:${escapeHtml(item.cpe_product)} (${Math.round((item.cpe_match_confidence || 0) * 100)}%)"><i class="bi bi-shield-check"></i></span>`
+                            : `<span class="badge bg-warning-subtle text-warning ms-1" title="No CPE match - vulnerabilities may not be detected"><i class="bi bi-shield-exclamation"></i></span>`
+                        }
+                    </div>
                     <div class="text-muted small">${escapeHtml(item.product_name)}</div>
                 </td>
                 <td>
@@ -6860,6 +6866,30 @@ async function loadImportQueue() {
 
         const data = await response.json();
         importQueueData = data.items || [];
+
+        // Update CPE coverage summary in the info alert
+        if (status === 'pending' && importQueueData.length > 0) {
+            const withCpe = importQueueData.filter(i => i.cpe_vendor && i.cpe_product).length;
+            const withoutCpe = importQueueData.length - withCpe;
+            const infoAlert = document.querySelector('#importQueue .alert-info');
+            if (infoAlert) {
+                infoAlert.innerHTML = `
+                    <i class="bi bi-info-circle me-2"></i>
+                    Software discovered from integrations and agents appears here for review.
+                    ${withoutCpe > 0 ? `
+                        <span class="ms-2 badge bg-warning text-dark">
+                            <i class="bi bi-shield-exclamation me-1"></i>${withoutCpe} without CPE
+                        </span>
+                        <small class="text-muted ms-1">(won't detect vulnerabilities)</small>
+                    ` : ''}
+                    ${withCpe > 0 ? `
+                        <span class="ms-2 badge bg-success">
+                            <i class="bi bi-shield-check me-1"></i>${withCpe} matched
+                        </span>
+                    ` : ''}
+                `;
+            }
+        }
 
         renderImportQueue();
         loadImportQueueCount();
