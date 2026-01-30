@@ -240,6 +240,19 @@ def get_rate_limiter() -> NVDRateLimiter:
     return _rate_limiter
 
 
+def _reset_limiter():
+    """Reset rate limiter for testing. Not for production use."""
+    global _rate_limiter
+    NVDRateLimiter._instance = None
+    _rate_limiter = None
+
+
+def update_api_key_status(has_key: bool):
+    """Force update of API key status. Used when key is added/removed."""
+    limiter = get_rate_limiter()
+    limiter.invalidate_api_key_cache()
+
+
 def rate_limited(timeout: float = 60.0):
     """
     Decorator to apply NVD rate limiting to a function.

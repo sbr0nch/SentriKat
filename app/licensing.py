@@ -696,12 +696,12 @@ def get_agent_usage():
 
     server_count = Asset.query.filter(
         Asset.active == True,
-        db.func.lower(Asset.asset_type).in_(server_types)
+        func.lower(Asset.asset_type).in_(server_types)
     ).count() or 0
 
     client_count = Asset.query.filter(
         Asset.active == True,
-        db.func.lower(Asset.asset_type).in_(client_types)
+        func.lower(Asset.asset_type).in_(client_types)
     ).count() or 0
 
     # Anything not matched is counted as server (unknown defaults to server)

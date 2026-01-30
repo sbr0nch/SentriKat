@@ -235,6 +235,41 @@ def get_current_user():
         return _safe_get_user(session['user_id'])
     return None
 
+
+def login_user_session(user):
+    """
+    Set up the session for a successfully authenticated user.
+    Used by both local login and SAML SSO.
+
+    Args:
+        user: The User object to log in
+    """
+    from app.models import Organization
+
+    # Session fixation protection: clear old session data
+    session.clear()
+
+    # Set session as permanent
+    session.permanent = True
+    session['user_id'] = user.id
+    session['username'] = user.username
+    session['is_admin'] = user.is_admin
+
+    # Set organization
+    if user.organization_id:
+        session['organization_id'] = user.organization_id
+    else:
+        # Default to first organization
+        default_org = Organization.query.filter_by(name='default').first()
+        if default_org:
+            session['organization_id'] = default_org.id
+
+    # Update last login
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+
+    return True
+
 @auth_bp.route('/login', methods=['GET'])
 def login():
     """Display login page"""
