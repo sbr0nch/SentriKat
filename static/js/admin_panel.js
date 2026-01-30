@@ -2336,9 +2336,16 @@ async function saveSyncSettings() {
         auto_sync_enabled: SK.DOM.getChecked('autoSyncEnabled'),
         sync_interval: SK.DOM.getValue('syncInterval'),
         sync_time: SK.DOM.getValue('syncTime'),
-        nvd_api_key: SK.DOM.getValue('nvdApiKey'),
         cisa_kev_url: SK.DOM.getValue('cisaKevUrl')
     };
+
+    // Only include NVD API key if user entered a new one
+    // Empty field = don't change existing key (user can use Clear button to remove)
+    const nvdKeyValue = SK.DOM.getValue('nvdApiKey');
+    if (nvdKeyValue) {
+        settings.nvd_api_key = nvdKeyValue;
+    }
+    // Note: To clear the key, user must use the Clear button which sends explicit empty string
 
     try {
         const response = await fetch('/api/settings/sync', {
@@ -2348,7 +2355,14 @@ async function saveSyncSettings() {
         });
 
         if (response.ok) {
-            showToast('✓ Sync settings saved successfully', 'success');
+            const result = await response.json();
+            showToast('Sync settings saved successfully', 'success');
+            // Update NVD key state if a new key was set
+            if (nvdKeyValue) {
+                nvdKeyConfigured = true;
+                updateNvdKeyUI();
+                checkNvdHealth();  // Refresh status with new key
+            }
             loadSyncStatus();
         } else {
             const error = await response.json();
@@ -2356,6 +2370,114 @@ async function saveSyncSettings() {
         }
     } catch (error) {
         showToast(`Error saving sync settings: ${error.message}`, 'danger');
+    }
+}
+
+// Track if NVD API key is configured (for clear button visibility)
+let nvdKeyConfigured = false;
+
+/**
+ * Clear the NVD API key
+ */
+async function clearNvdApiKey() {
+    const confirmed = await showConfirm(
+        'Are you sure you want to clear the NVD API key? Product search will still work but with rate limiting (5 requests per 30 seconds instead of 50).',
+        'Clear NVD API Key',
+        'Clear Key',
+        'btn-warning'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/api/settings/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                auto_sync_enabled: SK.DOM.getChecked('autoSyncEnabled'),
+                sync_interval: SK.DOM.getValue('syncInterval'),
+                sync_time: SK.DOM.getValue('syncTime'),
+                nvd_api_key: '',  // Explicitly clear
+                cisa_kev_url: SK.DOM.getValue('cisaKevUrl')
+            })
+        });
+
+        if (response.ok) {
+            nvdKeyConfigured = false;
+            updateNvdKeyUI();
+            showToast('NVD API key cleared successfully', 'success');
+            checkNvdHealth();  // Refresh status
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error clearing NVD API key: ${error.message}`, 'danger');
+    }
+}
+
+/**
+ * Update the NVD API key field UI based on configuration state
+ */
+function updateNvdKeyUI() {
+    const nvdKeyInput = SK.DOM.get('nvdApiKey');
+    const clearBtn = SK.DOM.get('btnClearNvdKey');
+
+    if (nvdKeyInput) {
+        nvdKeyInput.value = '';
+        nvdKeyInput.placeholder = nvdKeyConfigured
+            ? '(API key saved - enter new key to replace)'
+            : 'Enter your NVD API key (optional)';
+    }
+
+    if (clearBtn) {
+        if (nvdKeyConfigured) {
+            clearBtn.classList.remove('d-none');
+        } else {
+            clearBtn.classList.add('d-none');
+        }
+    }
+}
+
+/**
+ * Check NVD API health status
+ */
+async function checkNvdHealth() {
+    const statusEl = SK.DOM.get('nvdHealthStatus');
+    const detailsEl = SK.DOM.get('nvdHealthDetails');
+
+    if (!statusEl) return;
+
+    // Show loading
+    statusEl.innerHTML = '<span class="spinner-border spinner-border-sm text-muted" role="status"></span> <span class="text-muted">Checking...</span>';
+    if (detailsEl) detailsEl.classList.add('d-none');
+
+    try {
+        const response = await fetch('/api/settings/sync/nvd-status');
+        const result = await response.json();
+
+        if (result.reachable) {
+            statusEl.innerHTML = '<i class="bi bi-check-circle-fill text-success me-1"></i><span class="text-success">Connected</span>';
+            if (detailsEl) {
+                let details = `Rate limit: ${result.rate_limit}`;
+                if (result.api_key_configured) {
+                    details += ' <span class="badge bg-success">API Key Active</span>';
+                } else {
+                    details += ' <span class="badge bg-secondary">No API Key</span>';
+                }
+                detailsEl.innerHTML = details;
+                detailsEl.classList.remove('d-none');
+            }
+        } else {
+            statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-danger me-1"></i><span class="text-danger">Connection Failed</span>';
+            if (detailsEl && result.error) {
+                detailsEl.innerHTML = `<span class="text-danger">${result.error}</span>`;
+                detailsEl.classList.remove('d-none');
+            }
+        }
+    } catch (error) {
+        statusEl.innerHTML = '<i class="bi bi-question-circle text-muted me-1"></i><span class="text-muted">Unable to check</span>';
+        console.error('Error checking NVD health:', error);
     }
 }
 
@@ -2803,7 +2925,9 @@ async function saveBrandingSettings() {
         app_name: SK.DOM.getValue('appName') || 'SentriKat',
         login_message: SK.DOM.getValue('loginMessage') || '',
         support_email: SK.DOM.getValue('supportEmail') || '',
-        show_version: SK.DOM.getChecked('showVersion')
+        show_version: SK.DOM.getChecked('showVersion'),
+        display_timezone: SK.DOM.getValue('displayTimezone') || 'UTC',
+        date_format: SK.DOM.getValue('dateFormat') || 'YYYY-MM-DD HH:mm'
     };
 
     try {
@@ -2815,6 +2939,10 @@ async function saveBrandingSettings() {
 
         if (response.ok) {
             showToast('Branding settings saved successfully', 'success');
+            // Update global settings so date formatting takes effect immediately
+            window.appSettings = window.appSettings || {};
+            window.appSettings.displayTimezone = settings.display_timezone;
+            window.appSettings.dateFormat = settings.date_format;
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
@@ -2835,11 +2963,20 @@ async function loadBrandingSettings() {
             const showVersion = SK.DOM.get('showVersion');
             const logoPreview = SK.DOM.get('currentLogoPreview');
             const deleteLogoBtn = SK.DOM.get('deleteLogoBtn');
+            const displayTimezone = SK.DOM.get('displayTimezone');
+            const dateFormat = SK.DOM.get('dateFormat');
 
             if (appName) appName.value = settings.app_name || 'SentriKat';
             if (loginMessage) loginMessage.value = settings.login_message || '';
             if (supportEmail) supportEmail.value = settings.support_email || '';
             if (showVersion) showVersion.checked = settings.show_version !== false;
+            if (displayTimezone) displayTimezone.value = settings.display_timezone || 'UTC';
+            if (dateFormat) dateFormat.value = settings.date_format || 'YYYY-MM-DD HH:mm';
+
+            // Store in global settings for use by date formatting functions
+            window.appSettings = window.appSettings || {};
+            window.appSettings.displayTimezone = settings.display_timezone || 'UTC';
+            window.appSettings.dateFormat = settings.date_format || 'YYYY-MM-DD HH:mm';
 
             // Show custom logo if set
             if (settings.logo_url && logoPreview) {
@@ -3327,18 +3464,16 @@ async function loadAllSettings() {
                     const syncInterval = SK.DOM.get('syncInterval');
                     const syncTime = SK.DOM.get('syncTime');
                     const cisaKevUrl = SK.DOM.get('cisaKevUrl');
-                    const nvdKeyInput = SK.DOM.get('nvdApiKey');
 
                     if (autoSyncEnabled) autoSyncEnabled.checked = sync.auto_sync_enabled || false;
                     if (syncInterval) syncInterval.value = sync.sync_interval || 'daily';
                     if (syncTime) syncTime.value = sync.sync_time || '02:00';
                     if (cisaKevUrl) cisaKevUrl.value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
-                    if (nvdKeyInput) {
-                        nvdKeyInput.value = '';
-                        nvdKeyInput.placeholder = sync.nvd_api_key_configured
-                            ? '(API key saved - leave blank to keep)'
-                            : 'Enter your NVD API key (optional)';
-                    }
+
+                    // Update NVD key UI with clear button
+                    nvdKeyConfigured = sync.nvd_api_key_configured || false;
+                    updateNvdKeyUI();
+
                     console.log('Sync settings loaded');
                 }
             })
@@ -3369,6 +3504,7 @@ async function loadAllSettings() {
     await Promise.allSettled(loadPromises);
 
     loadSyncStatus();
+    checkNvdHealth();  // Check NVD API connection status
 
     // Load additional settings (these can fail independently)
     loadSecuritySettings();

@@ -564,20 +564,23 @@ def save_sync_settings():
         set_setting('cisa_kev_url', data.get('cisa_kev_url', ''), 'sync', 'CISA KEV feed URL')
 
         # Handle NVD API key - validate before saving
-        nvd_key = data.get('nvd_api_key', '').strip()
-        if nvd_key and nvd_key != '********':
-            # Validate the API key by making a test request
-            is_valid, error_msg = _validate_nvd_api_key(nvd_key)
-            if not is_valid:
-                return jsonify({
-                    'success': False,
-                    'error': f'Invalid NVD API key: {error_msg}. Key was not saved.'
-                }), 400
+        # Only process if key is explicitly included in the request
+        if 'nvd_api_key' in data:
+            nvd_key = (data.get('nvd_api_key') or '').strip()
+            if nvd_key and nvd_key != '********':
+                # Validate the API key by making a test request
+                is_valid, error_msg = _validate_nvd_api_key(nvd_key)
+                if not is_valid:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Invalid NVD API key: {error_msg}. Key was not saved.'
+                    }), 400
 
-            set_setting('nvd_api_key', nvd_key, 'sync', 'NVD API key', is_encrypted=True)
-        elif nvd_key == '':
-            # User cleared the API key
-            set_setting('nvd_api_key', '', 'sync', 'NVD API key')
+                set_setting('nvd_api_key', nvd_key, 'sync', 'NVD API key', is_encrypted=True)
+            elif nvd_key == '':
+                # User explicitly cleared the API key (via Clear button)
+                set_setting('nvd_api_key', '', 'sync', 'NVD API key')
+        # If 'nvd_api_key' not in data, don't change the existing key
 
         return jsonify({'success': True, 'message': 'Sync settings saved successfully'})
     except Exception as e:
@@ -816,7 +819,9 @@ def get_branding_settings():
         'login_message': get_setting('login_message', ''),
         'support_email': get_setting('support_email', ''),
         'show_version': get_setting('show_version', 'true') == 'true',
-        'logo_url': get_setting('logo_url', '/static/images/favicon-128x128.png')
+        'logo_url': get_setting('logo_url', '/static/images/favicon-128x128.png'),
+        'display_timezone': get_setting('display_timezone', 'UTC'),
+        'date_format': get_setting('date_format', 'YYYY-MM-DD HH:mm')
     }
     return jsonify(settings)
 
@@ -832,6 +837,8 @@ def save_branding_settings():
         set_setting('login_message', data.get('login_message', ''), 'branding', 'Login page message')
         set_setting('support_email', data.get('support_email', ''), 'branding', 'Support email address')
         set_setting('show_version', 'true' if data.get('show_version') else 'false', 'branding', 'Show version in footer')
+        set_setting('display_timezone', data.get('display_timezone', 'UTC'), 'branding', 'Display timezone')
+        set_setting('date_format', data.get('date_format', 'YYYY-MM-DD HH:mm'), 'branding', 'Date display format')
 
         return jsonify({'success': True, 'message': 'Branding settings saved successfully'})
     except Exception as e:
