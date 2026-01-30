@@ -5785,7 +5785,7 @@ async function activateLicense() {
 
         if (response.ok && data.success) {
             showToast(data.message, 'success');
-            SK.DOM.getValue('licenseKeyInput') = '';
+            SK.DOM.setValue('licenseKeyInput', '');
             loadLicenseInfo();
             // Reload page to apply license changes (like removing "Powered by")
             setTimeout(() => window.location.reload(), 1500);
