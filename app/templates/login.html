@@ -139,6 +139,24 @@
             letter-spacing: 0.5rem;
             font-family: monospace;
         }
+
+        .divider-text {
+            display: flex;
+            align-items: center;
+            text-align: center;
+        }
+
+        .divider-text::before,
+        .divider-text::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .divider-text span {
+            padding: 0 15px;
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
@@ -189,6 +207,16 @@
                         Signing in...
                     </span>
                 </button>
+
+                <!-- SAML SSO Login Option -->
+                <div id="samlLoginSection" class="d-none mt-4">
+                    <div class="divider-text">
+                        <span class="text-muted">or</span>
+                    </div>
+                    <a href="/saml/login" class="btn btn-outline-primary w-100 mt-3" id="samlLoginBtn">
+                        <i class="bi bi-key-fill me-2"></i>Sign in with SSO
+                    </a>
+                </div>
             </form>
 
             <!-- Step 2: Two-Factor Authentication -->
@@ -588,6 +616,31 @@
                 field.addEventListener('input', () => setFieldValid(fieldId));
             }
         });
+
+        // Check SAML SSO availability
+        async function checkSamlStatus() {
+            try {
+                const response = await fetch('/api/saml/status');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.enabled && data.login_url) {
+                        const samlSection = document.getElementById('samlLoginSection');
+                        const samlBtn = document.getElementById('samlLoginBtn');
+                        if (samlSection) {
+                            samlSection.classList.remove('d-none');
+                        }
+                        if (samlBtn && data.login_url) {
+                            samlBtn.href = data.login_url;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.log('SAML status check failed:', error);
+            }
+        }
+
+        // Check SAML on page load
+        checkSamlStatus();
     </script>
 </body>
 </html>

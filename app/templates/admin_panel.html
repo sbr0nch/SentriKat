@@ -856,6 +856,11 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="saml-settings-tab" data-bs-toggle="pill" data-bs-target="#samlSettings" type="button">
+                        <i class="bi bi-key-fill me-2"></i>SAML SSO
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
                     <button class="nav-link" id="smtp-settings-tab" data-bs-toggle="pill" data-bs-target="#smtpSettings" type="button">
                         <i class="bi bi-envelope me-2"></i>Global SMTP
                     </button>
@@ -1058,6 +1063,131 @@
                                         </button>
                                         <button type="button" class="btn btn-outline-secondary" onclick="testLDAPConnection()">
                                             <i class="bi bi-plug me-1"></i>Test Connection
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SAML SSO Settings (Super Admin + Professional License Only) -->
+                <div class="tab-pane fade" id="samlSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-key-fill me-2"></i>SAML Single Sign-On (SSO)</span>
+                            <span class="badge bg-primary">Professional</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure SAML 2.0 SSO to allow users to log in using your Identity Provider (IdP) like Okta, Azure AD, or OneLogin.
+                            </div>
+
+                            <form id="samlSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="samlEnabled">
+                                            <label class="form-check-label" for="samlEnabled">Enable SAML SSO</label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-cloud-download me-2"></i>Service Provider (SP) Information</h6>
+                                        <p class="text-muted small">Use these values when configuring your Identity Provider:</p>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label class="form-label">SP Entity ID</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="samlSpEntityId" readonly>
+                                            <button class="btn btn-outline-secondary" type="button" onclick="copySamlValue('samlSpEntityId')">
+                                                <i class="bi bi-clipboard"></i>
+                                            </button>
+                                        </div>
+                                        <small class="form-text text-muted">Also known as Audience URI</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label class="form-label">ACS URL</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="samlAcsUrl" readonly>
+                                            <button class="btn btn-outline-secondary" type="button" onclick="copySamlValue('samlAcsUrl')">
+                                                <i class="bi bi-clipboard"></i>
+                                            </button>
+                                        </div>
+                                        <small class="form-text text-muted">Assertion Consumer Service URL</small>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <a href="/api/saml/metadata" target="_blank" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-download me-1"></i>Download SP Metadata XML
+                                        </a>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-cloud-upload me-2"></i>Identity Provider (IdP) Configuration</h6>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label for="samlIdpMetadata" class="form-label">IdP Metadata (XML or URL)</label>
+                                        <textarea class="form-control" id="samlIdpMetadata" rows="6" placeholder="Paste your IdP metadata XML here, or enter the metadata URL"></textarea>
+                                        <small class="form-text text-muted">You can paste the full XML metadata or provide a URL to fetch it from</small>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-person-badge me-2"></i>User Provisioning</h6>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="samlDefaultOrg" class="form-label">Default Organization</label>
+                                        <select class="form-select" id="samlDefaultOrg">
+                                            <option value="">Select organization...</option>
+                                        </select>
+                                        <small class="form-text text-muted">Organization for new SAML users</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <div class="mt-4">
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="samlAutoProvision" checked>
+                                                <label class="form-check-label" for="samlAutoProvision">Auto-provision new users</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="samlUpdateUserInfo" checked>
+                                                <label class="form-check-label" for="samlUpdateUserInfo">Update user info on login</label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-arrow-left-right me-2"></i>Attribute Mapping</h6>
+                                        <p class="text-muted small">Map SAML assertion attributes to user fields. Default values work with most IdPs.</p>
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label class="form-label">Username Attribute</label>
+                                        <input type="text" class="form-control" id="samlAttrUsername" value="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name">
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label class="form-label">Email Attribute</label>
+                                        <input type="text" class="form-control" id="samlAttrEmail" value="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress">
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label class="form-label">Full Name Attribute</label>
+                                        <input type="text" class="form-control" id="samlAttrFullName" value="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname">
+                                    </div>
+
+                                    <div class="col-12 mt-4">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary me-2" onclick="saveSamlSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save SAML Settings
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" onclick="testSamlConfig()">
+                                            <i class="bi bi-check2-circle me-1"></i>Test Configuration
                                         </button>
                                     </div>
                                 </div>

@@ -2803,6 +2803,154 @@ async function loadSecuritySettings() {
 }
 
 // ============================================================================
+// SAML SSO Settings
+// ============================================================================
+
+async function loadSamlSettings() {
+    try {
+        const response = await fetch('/api/settings/saml');
+        if (response.ok) {
+            const settings = await response.json();
+
+            // Basic settings
+            const samlEnabled = SK.DOM.get('samlEnabled');
+            if (samlEnabled) samlEnabled.checked = settings.saml_enabled === true;
+
+            // SP information (read-only)
+            const spEntityId = SK.DOM.get('samlSpEntityId');
+            const acsUrl = SK.DOM.get('samlAcsUrl');
+            if (spEntityId) spEntityId.value = settings.saml_sp_entity_id || `${window.location.origin}/api/saml/metadata`;
+            if (acsUrl) acsUrl.value = settings.saml_sp_acs_url || `${window.location.origin}/saml/acs`;
+
+            // IdP metadata
+            const idpMetadata = SK.DOM.get('samlIdpMetadata');
+            if (idpMetadata) idpMetadata.value = settings.saml_idp_metadata || '';
+
+            // User provisioning
+            const autoProvision = SK.DOM.get('samlAutoProvision');
+            const updateUserInfo = SK.DOM.get('samlUpdateUserInfo');
+            if (autoProvision) autoProvision.checked = settings.saml_auto_provision !== false;
+            if (updateUserInfo) updateUserInfo.checked = settings.saml_update_user_info !== false;
+
+            // Load organizations for default org dropdown
+            await loadSamlOrganizations(settings.saml_default_org_id);
+
+            // Attribute mapping
+            try {
+                const mapping = JSON.parse(settings.saml_user_mapping || '{}');
+                const attrUsername = SK.DOM.get('samlAttrUsername');
+                const attrEmail = SK.DOM.get('samlAttrEmail');
+                const attrFullName = SK.DOM.get('samlAttrFullName');
+                if (attrUsername && mapping.username) attrUsername.value = mapping.username;
+                if (attrEmail && mapping.email) attrEmail.value = mapping.email;
+                if (attrFullName && mapping.full_name) attrFullName.value = mapping.full_name;
+            } catch (e) {
+                console.error('Error parsing SAML user mapping:', e);
+            }
+
+            // Show warning if SAML library not installed
+            if (!settings.saml_available) {
+                showToast('SAML library not installed. Run: pip install python3-saml', 'warning');
+            }
+        } else if (response.status === 403) {
+            console.log('SAML settings require Professional license');
+        }
+    } catch (error) {
+        console.error('Error loading SAML settings:', error);
+    }
+}
+
+async function loadSamlOrganizations(selectedOrgId) {
+    try {
+        const response = await fetch('/api/organizations');
+        if (response.ok) {
+            const orgs = await response.json();
+            const select = SK.DOM.get('samlDefaultOrg');
+            if (select) {
+                select.innerHTML = '<option value="">Select organization...</option>';
+                orgs.forEach(org => {
+                    const option = document.createElement('option');
+                    option.value = org.id;
+                    option.textContent = org.display_name || org.name;
+                    if (selectedOrgId && org.id.toString() === selectedOrgId.toString()) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error loading organizations for SAML:', error);
+    }
+}
+
+async function saveSamlSettings() {
+    const settings = {
+        saml_enabled: SK.DOM.getChecked('samlEnabled'),
+        saml_idp_metadata: SK.DOM.getValue('samlIdpMetadata'),
+        saml_sp_entity_id: SK.DOM.getValue('samlSpEntityId'),
+        saml_sp_acs_url: SK.DOM.getValue('samlAcsUrl'),
+        saml_default_org_id: SK.DOM.getValue('samlDefaultOrg'),
+        saml_auto_provision: SK.DOM.getChecked('samlAutoProvision'),
+        saml_update_user_info: SK.DOM.getChecked('samlUpdateUserInfo'),
+        saml_user_mapping: JSON.stringify({
+            username: SK.DOM.getValue('samlAttrUsername'),
+            email: SK.DOM.getValue('samlAttrEmail'),
+            full_name: SK.DOM.getValue('samlAttrFullName')
+        })
+    };
+
+    try {
+        const response = await fetch('/api/settings/saml', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        const result = await response.json();
+        if (response.ok && result.success) {
+            showToast('SAML settings saved successfully', 'success');
+        } else {
+            showToast(`Error: ${result.error || 'Failed to save SAML settings'}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving SAML settings: ${error.message}`, 'danger');
+    }
+}
+
+async function testSamlConfig() {
+    try {
+        const response = await fetch('/api/settings/saml/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+        if (response.ok && result.success) {
+            showToast(`SAML configuration is valid! IdP: ${result.idp_entity_id}`, 'success');
+        } else {
+            showToast(`SAML configuration error: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error testing SAML configuration: ${error.message}`, 'danger');
+    }
+}
+
+function copySamlValue(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        navigator.clipboard.writeText(element.value).then(() => {
+            showToast('Copied to clipboard', 'success');
+        }).catch(() => {
+            // Fallback for older browsers
+            element.select();
+            document.execCommand('copy');
+            showToast('Copied to clipboard', 'success');
+        });
+    }
+}
+
+// ============================================================================
 // Backup & Restore
 // ============================================================================
 
@@ -3557,6 +3705,7 @@ async function loadAllSettings() {
 
     // Load additional settings (these can fail independently)
     loadSecuritySettings();
+    loadSamlSettings();
     loadBrandingSettings();
     loadNotificationSettings();
     loadRetentionSettings();
