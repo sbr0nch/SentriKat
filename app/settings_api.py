@@ -387,6 +387,7 @@ def test_smtp_connection():
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
+        import socket
 
         # Get current user's email to send test to
         user_id = session.get('user_id')
@@ -396,7 +397,10 @@ def test_smtp_connection():
             test_recipient = user.email if user else None
 
         if not test_recipient:
-            return jsonify({'success': False, 'error': 'No email address found for current user'})
+            return jsonify({
+                'success': False,
+                'error': 'No email address found for your user account. Please add an email to your profile first.'
+            })
 
         smtp_config = {
             'host': get_setting('smtp_host'),
@@ -409,8 +413,11 @@ def test_smtp_connection():
             'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true'
         }
 
-        if not smtp_config['host'] or not smtp_config['from_email']:
-            return jsonify({'success': False, 'error': 'SMTP not configured'})
+        if not smtp_config['host']:
+            return jsonify({'success': False, 'error': 'SMTP server hostname is not configured'})
+
+        if not smtp_config['from_email']:
+            return jsonify({'success': False, 'error': 'SMTP "From" email address is not configured'})
 
         # Create test email
         msg = MIMEMultipart()
@@ -447,28 +454,79 @@ def test_smtp_connection():
         """
         msg.attach(MIMEText(body, 'html'))
 
-        # Send email - check SSL first, then plain SMTP with optional TLS
-        if smtp_config['use_ssl']:
-            server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'])
-        else:
-            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
-            if smtp_config['use_tls']:
-                server.starttls()
+        # Send email with proper error handling
+        server = None
+        try:
+            # Set socket timeout for connection
+            socket.setdefaulttimeout(30)
 
-        if smtp_config['username'] and smtp_config['password']:
-            server.login(smtp_config['username'], smtp_config['password'])
+            if smtp_config['use_ssl']:
+                server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
+            else:
+                server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
+                if smtp_config['use_tls']:
+                    server.starttls()
 
-        server.send_message(msg)
-        server.quit()
+            if smtp_config['username'] and smtp_config['password']:
+                server.login(smtp_config['username'], smtp_config['password'])
+
+            server.send_message(msg)
+
+        except socket.timeout:
+            return jsonify({
+                'success': False,
+                'error': f'Connection timeout: Could not connect to {smtp_config["host"]}:{smtp_config["port"]} within 30 seconds. Check firewall settings.'
+            })
+        except smtplib.SMTPAuthenticationError as e:
+            return jsonify({
+                'success': False,
+                'error': f'Authentication failed: Invalid username or password. Server said: {str(e)}'
+            })
+        except smtplib.SMTPConnectError as e:
+            return jsonify({
+                'success': False,
+                'error': f'Connection refused: Could not connect to {smtp_config["host"]}:{smtp_config["port"]}. Check server address and port.'
+            })
+        except smtplib.SMTPRecipientsRefused as e:
+            return jsonify({
+                'success': False,
+                'error': f'Recipient rejected: The server refused to send to {test_recipient}. Check if the address is valid.'
+            })
+        except smtplib.SMTPSenderRefused as e:
+            return jsonify({
+                'success': False,
+                'error': f'Sender rejected: The server refused the "From" address {smtp_config["from_email"]}. You may need to verify this address.'
+            })
+        except smtplib.SMTPException as e:
+            return jsonify({
+                'success': False,
+                'error': f'SMTP error: {str(e)}'
+            })
+        except socket.gaierror as e:
+            return jsonify({
+                'success': False,
+                'error': f'DNS lookup failed: Could not resolve hostname "{smtp_config["host"]}". Check the server address.'
+            })
+        except ConnectionRefusedError:
+            return jsonify({
+                'success': False,
+                'error': f'Connection refused by {smtp_config["host"]}:{smtp_config["port"]}. Check if SMTP server is running and port is correct.'
+            })
+        finally:
+            if server:
+                try:
+                    server.quit()
+                except:
+                    pass
 
         return jsonify({
             'success': True,
-            'message': f'✓ Test email sent successfully to {test_recipient}'
+            'message': f'✓ Test email sent successfully to {test_recipient}. Please check your inbox (and spam folder).'
         })
 
     except Exception as e:
         logger.warning(f"SMTP test failed: {e}")
-        return jsonify({'success': False, 'error': ERROR_MSGS['smtp']})
+        return jsonify({'success': False, 'error': f'Unexpected error: {str(e)}'})
 
 
 # ============================================================================
