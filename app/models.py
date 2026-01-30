@@ -596,6 +596,11 @@ class VulnerabilityMatch(db.Model):
     match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
     match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
 
+    # Auto-acknowledge tracking
+    auto_acknowledged = db.Column(db.Boolean, default=False)  # True if auto-ack'd (not manual)
+    resolution_reason = db.Column(db.String(50), nullable=True)  # manual, software_removed, version_upgraded
+    acknowledged_at = db.Column(db.DateTime, nullable=True)  # When it was acknowledged
+
     # Composite indexes for common query patterns
     __table_args__ = (
         db.Index('idx_match_product_ack', 'product_id', 'acknowledged'),
@@ -628,6 +633,9 @@ class VulnerabilityMatch(db.Model):
             'match_method': self.match_method or 'keyword',
             'match_confidence': self.match_confidence or 'medium',
             'acknowledged': self.acknowledged,
+            'auto_acknowledged': self.auto_acknowledged,
+            'resolution_reason': self.resolution_reason,
+            'acknowledged_at': self.acknowledged_at.isoformat() if self.acknowledged_at else None,
             'snoozed_until': self.snoozed_until.isoformat() if self.snoozed_until else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'effective_priority': self.calculate_effective_priority()

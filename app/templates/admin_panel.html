@@ -882,7 +882,7 @@
                 {% if current_user and current_user.is_super_admin() %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="proxy-settings-tab" data-bs-toggle="pill" data-bs-target="#proxySettings" type="button">
-                        <i class="bi bi-hdd-network me-2"></i>Proxy
+                        <i class="bi bi-gear me-2"></i>General
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -1306,21 +1306,64 @@
                 </div>
 
                 {% if current_user and current_user.is_super_admin() %}
-                <!-- Proxy Settings (Super Admin Only) -->
+                <!-- General Settings (Super Admin Only) -->
                 <div class="tab-pane fade" id="proxySettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
-                            <i class="bi bi-hdd-network me-2"></i>Proxy & Network Settings
+                            <i class="bi bi-gear me-2"></i>General Settings
                         </div>
                         <div class="card-body">
-                            <div class="alert alert-info">
-                                <i class="bi bi-info-circle me-2"></i>
-                                Configure proxy settings for external API connections (CISA KEV, NVD). Required if SentriKat is behind a corporate proxy.
-                            </div>
-
                             <form id="proxySettingsForm">
                                 <div class="row g-3">
+                                    <!-- Date & Time Display -->
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-clock me-2"></i>Date & Time Display</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="displayTimezone" class="form-label fw-semibold">Display Timezone</label>
+                                        <select class="form-select" id="displayTimezone">
+                                            <option value="UTC">UTC (Coordinated Universal Time)</option>
+                                            <option value="local">Browser Local Time</option>
+                                            <option value="America/New_York">Eastern Time (US)</option>
+                                            <option value="America/Chicago">Central Time (US)</option>
+                                            <option value="America/Denver">Mountain Time (US)</option>
+                                            <option value="America/Los_Angeles">Pacific Time (US)</option>
+                                            <option value="Europe/London">London (UK)</option>
+                                            <option value="Europe/Paris">Paris (CET)</option>
+                                            <option value="Europe/Berlin">Berlin (CET)</option>
+                                            <option value="Europe/Rome">Rome (CET)</option>
+                                            <option value="Europe/Madrid">Madrid (CET)</option>
+                                            <option value="Europe/Amsterdam">Amsterdam (CET)</option>
+                                            <option value="Europe/Zurich">Zurich (CET)</option>
+                                            <option value="Asia/Tokyo">Tokyo (Japan)</option>
+                                            <option value="Asia/Shanghai">Shanghai (China)</option>
+                                            <option value="Asia/Singapore">Singapore</option>
+                                            <option value="Asia/Dubai">Dubai (UAE)</option>
+                                            <option value="Australia/Sydney">Sydney (Australia)</option>
+                                        </select>
+                                        <small class="form-text text-muted">Timezone for displaying dates throughout the app</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="dateFormat" class="form-label fw-semibold">Date Format</label>
+                                        <select class="form-select" id="dateFormat">
+                                            <option value="YYYY-MM-DD HH:mm">2024-01-15 14:30 (ISO)</option>
+                                            <option value="DD/MM/YYYY HH:mm">15/01/2024 14:30 (European)</option>
+                                            <option value="MM/DD/YYYY hh:mm A">01/15/2024 02:30 PM (US)</option>
+                                            <option value="DD MMM YYYY HH:mm">15 Jan 2024 14:30</option>
+                                            <option value="MMM DD, YYYY hh:mm A">Jan 15, 2024 02:30 PM</option>
+                                        </select>
+                                        <small class="form-text text-muted">Format for displaying dates and times</small>
+                                    </div>
+
+                                    <!-- Network/Proxy Settings -->
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-hdd-network me-2"></i>Network & Proxy</h6>
+                                    </div>
                                     <div class="col-md-12">
+                                        <div class="alert alert-info mb-3">
+                                            <i class="bi bi-info-circle me-2"></i>
+                                            Configure proxy settings for external API connections (CISA KEV, NVD). Required if SentriKat is behind a corporate proxy.
+                                        </div>
                                         <div class="form-check form-switch">
                                             <input type="checkbox" class="form-check-input" id="verifySSL" checked>
                                             <label class="form-check-label fw-semibold" for="verifySSL">
@@ -1699,45 +1742,6 @@
                                     </div>
 
                                     <div class="col-12 mt-4">
-                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-clock me-2"></i>Date & Time Display</h6>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label for="displayTimezone" class="form-label fw-semibold">Display Timezone</label>
-                                        <select class="form-select" id="displayTimezone">
-                                            <option value="UTC">UTC (Coordinated Universal Time)</option>
-                                            <option value="local">Browser Local Time</option>
-                                            <option value="America/New_York">Eastern Time (US)</option>
-                                            <option value="America/Chicago">Central Time (US)</option>
-                                            <option value="America/Denver">Mountain Time (US)</option>
-                                            <option value="America/Los_Angeles">Pacific Time (US)</option>
-                                            <option value="Europe/London">London (UK)</option>
-                                            <option value="Europe/Paris">Paris (CET)</option>
-                                            <option value="Europe/Berlin">Berlin (CET)</option>
-                                            <option value="Europe/Rome">Rome (CET)</option>
-                                            <option value="Europe/Madrid">Madrid (CET)</option>
-                                            <option value="Europe/Amsterdam">Amsterdam (CET)</option>
-                                            <option value="Europe/Zurich">Zurich (CET)</option>
-                                            <option value="Asia/Tokyo">Tokyo (Japan)</option>
-                                            <option value="Asia/Shanghai">Shanghai (China)</option>
-                                            <option value="Asia/Singapore">Singapore</option>
-                                            <option value="Asia/Dubai">Dubai (UAE)</option>
-                                            <option value="Australia/Sydney">Sydney (Australia)</option>
-                                        </select>
-                                        <small class="form-text text-muted">Timezone for displaying dates throughout the app</small>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label for="dateFormat" class="form-label fw-semibold">Date Format</label>
-                                        <select class="form-select" id="dateFormat">
-                                            <option value="YYYY-MM-DD HH:mm">2024-01-15 14:30 (ISO)</option>
-                                            <option value="DD/MM/YYYY HH:mm">15/01/2024 14:30 (European)</option>
-                                            <option value="MM/DD/YYYY hh:mm A">01/15/2024 02:30 PM (US)</option>
-                                            <option value="DD MMM YYYY HH:mm">15 Jan 2024 14:30</option>
-                                            <option value="MMM DD, YYYY hh:mm A">Jan 15, 2024 02:30 PM</option>
-                                        </select>
-                                        <small class="form-text text-muted">Format for displaying dates and times</small>
-                                    </div>
-
-                                    <div class="col-12 mt-4">
                                         <h6 class="text-muted border-bottom pb-2"><i class="bi bi-image me-2"></i>Custom Logo</h6>
                                     </div>
                                     <div class="col-md-6">
@@ -1803,10 +1807,29 @@
                                         <small class="form-text text-muted">User login sessions</small>
                                     </div>
 
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-check2-circle me-2"></i>Auto-Acknowledge</h6>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="autoAcknowledgeRemovedSoftware" checked>
+                                            <label class="form-check-label fw-semibold" for="autoAcknowledgeRemovedSoftware">
+                                                Auto-acknowledge vulnerabilities when software is removed
+                                            </label>
+                                        </div>
+                                        <small class="form-text text-muted d-block mt-1">
+                                            Automatically acknowledge CVE matches when the affected software is no longer installed on any asset.
+                                            This reduces alert fatigue for vulnerabilities that no longer apply.
+                                        </small>
+                                    </div>
+
                                     <div class="col-md-12">
                                         <hr>
                                         <button type="button" class="btn btn-primary" onclick="saveRetentionSettings()">
                                             <i class="bi bi-check-circle me-1"></i>Save Retention Settings
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary ms-2" onclick="runAutoAcknowledge()">
+                                            <i class="bi bi-play-circle me-1"></i>Run Auto-Acknowledge Now
                                         </button>
                                     </div>
                                 </div>

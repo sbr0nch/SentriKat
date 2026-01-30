@@ -2673,9 +2673,13 @@ async function triggerWebhookAlerts() {
     }
 }
 
-// Proxy Settings
+// General Settings (Date/Time + Network/Proxy)
 async function saveProxySettings() {
     const settings = {
+        // Date & Time settings
+        display_timezone: SK.DOM.getValue('displayTimezone') || 'UTC',
+        date_format: SK.DOM.getValue('dateFormat') || 'YYYY-MM-DD HH:mm',
+        // Network/Proxy settings
         verify_ssl: SK.DOM.getChecked('verifySSL'),
         http_proxy: SK.DOM.getValue('httpProxy'),
         https_proxy: SK.DOM.getValue('httpsProxy'),
@@ -2690,13 +2694,17 @@ async function saveProxySettings() {
         });
 
         if (response.ok) {
-            showToast('Proxy settings saved successfully', 'success');
+            showToast('General settings saved successfully', 'success');
+            // Update global app settings for immediate effect
+            window.appSettings = window.appSettings || {};
+            window.appSettings.displayTimezone = settings.display_timezone;
+            window.appSettings.dateFormat = settings.date_format;
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
         }
     } catch (error) {
-        showToast(`Error saving proxy settings: ${error.message}`, 'danger');
+        showToast(`Error saving general settings: ${error.message}`, 'danger');
     }
 }
 
@@ -2925,9 +2933,7 @@ async function saveBrandingSettings() {
         app_name: SK.DOM.getValue('appName') || 'SentriKat',
         login_message: SK.DOM.getValue('loginMessage') || '',
         support_email: SK.DOM.getValue('supportEmail') || '',
-        show_version: SK.DOM.getChecked('showVersion'),
-        display_timezone: SK.DOM.getValue('displayTimezone') || 'UTC',
-        date_format: SK.DOM.getValue('dateFormat') || 'YYYY-MM-DD HH:mm'
+        show_version: SK.DOM.getChecked('showVersion')
     };
 
     try {
@@ -2939,10 +2945,6 @@ async function saveBrandingSettings() {
 
         if (response.ok) {
             showToast('Branding settings saved successfully', 'success');
-            // Update global settings so date formatting takes effect immediately
-            window.appSettings = window.appSettings || {};
-            window.appSettings.displayTimezone = settings.display_timezone;
-            window.appSettings.dateFormat = settings.date_format;
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
@@ -2963,20 +2965,11 @@ async function loadBrandingSettings() {
             const showVersion = SK.DOM.get('showVersion');
             const logoPreview = SK.DOM.get('currentLogoPreview');
             const deleteLogoBtn = SK.DOM.get('deleteLogoBtn');
-            const displayTimezone = SK.DOM.get('displayTimezone');
-            const dateFormat = SK.DOM.get('dateFormat');
 
             if (appName) appName.value = settings.app_name || 'SentriKat';
             if (loginMessage) loginMessage.value = settings.login_message || '';
             if (supportEmail) supportEmail.value = settings.support_email || '';
             if (showVersion) showVersion.checked = settings.show_version !== false;
-            if (displayTimezone) displayTimezone.value = settings.display_timezone || 'UTC';
-            if (dateFormat) dateFormat.value = settings.date_format || 'YYYY-MM-DD HH:mm';
-
-            // Store in global settings for use by date formatting functions
-            window.appSettings = window.appSettings || {};
-            window.appSettings.displayTimezone = settings.display_timezone || 'UTC';
-            window.appSettings.dateFormat = settings.date_format || 'YYYY-MM-DD HH:mm';
 
             // Show custom logo if set
             if (settings.logo_url && logoPreview) {
@@ -3197,7 +3190,8 @@ async function saveRetentionSettings() {
     const settings = {
         audit_log_retention_days: parseInt(SK.DOM.getValue('auditLogRetention')) || 365,
         sync_history_retention_days: parseInt(SK.DOM.getValue('syncHistoryRetention')) || 90,
-        session_log_retention_days: parseInt(SK.DOM.getValue('sessionLogRetention')) || 30
+        session_log_retention_days: parseInt(SK.DOM.getValue('sessionLogRetention')) || 30,
+        auto_acknowledge_removed_software: SK.DOM.getChecked('autoAcknowledgeRemovedSoftware')
     };
 
     try {
@@ -3226,13 +3220,56 @@ async function loadRetentionSettings() {
             const auditLogRetention = SK.DOM.get('auditLogRetention');
             const syncHistoryRetention = SK.DOM.get('syncHistoryRetention');
             const sessionLogRetention = SK.DOM.get('sessionLogRetention');
+            const autoAcknowledge = SK.DOM.get('autoAcknowledgeRemovedSoftware');
 
             if (auditLogRetention) auditLogRetention.value = settings.audit_log_retention_days || 365;
             if (syncHistoryRetention) syncHistoryRetention.value = settings.sync_history_retention_days || 90;
             if (sessionLogRetention) sessionLogRetention.value = settings.session_log_retention_days || 30;
+            if (autoAcknowledge) autoAcknowledge.checked = settings.auto_acknowledge_removed_software !== false;
         }
     } catch (error) {
         console.error('Error loading retention settings:', error);
+    }
+}
+
+/**
+ * Manually run auto-acknowledge for removed software
+ */
+async function runAutoAcknowledge() {
+    const confirmed = await showConfirm(
+        'This will auto-acknowledge vulnerability matches for software that is no longer installed on any asset. Continue?',
+        'Run Auto-Acknowledge',
+        'Run Now',
+        'btn-primary'
+    );
+
+    if (!confirmed) return;
+
+    showLoading();
+
+    try {
+        const response = await fetch('/api/settings/maintenance/auto-acknowledge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: false })
+        });
+
+        hideLoading();
+
+        if (response.ok) {
+            const result = await response.json();
+            if (result.acknowledged_count > 0) {
+                showToast(`Auto-acknowledged ${result.acknowledged_count} vulnerability matches`, 'success');
+            } else {
+                showToast('No vulnerability matches found for removed software', 'info');
+            }
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        hideLoading();
+        showToast(`Error: ${error.message}`, 'danger');
     }
 }
 
@@ -3480,12 +3517,24 @@ async function loadAllSettings() {
             .catch(err => console.error('Failed to load sync settings:', err))
     );
 
-    // Load Proxy/General settings
+    // Load General settings (Date/Time + Proxy/Network)
     loadPromises.push(
         fetchWithRetry('/api/settings/general', {}, 3, 800)
             .then(async response => {
                 if (response.ok) {
                     const general = await response.json();
+                    // Date & Time settings
+                    const displayTimezone = SK.DOM.get('displayTimezone');
+                    const dateFormat = SK.DOM.get('dateFormat');
+                    if (displayTimezone) displayTimezone.value = general.display_timezone || 'UTC';
+                    if (dateFormat) dateFormat.value = general.date_format || 'YYYY-MM-DD HH:mm';
+
+                    // Store in global settings for date formatting functions
+                    window.appSettings = window.appSettings || {};
+                    window.appSettings.displayTimezone = general.display_timezone || 'UTC';
+                    window.appSettings.dateFormat = general.date_format || 'YYYY-MM-DD HH:mm';
+
+                    // Proxy/Network settings
                     const verifySSL = SK.DOM.get('verifySSL');
                     const httpProxy = SK.DOM.get('httpProxy');
                     const httpsProxy = SK.DOM.get('httpsProxy');
@@ -3494,10 +3543,10 @@ async function loadAllSettings() {
                     if (httpProxy) httpProxy.value = general.http_proxy || '';
                     if (httpsProxy) httpsProxy.value = general.https_proxy || '';
                     if (noProxy) noProxy.value = general.no_proxy || '';
-                    console.log('Proxy settings loaded');
+                    console.log('General settings loaded');
                 }
             })
-            .catch(err => console.error('Failed to load proxy settings:', err))
+            .catch(err => console.error('Failed to load general settings:', err))
     );
 
     // Wait for all critical settings, then load additional ones
