@@ -397,13 +397,23 @@ def get_cpe_from_mapping(vendor: str, product_name: str) -> Tuple[Optional[str],
 
 def get_cpe_for_software(vendor: str, product_name: str, use_nvd_fallback: bool = True) -> Tuple[Optional[str], Optional[str], float]:
     """
-    Get CPE for software using:
-    1. Curated mapping table (fast, reliable)
-    2. NVD API search (slow, less reliable) - optional fallback
+    Get CPE for software using multi-tier matching:
+    1. User-learned mappings (highest priority - user knows best)
+    2. Curated mapping table (fast, reliable)
+    3. NVD API search (slow, less reliable) - optional fallback
 
     Returns: (cpe_vendor, cpe_product, confidence)
     """
-    # First try curated mappings
+    # First try user-learned mappings (highest priority)
+    try:
+        user_cpe_vendor, user_cpe_product = get_user_mapping(vendor, product_name)
+        if user_cpe_vendor and user_cpe_product:
+            logger.debug(f"User mapping match: {vendor} {product_name} -> {user_cpe_vendor}:{user_cpe_product}")
+            return user_cpe_vendor, user_cpe_product, 0.98  # Very high confidence for user mappings
+    except Exception as e:
+        logger.warning(f"Error checking user mappings: {e}")
+
+    # Second, try curated mappings
     cpe_vendor, cpe_product, confidence = get_cpe_from_mapping(vendor, product_name)
 
     if cpe_vendor and cpe_product:
@@ -424,76 +434,233 @@ def get_cpe_for_software(vendor: str, product_name: str, use_nvd_fallback: bool 
 
 
 # =============================================================================
-# USER-LEARNED MAPPINGS
+# USER-LEARNED MAPPINGS (Database-backed)
 # =============================================================================
 
-def save_user_mapping(vendor: str, product_name: str, cpe_vendor: str, cpe_product: str):
+def save_user_mapping(vendor: str, product_name: str, cpe_vendor: str, cpe_product: str,
+                      user_id: int = None, notes: str = None, source: str = 'user') -> bool:
     """
     Save a user-confirmed mapping to the database for future use.
     This allows the system to learn from user corrections.
+
+    Args:
+        vendor: Original vendor name
+        product_name: Original product name
+        cpe_vendor: CPE vendor identifier
+        cpe_product: CPE product identifier
+        user_id: ID of user who created the mapping
+        notes: Optional notes about this mapping
+        source: Source of mapping (user, import, community)
+
+    Returns:
+        bool: True if saved successfully
     """
     from app import db
-    from app.models import SystemSettings
-    import json
+    from app.models import UserCpeMapping
 
     try:
-        # Get or create the user mappings setting
-        setting = SystemSettings.query.filter_by(key='user_cpe_mappings').first()
+        # Normalize patterns
+        vendor_pattern = UserCpeMapping.normalize_pattern(vendor)
+        product_pattern = UserCpeMapping.normalize_pattern(product_name)
 
-        if setting:
-            mappings = json.loads(setting.value or '{}')
+        # Check if mapping already exists
+        existing = UserCpeMapping.query.filter_by(
+            vendor_pattern=vendor_pattern,
+            product_pattern=product_pattern
+        ).first()
+
+        if existing:
+            # Update existing mapping
+            existing.cpe_vendor = cpe_vendor
+            existing.cpe_product = cpe_product
+            existing.source = source
+            if notes:
+                existing.notes = notes
+            logger.info(f"Updated user CPE mapping: {vendor_pattern}/{product_pattern} -> {cpe_vendor}:{cpe_product}")
         else:
-            mappings = {}
-            setting = SystemSettings(
-                key='user_cpe_mappings',
-                category='cpe',
-                description='User-confirmed CPE mappings'
+            # Create new mapping
+            mapping = UserCpeMapping(
+                vendor_pattern=vendor_pattern,
+                product_pattern=product_pattern,
+                cpe_vendor=cpe_vendor,
+                cpe_product=cpe_product,
+                source=source,
+                notes=notes,
+                created_by=user_id
             )
-            db.session.add(setting)
+            db.session.add(mapping)
+            logger.info(f"Saved new user CPE mapping: {vendor_pattern}/{product_pattern} -> {cpe_vendor}:{cpe_product}")
 
-        # Create normalized key
-        norm_key = normalize_text(f"{normalize_vendor(vendor)} {product_name}")
-
-        # Save mapping
-        mappings[norm_key] = {
-            'vendor': vendor,
-            'product_name': product_name,
-            'cpe_vendor': cpe_vendor,
-            'cpe_product': cpe_product
-        }
-
-        setting.value = json.dumps(mappings)
         db.session.commit()
-
-        logger.info(f"Saved user CPE mapping: {norm_key} -> {cpe_vendor}:{cpe_product}")
         return True
 
     except Exception as e:
         logger.error(f"Failed to save user CPE mapping: {e}")
+        db.session.rollback()
         return False
 
 
 def get_user_mapping(vendor: str, product_name: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Check if there's a user-confirmed mapping for this software.
+    User mappings take priority over curated mappings.
+
+    Returns: (cpe_vendor, cpe_product) or (None, None)
     """
-    from app.models import SystemSettings
-    import json
+    from app.models import UserCpeMapping
 
     try:
-        setting = SystemSettings.query.filter_by(key='user_cpe_mappings').first()
-        if not setting or not setting.value:
-            return None, None
+        vendor_pattern = UserCpeMapping.normalize_pattern(vendor)
+        product_pattern = UserCpeMapping.normalize_pattern(product_name)
 
-        mappings = json.loads(setting.value)
-        norm_key = normalize_text(f"{normalize_vendor(vendor)} {product_name}")
+        # Try exact match first
+        mapping = UserCpeMapping.query.filter_by(
+            vendor_pattern=vendor_pattern,
+            product_pattern=product_pattern
+        ).first()
 
-        if norm_key in mappings:
-            m = mappings[norm_key]
-            return m.get('cpe_vendor'), m.get('cpe_product')
+        if mapping:
+            # Update usage count
+            mapping.usage_count = (mapping.usage_count or 0) + 1
+            return mapping.cpe_vendor, mapping.cpe_product
+
+        # Try matching with just product name (vendor-agnostic)
+        mapping = UserCpeMapping.query.filter_by(
+            product_pattern=product_pattern
+        ).first()
+
+        if mapping:
+            mapping.usage_count = (mapping.usage_count or 0) + 1
+            return mapping.cpe_vendor, mapping.cpe_product
 
         return None, None
 
     except Exception as e:
         logger.error(f"Failed to get user CPE mapping: {e}")
         return None, None
+
+
+def get_all_user_mappings() -> list:
+    """Get all user CPE mappings for export."""
+    from app.models import UserCpeMapping
+
+    try:
+        mappings = UserCpeMapping.query.order_by(UserCpeMapping.usage_count.desc()).all()
+        return [m.to_export_dict() for m in mappings]
+    except Exception as e:
+        logger.error(f"Failed to get user mappings: {e}")
+        return []
+
+
+def import_user_mappings(mappings: list, user_id: int = None, overwrite: bool = False) -> dict:
+    """
+    Import CPE mappings from a list (e.g., from JSON file or community feed).
+
+    Args:
+        mappings: List of mapping dicts with vendor_pattern, product_pattern, cpe_vendor, cpe_product
+        user_id: ID of user performing the import
+        overwrite: If True, overwrite existing mappings
+
+    Returns:
+        dict with 'imported', 'skipped', 'errors' counts
+    """
+    from app import db
+    from app.models import UserCpeMapping
+
+    result = {'imported': 0, 'skipped': 0, 'errors': 0}
+
+    for m in mappings:
+        try:
+            vendor_pattern = UserCpeMapping.normalize_pattern(m.get('vendor_pattern', ''))
+            product_pattern = UserCpeMapping.normalize_pattern(m.get('product_pattern', ''))
+            cpe_vendor = m.get('cpe_vendor', '')
+            cpe_product = m.get('cpe_product', '')
+
+            if not all([vendor_pattern, product_pattern, cpe_vendor, cpe_product]):
+                result['errors'] += 1
+                continue
+
+            # Check if exists
+            existing = UserCpeMapping.query.filter_by(
+                vendor_pattern=vendor_pattern,
+                product_pattern=product_pattern
+            ).first()
+
+            if existing:
+                if overwrite:
+                    existing.cpe_vendor = cpe_vendor
+                    existing.cpe_product = cpe_product
+                    existing.source = 'import'
+                    existing.notes = m.get('notes')
+                    result['imported'] += 1
+                else:
+                    result['skipped'] += 1
+            else:
+                mapping = UserCpeMapping(
+                    vendor_pattern=vendor_pattern,
+                    product_pattern=product_pattern,
+                    cpe_vendor=cpe_vendor,
+                    cpe_product=cpe_product,
+                    confidence=m.get('confidence', 0.95),
+                    source='import',
+                    notes=m.get('notes'),
+                    created_by=user_id
+                )
+                db.session.add(mapping)
+                result['imported'] += 1
+
+        except Exception as e:
+            logger.error(f"Failed to import mapping: {e}")
+            result['errors'] += 1
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"Failed to commit imported mappings: {e}")
+        db.session.rollback()
+        result['errors'] = len(mappings)
+        result['imported'] = 0
+
+    return result
+
+
+def delete_user_mapping(mapping_id: int) -> bool:
+    """Delete a user CPE mapping by ID."""
+    from app import db
+    from app.models import UserCpeMapping
+
+    try:
+        mapping = UserCpeMapping.query.get(mapping_id)
+        if mapping:
+            db.session.delete(mapping)
+            db.session.commit()
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Failed to delete mapping: {e}")
+        db.session.rollback()
+        return False
+
+
+def get_user_mapping_stats() -> dict:
+    """Get statistics about user CPE mappings."""
+    from app.models import UserCpeMapping
+
+    try:
+        total = UserCpeMapping.query.count()
+        by_source = {}
+        for source in ['user', 'import', 'community']:
+            by_source[source] = UserCpeMapping.query.filter_by(source=source).count()
+
+        top_used = UserCpeMapping.query.order_by(
+            UserCpeMapping.usage_count.desc()
+        ).limit(10).all()
+
+        return {
+            'total_mappings': total,
+            'by_source': by_source,
+            'top_used': [m.to_dict() for m in top_used]
+        }
+    except Exception as e:
+        logger.error(f"Failed to get mapping stats: {e}")
+        return {'total_mappings': 0, 'by_source': {}, 'top_used': []}

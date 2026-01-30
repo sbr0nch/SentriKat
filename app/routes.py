@@ -631,7 +631,12 @@ def update_product(product_id):
         (product.cpe_vendor != old_cpe_vendor or product.cpe_product != old_cpe_product)):
         try:
             from app.cpe_mappings import save_user_mapping
-            save_user_mapping(product.vendor, product.product_name, product.cpe_vendor, product.cpe_product)
+            save_user_mapping(
+                product.vendor, product.product_name,
+                product.cpe_vendor, product.cpe_product,
+                user_id=current_user_id,
+                notes=f"Learned from product edit: {product.product_name}"
+            )
         except Exception as e:
             current_app.logger.warning(f"Failed to save user CPE mapping: {e}")
     if 'cpe_uri' in data:

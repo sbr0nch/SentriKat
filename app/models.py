@@ -1991,3 +1991,78 @@ class StaleAssetNotification(db.Model):
             'resolved': self.resolved,
             'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None
         }
+
+
+class UserCpeMapping(db.Model):
+    """
+    User-learned CPE mappings for software that isn't in the curated database.
+
+    These mappings are:
+    - Created when users manually assign CPE to unmapped products
+    - Exportable/importable for sharing between instances
+    - Used with higher priority than curated database (user knows best)
+    """
+    __tablename__ = 'user_cpe_mappings'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Source software identification (normalized)
+    vendor_pattern = db.Column(db.String(200), nullable=False, index=True)
+    product_pattern = db.Column(db.String(200), nullable=False, index=True)
+
+    # Target CPE identifiers
+    cpe_vendor = db.Column(db.String(200), nullable=False)
+    cpe_product = db.Column(db.String(200), nullable=False)
+
+    # Metadata
+    confidence = db.Column(db.Float, default=0.95)  # User mappings are high confidence
+    source = db.Column(db.String(50), default='user')  # user, import, community
+    notes = db.Column(db.Text, nullable=True)  # Optional notes about this mapping
+
+    # Audit
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    usage_count = db.Column(db.Integer, default=0)  # Track how often this mapping is used
+
+    # Relationships
+    creator = db.relationship('User', backref=db.backref('cpe_mappings', lazy='dynamic'))
+
+    # Unique constraint to prevent duplicates
+    __table_args__ = (
+        db.UniqueConstraint('vendor_pattern', 'product_pattern', name='uq_user_cpe_mapping'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'vendor_pattern': self.vendor_pattern,
+            'product_pattern': self.product_pattern,
+            'cpe_vendor': self.cpe_vendor,
+            'cpe_product': self.cpe_product,
+            'confidence': self.confidence,
+            'source': self.source,
+            'notes': self.notes,
+            'usage_count': self.usage_count,
+            'created_by': self.creator.display_name if self.creator else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+    def to_export_dict(self):
+        """Minimal format for export/import (no internal IDs)"""
+        return {
+            'vendor_pattern': self.vendor_pattern,
+            'product_pattern': self.product_pattern,
+            'cpe_vendor': self.cpe_vendor,
+            'cpe_product': self.cpe_product,
+            'confidence': self.confidence,
+            'notes': self.notes
+        }
+
+    @staticmethod
+    def normalize_pattern(text):
+        """Normalize vendor/product name for matching"""
+        if not text:
+            return ''
+        return text.lower().strip()
