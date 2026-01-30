@@ -997,10 +997,23 @@
             }
 
             if (response.ok) {
-                showToast(
-                    currentProductId ? '✓ Product updated successfully' : '✓ Product added successfully',
-                    'success'
-                );
+                const result = await response.json();
+
+                // Check if CPE was matched (for new products only)
+                if (!currentProductId && !result.cpe_matched) {
+                    // Show warning toast for no CPE match
+                    showToast(
+                        `⚠️ Product added but NO CPE mapping found. Vulnerabilities may not be detected. Edit the product to assign CPE manually.`,
+                        'warning',
+                        8000  // Show longer
+                    );
+                } else {
+                    showToast(
+                        currentProductId ? '✓ Product updated successfully' : '✓ Product added successfully',
+                        'success'
+                    );
+                }
+
                 // Safely close modal
                 const modalEl = document.getElementById('productModal');
                 const modal = bootstrap.Modal.getInstance(modalEl);

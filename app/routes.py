@@ -544,7 +544,12 @@ def create_product():
     # Re-run matching for new product
     match_vulnerabilities_to_products()
 
-    return jsonify(product.to_dict()), 201
+    # Return product with CPE match info
+    response = product.to_dict()
+    response['cpe_matched'] = bool(cpe_vendor and cpe_product)
+    response['cpe_confidence'] = cpe_confidence if (cpe_vendor and cpe_product) else 0.0
+
+    return jsonify(response), 201
 
 @bp.route('/api/products/<int:product_id>', methods=['GET'])
 @login_required
