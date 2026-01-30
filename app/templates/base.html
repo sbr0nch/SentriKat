@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% block title %}{{ branding.app_name }} - Enterprise Vulnerability Management{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
@@ -242,6 +243,70 @@
             color: var(--text-color);
         }
 
+        /* Dark mode button adjustments */
+        [data-theme="dark"] .btn-primary,
+        [data-theme="dark"] .btn-success {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        [data-theme="dark"] .btn-primary:hover,
+        [data-theme="dark"] .btn-success:hover {
+            background-color: var(--primary-dark);
+            border-color: var(--primary-dark);
+        }
+
+        [data-theme="dark"] .btn-danger {
+            border-color: #f87171;
+            color: #f87171;
+        }
+
+        [data-theme="dark"] .btn-danger:hover {
+            background-color: #dc2626;
+            color: white;
+        }
+
+        [data-theme="dark"] .btn-warning {
+            border-color: #fbbf24;
+            color: #fbbf24;
+        }
+
+        [data-theme="dark"] .btn-warning:hover {
+            background-color: #f59e0b;
+            color: #1e293b;
+        }
+
+        /* Dark mode outline button variants */
+        [data-theme="dark"] .btn-outline-success {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        [data-theme="dark"] .btn-outline-success:hover {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        [data-theme="dark"] .btn-outline-danger {
+            border-color: #f87171;
+            color: #f87171;
+        }
+
+        [data-theme="dark"] .btn-outline-danger:hover {
+            background-color: #dc2626;
+            color: white;
+        }
+
+        [data-theme="dark"] .btn-outline-warning {
+            border-color: #fbbf24;
+            color: #fbbf24;
+        }
+
+        [data-theme="dark"] .btn-outline-warning:hover {
+            background-color: #f59e0b;
+            color: #1e293b;
+        }
+
         [data-theme="dark"] .alert-info {
             background-color: rgba(59, 130, 246, 0.2);
             border-color: rgba(59, 130, 246, 0.4);
@@ -473,6 +538,9 @@
             background-color: var(--gray-50);
             color: var(--gray-900);
             line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         /* ============================================================================
@@ -521,7 +589,8 @@
         /* Content wrapper - holds sidebar + main content */
         .content-wrapper {
             display: flex;
-            min-height: calc(100vh - 140px); /* Account for header and footer */
+            flex: 1;
+            min-height: 0; /* Allow flexbox to shrink */
         }
 
         /* ============================================
@@ -536,8 +605,8 @@
             flex-direction: column;
             flex-shrink: 0;
             position: sticky;
-            top: 0;
-            height: calc(100vh - 140px);
+            top: 56px; /* Navbar height */
+            height: calc(100vh - 56px);
             overflow-y: auto;
             overflow-x: hidden;
             transition: width 0.3s ease;
@@ -991,6 +1060,61 @@
             .sidebar-open .sidebar-overlay {
                 display: block;
             }
+
+            /* Full-width modals on mobile */
+            .modal-dialog {
+                margin: 0.5rem;
+                max-width: calc(100% - 1rem);
+            }
+
+            /* Scrollable tables on mobile */
+            .table-responsive-mobile {
+                display: block;
+                width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Stack form columns on mobile */
+            .row.g-2 > [class*="col-md-"],
+            .row.g-3 > [class*="col-md-"] {
+                width: 100%;
+            }
+
+            /* Adjust card padding on mobile */
+            .card-body {
+                padding: 1rem;
+            }
+
+            /* Smaller buttons on mobile */
+            .btn-group-mobile .btn {
+                padding: 0.25rem 0.5rem;
+                font-size: 0.875rem;
+            }
+        }
+
+        /* Extra small mobile screens */
+        @media (max-width: 575.98px) {
+            .modal-dialog {
+                margin: 0;
+                max-width: 100%;
+            }
+
+            .modal-content {
+                border-radius: 0;
+                min-height: 100vh;
+            }
+
+            /* Hide less important table columns on very small screens */
+            .hide-xs {
+                display: none !important;
+            }
+
+            /* Stack action buttons */
+            .btn-group.flex-wrap-mobile {
+                flex-wrap: wrap;
+                gap: 0.25rem;
+            }
         }
 
         .sidebar-overlay {
@@ -1113,52 +1237,124 @@
             opacity: 0.15;
         }
 
-        /* Buttons */
+        /* Buttons - Professional, clean styling */
         .btn {
-            border-radius: 0.5rem;
-            padding: 0.625rem 1.25rem;
-            font-weight: 600;
-            transition: all 0.2s;
+            border-radius: 6px;
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
             display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
-            border: none;
+            gap: 0.375rem;
+            border: 1px solid transparent;
+            font-size: 0.875rem;
+        }
+
+        .btn-sm {
+            padding: 0.25rem 0.625rem;
+            font-size: 0.8125rem;
         }
 
         .btn-primary {
-            background: var(--primary-color);
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
             color: white;
         }
 
         .btn-primary:hover {
-            background: var(--primary-dark);
-            transform: translateY(-1px);
-            box-shadow: var(--shadow-md);
+            background-color: var(--primary-dark);
+            border-color: var(--primary-dark);
         }
 
+        /* Success actions use primary color for consistency */
         .btn-success {
-            background: var(--success-color);
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
             color: white;
         }
 
+        .btn-success:hover {
+            background-color: var(--primary-dark);
+            border-color: var(--primary-dark);
+        }
+
+        /* Danger actions - outlined style for less visual noise */
         .btn-danger {
-            background: var(--danger-color);
+            background-color: transparent;
+            border-color: var(--danger-color);
+            color: var(--danger-color);
+        }
+
+        .btn-danger:hover {
+            background-color: var(--danger-color);
             color: white;
         }
 
+        /* Warning - subtle muted style */
         .btn-warning {
-            background: var(--warning-color);
+            background-color: transparent;
+            border-color: var(--warning-color);
+            color: #92400e;
+        }
+
+        .btn-warning:hover {
+            background-color: var(--warning-color);
             color: white;
         }
 
         .btn-outline-primary {
-            border: 2px solid var(--primary-color);
+            border: 1px solid var(--primary-color);
             color: var(--primary-color);
             background: transparent;
         }
 
         .btn-outline-primary:hover {
-            background: var(--primary-color);
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-outline-secondary {
+            border: 1px solid var(--gray-300);
+            color: var(--gray-600);
+            background: transparent;
+        }
+
+        .btn-outline-secondary:hover {
+            background-color: var(--gray-100);
+            border-color: var(--gray-400);
+        }
+
+        /* Outline button variants - subtle, professional */
+        .btn-outline-success {
+            border: 1px solid var(--primary-color);
+            color: var(--primary-color);
+            background: transparent;
+        }
+
+        .btn-outline-success:hover {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-outline-danger {
+            border: 1px solid var(--danger-color);
+            color: var(--danger-color);
+            background: transparent;
+        }
+
+        .btn-outline-danger:hover {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        .btn-outline-warning {
+            border: 1px solid var(--warning-color);
+            color: #92400e;
+            background: transparent;
+        }
+
+        .btn-outline-warning:hover {
+            background-color: var(--warning-color);
             color: white;
         }
 
@@ -1428,6 +1624,26 @@
             color: #b45309;
         }
 
+        .btn-action-primary {
+            color: var(--primary-color);
+        }
+
+        .btn-action-primary:hover {
+            background: #eff6ff;
+            border-color: #bfdbfe;
+            color: var(--primary-dark);
+        }
+
+        .btn-action-secondary {
+            color: var(--gray-500);
+        }
+
+        .btn-action-secondary:hover {
+            background: var(--gray-100);
+            border-color: var(--gray-300);
+            color: var(--gray-700);
+        }
+
         /* Table Column Controls */
         .table-controls {
             display: flex;
@@ -1523,7 +1739,7 @@
             bottom: 0;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(5px);
-            display: none;
+            display: none !important;
             justify-content: center;
             align-items: center;
             z-index: 9999;
@@ -1532,7 +1748,12 @@
         }
 
         .loading-overlay.show {
-            display: flex;
+            display: flex !important;
+        }
+
+        /* Disable modal backdrops completely - they were causing grey overlay issues */
+        .modal-backdrop {
+            display: none !important;
         }
 
         /* Toast Notifications */
@@ -1546,11 +1767,12 @@
         .app-footer {
             background: white;
             padding: 1.5rem 0;
-            margin-top: 3rem;
+            margin-top: auto; /* Push to bottom */
             border-top: 1px solid var(--gray-200);
             text-align: center;
             color: var(--gray-600);
             font-size: 0.875rem;
+            flex-shrink: 0;
         }
 
         /* Modal Improvements - Compact Styling */
@@ -1927,14 +2149,380 @@
             border-color: var(--border-color);
             color: var(--text-muted);
         }
+
+        /* Confirmation modal should stack above other modals */
+        #confirmModal {
+            z-index: 1060 !important;
+        }
+        #confirmModal ~ .modal-backdrop {
+            z-index: 1059 !important;
+        }
+
+        /* Security Settings modal - ensure it shows properly */
+        #securitySettingsModal {
+            z-index: 1055 !important;
+        }
+        #securitySettingsModal .modal-dialog {
+            z-index: 1056 !important;
+        }
+        #securitySettingsModal .modal-content {
+            position: relative;
+            z-index: 1056 !important;
+        }
+        /* Custom backdrop for security settings modal */
+        #securitySettingsBackdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1054;
+            display: none;
+        }
+        #securitySettingsBackdrop.show {
+            display: block;
+        }
+        /* Hide any Bootstrap backdrops when security modal is open */
+        body.security-modal-open .modal-backdrop {
+            display: none !important;
+        }
+
+        /* ========================================
+           SentriKat Security Settings Modal Styling
+           ======================================== */
+
+        /* Modal header with gradient */
+        #securitySettingsModal .modal-header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            border-bottom: none;
+            padding: 1.25rem 1.5rem;
+        }
+
+        #securitySettingsModal .modal-header .modal-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+        }
+
+        #securitySettingsModal .modal-header .btn-close {
+            filter: brightness(0) invert(1);
+            opacity: 0.8;
+        }
+
+        #securitySettingsModal .modal-header .btn-close:hover {
+            opacity: 1;
+        }
+
+        #securitySettingsModal .modal-body {
+            padding: 1.5rem;
+            background-color: var(--bg-color);
+        }
+
+        /* Card styling within security modal */
+        #securitySettingsModal .card {
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+            transition: box-shadow 0.2s ease;
+        }
+
+        #securitySettingsModal .card:hover {
+            box-shadow: var(--shadow-md);
+        }
+
+        #securitySettingsModal .card-header {
+            background: linear-gradient(135deg, var(--gray-50) 0%, var(--gray-100) 100%);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            color: var(--gray-800);
+            padding: 0.875rem 1.25rem;
+            display: flex;
+            align-items: center;
+        }
+
+        #securitySettingsModal .card-header i {
+            color: var(--primary-color);
+            font-size: 1.1rem;
+        }
+
+        #securitySettingsModal .card-body {
+            padding: 1.5rem;
+            background-color: var(--surface-color);
+        }
+
+        /* 2FA Section specific styles */
+        #2faDisabled .alert-info,
+        #2faSetup .alert-warning,
+        #2faEnabled .alert-success {
+            border-radius: 10px;
+            border: none;
+            padding: 1rem 1.25rem;
+            font-size: 0.9rem;
+        }
+
+        #2faDisabled .alert-info {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            color: #1e40af;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        #2faSetup .alert-warning {
+            background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+            color: #92400e;
+            border-left: 4px solid var(--warning-color);
+        }
+
+        #2faEnabled .alert-success {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            color: #065f46;
+            border-left: 4px solid var(--success-color);
+        }
+
+        /* QR Code container styling */
+        #qrCodeContainer {
+            background: white !important;
+            border-radius: 12px !important;
+            border: 2px solid var(--gray-200) !important;
+            padding: 1.25rem !important;
+            box-shadow: var(--shadow-md);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        #qrCodeContainer:hover {
+            transform: scale(1.02);
+            box-shadow: var(--shadow-lg);
+        }
+
+        /* TOTP secret display */
+        #totpSecretDisplay {
+            background: var(--gray-100);
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-family: 'SF Mono', 'Fira Code', 'Monaco', monospace;
+            font-size: 0.85rem;
+            color: var(--primary-dark);
+            border: 1px solid var(--border-color);
+            display: inline-block;
+            margin-top: 0.5rem;
+        }
+
+        /* Verification code input - SentriKat branded */
+        #verify2FACode {
+            font-size: 1.75rem !important;
+            letter-spacing: 0.75rem !important;
+            font-family: 'SF Mono', 'Fira Code', 'Monaco', monospace !important;
+            text-align: center !important;
+            padding: 1rem !important;
+            border: 2px solid var(--border-color) !important;
+            border-radius: 10px !important;
+            background: var(--surface-color) !important;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+        }
+
+        #verify2FACode:focus {
+            border-color: var(--primary-color) !important;
+            box-shadow: 0 0 0 4px rgba(30, 64, 175, 0.15) !important;
+            outline: none !important;
+        }
+
+        #verify2FACode::placeholder {
+            color: var(--gray-300) !important;
+            letter-spacing: 0.75rem !important;
+        }
+
+        /* Professional button styling - subtle and clean */
+        #securitySettingsModal .btn-success {
+            background-color: var(--primary-color);
+            border: 1px solid var(--primary-dark);
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            color: white;
+            transition: background-color 0.15s ease;
+        }
+
+        #securitySettingsModal .btn-success:hover {
+            background-color: var(--primary-dark);
+        }
+
+        #securitySettingsModal .btn-danger {
+            background-color: transparent;
+            border: 1px solid var(--danger-color);
+            color: var(--danger-color);
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+        }
+
+        #securitySettingsModal .btn-danger:hover {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        #securitySettingsModal .btn-primary {
+            background-color: var(--primary-color);
+            border: 1px solid var(--primary-dark);
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            color: white;
+            transition: background-color 0.15s ease;
+        }
+
+        #securitySettingsModal .btn-primary:hover {
+            background-color: var(--primary-dark);
+        }
+
+        #securitySettingsModal .btn-outline-secondary {
+            border-radius: 6px;
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            transition: all 0.15s ease;
+        }
+
+        #securitySettingsModal .btn-outline-secondary:hover {
+            background-color: var(--gray-100);
+            border-color: var(--gray-400);
+        }
+
+        /* Form labels and text */
+        #securitySettingsModal .form-label {
+            font-weight: 500;
+            color: var(--gray-700);
+            margin-bottom: 0.5rem;
+        }
+
+        #securitySettingsModal .form-text {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        #securitySettingsModal small.text-muted {
+            color: var(--text-muted) !important;
+        }
+
+        /* Password change section inputs */
+        #securitySettingsModal .form-control {
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            padding: 0.625rem 0.875rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        #securitySettingsModal .form-control:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+        }
+
+        /* Loading spinner in 2FA status */
+        #2faStatus .spinner-border {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-width: 3px;
+            color: var(--primary-color) !important;
+        }
+
+        /* LDAP user notice */
+        #securitySettingsModal .alert-info:not(#2faDisabled .alert-info) {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            color: #1e40af;
+            border: none;
+            border-radius: 10px;
+            border-left: 4px solid var(--info-color);
+        }
+
+        /* Dark mode adjustments for security modal */
+        [data-theme="dark"] #securitySettingsModal .modal-body {
+            background-color: var(--bg-color);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .card {
+            background-color: var(--surface-color);
+            border-color: var(--border-color);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .card-header {
+            background: linear-gradient(135deg, var(--gray-100) 0%, var(--gray-50) 100%);
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .card-header i {
+            color: var(--primary-light);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .card-body {
+            background-color: var(--surface-color);
+        }
+
+        [data-theme="dark"] #2faDisabled .alert-info {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.1) 100%);
+            color: var(--primary-light);
+        }
+
+        [data-theme="dark"] #2faSetup .alert-warning {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.1) 100%);
+            color: #fbbf24;
+        }
+
+        [data-theme="dark"] #2faEnabled .alert-success {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%);
+            color: #34d399;
+        }
+
+        [data-theme="dark"] #qrCodeContainer {
+            background: white !important;
+            border-color: var(--gray-400) !important;
+        }
+
+        [data-theme="dark"] #totpSecretDisplay {
+            background: var(--gray-100);
+            color: var(--primary-light);
+            border-color: var(--border-color);
+        }
+
+        [data-theme="dark"] #verify2FACode {
+            background: var(--surface-color) !important;
+            border-color: var(--border-color) !important;
+            color: var(--text-color) !important;
+        }
+
+        [data-theme="dark"] #verify2FACode:focus {
+            border-color: var(--primary-light) !important;
+            box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.2) !important;
+        }
+
+        [data-theme="dark"] #verify2FACode::placeholder {
+            color: var(--gray-400) !important;
+        }
+
+        [data-theme="dark"] #securitySettingsModal .form-label {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] #securitySettingsModal .alert-info:not(#2faDisabled .alert-info) {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.1) 100%);
+            color: var(--primary-light);
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
-        <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div>
-        <p class="text-secondary fw-semibold">Processing...</p>
+        <div class="text-center">
+            <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div>
+            <p class="text-secondary fw-semibold mt-3">Processing...</p>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-3" onclick="SK.Loading.forceHide()" style="opacity: 0.5;">
+                Click here if stuck
+            </button>
+        </div>
     </div>
 
     <!-- Top Navigation Bar -->
@@ -1959,13 +2547,13 @@
                     </div>
 
                     <div class="vr"></div>
-                    <button class="btn btn-primary btn-sm" onclick="triggerSync()">
+                    <button class="btn btn-primary btn-sm" id="syncBtn" onclick="triggerSync(this)">
                         <i class="bi bi-arrow-clockwise"></i> Sync
                     </button>
 
                     <!-- Dark Mode Toggle -->
-                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" id="themeToggle">
-                        <i class="bi bi-moon-fill" id="themeIcon"></i>
+                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" id="themeToggle" aria-label="Toggle dark mode">
+                        <i class="bi bi-moon-fill" id="themeIcon" aria-hidden="true"></i>
                     </button>
 
                     <!-- User Menu (when auth is enabled) -->
@@ -1999,14 +2587,12 @@
                                 </span>
                             </li>
                             <li><hr class="dropdown-divider"></li>
-                            {% if current_user.auth_type == 'local' %}
                             <li>
                                 <a class="dropdown-item" href="#" onclick="openSecuritySettings(); return false;">
                                     <i class="bi bi-shield-lock me-2"></i>Security Settings
                                 </a>
                             </li>
                             <li><hr class="dropdown-divider"></li>
-                            {% endif %}
                             <li>
                                 <a class="dropdown-item text-danger" href="/logout">
                                     <i class="bi bi-box-arrow-right me-2"></i>Logout
@@ -2039,12 +2625,12 @@
             </div>
 
             <!-- Sidebar Navigation -->
-            <nav class="sidebar-nav">
+            <nav class="sidebar-nav" aria-label="Main navigation">
                 <!-- Overview Section -->
-                <div class="sidebar-nav-section">
+                <div class="sidebar-nav-section" role="group" aria-label="Overview">
                     <div class="sidebar-nav-title">Overview</div>
                     <a href="/" class="sidebar-link {{ 'active' if request.endpoint == 'main.index' else '' }}" data-tooltip="Dashboard">
-                        <i class="bi bi-grid-1x2-fill"></i>
+                        <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
                         <span class="link-text">Dashboard</span>
                     </a>
                 </div>
@@ -2072,17 +2658,19 @@
                     <div class="sidebar-submenu">
                         <a href="/admin-panel#users" class="sidebar-sublink">
                             <i class="bi bi-person"></i>
-                            Local Users
+                            All Users
                         </a>
                         {% if license and license.is_professional() %}
                         <a href="/admin-panel#ldapUsers" class="sidebar-sublink">
                             <i class="bi bi-diagram-3"></i>
                             LDAP Users
                         </a>
+                        {% if current_user and current_user.is_super_admin() %}
                         <a href="/admin-panel#ldapGroups" class="sidebar-sublink">
                             <i class="bi bi-diagram-2"></i>
                             LDAP Groups
                         </a>
+                        {% endif %}
                         {% endif %}
                     </div>
 
@@ -2124,8 +2712,8 @@
         <div class="app-main">
             <!-- Mobile Sidebar Toggle -->
             <div class="d-lg-none p-2 border-bottom">
-                <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
-                    <i class="bi bi-list"></i> Menu
+                <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle navigation menu" aria-expanded="false">
+                    <i class="bi bi-list" aria-hidden="true"></i> Menu
                 </button>
             </div>
 
@@ -2180,8 +2768,8 @@
     <!-- Toast Container -->
     <div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
 
-    <!-- Confirmation Modal -->
-    <div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalLabel" aria-hidden="true">
+    <!-- Confirmation Modal (higher z-index for stacking on top of other modals) -->
+    <div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalLabel" aria-hidden="true" style="z-index: 1060;">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
@@ -2254,44 +2842,47 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- SentriKat Core Module - Centralized utilities -->
+    <script src="{{ url_for('static', filename='js/sentrikat-core.js') }}"></script>
+    <!-- SentriKat Modal Configurations -->
+    <script src="{{ url_for('static', filename='js/sentrikat-modals.js') }}"></script>
     <script>
-        function showLoading() {
-            document.getElementById('loadingOverlay').classList.add('show');
-        }
+        /**
+         * Page-specific utilities
+         */
 
-        function hideLoading() {
-            document.getElementById('loadingOverlay').classList.remove('show');
-            // Clean up any lingering modal backdrops
-            cleanupModalBackdrops();
+        /**
+         * Safely close and dispose of a Bootstrap modal
+         */
+        function safeCloseModal(modalElement) {
+            if (!modalElement) return;
+            const instance = bootstrap.Modal.getInstance(modalElement);
+            if (instance) {
+                instance.hide();
+            }
         }
 
         /**
-         * Remove any lingering modal backdrops from the DOM
-         * This fixes the issue where grey backdrop layers remain after bulk operations
+         * Safely remove a dynamic modal element from the DOM
          */
-        function cleanupModalBackdrops() {
-            // Remove all modal backdrops
-            document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
-                backdrop.remove();
-            });
-            // Remove modal-open class from body to restore scrolling
-            document.body.classList.remove('modal-open');
-            // Reset body padding that Bootstrap adds
-            document.body.style.removeProperty('padding-right');
+        function safeRemoveModal(modalId) {
+            const modalElement = document.getElementById(modalId);
+            if (!modalElement) return;
+            const instance = bootstrap.Modal.getInstance(modalElement);
+            if (instance) {
+                try { instance.dispose(); } catch (e) {}
+            }
+            modalElement.remove();
         }
 
         /**
          * Switch to a specific admin panel tab
-         * Used by the admin dropdown menu
          */
         function switchToAdminTab(tabId) {
-            // Navigate to admin panel if not already there
             if (window.location.pathname !== '/admin-panel') {
                 window.location.href = '/admin-panel#' + tabId;
                 return;
             }
-
-            // Switch tab on current page
             const tabButton = document.getElementById(tabId + '-tab');
             if (tabButton) {
                 const tab = new bootstrap.Tab(tabButton);
@@ -2299,30 +2890,9 @@
             }
         }
 
-        function showToast(message, type = 'success') {
-            const toastContainer = document.getElementById('toastContainer');
-            const icon = {
-                'success': 'check-circle-fill',
-                'danger': 'exclamation-triangle-fill',
-                'warning': 'exclamation-circle-fill',
-                'info': 'info-circle-fill'
-            }[type] || 'info-circle-fill';
-
-            const toast = document.createElement('div');
-            toast.className = `toast align-items-center text-white bg-${type} border-0`;
-            toast.setAttribute('role', 'alert');
-            toast.innerHTML = `
-                <div class="d-flex">
-                    <div class="toast-body">
-                        <i class="bi bi-${icon} me-2"></i>${message}
-                    </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-                </div>
-            `;
-            toastContainer.appendChild(toast);
-            const bsToast = new bootstrap.Toast(toast, { delay: 5000 });
-            bsToast.show();
-            toast.addEventListener('hidden.bs.toast', () => toast.remove());
+        // Initialize SK if available
+        if (typeof SK !== 'undefined') {
+            SK.init({ debug: true });
         }
 
         /**
@@ -2363,8 +2933,28 @@
         }
 
         // Check CVE status on page load and every 5 minutes
+        // Retry mechanism for initial load timing issues
+        let cveStatusRetries = 0;
+        async function checkCVEServiceStatusWithRetry() {
+            const led = document.getElementById('cveStatusLed');
+            try {
+                await checkCVEServiceStatus();
+                // If status is red/error on first load, retry a few times
+                if (led && led.classList.contains('status-led-red') && cveStatusRetries < 3) {
+                    cveStatusRetries++;
+                    setTimeout(checkCVEServiceStatusWithRetry, 2000); // Retry after 2 seconds
+                }
+            } catch (e) {
+                if (cveStatusRetries < 3) {
+                    cveStatusRetries++;
+                    setTimeout(checkCVEServiceStatusWithRetry, 2000);
+                }
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
-            checkCVEServiceStatus();
+            // Small delay to ensure database connections are ready
+            setTimeout(checkCVEServiceStatusWithRetry, 500);
             setInterval(checkCVEServiceStatus, 300000); // 5 minutes
         });
 
@@ -2389,7 +2979,8 @@
                 confirmBtn.textContent = confirmText;
                 confirmBtn.className = `btn ${confirmClass}`;
 
-                const bsModal = new bootstrap.Modal(modal);
+                // Use getOrCreateInstance to avoid creating duplicate modal instances
+                const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
 
                 // Handle confirm
                 const handleConfirm = () => {
@@ -2442,7 +3033,8 @@
                 modalTitle.innerHTML = `<i class="bi ${icon} me-2"></i>${title}`;
                 modalBody.innerHTML = message.replace(/\n/g, '<br>');
 
-                const bsModal = new bootstrap.Modal(modal);
+                // Use getOrCreateInstance to avoid creating duplicate modal instances
+                const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
 
                 const handleClose = () => {
                     modal.removeEventListener('hidden.bs.modal', handleClose);
@@ -2474,7 +3066,8 @@
                 modalBody.innerHTML = message.replace(/\n/g, '<br>');
                 input.value = defaultValue;
 
-                const bsModal = new bootstrap.Modal(modal);
+                // Use getOrCreateInstance to avoid creating duplicate modal instances
+                const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
 
                 // Handle submit
                 const handleSubmit = () => {
@@ -2514,7 +3107,7 @@
             });
         }
 
-        async function triggerSync() {
+        async function triggerSync(btn) {
             const confirmed = await showConfirm(
                 'Download the latest CISA KEV data and update all matches?<br><br>This may take a minute.',
                 'Sync Vulnerability Data',
@@ -2526,6 +3119,8 @@
                 return;
             }
 
+            const syncBtn = btn || document.getElementById('syncBtn');
+            setButtonLoading(syncBtn, 'Syncing...');
             showLoading();
             try {
                 const response = await fetch('/api/sync', { method: 'POST' });
@@ -2541,6 +3136,7 @@
                 showToast(`Error: ${error.message}`, 'danger');
             } finally {
                 hideLoading();
+                resetButton(syncBtn);
             }
         }
 
@@ -2563,6 +3159,76 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // CSRF token helper for AJAX requests
+        function getCSRFToken() {
+            return document.querySelector('meta[name="csrf-token"]')?.content || '';
+        }
+
+        // Helper to add CSRF header to fetch options
+        function withCSRF(options = {}) {
+            const headers = options.headers || {};
+            headers['X-CSRFToken'] = getCSRFToken();
+            return { ...options, headers };
+        }
+
+        // Button loading state helpers
+        function setButtonLoading(btn, loadingText = 'Loading...') {
+            if (!btn) return;
+            btn._originalHTML = btn.innerHTML;
+            btn._originalDisabled = btn.disabled;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span>${loadingText}`;
+        }
+
+        function resetButton(btn) {
+            if (!btn) return;
+            btn.disabled = btn._originalDisabled || false;
+            btn.innerHTML = btn._originalHTML || btn.innerHTML;
+        }
+
+        // Async button wrapper - handles loading state automatically
+        async function withLoadingButton(btn, loadingText, asyncFn) {
+            setButtonLoading(btn, loadingText);
+            try {
+                return await asyncFn();
+            } finally {
+                resetButton(btn);
+            }
+        }
+
+        // Form validation helpers
+        function setFieldInvalid(fieldId, message) {
+            const field = document.getElementById(fieldId);
+            if (!field) return;
+            field.classList.add('is-invalid');
+            // Look for or create feedback element
+            let feedback = field.parentElement.querySelector('.invalid-feedback');
+            if (!feedback) {
+                feedback = document.createElement('div');
+                feedback.className = 'invalid-feedback';
+                field.parentElement.appendChild(feedback);
+            }
+            feedback.textContent = message;
+            feedback.style.display = 'block';
+        }
+
+        function clearFieldValidation(fieldId) {
+            const field = document.getElementById(fieldId);
+            if (!field) return;
+            field.classList.remove('is-invalid');
+            const feedback = field.parentElement.querySelector('.invalid-feedback');
+            if (feedback) {
+                feedback.style.display = 'none';
+            }
+        }
+
+        function clearFormValidation(formId) {
+            const form = document.getElementById(formId);
+            if (!form) return;
+            form.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+            form.querySelectorAll('.invalid-feedback').forEach(el => el.style.display = 'none');
         }
 
         function getPriorityBadgeClass(priority) {
@@ -2618,7 +3284,11 @@
                 // Check content type before parsing JSON
                 const currentContentType = currentResponse.headers.get('content-type');
                 if (!currentContentType || !currentContentType.includes('application/json')) {
-                    throw new Error('Invalid response from server');
+                    console.error('Invalid content type from /api/session/organization:', currentContentType);
+                    // Try to get the response text for debugging
+                    const text = await currentResponse.text();
+                    console.error('Response body:', text.substring(0, 500));
+                    throw new Error('Server returned non-JSON response');
                 }
                 const currentOrg = await currentResponse.json();
 
@@ -2652,11 +3322,19 @@
                         <li>
                             <a class="dropdown-item ${org.id === currentOrg.id ? 'active' : ''}"
                                href="#"
-                               onclick="switchOrganization(${org.id}, '${org.display_name}'); return false;">
-                                <i class="bi bi-building me-2"></i>${org.display_name}
+                               data-org-id="${org.id}"
+                               data-org-name="${escapeHtml(org.display_name)}">
+                                <i class="bi bi-building me-2"></i>${escapeHtml(org.display_name)}
                             </a>
                         </li>
                     `).join('');
+                    // Add click handlers using event delegation
+                    orgList.querySelectorAll('[data-org-id]').forEach(link => {
+                        link.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            switchOrganization(parseInt(this.dataset.orgId), this.dataset.orgName);
+                        });
+                    });
                 } else {
                     orgList.innerHTML = '<li><span class="dropdown-item-text text-muted small">No organizations available</span></li>';
                 }
@@ -3333,10 +4011,11 @@
                 const existingDropdown = container.querySelector(`[data-column-toggle="${tableId}"]`);
                 if (existingDropdown) return;
 
-                // Create dropdown HTML
+                // Create dropdown HTML - using data attributes for safer event handling
                 const dropdownId = `columnToggle_${tableId}`;
+                const safeTableId = escapeHtml(tableId);
                 const dropdownHTML = `
-                    <div class="dropdown" data-column-toggle="${tableId}">
+                    <div class="dropdown" data-column-toggle="${safeTableId}">
                         <button class="btn-column-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
                             <i class="bi bi-layout-three-columns"></i>
                             <span>Columns</span>
@@ -3349,21 +4028,21 @@
                             </div>
                             <div class="column-list">
                                 ${columns.map(col => `
-                                    <div class="column-item" onclick="TableEnhancements.toggleColumnCheckbox('${tableId}', '${col.name}', event)">
-                                        <input type="checkbox" class="form-check-input"
-                                               id="col_${tableId}_${col.name}"
-                                               data-column="${col.name}"
-                                               checked
-                                               onclick="event.stopPropagation(); TableEnhancements.toggleColumn('${tableId}', '${col.name}', this.checked)">
+                                    <div class="column-item" data-table-id="${safeTableId}" data-col-name="${escapeHtml(col.name)}">
+                                        <input type="checkbox" class="form-check-input column-toggle-checkbox"
+                                               id="col_${safeTableId}_${escapeHtml(col.name)}"
+                                               data-column="${escapeHtml(col.name)}"
+                                               data-table-id="${safeTableId}"
+                                               checked>
                                         <div class="column-icon">
-                                            <i class="bi ${col.icon}"></i>
+                                            <i class="bi ${escapeHtml(col.icon)}"></i>
                                         </div>
-                                        <label for="col_${tableId}_${col.name}">${col.label}</label>
+                                        <label for="col_${safeTableId}_${escapeHtml(col.name)}">${escapeHtml(col.label)}</label>
                                     </div>
                                 `).join('')}
                             </div>
                             <div class="dropdown-footer">
-                                <button class="reset-btn" onclick="TableEnhancements.resetColumns('${tableId}')">
+                                <button class="reset-btn" data-reset-table="${safeTableId}">
                                     <i class="bi bi-arrow-counterclockwise"></i>
                                     Reset All
                                 </button>
@@ -3375,7 +4054,40 @@
                 // Insert dropdown
                 const wrapper = document.createElement('div');
                 wrapper.innerHTML = dropdownHTML;
-                container.appendChild(wrapper.firstElementChild);
+                const dropdownEl = wrapper.firstElementChild;
+                container.appendChild(dropdownEl);
+
+                // Add event listeners for column items
+                dropdownEl.querySelectorAll('.column-item').forEach(item => {
+                    item.addEventListener('click', (e) => {
+                        if (e.target.type === 'checkbox') return;
+                        const tblId = item.dataset.tableId;
+                        const colName = item.dataset.colName;
+                        const checkbox = item.querySelector('input[type="checkbox"]');
+                        if (checkbox) {
+                            checkbox.checked = !checkbox.checked;
+                            TableEnhancements.toggleColumn(tblId, colName, checkbox.checked);
+                        }
+                    });
+                });
+
+                // Add event listeners for checkboxes
+                dropdownEl.querySelectorAll('.column-toggle-checkbox').forEach(checkbox => {
+                    checkbox.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const tblId = checkbox.dataset.tableId;
+                        const colName = checkbox.dataset.column;
+                        TableEnhancements.toggleColumn(tblId, colName, checkbox.checked);
+                    });
+                });
+
+                // Add event listener for reset button
+                const resetBtn = dropdownEl.querySelector('[data-reset-table]');
+                if (resetBtn) {
+                    resetBtn.addEventListener('click', () => {
+                        TableEnhancements.resetColumns(resetBtn.dataset.resetTable);
+                    });
+                }
             },
 
             /**
@@ -3523,34 +4235,40 @@
     </script>
 
     <!-- Security Settings Modal -->
-    {% if auth_enabled and current_user and current_user.auth_type == 'local' %}
-    <div class="modal fade" id="securitySettingsModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+    {% if auth_enabled and current_user %}
+    <!-- Custom backdrop for security settings - we manage this ourselves -->
+    <div id="securitySettingsBackdrop" onclick="closeSecuritySettings()"></div>
+    <div class="modal fade" id="securitySettingsModal" tabindex="-1" aria-labelledby="securitySettingsModalLabel" aria-hidden="true" data-bs-backdrop="false" data-bs-keyboard="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="bi bi-shield-lock me-2"></i>Security Settings</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" onclick="closeSecuritySettings()" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <!-- Password Change Section -->
+                    {% if current_user.auth_type == 'local' %}
+                    <!-- Password Change Section (Local users only) -->
                     <div class="card mb-4">
                         <div class="card-header">
                             <i class="bi bi-key me-2"></i>Change Password
                         </div>
                         <div class="card-body">
-                            <form id="changePasswordForm">
+                            <form id="changePasswordForm" novalidate>
                                 <div class="row g-3">
                                     <div class="col-md-12">
                                         <label class="form-label">Current Password</label>
                                         <input type="password" class="form-control" id="secCurrentPassword" required>
+                                        <div class="invalid-feedback">Please enter your current password</div>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">New Password</label>
-                                        <input type="password" class="form-control" id="secNewPassword" required>
+                                        <input type="password" class="form-control" id="secNewPassword" required minlength="8">
+                                        <div class="invalid-feedback">Password must be at least 8 characters</div>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Confirm New Password</label>
                                         <input type="password" class="form-control" id="secConfirmPassword" required>
+                                        <div class="invalid-feedback">Passwords do not match</div>
                                     </div>
                                     <div class="col-12">
                                         <button type="submit" class="btn btn-primary">
@@ -3561,8 +4279,16 @@
                             </form>
                         </div>
                     </div>
+                    {% else %}
+                    <!-- LDAP User Notice -->
+                    <div class="alert alert-info mb-4">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Your password is managed through your organization's directory service (LDAP/Active Directory).
+                        You can still enable two-factor authentication below for additional security.
+                    </div>
+                    {% endif %}
 
-                    <!-- Two-Factor Authentication Section -->
+                    <!-- Two-Factor Authentication Section (all users) -->
                     <div class="card">
                         <div class="card-header">
                             <i class="bi bi-phone me-2"></i>Two-Factor Authentication
@@ -3641,11 +4367,125 @@
         let securityModal = null;
 
         function openSecuritySettings() {
-            if (!securityModal) {
-                securityModal = new bootstrap.Modal(document.getElementById('securitySettingsModal'));
+            // AGGRESSIVE CLEANUP: Remove ALL Bootstrap backdrops and modal state
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.paddingRight = '';
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
+
+            const modalEl = document.getElementById('securitySettingsModal');
+            const customBackdrop = document.getElementById('securitySettingsBackdrop');
+
+            // Dispose existing modal instance if any
+            if (securityModal) {
+                try {
+                    securityModal.dispose();
+                } catch (e) {}
+                securityModal = null;
             }
+
+            // Remove any existing Bootstrap Modal instance from the element
+            const existingInstance = bootstrap.Modal.getInstance(modalEl);
+            if (existingInstance) {
+                try {
+                    existingInstance.dispose();
+                } catch (e) {}
+            }
+
+            // Show our custom backdrop
+            customBackdrop.classList.add('show');
+            document.body.classList.add('security-modal-open');
+            document.body.style.overflow = 'hidden';
+
+            // Create fresh modal instance WITHOUT Bootstrap backdrop
+            securityModal = new bootstrap.Modal(modalEl, {
+                backdrop: false,
+                keyboard: true,
+                focus: true
+            });
+
+            // Listen for modal hide to clean up
+            modalEl.addEventListener('hidden.bs.modal', handleSecurityModalHidden, { once: true });
+
+            // Also listen for escape key
+            document.addEventListener('keydown', handleSecurityModalEscape);
+
             securityModal.show();
             load2FAStatus();
+        }
+
+        function handleSecurityModalEscape(e) {
+            if (e.key === 'Escape') {
+                closeSecuritySettings();
+            }
+        }
+
+        function handleSecurityModalHidden() {
+            cleanupSecurityModal();
+        }
+
+        function closeSecuritySettings() {
+            const modalEl = document.getElementById('securitySettingsModal');
+
+            if (securityModal) {
+                try {
+                    securityModal.hide();
+                } catch (e) {}
+            }
+
+            // Force cleanup after a small delay to ensure Bootstrap has finished
+            setTimeout(cleanupSecurityModal, 100);
+        }
+
+        function cleanupSecurityModal() {
+            const customBackdrop = document.getElementById('securitySettingsBackdrop');
+            const modalEl = document.getElementById('securitySettingsModal');
+
+            // Hide custom backdrop
+            if (customBackdrop) {
+                customBackdrop.classList.remove('show');
+            }
+
+            // Remove body classes and styles
+            document.body.classList.remove('security-modal-open');
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.paddingRight = '';
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
+
+            // Remove ALL Bootstrap backdrops (paranoid cleanup)
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+
+            // Dispose modal instance
+            if (securityModal) {
+                try {
+                    securityModal.dispose();
+                } catch (e) {}
+                securityModal = null;
+            }
+
+            // Also dispose any Bootstrap instance on the element
+            const existingInstance = bootstrap.Modal.getInstance(modalEl);
+            if (existingInstance) {
+                try {
+                    existingInstance.dispose();
+                } catch (e) {}
+            }
+
+            // Remove escape key listener
+            document.removeEventListener('keydown', handleSecurityModalEscape);
+
+            // Reset modal element classes
+            if (modalEl) {
+                modalEl.classList.remove('show');
+                modalEl.style.display = '';
+                modalEl.setAttribute('aria-hidden', 'true');
+                modalEl.removeAttribute('aria-modal');
+                modalEl.removeAttribute('role');
+            }
         }
 
         async function load2FAStatus() {
@@ -3765,18 +4605,64 @@
             }
         }
 
+        // Password Change Form - helper to set field invalid
+        function setSecFieldInvalid(fieldId, message) {
+            const field = document.getElementById(fieldId);
+            const feedback = field?.nextElementSibling;
+            if (field) {
+                field.classList.add('is-invalid');
+                if (feedback && feedback.classList.contains('invalid-feedback') && message) {
+                    feedback.textContent = message;
+                }
+            }
+        }
+
+        function clearSecFieldValidation(fieldId) {
+            const field = document.getElementById(fieldId);
+            if (field) field.classList.remove('is-invalid');
+        }
+
+        // Clear validation on input
+        ['secCurrentPassword', 'secNewPassword', 'secConfirmPassword'].forEach(id => {
+            document.getElementById(id)?.addEventListener('input', () => clearSecFieldValidation(id));
+        });
+
         // Password Change Form
         document.getElementById('changePasswordForm')?.addEventListener('submit', async function(e) {
             e.preventDefault();
+
+            // Clear previous validation
+            ['secCurrentPassword', 'secNewPassword', 'secConfirmPassword'].forEach(clearSecFieldValidation);
 
             const currentPassword = document.getElementById('secCurrentPassword').value;
             const newPassword = document.getElementById('secNewPassword').value;
             const confirmPassword = document.getElementById('secConfirmPassword').value;
 
-            if (newPassword !== confirmPassword) {
-                await showAlert('New passwords do not match', 'Validation Error', 'warning');
-                return;
+            // Client-side validation
+            let isValid = true;
+
+            if (!currentPassword) {
+                setSecFieldInvalid('secCurrentPassword', 'Please enter your current password');
+                isValid = false;
             }
+
+            if (!newPassword) {
+                setSecFieldInvalid('secNewPassword', 'Please enter a new password');
+                isValid = false;
+            } else if (newPassword.length < 8) {
+                setSecFieldInvalid('secNewPassword', 'Password must be at least 8 characters');
+                isValid = false;
+            }
+
+            if (!confirmPassword) {
+                setSecFieldInvalid('secConfirmPassword', 'Please confirm your new password');
+                isValid = false;
+            } else if (newPassword !== confirmPassword) {
+                setSecFieldInvalid('secConfirmPassword', 'Passwords do not match');
+                isValid = false;
+            }
+
+            if (!isValid) return;
 
             try {
                 const response = await fetch('/api/auth/change-password', {
@@ -3796,7 +4682,14 @@
                     document.getElementById('secNewPassword').value = '';
                     document.getElementById('secConfirmPassword').value = '';
                 } else {
-                    await showAlert(data.error || 'Failed to change password', 'Error', 'error');
+                    // Show field-specific error if possible
+                    if (data.error && data.error.toLowerCase().includes('current')) {
+                        setSecFieldInvalid('secCurrentPassword', data.error);
+                    } else if (data.error && (data.error.toLowerCase().includes('policy') || data.error.toLowerCase().includes('new password'))) {
+                        setSecFieldInvalid('secNewPassword', data.error);
+                    } else {
+                        await showAlert(data.error || 'Failed to change password', 'Error', 'error');
+                    }
                 }
             } catch (error) {
                 await showAlert('Error changing password: ' + error.message, 'Error', 'error');
@@ -3807,6 +4700,103 @@
         document.getElementById('verify2FACode')?.addEventListener('input', function(e) {
             this.value = this.value.replace(/[^0-9]/g, '').slice(0, 6);
         });
+    </script>
+
+    <!-- Session Timeout Handler -->
+    <script>
+    (function() {
+        const SESSION_TIMEOUT_MINUTES = {{ session_timeout_minutes|default(480) }};
+        const WARNING_BEFORE_MINUTES = 5; // Show warning 5 minutes before expiry
+        const CHECK_INTERVAL_SECONDS = 60; // Check every minute
+
+        let lastActivity = Date.now();
+        let warningShown = false;
+        let warningModal = null;
+
+        // Track user activity
+        function updateActivity() {
+            lastActivity = Date.now();
+            warningShown = false;
+            // Hide warning if shown
+            if (warningModal) {
+                warningModal.hide();
+            }
+        }
+
+        // Activity events to track
+        ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'].forEach(event => {
+            document.addEventListener(event, updateActivity, { passive: true });
+        });
+
+        // Create warning modal
+        function createWarningModal() {
+            const modalHtml = `
+                <div class="modal fade" id="sessionWarningModal" tabindex="-1" data-bs-backdrop="static">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header bg-warning text-dark">
+                                <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Session Expiring</h5>
+                            </div>
+                            <div class="modal-body text-center py-4">
+                                <i class="bi bi-clock-history text-warning" style="font-size: 3rem;"></i>
+                                <p class="mt-3 mb-2">Your session will expire in <strong id="sessionCountdown">${WARNING_BEFORE_MINUTES}</strong> minutes due to inactivity.</p>
+                                <p class="text-muted small">Click anywhere or press any key to stay logged in.</p>
+                            </div>
+                            <div class="modal-footer justify-content-center">
+                                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                                    <i class="bi bi-arrow-repeat me-1"></i>Stay Logged In
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="window.location.href='/logout'">
+                                    <i class="bi bi-box-arrow-right me-1"></i>Logout Now
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            return new bootstrap.Modal(document.getElementById('sessionWarningModal'));
+        }
+
+        // Check session status
+        function checkSession() {
+            const elapsed = (Date.now() - lastActivity) / 1000 / 60; // minutes
+            const remaining = SESSION_TIMEOUT_MINUTES - elapsed;
+
+            // Session expired - redirect to login
+            if (remaining <= 0) {
+                window.location.href = '/login?expired=1';
+                return;
+            }
+
+            // Show warning
+            if (remaining <= WARNING_BEFORE_MINUTES && !warningShown) {
+                warningShown = true;
+                if (!warningModal) {
+                    warningModal = createWarningModal();
+                }
+                warningModal.show();
+                updateCountdown(Math.ceil(remaining));
+            }
+
+            // Update countdown if warning is shown
+            if (warningShown && remaining > 0) {
+                updateCountdown(Math.ceil(remaining));
+            }
+        }
+
+        function updateCountdown(minutes) {
+            const el = document.getElementById('sessionCountdown');
+            if (el) {
+                el.textContent = minutes;
+            }
+        }
+
+        // Start checking - only if timeout is reasonable (> 0 and < 24 hours)
+        if (SESSION_TIMEOUT_MINUTES > 0 && SESSION_TIMEOUT_MINUTES < 1440) {
+            setInterval(checkSession, CHECK_INTERVAL_SECONDS * 1000);
+        }
+    })();
     </script>
     {% endif %}
 

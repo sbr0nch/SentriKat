@@ -24,6 +24,7 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerability_matches', 'first_alerted_at', 'DATETIME', 'TIMESTAMP'),
         ('agent_api_keys', 'auto_approve', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
         ('inventory_jobs', 'api_key_id', 'INTEGER', 'INTEGER'),
+        ('users', 'totp_required', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
@@ -110,9 +111,9 @@ def create_app(config_class=Config):
             content_security_policy={
                 'default-src': "'self'",
                 'script-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
-                'style-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
+                'style-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net", "fonts.googleapis.com"],
                 'img-src': ["'self'", "data:"],
-                'font-src': ["'self'", "cdn.jsdelivr.net"],
+                'font-src': ["'self'", "cdn.jsdelivr.net", "fonts.gstatic.com"],
             }
         )
 
@@ -146,7 +147,7 @@ def create_app(config_class=Config):
 
         current_user = None
         if 'user_id' in session:
-            current_user = User.query.get(session['user_id'])
+            current_user = db.session.get(User, session['user_id'])
 
         # Match auth.py: AUTH_ENABLED = DISABLE_AUTH != 'true'
         auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
@@ -201,11 +202,24 @@ def create_app(config_class=Config):
                 pass
             branding['show_powered_by'] = True
 
+        # Load session timeout for client-side handling
+        session_timeout_minutes = 480  # Default 8 hours
+        try:
+            timeout_setting = SystemSettings.query.filter_by(key='session_timeout').first()
+            if timeout_setting and timeout_setting.value:
+                session_timeout_minutes = int(timeout_setting.value)
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
         return dict(
             current_user=current_user,
             auth_enabled=auth_enabled,
             branding=branding,
-            license=license_info
+            license=license_info,
+            session_timeout_minutes=session_timeout_minutes
         )
 
     # Setup wizard redirect

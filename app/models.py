@@ -73,6 +73,7 @@ class Organization(db.Model):
     alert_on_high = db.Column(db.Boolean, default=False)
     alert_on_new_cve = db.Column(db.Boolean, default=True)
     alert_on_ransomware = db.Column(db.Boolean, default=True)
+    alert_on_low_confidence = db.Column(db.Boolean, default=False)  # Include LOW confidence matches in alerts (default: skip)
     alert_time_start = db.Column(db.String(5), default='08:00')  # HH:MM format
     alert_time_end = db.Column(db.String(5), default='18:00')    # HH:MM format
     alert_days = db.Column(db.String(50), default='mon,tue,wed,thu,fri')  # Comma-separated days
@@ -88,6 +89,11 @@ class Organization(db.Model):
     webhook_name = db.Column(db.String(100), default='Organization Webhook')
     webhook_format = db.Column(db.String(50), default='slack')  # slack, discord, teams, rocketchat, custom
     webhook_token = db.Column(db.String(500), nullable=True)  # Optional auth token
+
+    # Agent Product Settings
+    agent_require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for agent-added products
+    agent_stale_threshold_days = db.Column(db.Integer, default=30)  # Days before agent is considered stale
+    product_stale_threshold_days = db.Column(db.Integer, default=90)  # Days before product auto-disables
 
     # Metadata
     active = db.Column(db.Boolean, default=True, index=True)
@@ -115,6 +121,7 @@ class Organization(db.Model):
                 'high': self.alert_on_high,
                 'new_cve': self.alert_on_new_cve,
                 'ransomware': self.alert_on_ransomware,
+                'low_confidence': self.alert_on_low_confidence,  # Include low-confidence matches
                 'time_start': self.alert_time_start,
                 'time_end': self.alert_time_end,
                 'days': self.alert_days,
@@ -136,6 +143,7 @@ class Organization(db.Model):
             'alert_on_high': self.alert_on_high,
             'alert_on_new_cve': self.alert_on_new_cve,
             'alert_on_ransomware': self.alert_on_ransomware,
+            'alert_on_low_confidence': self.alert_on_low_confidence,
             # Webhook settings (decrypt URL for editing)
             'webhook_enabled': self.webhook_enabled,
             'webhook_url': self._decrypt_webhook_url(),
@@ -145,7 +153,8 @@ class Organization(db.Model):
             'webhook_configured': bool(self.webhook_enabled and self.webhook_url),
             'user_count': user_count,
             'active': self.active,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'is_default': self.name == 'default'  # Flag for UI to prevent deletion
         }
 
     def _decrypt_webhook_url(self):
@@ -240,7 +249,7 @@ class Product(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True, index=True)  # NULL for migration compatibility
-    service_catalog_id = db.Column(db.Integer, db.ForeignKey('service_catalog.id'), nullable=True)  # Optional link to catalog
+    service_catalog_id = db.Column(db.Integer, db.ForeignKey('service_catalog.id'), nullable=True, index=True)  # Optional link to catalog
     vendor = db.Column(db.String(200), nullable=False, index=True)
     product_name = db.Column(db.String(200), nullable=False, index=True)
     version = db.Column(db.String(100), nullable=True)
@@ -256,6 +265,25 @@ class Product(db.Model):
     cpe_product = db.Column(db.String(200), nullable=True, index=True)  # NVD CPE product identifier
     cpe_uri = db.Column(db.String(500), nullable=True)  # Full CPE 2.3 URI (optional)
     match_type = db.Column(db.String(20), default='auto')  # auto, cpe, keyword, both
+
+    # Agent product queue fields - for approval workflow
+    source = db.Column(db.String(20), default='manual', index=True)  # manual, agent
+    approval_status = db.Column(db.String(20), default='approved', index=True)  # approved, pending, rejected
+    pending_since = db.Column(db.DateTime, nullable=True)  # When added to queue
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Who approved/rejected
+    reviewed_at = db.Column(db.DateTime, nullable=True)  # When approved/rejected
+    rejection_reason = db.Column(db.String(500), nullable=True)  # Why rejected
+
+    # Auto-disable tracking
+    last_agent_report = db.Column(db.DateTime, nullable=True, index=True)  # Last time an agent reported this product
+    auto_disabled = db.Column(db.Boolean, default=False)  # Was disabled due to no agent reports
+
+    # Composite indexes for common query patterns
+    __table_args__ = (
+        db.Index('idx_product_org_active', 'organization_id', 'active'),
+        db.Index('idx_product_vendor_name', 'vendor', 'product_name'),
+        db.Index('idx_product_approval', 'approval_status', 'source'),
+    )
 
     # Relationships
     organization = db.relationship('Organization', backref='products')  # Legacy single org (deprecated)
@@ -346,7 +374,6 @@ class Product(db.Model):
             'keywords': self.keywords,
             'description': self.description,
             'active': self.active,
-            'criticality': self.criticality,
             'platforms': platform_list,  # OS platforms detected on (Windows, Linux, macOS)
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -561,97 +588,33 @@ class VulnerabilityMatch(db.Model):
     # Reset to NULL when CVE is reopened (unacknowledged) to re-alert
     first_alerted_at = db.Column(db.DateTime, nullable=True, index=True)
 
+    # Snooze feature - temporarily suppress alerts until this datetime
+    # NULL = not snoozed, set when user clicks "Remind me later"
+    snoozed_until = db.Column(db.DateTime, nullable=True, index=True)
+
     # Match method and confidence
     match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
     match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
 
-    product = db.relationship('Product', backref='matches')
-    vulnerability = db.relationship('Vulnerability', backref='matches')
+    # Composite indexes for common query patterns
+    __table_args__ = (
+        db.Index('idx_match_product_ack', 'product_id', 'acknowledged'),
+        db.Index('idx_match_vuln_ack', 'vulnerability_id', 'acknowledged'),
+    )
+
+    product = db.relationship('Product', backref=db.backref('matches', cascade='all, delete-orphan'))
+    vulnerability = db.relationship('Vulnerability', backref=db.backref('matches', cascade='all, delete-orphan'))
 
     def calculate_effective_priority(self):
         """
-        Calculate effective priority combining CVE severity with product criticality and age.
+        Returns the CVE severity directly.
 
-        The key insight: Product criticality determines how IMPORTANT the CVE is for YOU.
-        - A critical CVE on a dev laptop (low criticality) = Low priority for you
-        - A medium CVE on a production server (critical) = High priority for you
+        Previously this combined CVE severity with product criticality,
+        but that was confusing. Now we just use the CVE's severity.
 
-        Priority Matrix:
-        CVE\\Product | Critical | High   | Medium | Low
-        ------------|----------|--------|--------|------
-        Critical    | Critical | High   | Medium | Low
-        High        | High     | High   | Medium | Low
-        Medium      | High     | Medium | Medium | Low
-        Low         | Medium   | Low    | Low    | Low
-
-        Age Factor (applied after matrix calculation):
-        - CVEs > 2 years old: demote by 2 levels (unless ransomware or due soon)
-        - CVEs > 1 year old: demote by 1 level (unless ransomware or due soon)
-        - CVEs < 90 days old: no demotion
-
-        This reflects reality: very old CVEs that haven't been exploited yet are lower risk
-        than recent vulnerabilities being actively discovered/exploited.
-
-        Special rules:
-        - Ransomware-related CVEs are NEVER demoted by age (actively exploited)
-        - Due within 30 days = NEVER demoted by age (still urgent)
-        - Due within 7 days on critical product = always Critical
+        Returns: critical, high, medium, low (based on CVE's CVSS score)
         """
-        vuln_priority = self.vulnerability.calculate_priority()
-        product_criticality = self.product.criticality or 'medium'
-
-        priority_levels = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
-        level_names = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
-
-        vuln_level = priority_levels.get(vuln_priority, 2)
-        prod_level = priority_levels.get(product_criticality, 2)
-
-        # Calculate combined priority - product criticality caps the effective priority
-        # Critical product: can show any priority
-        # High product: max is high (critical CVEs show as high)
-        # Medium product: max is medium
-        # Low product: max is low
-        max_allowed = prod_level
-        effective_level = min(vuln_level, max_allowed)
-
-        # Special cases that can override:
-
-        # 1. Ransomware on high+ criticality product = elevate by one
-        if self.vulnerability.known_ransomware and prod_level >= 3:
-            effective_level = min(effective_level + 1, 4)
-
-        # 2. Due within 7 days on critical product = Critical
-        if self.vulnerability.due_date and prod_level == 4:
-            days_until_due = (self.vulnerability.due_date - date.today()).days
-            if days_until_due <= 7:
-                effective_level = 4
-
-        # 3. Medium product with critical/high CVE = at least medium (don't demote too much)
-        if prod_level == 2 and vuln_level >= 3:
-            effective_level = max(effective_level, 2)
-
-        # 4. AGE FACTOR: Demote old CVEs (unless they have urgent attributes)
-        # Skip age demotion if:
-        # - Ransomware-related (actively exploited, always dangerous)
-        # - Due within 30 days (still has urgency)
-        is_ransomware = self.vulnerability.known_ransomware
-        has_urgent_due = False
-        if self.vulnerability.due_date:
-            days_until_due = (self.vulnerability.due_date - date.today()).days
-            has_urgent_due = days_until_due <= 30
-
-        if not is_ransomware and not has_urgent_due and self.vulnerability.date_added:
-            days_old = (date.today() - self.vulnerability.date_added).days
-
-            if days_old > 730:  # > 2 years old
-                # Demote by 2 levels (but not below low)
-                effective_level = max(effective_level - 2, 1)
-            elif days_old > 365:  # > 1 year old
-                # Demote by 1 level (but not below low)
-                effective_level = max(effective_level - 1, 1)
-            # < 1 year: no age-based demotion
-
-        return level_names.get(effective_level, 'medium')
+        return self.vulnerability.calculate_priority()
 
     def to_dict(self):
         vuln_dict = self.vulnerability.to_dict()
@@ -665,9 +628,9 @@ class VulnerabilityMatch(db.Model):
             'match_method': self.match_method or 'keyword',
             'match_confidence': self.match_confidence or 'medium',
             'acknowledged': self.acknowledged,
+            'snoozed_until': self.snoozed_until.isoformat() if self.snoozed_until else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'effective_priority': self.calculate_effective_priority(),
-            'product_criticality': product_dict['criticality']
+            'effective_priority': self.calculate_effective_priority()
         }
 
 class SyncLog(db.Model):
@@ -788,6 +751,7 @@ class User(db.Model):
     # Two-Factor Authentication
     totp_secret = db.Column(db.String(32), nullable=True)
     totp_enabled = db.Column(db.Boolean, default=False)
+    totp_required = db.Column(db.Boolean, default=False)  # Admin can require 2FA setup
 
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -1152,6 +1116,7 @@ class User(db.Model):
             'must_change_password': self.must_change_password or False,
             # 2FA status
             'totp_enabled': self.totp_enabled or False,
+            'totp_required': self.totp_required or False,
             # Multi-org data
             'org_memberships': org_memberships,
             'all_organizations': self.get_all_organizations()
@@ -1269,9 +1234,11 @@ class Asset(db.Model):
     organization = db.relationship('Organization', backref=db.backref('assets', lazy='dynamic'))
     product_installations = db.relationship('ProductInstallation', backref='asset', cascade='all, delete-orphan', lazy='dynamic')
 
-    # Unique constraint: hostname should be unique per organization
+    # Unique constraint and composite indexes
     __table_args__ = (
         db.UniqueConstraint('organization_id', 'hostname', name='uix_org_hostname'),
+        db.Index('idx_asset_org_agent', 'organization_id', 'agent_id'),
+        db.Index('idx_asset_org_status', 'organization_id', 'status'),
     )
 
     def get_tags(self):
@@ -1851,7 +1818,7 @@ class AgentEvent(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
     asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
-    api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True)
+    api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True, index=True)
 
     # Event details
     event_type = db.Column(db.String(50), nullable=False, index=True)

@@ -188,6 +188,120 @@ class LDAPSyncEngine:
             }
 
     @staticmethod
+    def _handle_auto_deprovisioning(ldap_users, organization_id=None, sync_id=None, initiated_by=None):
+        """
+        Handle auto-deprovisioning of users who no longer belong to any LDAP groups
+        with auto_deprovision enabled.
+
+        Args:
+            ldap_users: List of LDAP User objects that were synced
+            organization_id: Organization ID filter (or None for all)
+            sync_id: Sync ID for audit logging
+            initiated_by: User ID who initiated sync
+
+        Returns:
+            int: Number of users deprovisioned
+        """
+        deprovisioned_count = 0
+
+        # Get all mappings with auto_deprovision enabled
+        deprovision_mappings = LDAPGroupMapping.query.filter(
+            LDAPGroupMapping.auto_deprovision == True,
+            LDAPGroupMapping.is_active == True,
+            LDAPGroupMapping.sync_enabled == True
+        )
+
+        if organization_id:
+            deprovision_mappings = deprovision_mappings.filter(
+                LDAPGroupMapping.organization_id == organization_id
+            )
+
+        deprovision_mappings = deprovision_mappings.all()
+
+        if not deprovision_mappings:
+            logger.debug("No auto-deprovision mappings configured")
+            return 0
+
+        # Get the LDAP group DNs that have auto_deprovision enabled
+        deprovision_groups = {m.ldap_group_dn for m in deprovision_mappings}
+
+        logger.info(f"Checking {len(ldap_users)} users against {len(deprovision_groups)} auto-deprovision groups")
+
+        for user in ldap_users:
+            if not user.is_active:
+                continue  # Already deactivated
+
+            try:
+                # Get user's current LDAP groups
+                result = LDAPManager.get_user_groups(user.username)
+
+                if not result['success']:
+                    logger.warning(f"Could not get LDAP groups for {user.username}: {result.get('error')}")
+                    continue
+
+                user_groups = set(result['groups'])
+
+                # Check if user was previously in any auto-deprovision group
+                # by checking their organization assignment matches a deprovision mapping
+                user_org_deprovision_mappings = [
+                    m for m in deprovision_mappings
+                    if m.organization_id == user.organization_id
+                ]
+
+                if not user_org_deprovision_mappings:
+                    continue  # User's org doesn't have deprovision mappings
+
+                # Get the groups for user's org that have auto_deprovision
+                org_deprovision_groups = {m.ldap_group_dn for m in user_org_deprovision_mappings}
+
+                # Check if user is NO LONGER in ANY of the deprovision groups
+                # but is still assigned to this organization (meaning they were removed)
+                user_in_deprovision_groups = user_groups.intersection(org_deprovision_groups)
+
+                # Also check if they have ANY active mapping
+                any_active_mapping = LDAPGroupMapping.query.filter(
+                    LDAPGroupMapping.ldap_group_dn.in_(user_groups),
+                    LDAPGroupMapping.is_active == True,
+                    LDAPGroupMapping.sync_enabled == True
+                ).first()
+
+                # Deprovision if:
+                # 1. User is not in any deprovision groups for their org, AND
+                # 2. User has no other active mappings
+                if not user_in_deprovision_groups and not any_active_mapping:
+                    # Deactivate user
+                    user.is_active = False
+                    deprovisioned_count += 1
+
+                    logger.info(f"Auto-deprovisioned user {user.username} - no longer in required LDAP groups")
+
+                    # Log audit event
+                    audit_log = LDAPAuditLog(
+                        sync_id=sync_id,
+                        event_type='user_deprovisioned',
+                        user_id=initiated_by,
+                        target_user_id=user.id,
+                        organization_id=user.organization_id,
+                        ldap_groups=json.dumps(list(user_groups)),
+                        field_changed='is_active',
+                        old_value='True',
+                        new_value='False',
+                        description=f"User auto-deprovisioned - removed from all mapped LDAP groups",
+                        success=True
+                    )
+                    db.session.add(audit_log)
+
+            except Exception as e:
+                logger.error(f"Error checking deprovision for user {user.username}: {str(e)}")
+                continue
+
+        if deprovisioned_count > 0:
+            db.session.commit()
+            logger.info(f"Auto-deprovisioned {deprovisioned_count} users")
+
+        return deprovisioned_count
+
+    @staticmethod
     def sync_all_ldap_users(organization_id=None, initiated_by=None):
         """
         Sync all LDAP users in system or specific organization
@@ -252,7 +366,13 @@ class LDAPSyncEngine:
                     })
 
             # Handle deprovisioning (users removed from all groups)
-            # TODO: Implement auto-deprovisioning based on mapping settings
+            deprovisioned_count = LDAPSyncEngine._handle_auto_deprovisioning(
+                ldap_users=ldap_users,
+                organization_id=organization_id,
+                sync_id=sync_id,
+                initiated_by=initiated_by
+            )
+            stats['users_deactivated'] = deprovisioned_count
 
             # Calculate duration
             duration = (datetime.utcnow() - start_time).total_seconds()

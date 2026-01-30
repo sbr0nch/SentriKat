@@ -2,7 +2,7 @@
 
 ## Copyright Notice
 
-**Copyright © 2024-2025 Denis Sota. All Rights Reserved.**
+**Copyright © 2024-2026 Denis Sota. All Rights Reserved.**
 
 ---
 
@@ -148,10 +148,11 @@ SentriKat includes the following open-source components:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2024 | Initial release |
+| 1.1 | 2026 | License year update |
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: December 2024
+**Document Version**: 1.1
+**Last Updated**: January 2026
 
-*© 2024-2025 Denis Sota. SentriKat is a trademark of Denis Sota.*
+*© 2024-2026 Denis Sota. SentriKat is a trademark of Denis Sota.*

@@ -340,7 +340,6 @@ def sync_integration(integration) -> Dict[str, Any]:
             cpe_product=cpe_product,
             cpe_match_confidence=confidence,
             organization_id=integration.organization_id,
-            criticality=integration.default_criticality or 'medium',
             status='pending'
         )
 

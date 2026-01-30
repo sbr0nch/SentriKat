@@ -1,15 +1,19 @@
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, send_from_directory
 from app import db, csrf, limiter
+from sqlalchemy import func
+from sqlalchemy.orm import selectinload
+import os
 from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required, org_admin_required, manager_required
 from app.licensing import requires_professional, check_user_limit, check_org_limit, check_product_limit
+from app.error_utils import safe_error_response, ERROR_MSGS
 import json
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,27 @@ bp = Blueprint('main', __name__)
 
 # Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
 csrf.exempt(bp)
+
+
+# =============================================================================
+# Static File Serving (Persistent uploads from data volume)
+# =============================================================================
+
+@bp.route('/data/uploads/<path:filename>')
+@login_required
+def serve_upload(filename):
+    """Serve uploaded files from persistent data directory.
+
+    Protected by login_required since uploaded files may contain sensitive branding.
+    Flask's send_from_directory has built-in path traversal protection.
+    """
+    # Additional path traversal protection - reject any path with .. or absolute paths
+    if '..' in filename or filename.startswith('/'):
+        return jsonify({'error': 'Invalid filename'}), 400
+
+    data_dir = os.environ.get('DATA_DIR', '/app/data')
+    uploads_dir = os.path.join(data_dir, 'uploads')
+    return send_from_directory(uploads_dir, filename)
 
 
 # =============================================================================
@@ -80,7 +105,7 @@ def get_status():
     """
     try:
         last_sync = SyncLog.query.order_by(SyncLog.started_at.desc()).first()
-        vuln_count = Vulnerability.query.count()
+        vuln_count = Vulnerability.query.count() or 0
 
         return jsonify({
             'status': 'online',
@@ -91,6 +116,7 @@ def get_status():
         })
     except Exception as e:
         logger.error(f"Status check error: {str(e)}")
+        db.session.rollback()  # Rollback on error to clean session state
         return jsonify({
             'status': 'error',
             'version': APP_VERSION
@@ -199,11 +225,13 @@ def get_products():
     - status: Filter by status (active, inactive)
     - page: Page number (1-indexed)
     - per_page: Items per page (default 25, max 100)
+    - grouped: If 'true', group products by vendor+product_name with versions as array
 
     - Super Admin: See all products (can filter by any org)
     - Others: Only see products assigned to their organization
     """
     from app.models import product_organizations
+    from sqlalchemy import select
     import logging
     logger = logging.getLogger(__name__)
 
@@ -221,25 +249,34 @@ def get_products():
     page = request.args.get('page', type=int)
     per_page = request.args.get('per_page', 25, type=int)
     per_page = min(per_page, 100)  # Limit max items per page
+    grouped = request.args.get('grouped', '').lower() == 'true'
 
     logger.info(f"get_products: user={current_user.username}, role={current_user.role}, is_super_admin={current_user.is_super_admin()}")
 
     # Build base query based on permissions
+    # Fetch IDs first to avoid scalar_subquery issues with connection pool
+    query = Product.query
+
     if current_user.is_super_admin():
-        query = Product.query
         logger.info("get_products: super_admin sees all products")
 
         # Super admin can filter by specific organization
         if filter_org:
-            query = query.join(
-                product_organizations,
-                Product.id == product_organizations.c.product_id
-            ).filter(
-                db.or_(
-                    product_organizations.c.organization_id == filter_org,
-                    Product.organization_id == filter_org
+            # Get product IDs for this org - fetch IDs first
+            org_product_ids = db.session.execute(
+                select(product_organizations.c.product_id).where(
+                    product_organizations.c.organization_id == filter_org
                 )
-            )
+            ).scalars().all()
+            if org_product_ids:
+                query = query.filter(
+                    db.or_(
+                        Product.id.in_(org_product_ids),
+                        Product.organization_id == filter_org
+                    )
+                )
+            else:
+                query = query.filter(Product.organization_id == filter_org)
     else:
         # Get user's current organization from session
         org_id = session.get('organization_id') or current_user.organization_id
@@ -251,16 +288,21 @@ def get_products():
                 return jsonify({'products': [], 'total': 0, 'page': 1, 'per_page': per_page, 'pages': 0})
             return jsonify([])
 
-        # Get products assigned via many-to-many table or legacy field
-        query = Product.query.outerjoin(
-            product_organizations,
-            Product.id == product_organizations.c.product_id
-        ).filter(
-            db.or_(
-                product_organizations.c.organization_id == org_id,
-                Product.organization_id == org_id
+        # Get products assigned via many-to-many table - fetch IDs first
+        org_product_ids = db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == org_id
             )
-        )
+        ).scalars().all()
+        if org_product_ids:
+            query = query.filter(
+                db.or_(
+                    Product.id.in_(org_product_ids),
+                    Product.organization_id == org_id
+                )
+            )
+        else:
+            query = query.filter(Product.organization_id == org_id)
 
         logger.info(f"get_products: filtered to org {org_id}")
 
@@ -291,8 +333,84 @@ def get_products():
     elif status == 'inactive':
         query = query.filter(Product.active == False)
 
-    # Ensure no duplicates from join and order by vendor, product name
-    query = query.distinct().order_by(Product.vendor, Product.product_name)
+    # Order by vendor, product name (no distinct needed with subquery approach)
+    query = query.order_by(Product.vendor, Product.product_name)
+
+    # If grouped mode requested, group by vendor+product_name
+    if grouped:
+        products = query.all()
+        grouped_products = {}
+
+        for p in products:
+            # Create unique key from vendor + product_name (case-insensitive)
+            key = f"{(p.vendor or '').lower()}|{(p.product_name or '').lower()}"
+
+            if key not in grouped_products:
+                grouped_products[key] = {
+                    'vendor': p.vendor,
+                    'product_name': p.product_name,
+                    'cpe_vendor': p.cpe_vendor,
+                    'cpe_product': p.cpe_product,
+                    'keywords': p.keywords,
+                    'active': p.active,
+                    'versions': [],
+                    'organization_ids': set(),
+                    'organization_names': set(),
+                    'total_vulnerabilities': 0,
+                    'has_vulnerable_version': False
+                }
+
+            # Add this version entry
+            version_entry = {
+                'id': p.id,
+                'version': p.version or 'Any',
+                'active': p.active,
+                'cpe_uri': p.cpe_uri,
+                'source': getattr(p, 'source', 'manual'),
+                'created_at': p.created_at.isoformat() if p.created_at else None,
+                'vulnerability_count': len(p.matches) if p.matches else 0,
+                'is_vulnerable': any(not m.acknowledged for m in p.matches) if p.matches else False
+            }
+            grouped_products[key]['versions'].append(version_entry)
+
+            # Aggregate organization info
+            if p.organization_id:
+                grouped_products[key]['organization_ids'].add(p.organization_id)
+                if p.organization:
+                    grouped_products[key]['organization_names'].add(p.organization.display_name or p.organization.name)
+
+            # Track vulnerability status
+            if version_entry['is_vulnerable']:
+                grouped_products[key]['has_vulnerable_version'] = True
+            grouped_products[key]['total_vulnerabilities'] += version_entry['vulnerability_count']
+
+        # Convert to list and clean up sets
+        result = []
+        for key, group in grouped_products.items():
+            group['organization_ids'] = list(group['organization_ids'])
+            group['organization_names'] = list(group['organization_names'])
+            # Sort versions - put specific versions first, 'Any' last
+            group['versions'].sort(key=lambda v: (v['version'] == 'Any', v['version'] or ''))
+            result.append(group)
+
+        # Sort by vendor, then product_name
+        result.sort(key=lambda g: (g['vendor'] or '', g['product_name'] or ''))
+
+        # Apply pagination if requested
+        if page:
+            total = len(result)
+            start = (page - 1) * per_page
+            end = start + per_page
+            return jsonify({
+                'products': result[start:end],
+                'total': total,
+                'page': page,
+                'per_page': per_page,
+                'pages': (total + per_page - 1) // per_page
+            })
+
+        logger.info(f"get_products (grouped): returning {len(result)} product groups")
+        return jsonify(result)
 
     # If pagination requested, return paginated result
     if page:
@@ -379,7 +497,6 @@ def create_product():
         keywords=data.get('keywords'),
         description=data.get('description'),
         active=data.get('active', True),
-        criticality=data.get('criticality', 'medium'),
         # CPE fields for NVD matching
         cpe_vendor=data.get('cpe_vendor'),
         cpe_product=data.get('cpe_product'),
@@ -482,8 +599,6 @@ def update_product(product_id):
         product.description = data['description']
     if 'active' in data:
         product.active = data['active']
-    if 'criticality' in data:
-        product.criticality = data['criticality']
     # CPE fields for NVD matching
     if 'cpe_vendor' in data:
         product.cpe_vendor = data['cpe_vendor']
@@ -667,95 +782,10 @@ def delete_product(product_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.exception("Failed to delete product")
+        return jsonify({'success': False, 'error': ERROR_MSGS['database']}), 500
 
 
-@bp.route('/api/products/bulk-update-criticality', methods=['POST'])
-@manager_required
-def bulk_update_product_criticality():
-    """
-    Bulk update criticality for multiple products.
-
-    Request body:
-    {
-        "product_ids": [1, 2, 3, ...],
-        "criticality": "high"  // critical, high, medium, low
-    }
-
-    Permissions:
-    - Super Admin: Can update any product
-    - Org Admin/Manager: Can only update products in their org
-    """
-    from app.logging_config import log_audit_event
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'Request body required'}), 400
-
-    product_ids = data.get('product_ids', [])
-    new_criticality = data.get('criticality', '').lower()
-
-    if not product_ids:
-        return jsonify({'error': 'No products specified'}), 400
-
-    valid_criticalities = ['critical', 'high', 'medium', 'low']
-    if new_criticality not in valid_criticalities:
-        return jsonify({'error': f'Invalid criticality. Must be one of: {", ".join(valid_criticalities)}'}), 400
-
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
-    user_org_id = session.get('organization_id') or current_user.organization_id
-
-    updated = 0
-    skipped = 0
-    errors = []
-
-    for product_id in product_ids:
-        try:
-            product = Product.query.get(product_id)
-            if not product:
-                skipped += 1
-                continue
-
-            # Permission check for non-super-admins
-            if not current_user.is_super_admin():
-                product_org_ids = [org.id for org in product.organizations.all()]
-                if user_org_id not in product_org_ids:
-                    skipped += 1
-                    continue
-
-            old_criticality = product.criticality
-            if old_criticality != new_criticality:
-                product.criticality = new_criticality
-                updated += 1
-
-                log_audit_event(
-                    'BULK_UPDATE_CRITICALITY',
-                    'products',
-                    product_id,
-                    old_value={'criticality': old_criticality},
-                    new_value={'criticality': new_criticality},
-                    details=f"Bulk updated {product.vendor} {product.product_name} criticality"
-                )
-            else:
-                skipped += 1
-
-        except Exception as e:
-            errors.append({'product_id': product_id, 'error': str(e)})
-
-    try:
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Database error: {str(e)}'}), 500
-
-    return jsonify({
-        'success': True,
-        'updated': updated,
-        'skipped': skipped,
-        'errors': errors,
-        'message': f'Updated {updated} products to {new_criticality} criticality'
-    })
 
 
 @bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
@@ -822,7 +852,8 @@ def assign_product_organizations(product_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to add organization to product")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 @bp.route('/api/products/<int:product_id>/organizations/<int:org_id>', methods=['DELETE'])
 @org_admin_required
@@ -905,7 +936,8 @@ def remove_product_organization(product_id, org_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to remove organization from product")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 @bp.route('/api/vulnerabilities', methods=['GET'])
 @login_required
@@ -985,14 +1017,15 @@ def get_vulnerabilities():
         })
 
     except Exception as e:
-        logger.error(f"Error getting vulnerabilities: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting vulnerabilities")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 @bp.route('/api/vulnerabilities/stats', methods=['GET'])
 @login_required
 def get_vulnerability_stats():
     """Get vulnerability statistics with priority breakdown for current organization"""
     from app.models import product_organizations
+    from sqlalchemy import select
 
     # Get current organization
     org_id = session.get('organization_id')
@@ -1000,40 +1033,77 @@ def get_vulnerability_stats():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
-    total_vulns = Vulnerability.query.count()
+    # Use simple ORM count - avoid complex select patterns
+    total_vulns = Vulnerability.query.count() or 0
 
-    # Filter matches by organization using multi-org relationship
+    # Filter matches by organization - fetch IDs first to avoid subquery issues
     if org_id:
-        # Join through product_organizations junction table
-        total_matches_query = db.session.query(VulnerabilityMatch).join(Product).join(
-            product_organizations, Product.id == product_organizations.c.product_id
-        ).filter(product_organizations.c.organization_id == org_id)
+        # Get product IDs for this organization
+        org_product_ids = db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == org_id
+            )
+        ).scalars().all()
 
-        unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).join(
-            product_organizations, Product.id == product_organizations.c.product_id
-        ).filter(
-            product_organizations.c.organization_id == org_id,
-            VulnerabilityMatch.acknowledged == False
-        )
+        if org_product_ids:
+            total_matches_query = VulnerabilityMatch.query.filter(
+                VulnerabilityMatch.product_id.in_(org_product_ids)
+            )
 
-        ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).join(
-            product_organizations, Product.id == product_organizations.c.product_id
-        ).filter(
-            product_organizations.c.organization_id == org_id,
-            Vulnerability.known_ransomware == True
-        )
+            unacknowledged_query = VulnerabilityMatch.query.filter(
+                VulnerabilityMatch.product_id.in_(org_product_ids),
+                VulnerabilityMatch.acknowledged == False
+            )
 
-        products_tracked_query = db.session.query(Product).join(
-            product_organizations, Product.id == product_organizations.c.product_id
-        ).filter(
-            product_organizations.c.organization_id == org_id,
-            Product.active == True
-        )
+            # Get ransomware vulnerability IDs
+            ransomware_vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(Vulnerability.known_ransomware == True)
+            ).scalars().all()
+
+            if ransomware_vuln_ids:
+                ransomware_query = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids)
+                )
+            else:
+                ransomware_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.id < 0)  # Empty
+
+            products_tracked_query = Product.query.filter(
+                Product.id.in_(org_product_ids),
+                Product.active == True
+            )
+        else:
+            # No products in org - return zeros
+            return jsonify({
+                'total_vulnerabilities': total_vulns,
+                'total_matches': 0,
+                'unacknowledged': 0,
+                'unacknowledged_cves': 0,
+                'ransomware_related': 0,
+                'products_tracked': 0,
+                'priority_breakdown': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0},
+                'cve_priority_breakdown': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0},
+                'critical_count': 0,
+                'high_count': 0,
+                'medium_count': 0,
+                'low_count': 0
+            })
     else:
         # No org filter - show all
-        total_matches_query = db.session.query(VulnerabilityMatch).join(Product)
-        unacknowledged_query = db.session.query(VulnerabilityMatch).join(Product).filter(VulnerabilityMatch.acknowledged == False)
-        ransomware_query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product).filter(Vulnerability.known_ransomware == True)
+        total_matches_query = VulnerabilityMatch.query
+        unacknowledged_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.acknowledged == False)
+
+        ransomware_vuln_ids = db.session.execute(
+            select(Vulnerability.id).where(Vulnerability.known_ransomware == True)
+        ).scalars().all()
+
+        if ransomware_vuln_ids:
+            ransomware_query = VulnerabilityMatch.query.filter(
+                VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids)
+            )
+        else:
+            ransomware_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.id < 0)  # Empty
+
         products_tracked_query = Product.query.filter_by(active=True)
 
     total_matches = total_matches_query.count()
@@ -1042,7 +1112,11 @@ def get_vulnerability_stats():
     products_tracked = products_tracked_query.count()
 
     # Calculate priority-based stats (both CVE counts and match counts)
-    all_matches = unacknowledged_query.all()
+    # Use selectinload to eagerly load relationships and avoid column mapping issues
+    all_matches = unacknowledged_query.options(
+        selectinload(VulnerabilityMatch.product),
+        selectinload(VulnerabilityMatch.vulnerability)
+    ).all()
 
     # Match counts (existing)
     priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
@@ -1244,8 +1318,8 @@ def get_vulnerabilities_grouped():
         })
 
     except Exception as e:
-        logger.error(f"Error getting grouped vulnerabilities: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting grouped vulnerabilities")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 @bp.route('/api/products/aggregated', methods=['GET'])
@@ -1489,6 +1563,74 @@ def unacknowledge_match(match_id):
     return jsonify(match.to_dict())
 
 
+@bp.route('/api/matches/<int:match_id>/snooze', methods=['POST'])
+@login_required
+def snooze_match(match_id):
+    """
+    Snooze a vulnerability match for a specified duration.
+
+    Request body:
+    {
+        "hours": 24  // or "days": 7
+    }
+
+    Snoozing temporarily suppresses alerts for this match until the snooze expires.
+    Useful when a patch isn't available yet or remediation is planned.
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    match = VulnerabilityMatch.query.get_or_404(match_id)
+
+    # Authorization: verify user can manage this product's matches
+    if not current_user.is_super_admin():
+        product_org_ids = [org.id for org in match.product.organizations.all()]
+        if match.product.organization_id:
+            product_org_ids.append(match.product.organization_id)
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if not any(org_id in user_org_ids for org_id in product_org_ids):
+            return jsonify({'error': 'Insufficient permissions'}), 403
+
+    data = request.get_json() or {}
+    hours = data.get('hours', 0)
+    days = data.get('days', 0)
+
+    if not hours and not days:
+        # Default to 24 hours if not specified
+        hours = 24
+
+    total_hours = hours + (days * 24)
+    match.snoozed_until = datetime.utcnow() + timedelta(hours=total_hours)
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'snoozed_until': match.snoozed_until.isoformat(),
+        'match': match.to_dict()
+    })
+
+
+@bp.route('/api/matches/<int:match_id>/unsnooze', methods=['POST'])
+@login_required
+def unsnooze_match(match_id):
+    """Remove snooze from a vulnerability match."""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    match = VulnerabilityMatch.query.get_or_404(match_id)
+
+    # Authorization
+    if not current_user.is_super_admin():
+        product_org_ids = [org.id for org in match.product.organizations.all()]
+        if match.product.organization_id:
+            product_org_ids.append(match.product.organization_id)
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        if not any(org_id in user_org_ids for org_id in product_org_ids):
+            return jsonify({'error': 'Insufficient permissions'}), 403
+
+    match.snoozed_until = None
+    db.session.commit()
+    return jsonify(match.to_dict())
+
+
 @bp.route('/api/matches/acknowledge-by-cve/<cve_id>', methods=['POST'])
 @login_required
 def acknowledge_by_cve(cve_id):
@@ -1522,15 +1664,18 @@ def acknowledge_by_cve(cve_id):
             acknowledged=False
         ).all()
     else:
-        # Non-admin: filter by organization membership
+        # Non-admin: filter by organization membership using scalar_subquery
         user_org_ids = [org.id for org in current_user.get_all_organizations()]
 
-        matches = db.session.query(VulnerabilityMatch).join(Product).join(
-            product_organizations, Product.id == product_organizations.c.product_id
-        ).filter(
+        # Get product IDs accessible to user's organizations
+        user_product_ids = db.session.query(product_organizations.c.product_id).filter(
+            product_organizations.c.organization_id.in_(user_org_ids)
+        ).scalar_subquery()
+
+        matches = db.session.query(VulnerabilityMatch).filter(
             VulnerabilityMatch.vulnerability_id == vuln.id,
             VulnerabilityMatch.acknowledged == False,
-            product_organizations.c.organization_id.in_(user_org_ids)
+            VulnerabilityMatch.product_id.in_(user_product_ids)
         ).all()
 
     if not matches:
@@ -1589,14 +1734,18 @@ def unacknowledge_by_cve(cve_id):
             acknowledged=True
         ).all()
     else:
+        # Non-admin: filter by organization membership using scalar_subquery
         user_org_ids = [org.id for org in current_user.get_all_organizations()]
 
-        matches = db.session.query(VulnerabilityMatch).join(Product).join(
-            product_organizations, Product.id == product_organizations.c.product_id
-        ).filter(
+        # Get product IDs accessible to user's organizations
+        user_product_ids = db.session.query(product_organizations.c.product_id).filter(
+            product_organizations.c.organization_id.in_(user_org_ids)
+        ).scalar_subquery()
+
+        matches = db.session.query(VulnerabilityMatch).filter(
             VulnerabilityMatch.vulnerability_id == vuln.id,
             VulnerabilityMatch.acknowledged == True,
-            product_organizations.c.organization_id.in_(user_org_ids)
+            VulnerabilityMatch.product_id.in_(user_product_ids)
         ).all()
 
     if not matches:
@@ -1703,29 +1852,34 @@ def test_connection():
             }), 400
 
     except requests.exceptions.SSLError as e:
+        logger.warning(f"SSL error during proxy test: {e}")
         return jsonify({
             'success': False,
-            'error': f'SSL Error: {str(e)}. Try disabling SSL verification if behind a proxy.'
+            'error': 'SSL Error: Try disabling SSL verification if behind a proxy.'
         }), 400
     except requests.exceptions.ProxyError as e:
+        logger.warning(f"Proxy error during proxy test: {e}")
         return jsonify({
             'success': False,
-            'error': f'Proxy Error: {str(e)}. Check your proxy settings.'
+            'error': 'Proxy Error: Check your proxy settings.'
         }), 400
     except requests.exceptions.ConnectionError as e:
+        logger.warning(f"Connection error during proxy test: {e}")
         return jsonify({
             'success': False,
-            'error': f'Connection Error: {str(e)}'
+            'error': 'Connection Error: Unable to reach the target URL.'
         }), 400
     except requests.exceptions.Timeout as e:
+        logger.warning(f"Timeout during proxy test: {e}")
         return jsonify({
             'success': False,
-            'error': f'Timeout: {str(e)}'
+            'error': 'Timeout: The request took too long to complete.'
         }), 400
     except Exception as e:
+        logger.exception("Unexpected error during proxy test")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': ERROR_MSGS['network']
         }), 500
 
 
@@ -1750,7 +1904,8 @@ def rematch_products():
             'message': f'Removed {removed} invalid matches, added {added} new matches'
         })
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.exception("Error during product rematch")
+        return jsonify({'status': 'error', 'message': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/products/apply-cpe', methods=['POST'])
@@ -1776,7 +1931,8 @@ def apply_cpe_mappings():
             'message': f'Applied CPE to {updated} products. Coverage: {stats["coverage_percent"]}%'
         })
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.exception("Error applying CPE mappings")
+        return jsonify({'status': 'error', 'message': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/products/cpe-suggestions', methods=['GET'])
@@ -1799,7 +1955,8 @@ def get_cpe_suggestions():
             'coverage': stats
         })
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.exception("Error getting CPE suggestions")
+        return jsonify({'status': 'error', 'message': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/alerts/trigger-critical', methods=['POST'])
@@ -1818,12 +1975,15 @@ def trigger_critical_cve_alerts():
         organizations = Organization.query.filter_by(active=True).all()
 
         for org in organizations:
-            # Get unacknowledged critical/high priority vulnerabilities
+            # Get unacknowledged critical/high priority vulnerabilities using scalar_subquery
+            org_product_ids = db.session.query(Product.id).filter(
+                Product.organization_id == org.id
+            ).scalar_subquery()
+
             unack_matches = (
                 VulnerabilityMatch.query
-                .join(Product)
                 .filter(
-                    Product.organization_id == org.id,
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
                     VulnerabilityMatch.acknowledged == False
                 )
                 .all()
@@ -1870,10 +2030,127 @@ def trigger_critical_cve_alerts():
         })
 
     except Exception as e:
+        logger.exception("Error triggering critical CVE alerts")
         return jsonify({
             'status': 'error',
-            'error': str(e)
+            'error': ERROR_MSGS['smtp']
         }), 500
+
+
+@bp.route('/api/alerts/trigger-webhooks', methods=['POST'])
+@admin_required
+def trigger_webhook_alerts():
+    """
+    Manually trigger webhook alerts for all organizations
+
+    Permissions:
+    - Super Admin only: Can manually trigger webhook notifications
+    """
+    from app.cisa_sync import send_org_webhook
+
+    try:
+        results = []
+        organizations = Organization.query.filter_by(active=True).all()
+
+        for org in organizations:
+            # Check if org has webhooks enabled
+            if not org.webhook_enabled or not org.webhook_url:
+                results.append({
+                    'organization': org.name,
+                    'status': 'skipped',
+                    'reason': 'Webhook not configured'
+                })
+                continue
+
+            # Get unacknowledged matches for this org
+            org_product_ids = db.session.query(Product.id).filter(
+                Product.organization_id == org.id
+            ).scalar_subquery()
+
+            unack_matches = (
+                VulnerabilityMatch.query
+                .filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.acknowledged == False
+                )
+                .all()
+            )
+
+            # Filter for critical/high priority matches
+            priority_matches = [
+                m for m in unack_matches
+                if m.calculate_effective_priority() in ('critical', 'high')
+            ]
+
+            if not priority_matches:
+                results.append({
+                    'organization': org.name,
+                    'status': 'skipped',
+                    'reason': 'No unacknowledged critical/high CVEs'
+                })
+                continue
+
+            # Count critical
+            critical_count = sum(1 for m in priority_matches if m.calculate_effective_priority() == 'critical')
+
+            # Send webhook
+            result = send_org_webhook(
+                org=org,
+                new_cves_count=len(priority_matches),
+                critical_count=critical_count,
+                matches_count=len(priority_matches),
+                matches=priority_matches
+            )
+
+            if result:
+                if result.get('skipped'):
+                    results.append({
+                        'organization': org.name,
+                        'status': 'skipped',
+                        'reason': result.get('reason', 'No new CVEs to alert')
+                    })
+                elif result.get('success'):
+                    results.append({
+                        'organization': org.name,
+                        'status': 'success',
+                        'new_cves': result.get('new_cves', 0)
+                    })
+                else:
+                    results.append({
+                        'organization': org.name,
+                        'status': 'error',
+                        'reason': result.get('error', 'Unknown error')
+                    })
+            else:
+                results.append({
+                    'organization': org.name,
+                    'status': 'skipped',
+                    'reason': 'No webhook configured'
+                })
+
+        # Count successes
+        sent_count = sum(1 for r in results if r['status'] == 'success')
+        skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+        error_count = sum(1 for r in results if r['status'] == 'error')
+
+        return jsonify({
+            'status': 'success',
+            'summary': {
+                'total_orgs': len(organizations),
+                'webhooks_sent': sent_count,
+                'skipped': skipped_count,
+                'errors': error_count
+            },
+            'details': results
+        })
+
+    except Exception as e:
+        logger.exception("Error triggering webhook alerts")
+        return jsonify({
+            'status': 'error',
+            'error': 'Failed to send webhook notifications'
+        }), 500
+
 
 # ============================================================================
 # SERVICE CATALOG API ENDPOINTS
@@ -1905,24 +2182,26 @@ def search_catalog():
 
     # Autocomplete mode: return unique vendor or product names
     if search_type == 'vendor':
-        vendors = db.session.query(ServiceCatalog.vendor)\
+        vendors = ServiceCatalog.query\
             .filter(ServiceCatalog.is_active == True)\
             .filter(ServiceCatalog.vendor.ilike(f'%{query}%'))\
+            .with_entities(ServiceCatalog.vendor)\
             .distinct()\
             .order_by(ServiceCatalog.vendor)\
             .limit(limit)\
             .all()
-        return jsonify([v[0] for v in vendors])
+        return jsonify([v.vendor for v in vendors])
 
     elif search_type == 'product':
-        products = db.session.query(ServiceCatalog.product_name)\
+        products = ServiceCatalog.query\
             .filter(ServiceCatalog.is_active == True)\
             .filter(ServiceCatalog.product_name.ilike(f'%{query}%'))\
+            .with_entities(ServiceCatalog.product_name)\
             .distinct()\
             .order_by(ServiceCatalog.product_name)\
             .limit(limit)\
             .all()
-        return jsonify([p[0] for p in products])
+        return jsonify([p.product_name for p in products])
 
     # Full search mode: return complete service records
     results = ServiceCatalog.query.filter_by(is_active=True)
@@ -1952,12 +2231,16 @@ def search_catalog():
 @login_required
 def get_categories():
     """Get all categories with counts"""
-    categories = db.session.query(
-        ServiceCatalog.category,
-        db.func.count(ServiceCatalog.id).label('count')
-    ).filter_by(is_active=True).group_by(ServiceCatalog.category).all()
+    categories = ServiceCatalog.query\
+        .filter_by(is_active=True)\
+        .with_entities(
+            ServiceCatalog.category,
+            func.count(ServiceCatalog.id).label('count')
+        )\
+        .group_by(ServiceCatalog.category)\
+        .all()
 
-    return jsonify([{'name': c[0], 'count': c[1]} for c in categories])
+    return jsonify([{'name': c.category, 'count': c.count} for c in categories])
 
 @bp.route('/api/catalog/popular', methods=['GET'])
 @login_required
@@ -2285,7 +2568,8 @@ def test_smtp(org_id):
         })
 
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.exception("Failed to send test email")
+        return jsonify({'success': False, 'error': ERROR_MSGS['smtp']})
 
 @bp.route('/api/organizations/<int:org_id>/alert-logs', methods=['GET'])
 @login_required
@@ -2675,7 +2959,8 @@ def delete_user(user_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to delete user: {str(e)}'}), 500
+        logger.exception(f"Failed to delete user {user_id}")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 @bp.route('/api/users/<int:user_id>/toggle-active', methods=['POST'])
 @org_admin_required
@@ -2921,6 +3206,57 @@ def force_password_change(user_id):
         'message': message,
         'email_sent': email_sent
     })
+
+
+@bp.route('/api/users/<int:user_id>/require-2fa', methods=['POST'])
+@org_admin_required
+def require_2fa_for_user(user_id):
+    """
+    Require a user to set up 2FA on next login.
+
+    Permissions:
+    - Super Admin: Can require for any user
+    - Org Admin: Can only require for users in their organization
+    """
+    from app.logging_config import log_audit_event
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    user = User.query.get_or_404(user_id)
+
+    # Cannot require 2FA for yourself via this endpoint
+    if user_id == current_user_id:
+        return jsonify({'error': 'Use Security Settings to manage your own 2FA'}), 400
+
+    # Check permissions
+    if not current_user.can_manage_user(user):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Only for local users
+    if user.auth_type != 'local':
+        return jsonify({'error': '2FA management only applies to local users'}), 400
+
+    # If already enabled, nothing to do
+    if user.totp_enabled:
+        return jsonify({'error': 'User already has 2FA enabled'}), 400
+
+    # Set the totp_required flag (user must set up 2FA on next login)
+    user.totp_required = True
+
+    log_audit_event(
+        'REQUIRE_2FA',
+        'users',
+        user.id,
+        details=f"2FA required for {user.username} by {current_user.username}"
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'{user.username} will be required to set up 2FA on next login'
+    })
+
 
 # ============================================================================
 # USER ORGANIZATION ASSIGNMENTS (Multi-Org Support)
@@ -3306,7 +3642,8 @@ def get_audit_logs():
         paginated_logs = all_logs[start_idx:end_idx]
 
     except Exception as e:
-        return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
+        logger.exception("Failed to read audit logs")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
     return jsonify({
         'logs': paginated_logs,
@@ -3393,7 +3730,8 @@ def export_audit_logs():
                     continue
 
     except Exception as e:
-        return jsonify({'error': f'Failed to read audit logs: {str(e)}'}), 500
+        logger.exception("Failed to read audit logs for export")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
     # Sort by timestamp descending (most recent first)
     logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
@@ -3544,9 +3882,8 @@ def generate_monthly_report():
         return response
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to generate monthly report")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/reports/custom', methods=['GET'])
@@ -3608,9 +3945,8 @@ def generate_custom_report():
     except ValueError as e:
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to generate custom report")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @bp.route('/api/reports/export', methods=['GET'])
@@ -3656,9 +3992,8 @@ def export_selected_matches():
         return response
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to export selected matches")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 # ============================================================================

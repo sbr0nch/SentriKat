@@ -27,6 +27,8 @@ from app.models import (
     AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification
 )
 from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
+from app.auth import login_required, admin_required, org_admin_required
+from app.error_utils import ERROR_MSGS
 import json
 
 # Threshold for async processing (queued instead of immediate)
@@ -741,8 +743,8 @@ def queue_inventory_job(organization, data, api_key_id=None):
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error queueing inventory job for {hostname}: {e}", exc_info=True)
-        return jsonify({'error': f'Failed to queue inventory: {str(e)}'}), 500
+        logger.exception(f"Error queueing inventory job for {hostname}")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 def process_inventory_job(job):
@@ -849,7 +851,9 @@ def process_inventory_job(job):
                         product_name=product_name,
                         version=version,
                         active=True,
-                        criticality='medium'
+                        criticality='medium',
+                        source='agent',  # Track that this was auto-added by agent
+                        last_agent_report=datetime.utcnow()
                     )
                     # Auto-apply CPE mapping for better vulnerability matching
                     from app.cpe_mapping import apply_cpe_to_product
@@ -862,6 +866,15 @@ def process_inventory_job(job):
                     if organization not in product.organizations.all():
                         product.organizations.append(organization)
                 else:
+                    # Update last_agent_report timestamp
+                    product.last_agent_report = datetime.utcnow()
+
+                    # Re-enable if it was auto-disabled
+                    if product.auto_disabled:
+                        product.active = True
+                        product.auto_disabled = False
+                        logger.info(f"Re-enabled auto-disabled product: {vendor} {product_name}")
+
                     products_updated += 1
                     if organization not in product.organizations.all():
                         product.organizations.append(organization)
@@ -1015,7 +1028,7 @@ def report_inventory():
         data = request.get_json(force=True)  # force=True ignores content-type
     except Exception as e:
         logger.error(f"Failed to parse JSON body: {e}")
-        return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
+        return jsonify({'error': 'Invalid JSON format'}), 400
 
     if not data:
         logger.warning(f"Agent inventory failed: No JSON body from {source_ip}")
@@ -1181,7 +1194,9 @@ def report_inventory():
                     product_name=product_name,
                     version=version,  # Use first reported version as default
                     active=True,
-                    criticality='medium'
+                    criticality='medium',
+                    source='agent',  # Track that this was auto-added by agent
+                    last_agent_report=datetime.utcnow()
                 )
                 # Auto-apply CPE mapping for better vulnerability matching
                 from app.cpe_mapping import apply_cpe_to_product
@@ -1195,6 +1210,15 @@ def report_inventory():
                 if organization not in product.organizations.all():
                     product.organizations.append(organization)
             else:
+                # Update last_agent_report timestamp
+                product.last_agent_report = datetime.utcnow()
+
+                # Re-enable if it was auto-disabled
+                if product.auto_disabled:
+                    product.active = True
+                    product.auto_disabled = False
+                    logger.info(f"Re-enabled auto-disabled product: {vendor} {product_name}")
+
                 products_updated += 1
                 # Ensure product is assigned to this organization
                 if organization not in product.organizations.all():
@@ -1316,8 +1340,8 @@ def report_inventory():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error processing inventory report: {e}", exc_info=True)
-        return jsonify({'error': f'Failed to process inventory: {str(e)}'}), 500
+        logger.exception("Error processing inventory report")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 @agent_bp.route('/api/agent/heartbeat', methods=['POST'])
@@ -1410,19 +1434,23 @@ def list_jobs():
 
 
 @agent_bp.route('/api/admin/process-jobs', methods=['POST'])
+@admin_required
 @limiter.limit("10/minute")
 def trigger_job_processing():
     """
     Trigger processing of pending inventory jobs.
     Called by cron or manually by admin.
+    Requires super admin access.
     """
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
-    max_jobs = request.args.get('max', 10, type=int)
+    max_jobs = min(request.args.get('max', 10, type=int), 100)  # Cap at 100 to prevent resource exhaustion
+    if max_jobs < 1:
+        max_jobs = 10
     jobs_processed = 0
     jobs_failed = 0
 
@@ -1446,14 +1474,13 @@ def trigger_job_processing():
 
 
 @agent_bp.route('/api/admin/jobs', methods=['GET'])
+@login_required
 @limiter.limit("60/minute")
 def admin_list_jobs():
     """List all inventory jobs (admin view)."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
@@ -1490,6 +1517,7 @@ def admin_list_jobs():
 # ============================================================================
 
 @agent_bp.route('/api/assets', methods=['GET'])
+@login_required
 @limiter.limit("100/minute")
 def list_assets():
     """List all assets for the organization."""
@@ -1497,8 +1525,6 @@ def list_assets():
 
     try:
         user = get_current_user()
-        if not user:
-            return jsonify({'error': 'Authentication required'}), 401
 
         # Get organization filter
         org_id = request.args.get('organization_id', type=int)
@@ -1512,8 +1538,16 @@ def list_assets():
                 query = query.filter_by(organization_id=org_id)
         else:
             # Non-super-admins can only see their organization's assets
+            # Include both primary organization and org_memberships
             try:
-                user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+                user_org_ids = set()
+                # Add primary organization
+                if user.organization_id:
+                    user_org_ids.add(user.organization_id)
+                # Add multi-org memberships
+                for m in user.org_memberships.all():
+                    user_org_ids.add(m.organization_id)
+                user_org_ids = list(user_org_ids)
             except Exception as e:
                 logger.warning(f"Error getting org memberships for user {user.id}: {e}")
                 user_org_ids = []
@@ -1591,18 +1625,17 @@ def list_assets():
         })
 
     except Exception as e:
-        logger.error(f"Error in list_assets: {e}", exc_info=True)
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+        logger.exception("Error in list_assets")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['GET'])
+@login_required
 def get_asset(asset_id):
     """Get asset details with installed products."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     asset = Asset.query.get_or_404(asset_id)
 
@@ -1616,13 +1649,12 @@ def get_asset(asset_id):
 
 
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['DELETE'])
+@login_required
 def delete_asset(asset_id):
     """Delete an asset and its product installations."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     asset = Asset.query.get_or_404(asset_id)
 
@@ -1645,6 +1677,7 @@ def delete_asset(asset_id):
 
 
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['PUT', 'PATCH'])
+@login_required
 def update_asset(asset_id):
     """
     Update asset details.
@@ -1660,8 +1693,6 @@ def update_asset(asset_id):
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     asset = Asset.query.get_or_404(asset_id)
 
@@ -1717,13 +1748,12 @@ def update_asset(asset_id):
 
 
 @agent_bp.route('/api/assets/groups', methods=['GET'])
+@login_required
 def list_asset_groups():
     """List all unique asset groups/environments for filtering."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     # Build query based on permissions
     if user.is_super_admin():
@@ -1754,6 +1784,7 @@ def list_asset_groups():
 # ============================================================================
 
 @agent_bp.route('/api/agent-keys', methods=['GET'])
+@login_required
 @requires_professional('Agent Keys')
 def list_agent_keys():
     """List agent API keys for organization."""
@@ -1761,8 +1792,6 @@ def list_agent_keys():
 
     try:
         user = get_current_user()
-        if not user:
-            return jsonify({'error': 'Authentication required'}), 401
 
         # Check permission
         if not user.is_super_admin():
@@ -1771,8 +1800,25 @@ def list_agent_keys():
             if not org_id:
                 return jsonify({'error': 'organization_id required'}), 400
 
-            user_org = user.org_memberships.filter_by(organization_id=org_id).first()
-            if not user_org or user_org.role != 'org_admin':
+            # Check if user is org_admin either globally or in this specific org
+            has_permission = False
+
+            # Check global role first
+            if user.role == 'org_admin':
+                # Check if user belongs to this org (primary org or membership)
+                if user.organization_id == org_id:
+                    has_permission = True
+                else:
+                    user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+                    if user_org:
+                        has_permission = True
+            else:
+                # Check org-specific role
+                user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+                if user_org and user_org.role == 'org_admin':
+                    has_permission = True
+
+            if not has_permission:
                 return jsonify({'error': 'Organization admin access required'}), 403
 
             keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
@@ -1800,19 +1846,18 @@ def list_agent_keys():
         return jsonify({'api_keys': api_keys})
 
     except Exception as e:
-        logger.error(f"Error in list_agent_keys: {e}", exc_info=True)
-        return jsonify({'error': f'Failed to load agent keys: {str(e)}'}), 500
+        logger.exception("Error in list_agent_keys")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 @agent_bp.route('/api/agent-keys', methods=['POST'])
+@login_required
 @requires_professional('Agent Keys')
 def create_agent_key():
     """Create a new agent API key."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     data = request.get_json()
     org_id = data.get('organization_id')
@@ -1873,14 +1918,13 @@ def create_agent_key():
 
 
 @agent_bp.route('/api/agent-keys/<int:key_id>', methods=['DELETE'])
+@login_required
 @requires_professional('Agent Keys')
 def delete_agent_key(key_id):
     """Delete an agent API key."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     agent_key = AgentApiKey.query.get_or_404(key_id)
 
@@ -1907,24 +1951,26 @@ def delete_agent_key(key_id):
 # ============================================================================
 
 @agent_bp.route('/api/admin/maintenance/stats', methods=['GET'])
+@admin_required
 def get_maintenance_stats():
     """Get statistics about stale/orphaned data."""
     from app.auth import get_current_user
     from app.maintenance import get_maintenance_stats as get_stats
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     try:
         stats = get_stats()
         return jsonify(stats)
     except Exception as e:
-        logger.error(f"Error getting maintenance stats: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting maintenance stats")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @agent_bp.route('/api/admin/maintenance/cleanup', methods=['POST'])
+@admin_required
 @limiter.limit("5/minute")
 def run_maintenance_cleanup():
     """
@@ -1943,7 +1989,7 @@ def run_maintenance_cleanup():
     from app.maintenance import run_full_maintenance
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     data = request.get_json() or {}
@@ -1963,11 +2009,12 @@ def run_maintenance_cleanup():
         logger.info(f"Maintenance run by {user.username}: {result.to_dict()}")
         return jsonify(result.to_dict())
     except Exception as e:
-        logger.error(f"Error running maintenance: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error running maintenance")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 @agent_bp.route('/api/admin/products/<int:product_id>/versions', methods=['GET'])
+@login_required
 def get_product_versions(product_id):
     """
     Get version summary for a product across all assets.
@@ -1979,8 +2026,6 @@ def get_product_versions(product_id):
     from app.maintenance import get_product_version_summary
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     product = Product.query.get_or_404(product_id)
 
@@ -2001,8 +2046,8 @@ def get_product_versions(product_id):
             'total_installations': sum(v['count'] for v in versions)
         })
     except Exception as e:
-        logger.error(f"Error getting product versions: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting product versions")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 # ============================================================================
@@ -2010,6 +2055,7 @@ def get_product_versions(product_id):
 # ============================================================================
 
 @agent_bp.route('/api/integrations/summary', methods=['GET'])
+@login_required
 @requires_professional('Integrations')
 def get_integrations_summary():
     """
@@ -2024,8 +2070,6 @@ def get_integrations_summary():
     from app.integrations_models import Integration, ImportQueue
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     try:
         # Get organization filter
@@ -2109,8 +2153,8 @@ def get_integrations_summary():
         })
 
     except Exception as e:
-        logger.error(f"Error getting integrations summary: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error getting integrations summary")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 
 # ============================================================================
@@ -2118,6 +2162,7 @@ def get_integrations_summary():
 # ============================================================================
 
 @agent_bp.route('/api/admin/worker-status', methods=['GET'])
+@admin_required
 def get_worker_status():
     """
     Get the status of the background job worker.
@@ -2126,7 +2171,7 @@ def get_worker_status():
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     global _worker_thread
@@ -2171,13 +2216,14 @@ def get_worker_status():
 
 
 @agent_bp.route('/api/admin/worker/start', methods=['POST'])
+@admin_required
 @limiter.limit("5/minute")
 def start_worker():
     """Manually start the background worker."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     try:
@@ -2187,7 +2233,8 @@ def start_worker():
             'message': 'Background worker started'
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to start background worker")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 # ============================================================================
@@ -2195,13 +2242,12 @@ def start_worker():
 # ============================================================================
 
 @agent_bp.route('/api/admin/licenses', methods=['GET'])
+@login_required
 def list_licenses():
     """List all agent licenses (admin view)."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     if user.is_super_admin():
         licenses = AgentLicense.query.all()
@@ -2220,13 +2266,12 @@ def list_licenses():
 
 
 @agent_bp.route('/api/admin/licenses/<int:org_id>', methods=['GET'])
+@login_required
 def get_organization_license(org_id):
     """Get license details for a specific organization."""
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     # Check permission
     if not user.is_super_admin():
@@ -2258,6 +2303,7 @@ def get_organization_license(org_id):
 
 
 @agent_bp.route('/api/admin/licenses/<int:org_id>', methods=['PUT', 'PATCH'])
+@admin_required
 def update_license(org_id):
     """
     Update an organization's license (super admin only).
@@ -2266,7 +2312,7 @@ def update_license(org_id):
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user or not user.is_super_admin():
+    if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     license_obj = AgentLicense.query.filter_by(organization_id=org_id).first()
@@ -2343,6 +2389,7 @@ def update_license(org_id):
 
 
 @agent_bp.route('/api/admin/usage/<int:org_id>', methods=['GET'])
+@login_required
 def get_usage_history(org_id):
     """
     Get usage history for an organization.
@@ -2352,8 +2399,6 @@ def get_usage_history(org_id):
     from datetime import date
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     # Check permission
     if not user.is_super_admin():
@@ -2361,8 +2406,8 @@ def get_usage_history(org_id):
         if org_id not in user_org_ids:
             return jsonify({'error': 'Access denied'}), 403
 
-    # Get date range
-    days = request.args.get('days', 30, type=int)
+    # Get date range (cap at 365 days to prevent excessive data queries)
+    days = min(max(request.args.get('days', 30, type=int), 1), 365)
     start_date = date.today() - timedelta(days=days)
 
     records = AgentUsageRecord.query.filter(
@@ -2389,6 +2434,7 @@ def get_usage_history(org_id):
 
 
 @agent_bp.route('/api/admin/events', methods=['GET'])
+@login_required
 def list_agent_events():
     """
     List agent events for audit trail.
@@ -2397,8 +2443,6 @@ def list_agent_events():
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     # Build query
     query = AgentEvent.query
@@ -2445,6 +2489,7 @@ def list_agent_events():
 
 
 @agent_bp.route('/api/admin/version-history', methods=['GET'])
+@login_required
 def list_version_history():
     """
     List version change history for products.
@@ -2453,8 +2498,6 @@ def list_version_history():
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user:
-        return jsonify({'error': 'Authentication required'}), 401
 
     query = ProductVersionHistory.query
 

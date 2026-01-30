@@ -59,9 +59,10 @@ class EmailAlertManager:
         if not new_matches:
             return {'status': 'skipped', 'reason': 'No new matches'}
 
-        # Check if we should send alerts now
-        if not EmailAlertManager.should_send_alert_now(organization):
-            return {'status': 'skipped', 'reason': 'Outside alert time window'}
+        # Note: Time window check removed - alerts are sent immediately when CVEs are detected.
+        # The previous time window logic caused alerts to be lost when sync ran outside
+        # business hours. Users can configure email notification rules on their email
+        # client/server if they need quiet hours.
 
         # Get SMTP config - try organization first, then fall back to global
         smtp_config = organization.get_smtp_config()
@@ -99,34 +100,56 @@ class EmailAlertManager:
         if not recipients:
             return {'status': 'error', 'reason': 'No recipients configured'}
 
-        # Filter matches by alert settings
+        # Filter matches by alert settings and confidence level
         filtered_matches = []
-        for match in new_matches:
-            priority = match.calculate_effective_priority()
-            vuln = match.vulnerability
+        low_confidence_skipped = 0
+        now = datetime.utcnow()
 
-            # Calculate urgency based on due date (days until remediation deadline)
-            # This matches the dashboard "Urgency" filter behavior
-            if vuln.due_date:
-                days_until_due = (vuln.due_date - date.today()).days
-            else:
-                days_until_due = 999  # No due date = not urgent
+        # Get organization's confidence threshold setting (default: skip LOW confidence)
+        # Organizations can choose to include low-confidence matches in alerts
+        include_low_confidence = getattr(organization, 'alert_on_low_confidence', False)
+
+        for match in new_matches:
+            # Skip snoozed matches
+            if match.snoozed_until and match.snoozed_until > now:
+                continue
+
+            # ENTERPRISE FEATURE: Skip LOW confidence matches by default
+            # LOW confidence = keyword-only matching, often false positives
+            # HIGH/MEDIUM confidence = CPE matching or vendor+product matching
+            if not include_low_confidence and match.match_confidence == 'low':
+                low_confidence_skipped += 1
+                continue
+
+            severity = match.calculate_effective_priority()  # Now returns CVE severity directly
+            vuln = match.vulnerability
 
             should_alert = False
 
-            # Check alert settings - CRITICAL + URGENT (due within 7 days)
-            # This matches dashboard filter: Severity=Critical, Urgency=≤7 Days
-            if organization.alert_on_critical and priority == 'critical' and days_until_due <= 7:
+            # Alert based on CVE severity and user's alert preferences
+            # alert_on_critical: Alert for all critical severity CVEs
+            if organization.alert_on_critical and severity == 'critical':
                 should_alert = True
-            # Ransomware alerts for urgent critical vulnerabilities
-            elif organization.alert_on_ransomware and vuln.known_ransomware and priority == 'critical' and days_until_due <= 7:
+            # alert_on_high: Alert for all high severity CVEs
+            elif organization.alert_on_high and severity == 'high':
                 should_alert = True
-            # New CVE alert - also use urgency filter
-            elif organization.alert_on_new_cve and priority == 'critical' and days_until_due <= 7:
+            # alert_on_ransomware: Alert for any CVE with known ransomware usage
+            elif organization.alert_on_ransomware and vuln.known_ransomware:
+                should_alert = True
+            # alert_on_new_cve: Alert for any new CVE (first time seen)
+            elif organization.alert_on_new_cve and match.first_alerted_at is None:
                 should_alert = True
 
             if should_alert:
                 filtered_matches.append(match)
+
+        # Log skipped low-confidence matches for transparency
+        if low_confidence_skipped > 0:
+            import logging
+            logging.getLogger(__name__).info(
+                f"Skipped {low_confidence_skipped} low-confidence matches for {organization.name} "
+                f"(enable alert_on_low_confidence to include)"
+            )
 
         if not filtered_matches:
             return {'status': 'skipped', 'reason': 'No matches meet alert criteria'}
@@ -449,8 +472,13 @@ class EmailAlertManager:
         return html
 
     @staticmethod
-    def _send_email(smtp_config, recipients, subject, html_body):
-        """Send HTML email via SMTP (supports Gmail, Office365, Internal SMTP)"""
+    def _send_email(smtp_config, recipients, subject, html_body, max_retries=3):
+        """Send HTML email via SMTP with retry logic (supports Gmail, Office365, Internal SMTP)
+
+        Retries up to max_retries times with exponential backoff for transient failures.
+        """
+        import time
+
         msg = MIMEMultipart('alternative')
         msg['From'] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
         msg['To'] = ', '.join(recipients)
@@ -460,23 +488,37 @@ class EmailAlertManager:
         html_part = MIMEText(html_body, 'html', 'utf-8')
         msg.attach(html_part)
 
-        # Determine connection type
-        if smtp_config['use_ssl']:
-            # Use SSL (typically port 465)
-            server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
-        else:
-            # Use plain connection, possibly with STARTTLS
-            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
-            if smtp_config['use_tls']:
-                server.starttls()
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                # Determine connection type
+                if smtp_config['use_ssl']:
+                    # Use SSL (typically port 465)
+                    server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
+                else:
+                    # Use plain connection, possibly with STARTTLS
+                    server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
+                    if smtp_config['use_tls']:
+                        server.starttls()
 
-        # Authenticate if credentials provided
-        if smtp_config['username'] and smtp_config['password']:
-            server.login(smtp_config['username'], smtp_config['password'])
+                # Authenticate if credentials provided
+                if smtp_config['username'] and smtp_config['password']:
+                    server.login(smtp_config['username'], smtp_config['password'])
 
-        # Send email
-        server.sendmail(smtp_config['from_email'], recipients, msg.as_string())
-        server.quit()
+                # Send email
+                server.sendmail(smtp_config['from_email'], recipients, msg.as_string())
+                server.quit()
+                return  # Success
+
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 2s, 4s, 8s
+                    wait_time = 2 ** (attempt + 1)
+                    time.sleep(wait_time)
+                else:
+                    # Final attempt failed, raise the error
+                    raise last_error
 
     @staticmethod
     def _log_alert(org_id, alert_type, matches_count, recipients_count, status, error_msg):

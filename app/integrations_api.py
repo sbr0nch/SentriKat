@@ -115,10 +115,6 @@ def import_software():
     if integration and integration.auto_approve:
         auto_approve = True
 
-    default_criticality = 'medium'
-    if integration:
-        default_criticality = integration.default_criticality or 'medium'
-
     # Process each software item
     results = {
         'queued': 0,
@@ -194,7 +190,6 @@ def import_software():
             cpe_product=cpe_product,
             cpe_match_confidence=confidence,
             organization_id=org_id,
-            criticality=default_criticality,
             status='pending'
         )
         queue_item.set_available_versions(available_versions)
@@ -337,7 +332,6 @@ def create_product_from_queue(queue_item):
             product_name=queue_item.product_name,
             version=queue_item.selected_version or queue_item.detected_version,
             organization_id=queue_item.organization_id,
-            criticality=queue_item.criticality,
             cpe_vendor=queue_item.cpe_vendor,
             cpe_product=queue_item.cpe_product,
             active=True
@@ -404,7 +398,7 @@ def get_queue_item(item_id):
 @login_required
 @requires_professional('Integrations')
 def update_queue_item(item_id):
-    """Update a queue item (change version, org, criticality)."""
+    """Update a queue item (change version, org)."""
     item = ImportQueue.query.get_or_404(item_id)
     data = request.get_json()
 
@@ -415,8 +409,6 @@ def update_queue_item(item_id):
         item.selected_version = data['selected_version'] or None
     if 'organization_id' in data:
         item.organization_id = data['organization_id']
-    if 'criticality' in data:
-        item.criticality = data['criticality']
     if 'cpe_vendor' in data:
         item.cpe_vendor = data['cpe_vendor']
     if 'cpe_product' in data:
@@ -443,8 +435,6 @@ def approve_queue_item(item_id):
         item.selected_version = data['selected_version']
     if 'organization_id' in data:
         item.organization_id = data['organization_id']
-    if 'criticality' in data:
-        item.criticality = data['criticality']
 
     # Create the product
     product = create_product_from_queue(item)
@@ -563,7 +553,47 @@ def bulk_process_queue():
 @requires_professional('Integrations')
 def get_integrations():
     """Get all integrations."""
-    integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Filter by organization for non-super-admin users
+    if user.is_super_admin():
+        org_id = request.args.get('organization_id', type=int)
+        if org_id:
+            integrations = Integration.query.filter_by(is_active=True, organization_id=org_id).order_by(Integration.name).all()
+        else:
+            integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
+    else:
+        org_id = request.args.get('organization_id', type=int)
+        if not org_id:
+            return jsonify({'error': 'organization_id required'}), 400
+
+        # Check permission - user must be org_admin/manager either globally or in this org
+        has_permission = False
+
+        # Check global role first
+        if user.role in ['org_admin', 'manager']:
+            # Check if user belongs to this org (primary org or membership)
+            if user.organization_id == org_id:
+                has_permission = True
+            else:
+                user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+                if user_org:
+                    has_permission = True
+        else:
+            # Check org-specific role
+            user_org = user.org_memberships.filter_by(organization_id=org_id).first()
+            if user_org and user_org.role in ['org_admin', 'manager']:
+                has_permission = True
+
+        if not has_permission:
+            return jsonify({'error': 'Organization admin or manager access required'}), 403
+
+        integrations = Integration.query.filter_by(is_active=True, organization_id=org_id).order_by(Integration.name).all()
+
     return jsonify([i.to_dict() for i in integrations])
 
 
@@ -607,7 +637,6 @@ def create_integration():
         integration_type=integration_type,
         organization_id=data.get('organization_id'),
         auto_approve=data.get('auto_approve', False),
-        default_criticality=data.get('default_criticality', 'medium'),
         sync_enabled=data.get('sync_enabled', True),
         sync_interval_hours=data.get('sync_interval_hours', 6),
         api_key=api_key,
@@ -642,8 +671,6 @@ def update_integration(integration_id):
         integration.organization_id = data['organization_id']
     if 'auto_approve' in data:
         integration.auto_approve = data['auto_approve']
-    if 'default_criticality' in data:
-        integration.default_criticality = data['default_criticality']
     if 'sync_enabled' in data:
         integration.sync_enabled = data['sync_enabled']
     if 'sync_interval_hours' in data:
@@ -889,7 +916,6 @@ def process_software_import(integration, data):
     org_id = data.get('organization_id')
 
     auto_approve = integration.auto_approve if integration else False
-    default_criticality = integration.default_criticality if integration else 'medium'
 
     results = {'queued': 0, 'auto_approved': 0, 'duplicates': 0, 'errors': 0}
 
@@ -934,7 +960,6 @@ def process_software_import(integration, data):
             cpe_product=cpe_product,
             cpe_match_confidence=confidence,
             organization_id=org_id,
-            criticality=default_criticality,
             status='pending'
         )
 

@@ -14,6 +14,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from app.models import VulnerabilityMatch, Product, Vulnerability, Organization
 from app import db
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 
 class VulnerabilityReportGenerator:
@@ -109,13 +110,16 @@ class VulnerabilityReportGenerator:
 
     def _get_stats(self, start_date, end_date):
         """Get vulnerability statistics for the date range"""
-        query = db.session.query(VulnerabilityMatch).join(Product)
+        # Build base query without eager loading to avoid column mapping issues
+        query = db.session.query(VulnerabilityMatch)
 
         if self.organization_id:
-            query = query.filter(Product.organization_id == self.organization_id)
-
-        # Filter by date range (using match date or vulnerability date_added)
-        query = query.join(Vulnerability)
+            # Filter by organization using scalar_subquery for proper IN() usage
+            from app.models import product_organizations
+            org_product_ids = db.session.query(product_organizations.c.product_id).filter(
+                product_organizations.c.organization_id == self.organization_id
+            ).scalar_subquery()
+            query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
 
         all_matches = query.all()
 
@@ -482,8 +486,12 @@ class VulnerabilityReportGenerator:
             if org:
                 org_name = org.display_name
 
-        # Get the selected matches
-        matches = VulnerabilityMatch.query.filter(
+        # Get the selected matches with eager loading to avoid N+1 queries
+        # Note: Product.organizations is a dynamic relationship and can't be eager loaded
+        matches = VulnerabilityMatch.query.options(
+            selectinload(VulnerabilityMatch.vulnerability),
+            selectinload(VulnerabilityMatch.product)
+        ).filter(
             VulnerabilityMatch.id.in_(match_ids)
         ).all()
 

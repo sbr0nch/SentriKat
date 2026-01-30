@@ -11,8 +11,10 @@
     <!-- Hidden tab triggers (for programmatic switching) -->
     <div id="adminTabs" class="d-none">
         <button id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button"></button>
+        {% if license and license.is_professional() %}
         <button id="ldapUsers-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button"></button>
         <button id="ldapGroups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button"></button>
+        {% endif %}
         <button id="organizations-tab" data-bs-toggle="tab" data-bs-target="#organizations" type="button"></button>
         <button id="integrations-tab" data-bs-toggle="tab" data-bs-target="#integrations" type="button"></button>
         <button id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button"></button>
@@ -23,8 +25,8 @@
         <div class="tab-pane fade" id="users" role="tabpanel">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
-                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-people-fill me-2"></i>Local Users</h2>
-                    <p class="text-muted mb-0 small">Manage local user accounts and permissions</p>
+                    <h2 class="h4 fw-bold mb-1"><i class="bi bi-people-fill me-2"></i>All Users</h2>
+                    <p class="text-muted mb-0 small">Manage user accounts and permissions</p>
                 </div>
             </div>
             <div class="alert alert-light border mb-3 small">
@@ -211,8 +213,7 @@
                                     <th style="width: 40px;">
                                         <input type="checkbox" class="form-check-input" id="selectAllOrgs" onchange="toggleSelectAllOrgs()">
                                     </th>
-                                    <th data-column="name" data-column-label="Name" data-sort-key="name" data-sort-type="string">Name</th>
-                                    <th data-column="displayname" data-column-label="Display Name" data-sort-key="displayname" data-sort-type="string">Display Name</th>
+                                    <th data-column="displayname" data-column-label="Organization" data-sort-key="displayname" data-sort-type="string">Organization</th>
                                     <th data-column="users" data-column-label="Users" data-sort-key="users" data-sort-type="number">Users</th>
                                     <th data-column="smtp" data-column-label="SMTP" data-sort-key="smtp" data-sort-type="boolean">SMTP Configured</th>
                                     <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="boolean">Status</th>
@@ -233,7 +234,8 @@
             </div>
         </div>
 
-        <!-- LDAP Groups Section -->
+        {% if license and license.is_professional() %}
+        <!-- LDAP Groups Section (Professional License Only) -->
         <div class="tab-pane fade" id="ldapGroups" role="tabpanel">
             <div class="mb-4">
                 <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-2 me-2"></i>LDAP Groups</h2>
@@ -286,11 +288,11 @@
                             <div class="d-flex justify-content-between align-items-center">
                                 <span><i class="bi bi-search me-2"></i>Discover LDAP Groups</span>
                                 <button class="btn btn-sm btn-outline-secondary" onclick="toggleGroupDiscovery()">
-                                    <i class="bi bi-chevron-down" id="discoveryToggleIcon"></i>
+                                    <i class="bi bi-chevron-up" id="discoveryToggleIcon"></i>
                                 </button>
                             </div>
                         </div>
-                        <div class="card-body" id="groupDiscoveryPanel" style="display: none;">
+                        <div class="card-body" id="groupDiscoveryPanel">
                             <div class="row g-3 mb-3">
                                 <div class="col-md-8">
                                     <label class="form-label fw-semibold">Search Base DN</label>
@@ -364,12 +366,7 @@
                                         </tr>
                                     </thead>
                                     <tbody id="groupMappingsTable">
-                                        <tr>
-                                            <td colspan="10" class="text-center py-4">
-                                                <div class="spinner-border text-primary" role="status"></div>
-                                                <p class="text-muted mt-2">Loading group mappings...</p>
-                                            </td>
-                                        </tr>
+                                        <!-- Content loaded by JavaScript -->
                                     </tbody>
                                 </table>
                             </div>
@@ -476,6 +473,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
         {% if license and license.is_professional() %}
         <!-- Integrations Section -->
@@ -497,11 +495,13 @@
                         <span class="badge bg-primary ms-1" id="importQueueCount">0</span>
                     </button>
                 </li>
+                <!-- Pull Sources - Coming Soon (hidden for now)
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="pull-sources-tab" data-bs-toggle="pill" data-bs-target="#pullSources" type="button">
-                        <i class="bi bi-cloud-download me-2"></i>Pull Sources
+                    <button class="nav-link disabled" id="pull-sources-tab" data-bs-toggle="pill" data-bs-target="#pullSources" type="button" disabled>
+                        <i class="bi bi-cloud-download me-2"></i>Pull Sources <span class="badge bg-secondary ms-1">Soon</span>
                     </button>
                 </li>
+                -->
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="push-agents-tab" data-bs-toggle="pill" data-bs-target="#pushAgents" type="button">
                         <i class="bi bi-cloud-upload me-2"></i>Push Agents
@@ -516,14 +516,14 @@
                         <div class="col-12">
                             <div class="card border-0 bg-light">
                                 <div class="card-body">
-                                    <h5 class="card-title mb-3"><i class="bi bi-diagram-3 me-2 text-muted"></i>How Integrations Work</h5>
-                                    <div class="row align-items-center">
-                                        <!-- Pull Sources -->
-                                        <div class="col-md-3 text-center mb-3 mb-md-0">
+                                    <h5 class="card-title mb-3"><i class="bi bi-diagram-3 me-2 text-muted"></i>How Push Agents Work</h5>
+                                    <div class="row align-items-center justify-content-center">
+                                        <!-- Push Agents -->
+                                        <div class="col-md-4 text-center mb-3 mb-md-0">
                                             <div class="p-3 bg-white rounded border">
-                                                <i class="bi bi-cloud-download text-muted" style="font-size: 2rem;"></i>
-                                                <h6 class="mt-2 mb-1">Pull Sources</h6>
-                                                <small class="text-muted">REST API sources</small>
+                                                <i class="bi bi-cloud-upload text-muted" style="font-size: 2rem;"></i>
+                                                <h6 class="mt-2 mb-1">Push Agents</h6>
+                                                <small class="text-muted">Windows/Linux endpoints</small>
                                             </div>
                                         </div>
                                         <!-- Arrow -->
@@ -538,18 +538,6 @@
                                                 <small class="text-muted">Import Queue &rarr; Products</small>
                                             </div>
                                         </div>
-                                        <!-- Arrow -->
-                                        <div class="col-md-1 text-center d-none d-md-block">
-                                            <i class="bi bi-arrow-left text-secondary" style="font-size: 1.5rem;"></i>
-                                        </div>
-                                        <!-- Push Agents -->
-                                        <div class="col-md-3 text-center">
-                                            <div class="p-3 bg-white rounded border">
-                                                <i class="bi bi-cloud-upload text-muted" style="font-size: 2rem;"></i>
-                                                <h6 class="mt-2 mb-1">Push Agents</h6>
-                                                <small class="text-muted">Windows/Linux endpoints</small>
-                                            </div>
-                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -558,6 +546,7 @@
 
                     <!-- Stats Cards -->
                     <div class="row mb-4" id="integrationStatsRow">
+                        <!-- Pull Sources stat card hidden - coming soon
                         <div class="col-md-3">
                             <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('pull-sources-tab').click()">
                                 <div class="card-body">
@@ -574,7 +563,8 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
+                        -->
+                        <div class="col-md-4">
                             <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('push-agents-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
@@ -590,7 +580,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('import-queue-tab').click()">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
@@ -606,7 +596,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
@@ -626,6 +616,7 @@
 
                     <!-- Quick Actions -->
                     <div class="row">
+                        <!-- Pull Sources card hidden - Coming Soon
                         <div class="col-md-6">
                             <div class="card">
                                 <div class="card-header bg-white">
@@ -638,13 +629,14 @@
                                         <span class="badge bg-light text-dark border"><i class="bi bi-box me-1"></i>Inventory Systems</span>
                                         <span class="badge bg-light text-dark border"><i class="bi bi-hdd-network me-1"></i>Asset Management</span>
                                     </div>
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('pull-sources-tab').click()">
-                                        <i class="bi bi-gear me-1"></i>Configure Pull Sources
+                                    <button class="btn btn-outline-secondary btn-sm disabled" disabled>
+                                        <i class="bi bi-gear me-1"></i>Coming Soon
                                     </button>
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-6">
+                        -->
+                        <div class="col-12">
                             <div class="card">
                                 <div class="card-header bg-white">
                                     <i class="bi bi-cloud-upload me-2 text-muted"></i><strong>Push Agents</strong>
@@ -729,7 +721,7 @@
                                     <tbody id="importQueueTable">
                                         <tr>
                                             <td colspan="7" class="text-center py-4 text-muted">
-                                                <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                                                <i class="bi bi-inbox text-primary" style="font-size: 2rem;"></i>
                                                 <p class="mb-0 mt-2">Loading import queue...</p>
                                             </td>
                                         </tr>
@@ -741,55 +733,12 @@
                     </div>
                 </div>
 
-                <!-- Pull Sources Sub-Tab (formerly Connectors) -->
+                <!-- Pull Sources Sub-Tab - Coming Soon -->
                 <div class="tab-pane fade" id="pullSources" role="tabpanel">
-                    <div class="alert alert-info mb-3">
-                        <i class="bi bi-info-circle me-2"></i>
-                        <strong>Pull Sources</strong> connect to external software inventory systems via REST API. Configure the URL, authentication, and field mappings to match your source system.
-                    </div>
-
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-cloud-download me-2"></i>Pull Sources</span>
-                            <button class="btn btn-primary btn-sm" onclick="showCreateIntegrationModal()">
-                                <i class="bi bi-plus-circle me-1"></i>Add Pull Source
-                            </button>
-                        </div>
-                        <div class="card-body p-0">
-                            <div class="table-responsive">
-                                <table class="table table-hover mb-0">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th style="cursor: pointer;" onclick="sortPullSources('name')">
-                                                Name <span id="pullSourcesSortName"></span>
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortPullSources('type')">
-                                                Type <span id="pullSourcesSortType"></span>
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortPullSources('organization')">
-                                                Organization <span id="pullSourcesSortOrganization"></span>
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortPullSources('last_sync')">
-                                                Last Sync <span id="pullSourcesSortLastSync"></span>
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortPullSources('status')">
-                                                Status <span id="pullSourcesSortStatus"></span>
-                                            </th>
-                                            <th style="width: 150px;">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="integrationsTable">
-                                        <tr>
-                                            <td colspan="6" class="text-center py-4 text-muted">
-                                                <i class="bi bi-plug" style="font-size: 2rem;"></i>
-                                                <p class="mb-0 mt-2">No integrations configured</p>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="card-footer" id="pullSourcesPagination"></div>
+                    <div class="text-center py-5">
+                        <i class="bi bi-cloud-download text-muted" style="font-size: 4rem; opacity: 0.3;"></i>
+                        <h4 class="mt-3 text-muted">Pull Sources - Coming Soon</h4>
+                        <p class="text-muted">Connect to external software inventory systems via REST API.<br>This feature is currently under development.</p>
                     </div>
                 </div>
 
@@ -1000,7 +949,7 @@
 
                                     <div class="col-md-8">
                                         <label for="ldapServer" class="form-label fw-semibold">LDAP Server URL *</label>
-                                        <input type="text" class="form-control" id="ldapServer" placeholder="ldap://dc3.bonelabs.com:389">
+                                        <input type="text" class="form-control" id="ldapServer" placeholder="ldap://dc.example.com:389">
                                         <small class="form-text text-muted">Format: ldap://server:port or ldaps://server:636</small>
                                     </div>
 
@@ -1012,13 +961,13 @@
 
                                     <div class="col-md-12">
                                         <label for="ldapBaseDN" class="form-label fw-semibold">Base DN *</label>
-                                        <input type="text" class="form-control" id="ldapBaseDN" placeholder="DC=bonelabs,DC=com">
+                                        <input type="text" class="form-control" id="ldapBaseDN" placeholder="DC=example,DC=com">
                                         <small class="form-text text-muted">Base Distinguished Name for searches</small>
                                     </div>
 
                                     <div class="col-md-12">
                                         <label for="ldapBindDN" class="form-label fw-semibold">Bind DN (Service Account) *</label>
-                                        <input type="text" class="form-control" id="ldapBindDN" placeholder="CN=Service Account,OU=Users,DC=bonelabs,DC=com">
+                                        <input type="text" class="form-control" id="ldapBindDN" placeholder="CN=Service Account,OU=Users,DC=example,DC=com">
                                         <small class="form-text text-muted">Service account for LDAP binds</small>
                                     </div>
 
@@ -1271,28 +1220,56 @@
                         </div>
                     </div>
 
-                    <!-- Manual Email Alerts -->
+                    <!-- Manual Alert Triggers -->
                     <div class="card mt-4">
                         <div class="card-header">
-                            <i class="bi bi-envelope-exclamation me-2"></i>Manual Alert Triggers
+                            <i class="bi bi-megaphone me-2"></i>Manual Alert Triggers
                         </div>
                         <div class="card-body">
-                            <div class="alert alert-warning">
-                                <i class="bi bi-exclamation-triangle me-2"></i>
-                                <strong>Manual Alerts:</strong> Use this to manually send critical CVE email alerts to all organizations.
-                                This will send emails for all unacknowledged critical and high priority vulnerabilities.
+                            <div class="alert alert-info mb-4">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>Manual Alerts:</strong> Manually trigger alerts for all organizations with unacknowledged critical and high priority CVEs.
+                                Use these buttons to send notifications on-demand outside of the automatic sync schedule.
                             </div>
 
-                            <div class="row g-3">
-                                <div class="col-md-12">
-                                    <button type="button" class="btn btn-danger" onclick="triggerCriticalCVEAlerts()">
-                                        <i class="bi bi-envelope-exclamation me-1"></i>Send Critical CVE Alerts Now
-                                    </button>
-                                    <small class="text-muted ms-2">Sends alert emails to all organizations with unacknowledged critical CVEs</small>
+                            <div class="row g-4">
+                                <!-- Email Alerts -->
+                                <div class="col-md-6">
+                                    <div class="card h-100 border-danger">
+                                        <div class="card-header bg-danger text-white">
+                                            <i class="bi bi-envelope-exclamation me-2"></i>Email Alerts
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="card-text text-muted mb-3">
+                                                Send email notifications to all configured recipients in each organization.
+                                            </p>
+                                            <button type="button" class="btn btn-danger w-100" onclick="triggerCriticalCVEAlerts()" id="btnTriggerEmail">
+                                                <i class="bi bi-envelope-exclamation me-1"></i>Send Email Alerts Now
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
 
+                                <!-- Webhook Alerts -->
+                                <div class="col-md-6">
+                                    <div class="card h-100 border-primary">
+                                        <div class="card-header bg-primary text-white">
+                                            <i class="bi bi-broadcast me-2"></i>Webhook Alerts
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="card-text text-muted mb-3">
+                                                Send webhook notifications to Slack, Teams, Discord, or custom endpoints.
+                                            </p>
+                                            <button type="button" class="btn btn-primary w-100" onclick="triggerWebhookAlerts()" id="btnTriggerWebhook">
+                                                <i class="bi bi-broadcast me-1"></i>Send Webhook Alerts Now
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Results Container -->
                                 <div class="col-md-12" id="alertResultsContainer" style="display: none;">
-                                    <div class="alert alert-info">
+                                    <div class="alert" id="alertResultsAlert">
                                         <h6 class="alert-heading"><i class="bi bi-info-circle me-2"></i>Alert Results</h6>
                                         <div id="alertResultsContent"></div>
                                     </div>
@@ -1460,7 +1437,6 @@
                     <div class="card mt-4" id="backupRestoreCard">
                         <div class="card-header">
                             <i class="bi bi-cloud-download me-2"></i>Backup & Restore
-                            {% if not license or not license.is_professional() %}<span class="badge bg-warning text-dark ms-1" style="font-size: 0.7em;">PRO</span>{% endif %}
                         </div>
                         <div class="card-body">
                             <div class="alert alert-warning">
@@ -2271,7 +2247,7 @@
 </div>
 
 <!-- Create/Edit User Modal -->
-<div class="modal fade" id="userModal" tabindex="-1">
+<div class="modal fade" id="userModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
@@ -2343,7 +2319,9 @@
                                 <option value="user">User - View-only access to vulnerabilities</option>
                                 <option value="manager">Manager - Can manage products and view vulnerabilities</option>
                                 <option value="org_admin">Organization Admin - Full access within their organization</option>
+                                {% if current_user and current_user.is_super_admin() %}
                                 <option value="super_admin">Super Admin - Full system access across all organizations</option>
+                                {% endif %}
                             </select>
                             <div class="alert alert-sm mt-2" id="roleDescription"></div>
                         </div>
@@ -2370,6 +2348,43 @@
                                 <label class="form-check-label fw-semibold" for="isActive">
                                     Active (user can log in)
                                 </label>
+                            </div>
+                        </div>
+
+                        <!-- Security Settings (shown when editing local users) -->
+                        <div class="col-md-12 mt-3" id="securitySettingsSection" style="display: none;">
+                            <div class="card border-info">
+                                <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                                    <span><i class="bi bi-shield-lock me-2"></i>Security Settings</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <!-- 2FA Status -->
+                                        <div class="col-md-6">
+                                            <label class="form-label text-muted small mb-1">Two-Factor Authentication</label>
+                                            <div id="user2FAStatus">
+                                                <span class="badge bg-secondary">Loading...</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6 text-end">
+                                            <div id="user2FAActions">
+                                                <!-- Actions will be populated by JS -->
+                                            </div>
+                                        </div>
+                                        <!-- Password Status -->
+                                        <div class="col-md-6">
+                                            <label class="form-label text-muted small mb-1">Password Status</label>
+                                            <div id="userPasswordStatus">
+                                                <span class="badge bg-secondary">Loading...</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6 text-end">
+                                            <button type="button" class="btn btn-sm btn-outline-warning" id="forcePasswordChangeBtn" onclick="forcePasswordChangeFromModal()">
+                                                <i class="bi bi-key me-1"></i>Force Password Change
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -2490,7 +2505,6 @@
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" id="webhook-tab" data-bs-toggle="tab" data-bs-target="#webhookSettings" type="button">
                                 <i class="bi bi-broadcast me-1"></i>Webhook
-                                <span class="badge bg-warning text-dark ms-1" style="font-size: 0.6em;">PRO</span>
                             </button>
                         </li>
                     </ul>

@@ -72,19 +72,35 @@ def check_cpe_match(vulnerability, product):
             if entry_vendor == cpe_vendor.lower() and entry_product == cpe_product.lower():
                 # Check version range if available
                 version = product.version
-                if version and (entry.get('version_start') or entry.get('version_end')):
-                    if _version_in_range(version,
-                                         entry.get('version_start'),
-                                         entry.get('version_end'),
-                                         entry.get('version_start_type'),
-                                         entry.get('version_end_type')):
-                        return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (version in range)"], 'cpe', 'high'
+                has_version_range = entry.get('version_start') or entry.get('version_end')
+
+                if has_version_range:
+                    # CPE data has version constraints - verify product version
+                    if version:
+                        if _version_in_range(version,
+                                             entry.get('version_start'),
+                                             entry.get('version_end'),
+                                             entry.get('version_start_type'),
+                                             entry.get('version_end_type')):
+                            # Version confirmed in vulnerable range - HIGH confidence
+                            range_str = f"{entry.get('version_start', '*')} - {entry.get('version_end', '*')}"
+                            return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (version {version} in range {range_str})"], 'cpe', 'high'
+                        # Version NOT in vulnerable range - skip this entry
+                        continue
+                    else:
+                        # Product has no version but CVE has version range
+                        # MEDIUM confidence - can't verify if actually affected
+                        range_str = f"{entry.get('version_start', '*')} - {entry.get('version_end', '*')}"
+                        return [f"CPE match: {cpe_vendor}:{cpe_product} (version range {range_str}, product version unknown)"], 'cpe', 'medium'
                 else:
-                    # No version constraint or no product version
-                    return [f"CPE match: {cpe_vendor}:{cpe_product}"], 'cpe', 'high'
+                    # No version constraint - all versions affected
+                    if version:
+                        return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (all versions affected)"], 'cpe', 'high'
+                    else:
+                        return [f"CPE match: {cpe_vendor}:{cpe_product} (all versions affected)"], 'cpe', 'high'
     else:
         # No cached CPE data - try to match against CISA KEV vendor/product
-        # Normalize for comparison
+        # Use STRICT word-boundary matching to prevent false positives
         vuln_vendor = normalize_string(vulnerability.vendor_project)
         vuln_product = normalize_string(vulnerability.product)
 
@@ -92,11 +108,19 @@ def check_cpe_match(vulnerability, product):
         normalized_cpe_vendor = cpe_vendor.lower().replace('_', ' ')
         normalized_cpe_product = cpe_product.lower().replace('_', ' ')
 
-        # Check if CPE vendor/product matches vulnerability vendor/product
-        vendor_match = (normalized_cpe_vendor in vuln_vendor or
-                        vuln_vendor in normalized_cpe_vendor)
-        product_match = (normalized_cpe_product in vuln_product or
-                         vuln_product in normalized_cpe_product)
+        def is_word_match(word, text):
+            """Check if word appears as complete word(s) in text using word boundaries."""
+            if not word or not text:
+                return False
+            if word == text:
+                return True
+            # Word boundary matching
+            pattern = r'(?:^|[\s_\-])' + re.escape(word) + r'(?:[\s_\-]|$)'
+            return bool(re.search(pattern, text, re.IGNORECASE))
+
+        # Check if CPE vendor/product matches vulnerability vendor/product using word boundaries
+        vendor_match = is_word_match(normalized_cpe_vendor, vuln_vendor) or is_word_match(vuln_vendor, normalized_cpe_vendor)
+        product_match = is_word_match(normalized_cpe_product, vuln_product) or is_word_match(vuln_product, normalized_cpe_product)
 
         if vendor_match and product_match:
             return [f"CPE inference: {cpe_vendor}:{cpe_product}"], 'cpe', 'medium'
@@ -105,9 +129,23 @@ def check_cpe_match(vulnerability, product):
 
 
 def _version_in_range(version, start, end, start_type, end_type):
-    """Check if a version falls within a specified range."""
+    """
+    Check if a version falls within a specified range.
+
+    ENTERPRISE LOGIC:
+    - If no version range specified (no start AND no end): Returns True (all versions affected)
+    - If version range exists but product has no version: Returns False (can't verify, be conservative)
+    - Otherwise: Check if version is within the specified range
+
+    This prevents false positives by requiring version verification when CPE data has ranges.
+    """
+    # If no version range specified at all, all versions are affected
+    if not start and not end:
+        return True
+
+    # If version range exists but product has no version, we can't verify - be conservative
     if not version:
-        return True  # No version specified, assume match
+        return False  # Changed from True - don't assume match without version proof
 
     version_key = _version_sort_key(version)
 
@@ -133,13 +171,39 @@ def _version_in_range(version, start, end, start_type, end_type):
 
 
 def _version_sort_key(version):
-    """Generate a sortable key for version strings."""
+    """
+    Generate a sortable key for version strings.
+    Handles semver-like versions properly: 1.2.3, 10.1.18, etc.
+
+    Key format: tuple of (type, value) pairs where:
+    - type 0 = numeric (for proper numeric comparison)
+    - type 1 = string (for alphabetic comparison)
+
+    Examples:
+    - "10.1.18" -> ((0,10), (0,1), (0,18))
+    - "1.0.0-alpha" -> ((0,1), (0,0), (0,0), (1,'alpha'))
+    """
+    if not version:
+        return tuple()
+
     parts = []
-    for part in re.split(r'[.\-_]', str(version)):
+    # Split on common version delimiters
+    for part in re.split(r'[.\-_+]', str(version)):
+        if not part:
+            continue
+        # Try to convert to int for numeric comparison
         try:
             parts.append((0, int(part)))
         except ValueError:
-            parts.append((1, part.lower()))
+            # Handle mixed alphanumeric like "18ubuntu1"
+            # Split into numeric prefix and alpha suffix
+            match = re.match(r'^(\d+)(.*)$', part)
+            if match:
+                parts.append((0, int(match.group(1))))
+                if match.group(2):
+                    parts.append((1, match.group(2).lower()))
+            else:
+                parts.append((1, part.lower()))
     return tuple(parts)
 
 
@@ -171,11 +235,33 @@ def check_keyword_match(vulnerability, product):
 
     match_reasons = []
 
-    # Vendor matching: bidirectional (either contains the other)
+    # Vendor matching: STRICT word-boundary matching to prevent false positives
+    # e.g., "sun" should NOT match "samsung", but "apache" matches "apache software foundation"
     def vendors_match(v1, v2):
         if not v1 or not v2:
             return False
-        return v1 in v2 or v2 in v1
+
+        # Exact match first
+        if v1 == v2:
+            return True
+
+        # Normalize for comparison (handle underscores, hyphens)
+        v1_normalized = v1.replace('_', ' ').replace('-', ' ')
+        v2_normalized = v2.replace('_', ' ').replace('-', ' ')
+
+        if v1_normalized == v2_normalized:
+            return True
+
+        # Word boundary matching - vendor must appear as complete word(s)
+        # This prevents "sun" matching "samsung" but allows "apache" in "apache software foundation"
+        def is_word_in_text(word, text):
+            """Check if word appears as complete word(s) in text."""
+            # Create pattern that matches word as whole word or at word boundaries
+            pattern = r'(?:^|[\s_\-])' + re.escape(word) + r'(?:[\s_\-]|$)'
+            return bool(re.search(pattern, text, re.IGNORECASE))
+
+        # Check both directions but require word boundaries
+        return is_word_in_text(v1_normalized, v2_normalized) or is_word_in_text(v2_normalized, v1_normalized)
 
     # Product matching: check multiple variations
     def products_match(prod, vuln):
@@ -377,41 +463,84 @@ def rematch_all_products():
 def get_filtered_vulnerabilities(filters=None):
     """Get vulnerabilities filtered by various criteria"""
     from app.models import product_organizations
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
 
-    query = db.session.query(VulnerabilityMatch).join(Vulnerability).join(Product)
+    # Build base query - NO joins to avoid column mapping issues
+    # Use selectinload for eager loading in separate queries
+    query = db.session.query(VulnerabilityMatch).options(
+        selectinload(VulnerabilityMatch.product),
+        selectinload(VulnerabilityMatch.vulnerability)
+    )
 
     if filters:
-        # Filter by organization using multi-org relationship
+        # Filter by organization - fetch IDs first
         if filters.get('organization_id'):
-            query = query.join(
-                product_organizations, Product.id == product_organizations.c.product_id
-            ).filter(product_organizations.c.organization_id == filters['organization_id'])
+            org_product_ids = db.session.execute(
+                select(product_organizations.c.product_id).where(
+                    product_organizations.c.organization_id == filters['organization_id']
+                )
+            ).scalars().all()
+            if org_product_ids:
+                query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
+            else:
+                return []
 
         # Filter by product ID
         if filters.get('product_id'):
             query = query.filter(VulnerabilityMatch.product_id == filters['product_id'])
 
-        # Filter by CVE ID
+        # Filter by CVE ID - fetch matching vuln IDs first, NO join
         if filters.get('cve_id'):
-            query = query.filter(Vulnerability.cve_id.ilike(f"%{filters['cve_id']}%"))
+            vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(
+                    Vulnerability.cve_id.ilike(f"%{filters['cve_id']}%")
+                )
+            ).scalars().all()
+            if vuln_ids:
+                query = query.filter(VulnerabilityMatch.vulnerability_id.in_(vuln_ids))
+            else:
+                return []
 
-        # Filter by vendor
+        # Filter by vendor - fetch matching vuln IDs first
         if filters.get('vendor'):
-            query = query.filter(Vulnerability.vendor_project.ilike(f"%{filters['vendor']}%"))
+            vendor_vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(
+                    Vulnerability.vendor_project.ilike(f"%{filters['vendor']}%")
+                )
+            ).scalars().all()
+            if vendor_vuln_ids:
+                query = query.filter(VulnerabilityMatch.vulnerability_id.in_(vendor_vuln_ids))
+            else:
+                return []
 
-        # Filter by product
+        # Filter by product name in vulnerability
         if filters.get('product'):
-            query = query.filter(Vulnerability.product.ilike(f"%{filters['product']}%"))
+            product_vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(
+                    Vulnerability.product.ilike(f"%{filters['product']}%")
+                )
+            ).scalars().all()
+            if product_vuln_ids:
+                query = query.filter(VulnerabilityMatch.vulnerability_id.in_(product_vuln_ids))
+            else:
+                return []
 
         # Filter by ransomware
         if filters.get('ransomware_only'):
-            query = query.filter(Vulnerability.known_ransomware == True)
+            ransomware_vuln_ids = db.session.execute(
+                select(Vulnerability.id).where(Vulnerability.known_ransomware == True)
+            ).scalars().all()
+            if ransomware_vuln_ids:
+                query = query.filter(VulnerabilityMatch.vulnerability_id.in_(ransomware_vuln_ids))
+            else:
+                return []
 
         # Filter by acknowledged status
         if filters.get('acknowledged') is not None:
             query = query.filter(VulnerabilityMatch.acknowledged == filters['acknowledged'])
 
-    # Order by date added (newest first)
-    query = query.order_by(Vulnerability.date_added.desc())
+    # Order by match creation date (newest first)
+    query = query.order_by(VulnerabilityMatch.created_at.desc())
 
     return query.all()

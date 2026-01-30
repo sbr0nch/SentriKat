@@ -5,6 +5,7 @@ Provides a GUI-based setup process for initial configuration
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
 from app import db, csrf
+from sqlalchemy import func
 from app.models import Organization, User, ServiceCatalog
 from app.cisa_sync import sync_cisa_kev
 import os
@@ -19,9 +20,9 @@ def is_setup_complete():
     """Check if initial setup has been completed"""
     try:
         # Check if at least one organization exists
-        org_count = Organization.query.count()
+        org_count = Organization.query.count() or 0
         # Check if at least one user exists (only if auth is enabled)
-        user_count = User.query.count()
+        user_count = User.query.count() or 0
 
         # Setup is complete if we have at least one organization
         # and either auth is disabled or we have at least one user
@@ -54,9 +55,9 @@ def setup_status():
     return jsonify({
         'setup_complete': is_setup_complete(),
         'auth_enabled': os.environ.get('DISABLE_AUTH', 'false').lower() != 'true',
-        'org_count': Organization.query.count(),
-        'user_count': User.query.count(),
-        'service_count': ServiceCatalog.query.count()
+        'org_count': Organization.query.count() or 0,
+        'user_count': User.query.count() or 0,
+        'service_count': ServiceCatalog.query.count() or 0
     })
 
 @setup_bp.route('/api/setup/create-organization', methods=['POST'])

@@ -35,6 +35,7 @@ class MaintenanceResult:
         self.assets_marked_stale = 0
         self.assets_removed = 0
         self.products_cleaned = 0
+        self.products_auto_disabled = 0
         self.import_queue_cleaned = 0
         self.errors = []
 
@@ -44,6 +45,7 @@ class MaintenanceResult:
             'assets_marked_stale': self.assets_marked_stale,
             'assets_removed': self.assets_removed,
             'products_cleaned': self.products_cleaned,
+            'products_auto_disabled': self.products_auto_disabled,
             'import_queue_cleaned': self.import_queue_cleaned,
             'errors': self.errors,
             'success': len(self.errors) == 0
@@ -177,7 +179,7 @@ def cleanup_orphaned_products(dry_run=False):
     # Find products with no installations
     products_with_installations = db.session.query(
         ProductInstallation.product_id
-    ).distinct().subquery()
+    ).distinct().scalar_subquery()
 
     orphaned = Product.query.filter(
         ~Product.id.in_(products_with_installations),
@@ -196,6 +198,83 @@ def cleanup_orphaned_products(dry_run=False):
         logger.info(f"Removed {count} orphaned products")
 
     return count
+
+
+DEFAULT_PRODUCT_STALE_DAYS = 90  # Auto-disable products not reported for 90 days
+
+
+def auto_disable_stale_products(days=None, dry_run=False):
+    """
+    Auto-disable products that haven't been reported by any agent for X days.
+
+    This handles products that were once installed but are no longer in use.
+    Products are NOT deleted, just marked as inactive (active=False) and
+    auto_disabled=True so they can be re-enabled if needed.
+
+    Only affects agent-sourced products (source='agent'), not manually created ones.
+
+    Args:
+        days: Number of days threshold (default: DEFAULT_PRODUCT_STALE_DAYS)
+        dry_run: If True, don't actually modify, just count
+
+    Returns:
+        Number of products auto-disabled
+    """
+    if days is None:
+        days = DEFAULT_PRODUCT_STALE_DAYS
+
+    threshold = datetime.utcnow() - timedelta(days=days)
+
+    # Find products that:
+    # 1. Are currently active
+    # 2. Were added by agents (source='agent')
+    # 3. Haven't been reported by any agent for X days
+    # 4. Haven't already been auto-disabled
+    stale_products = Product.query.filter(
+        Product.active == True,
+        Product.source == 'agent',  # Only agent-sourced products
+        Product.auto_disabled == False,  # Not already auto-disabled
+        db.or_(
+            Product.last_agent_report < threshold,
+            Product.last_agent_report.is_(None)  # Never reported (shouldn't happen but handle it)
+        )
+    )
+
+    count = stale_products.count()
+
+    if count > 0 and not dry_run:
+        stale_products.update({
+            'active': False,
+            'auto_disabled': True,
+            'updated_at': datetime.utcnow()
+        }, synchronize_session=False)
+        db.session.commit()
+        logger.info(f"Auto-disabled {count} stale products (not reported for >{days} days)")
+
+    return count
+
+
+def re_enable_product_if_reported(product):
+    """
+    Re-enable a product if it was auto-disabled but an agent reported it again.
+
+    Called when an agent reports a product that was previously auto-disabled.
+    This allows products to come back to life if agents start reporting them again.
+
+    Args:
+        product: Product object to check and potentially re-enable
+
+    Returns:
+        True if product was re-enabled, False otherwise
+    """
+    if product.auto_disabled:
+        product.active = True
+        product.auto_disabled = False
+        product.last_agent_report = datetime.utcnow()
+        db.session.commit()
+        logger.info(f"Re-enabled auto-disabled product: {product.vendor} {product.product_name}")
+        return True
+    return False
 
 
 def cleanup_import_queue(days=None, dry_run=False):
@@ -288,6 +367,16 @@ def run_full_maintenance(dry_run=False, settings=None):
         result.errors.append(f"Import queue cleanup failed: {str(e)}")
         logger.error(f"Import queue cleanup failed: {e}", exc_info=True)
 
+    try:
+        # 5. Auto-disable stale products (not reported by agents for X days)
+        result.products_auto_disabled = auto_disable_stale_products(
+            days=settings.get('product_stale_days'),
+            dry_run=dry_run
+        )
+    except Exception as e:
+        result.errors.append(f"Product auto-disable failed: {str(e)}")
+        logger.error(f"Product auto-disable failed: {e}", exc_info=True)
+
     return result
 
 
@@ -324,7 +413,7 @@ def get_maintenance_stats():
     # Orphaned products
     products_with_installations = db.session.query(
         ProductInstallation.product_id
-    ).distinct().subquery()
+    ).distinct().scalar_subquery()
 
     orphaned_products = Product.query.filter(
         ~Product.id.in_(products_with_installations),
@@ -338,16 +427,36 @@ def get_maintenance_stats():
         ImportQueue.processed_at < queue_threshold
     ).count()
 
+    # Stale products (not reported by agents for 90+ days)
+    product_threshold = now - timedelta(days=DEFAULT_PRODUCT_STALE_DAYS)
+    stale_products = Product.query.filter(
+        Product.active == True,
+        Product.source == 'agent',
+        Product.auto_disabled == False,
+        db.or_(
+            Product.last_agent_report < product_threshold,
+            Product.last_agent_report.is_(None)
+        )
+    ).count()
+
+    # Already auto-disabled products
+    auto_disabled_products = Product.query.filter(
+        Product.auto_disabled == True
+    ).count()
+
     return {
         'stale_installations': stale_installations,
         'stale_assets': stale_assets,
         'very_old_assets': very_old_assets,
         'orphaned_products': orphaned_products,
+        'stale_products': stale_products,
+        'auto_disabled_products': auto_disabled_products,
         'old_import_queue_items': old_queue_items,
         'thresholds': {
             'installation_stale_days': DEFAULT_INSTALLATION_STALE_DAYS,
             'asset_stale_days': DEFAULT_ASSET_STALE_DAYS,
             'asset_remove_days': DEFAULT_ASSET_REMOVE_DAYS,
+            'product_stale_days': DEFAULT_PRODUCT_STALE_DAYS,
             'import_queue_keep_days': DEFAULT_IMPORT_QUEUE_KEEP_DAYS
         }
     }

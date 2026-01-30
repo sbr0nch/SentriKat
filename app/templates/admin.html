@@ -74,17 +74,6 @@
                 <button class="btn btn-outline-secondary" onclick="bulkDeactivate()">
                     <i class="bi bi-pause-circle me-1"></i>Deactivate
                 </button>
-                <div class="btn-group">
-                    <button class="btn btn-outline-warning dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="bi bi-flag me-1"></i>Set Priority
-                    </button>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item text-danger" href="#" onclick="bulkChangePriority('critical'); return false;"><i class="bi bi-exclamation-octagon me-1"></i>Critical</a></li>
-                        <li><a class="dropdown-item text-warning" href="#" onclick="bulkChangePriority('high'); return false;"><i class="bi bi-exclamation-triangle me-1"></i>High</a></li>
-                        <li><a class="dropdown-item text-info" href="#" onclick="bulkChangePriority('medium'); return false;"><i class="bi bi-exclamation-circle me-1"></i>Medium</a></li>
-                        <li><a class="dropdown-item text-secondary" href="#" onclick="bulkChangePriority('low'); return false;"><i class="bi bi-dash-circle me-1"></i>Low</a></li>
-                    </ul>
-                </div>
                 <button class="btn btn-outline-danger" onclick="bulkDelete()">
                     <i class="bi bi-trash me-1"></i>Delete
                 </button>
@@ -122,15 +111,6 @@
                 </div>
                 {% endif %}
                 <div class="col-md-2">
-                    <select class="form-select form-select-sm" id="filterCriticality" onchange="loadProducts()">
-                        <option value="">All Criticalities</option>
-                        <option value="critical">Critical</option>
-                        <option value="high">High</option>
-                        <option value="medium">Medium</option>
-                        <option value="low">Low</option>
-                    </select>
-                </div>
-                <div class="col-md-2">
                     <select class="form-select form-select-sm" id="filterStatus" onchange="loadProducts()">
                         <option value="">All Statuses</option>
                         <option value="active">Active</option>
@@ -155,14 +135,13 @@
                             <th data-column="version" data-column-label="Version" data-sort-key="version" data-sort-type="string">Version</th>
                             <th data-column="platform" data-column-label="Platform" data-sort-key="platform" data-sort-type="string">Platform</th>
                             <th data-column="organization" data-column-label="Organization" data-sort-key="organization" data-sort-type="string">Organization</th>
-                            <th data-column="criticality" data-column-label="Criticality" data-sort-key="criticality" data-sort-type="priority">Criticality</th>
                             <th data-column="status" data-column-label="Status" data-sort-key="status" data-sort-type="boolean">Status</th>
                             <th data-column="actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="productsTable">
                         <tr>
-                            <td colspan="9" class="text-center py-4">
+                            <td colspan="8" class="text-center py-4">
                                 <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
@@ -287,19 +266,10 @@
                             <h6 class="mb-0 fw-bold">Settings</h6>
                         </div>
                         <div class="row g-2">
-                            <div class="col-md-6">
+                            <div class="col-12">
                                 <label for="productOrganization" class="form-label small">Organization</label>
                                 <select class="form-select form-select-sm" id="productOrganization">
                                     <option value="">All / Global</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="criticality" class="form-label small">Criticality</label>
-                                <select class="form-select form-select-sm" id="criticality" required>
-                                    <option value="critical">Critical</option>
-                                    <option value="high">High</option>
-                                    <option value="medium" selected>Medium</option>
-                                    <option value="low">Low</option>
                                 </select>
                             </div>
                         </div>
@@ -671,15 +641,13 @@
         const filterOrgEl = document.getElementById('filterOrg');
         if (filterOrgEl && filterOrgEl.value) params.append('filter_org', filterOrgEl.value);
 
-        const criticality = document.getElementById('filterCriticality')?.value;
-        if (criticality) params.append('criticality', criticality);
-
         const status = document.getElementById('filterStatus')?.value;
         if (status) params.append('status', status);
 
         const perPage = parseInt(document.getElementById('perPage')?.value || '25');
         params.append('page', currentPage);
         params.append('per_page', perPage);
+        params.append('grouped', 'true');  // Use grouped mode
 
         try {
             const response = await fetch(`/api/products?${params.toString()}`);
@@ -700,7 +668,7 @@
             }
 
             if (products.length === 0) {
-                const hasFilters = search || criticality || status || (filterOrgEl && filterOrgEl.value);
+                const hasFilters = search || status || (filterOrgEl && filterOrgEl.value);
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="8" class="text-center py-5">
@@ -712,55 +680,89 @@
                     </tr>
                 `;
             } else {
-                tbody.innerHTML = products.map(product => {
-                    const criticalityBadge = `<span class="badge ${getPriorityBadgeClass(product.criticality || 'medium')}">${(product.criticality || 'medium').toUpperCase()}</span>`;
-                    const statusBadge = product.active
+                tbody.innerHTML = products.map(group => {
+                    // For grouped products
+                    const statusBadge = group.active
                         ? '<span class="badge badge-status-active">Active</span>'
                         : '<span class="badge badge-status-inactive">Inactive</span>';
 
-                    // Display multiple organizations
+                    // Display organizations
                     let orgDisplay;
-                    if (product.organizations && product.organizations.length > 0) {
-                        orgDisplay = product.organizations.map(org =>
-                            `<span class="badge bg-primary me-1">${escapeHtml(org.display_name)}</span>`
+                    if (group.organization_names && group.organization_names.length > 0) {
+                        orgDisplay = group.organization_names.map(name =>
+                            `<span class="badge bg-primary me-1">${escapeHtml(name)}</span>`
                         ).join('');
-                    } else if (product.organization_name) {
-                        // Legacy single org support
-                        orgDisplay = `<span class="badge bg-primary">${escapeHtml(product.organization_name)}</span>`;
                     } else {
                         orgDisplay = '<span class="text-muted">-</span>';
                     }
 
+                    // Build version badges - show vulnerable versions in red
+                    const versions = group.versions || [];
+                    let versionDisplay;
+                    if (versions.length === 0) {
+                        versionDisplay = '<span class="text-muted">-</span>';
+                    } else if (versions.length === 1) {
+                        const v = versions[0];
+                        const badgeClass = v.is_vulnerable ? 'bg-danger' : 'bg-info';
+                        const vulnIcon = v.is_vulnerable ? '<i class="bi bi-exclamation-triangle-fill me-1"></i>' : '';
+                        versionDisplay = `<span class="badge ${badgeClass}" title="${v.is_vulnerable ? 'Vulnerable' : 'OK'}">${vulnIcon}${escapeHtml(v.version)}</span>`;
+                    } else {
+                        // Multiple versions - show compact with expand option
+                        const vulnerableVersions = versions.filter(v => v.is_vulnerable);
+                        const safeVersions = versions.filter(v => !v.is_vulnerable);
+
+                        let badges = [];
+                        // Show vulnerable versions first (up to 2)
+                        vulnerableVersions.slice(0, 2).forEach(v => {
+                            badges.push(`<span class="badge bg-danger" title="Vulnerable: ${escapeHtml(v.version)}"><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(v.version)}</span>`);
+                        });
+                        // Then safe versions (up to 2 if space)
+                        const safeSlots = Math.max(0, 3 - badges.length);
+                        safeVersions.slice(0, safeSlots).forEach(v => {
+                            badges.push(`<span class="badge bg-info" title="${escapeHtml(v.version)}">${escapeHtml(v.version)}</span>`);
+                        });
+
+                        const remaining = versions.length - badges.length;
+                        if (remaining > 0) {
+                            badges.push(`<span class="badge bg-secondary" title="Click to see all versions">+${remaining} more</span>`);
+                        }
+
+                        versionDisplay = `<div class="d-flex flex-wrap gap-1">${badges.join('')}</div>`;
+                    }
+
+                    // Get the first version ID for actions (or use a group identifier)
+                    const firstVersionId = versions.length > 0 ? versions[0].id : null;
+                    const allVersionIds = versions.map(v => v.id);
+                    const groupKey = `${escapeHtml(group.vendor)}|${escapeHtml(group.product_name)}`;
+
                     return `
-                        <tr onclick="toggleProductRow(${product.id}, event)" style="cursor: pointer;">
+                        <tr data-group-key="${groupKey}" data-version-ids="${allVersionIds.join(',')}" style="cursor: pointer;">
                             <td onclick="event.stopPropagation();">
                                 <input type="checkbox" class="form-check-input product-checkbox"
-                                       data-product-id="${product.id}"
-                                       onchange="toggleProductSelect(${product.id}, this)">
+                                       data-product-ids="${allVersionIds.join(',')}"
+                                       onchange="toggleGroupSelect('${allVersionIds.join(',')}', this)">
                             </td>
-                            <td data-column="product" class="fw-semibold">${escapeHtml(product.product_name)}</td>
-                            <td data-column="vendor">${escapeHtml(product.vendor)}</td>
-                            <td data-column="version">${product.version ? `<span class="badge bg-info">${escapeHtml(product.version)}</span>` : '<span class="text-muted">-</span>'}</td>
-                            <td data-column="platform">${product.platforms && product.platforms.length > 0 ? product.platforms.map(p => {
-                                const icon = p === 'Windows' ? 'bi-windows' : (p === 'Linux' ? 'bi-ubuntu' : (p === 'macOS' ? 'bi-apple' : 'bi-pc-display'));
-                                const color = p === 'Windows' ? 'primary' : (p === 'Linux' ? 'warning' : (p === 'macOS' ? 'secondary' : 'info'));
-                                return `<span class="badge bg-${color}" title="${escapeHtml(p)}"><i class="bi ${icon}"></i></span>`;
-                            }).join(' ') : '<span class="text-muted">-</span>'}</td>
+                            <td data-column="product" class="fw-semibold">
+                                ${escapeHtml(group.product_name)}
+                                ${group.has_vulnerable_version ? '<i class="bi bi-exclamation-triangle-fill text-danger ms-1" title="Has vulnerable versions"></i>' : ''}
+                            </td>
+                            <td data-column="vendor">${escapeHtml(group.vendor)}</td>
+                            <td data-column="version">${versionDisplay}</td>
+                            <td data-column="platform"><span class="text-muted">-</span></td>
                             <td data-column="organization">${orgDisplay}</td>
-                            <td data-column="criticality">${criticalityBadge}</td>
                             <td data-column="status">${statusBadge}</td>
                             <td data-column="actions" onclick="event.stopPropagation();">
                                 <div class="d-flex gap-1">
-                                    ${userPermissions.canManageProducts ? `
-                                    <button class="btn-action btn-action-edit" onclick="editProduct(${product.id})" title="Edit">
+                                    ${versions.length > 1 ? `
+                                    <button class="btn-action btn-action-edit" onclick="showVersionsModal('${escapeHtml(group.vendor)}', '${escapeHtml(group.product_name)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})" title="Manage Versions">
+                                        <i class="bi bi-layers"></i>
+                                    </button>` : ''}
+                                    ${userPermissions.canManageProducts && firstVersionId ? `
+                                    <button class="btn-action btn-action-edit" onclick="editProduct(${firstVersionId})" title="Edit">
                                         <i class="bi bi-pencil"></i>
                                     </button>` : ''}
-                                    ${userPermissions.canAssignOrgs ? `
-                                    <button class="btn-action btn-action-edit" onclick="manageOrganizations(${product.id})" title="Organizations">
-                                        <i class="bi bi-building"></i>
-                                    </button>` : ''}
-                                    ${userPermissions.canManageProducts ? `
-                                    <button class="btn-action btn-action-delete" onclick="deleteProduct(${product.id}, '${escapeHtml(product.vendor)} ${escapeHtml(product.product_name)}')" title="Delete">
+                                    ${userPermissions.canManageProducts && firstVersionId ? `
+                                    <button class="btn-action btn-action-delete" onclick="deleteProductGroup('${allVersionIds.join(',')}', '${escapeHtml(group.vendor)} ${escapeHtml(group.product_name)}')" title="Delete All Versions">
                                         <i class="bi bi-trash3"></i>
                                     </button>` : ''}
                                 </div>
@@ -790,7 +792,6 @@
         document.getElementById('productSearch').value = '';
         const filterOrgEl = document.getElementById('filterOrg');
         if (filterOrgEl) filterOrgEl.value = '';
-        document.getElementById('filterCriticality').value = '';
         document.getElementById('filterStatus').value = '';
         currentPage = 1;
         loadProducts();
@@ -812,13 +813,38 @@
         }
     }
 
+    // Safe DOM helpers - use SK.DOM if available, otherwise fallback to native
+    function safeSetValue(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value ?? '';
+    }
+    function safeSetHtml(id, html) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html ?? '';
+    }
+    function safeSetChecked(id, checked) {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!checked;
+    }
+    function safeSetDisplay(id, display) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = display;
+    }
+    function safeSetText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text ?? '';
+    }
+
     async function showAddProduct() {
         currentProductId = null;
-        document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-plus-circle me-2"></i>Add Product';
-        document.getElementById('productForm').reset();
-        document.getElementById('active').checked = true;
-        document.getElementById('criticality').value = 'medium';
-        document.getElementById('matchType').value = 'auto';
+        safeSetHtml('productModalTitle', '<i class="bi bi-plus-circle me-2"></i>Add Product');
+
+        const productForm = document.getElementById('productForm');
+        if (productForm) productForm.reset();
+
+        safeSetChecked('active', true);
+        safeSetValue('criticality', 'medium');
+        safeSetValue('matchType', 'auto');
 
         // Reset NVD search UI (primary method)
         resetNVDSearch();
@@ -831,8 +857,7 @@
         if (advancedCollapse) advancedCollapse.classList.remove('show');
 
         // Show manual entry toggle
-        const toggle = document.getElementById('manualEntryToggle');
-        if (toggle) toggle.style.display = 'block';
+        safeSetDisplay('manualEntryToggle', 'block');
 
         // Check NVD API key status and show rate limit warning if needed
         checkNvdApiKeyStatus();
@@ -842,11 +867,10 @@
 
         // Show the modal - reuse or create instance
         const modalEl = document.getElementById('productModal');
-        let modal = bootstrap.Modal.getInstance(modalEl);
-        if (!modal) {
-            modal = new bootstrap.Modal(modalEl);
+        if (modalEl) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+            modal.show();
         }
-        modal.show();
     }
 
     async function checkNvdApiKeyStatus() {
@@ -870,7 +894,7 @@
 
     async function editProduct(productId) {
         currentProductId = productId;
-        document.getElementById('productModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Product';
+        safeSetHtml('productModalTitle', '<i class="bi bi-pencil me-2"></i>Edit Product');
 
         // Reset NVD search UI
         resetNVDSearch();
@@ -882,21 +906,20 @@
             const response = await fetch(`/api/products/${productId}`);
             const product = await response.json();
 
-            document.getElementById('vendor').value = product.vendor;
-            document.getElementById('productName').value = product.product_name;
-            document.getElementById('version').value = product.version || '';
-            document.getElementById('criticality').value = product.criticality || 'medium';
-            document.getElementById('keywords').value = product.keywords || '';
-            document.getElementById('description').value = product.description || '';
-            document.getElementById('active').checked = product.active;
-            document.getElementById('productOrganization').value = product.organization_id || '';
+            safeSetValue('vendor', product.vendor);
+            safeSetValue('productName', product.product_name);
+            safeSetValue('version', product.version || '');
+            safeSetValue('criticality', product.criticality || 'medium');
+            safeSetValue('keywords', product.keywords || '');
+            safeSetValue('description', product.description || '');
+            safeSetChecked('active', product.active);
+            safeSetValue('productOrganization', product.organization_id || '');
 
             // Load CPE data and update NVD selection display
             loadCPEIntoForm(product);
 
             // Hide manual entry toggle when editing (data is already filled)
-            const toggle = document.getElementById('manualEntryToggle');
-            if (toggle) toggle.style.display = 'none';
+            safeSetDisplay('manualEntryToggle', 'none');
 
             // Collapse advanced options by default
             const advancedCollapse = document.getElementById('advancedOptionsCollapse');
@@ -904,23 +927,35 @@
 
             // Show the modal - reuse or create instance
             const modalEl = document.getElementById('productModal');
-            let modal = bootstrap.Modal.getInstance(modalEl);
-            if (!modal) {
-                modal = new bootstrap.Modal(modalEl);
+            if (modalEl) {
+                const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+                modal.show();
             }
-            modal.show();
         } catch (error) {
             showToast(`Error loading product: ${error.message}`, 'danger');
         }
     }
 
     async function saveProduct() {
+        // Clear previous validation
+        clearFormValidation('productForm');
+
         const vendor = document.getElementById('vendor').value.trim();
         const productName = document.getElementById('productName').value.trim();
-        const criticality = document.getElementById('criticality').value;
 
-        if (!vendor || !productName) {
-            showToast('Vendor and Product Name are required', 'warning');
+        // Validate required fields
+        let isValid = true;
+        if (!vendor) {
+            setFieldInvalid('vendor', 'Vendor is required');
+            isValid = false;
+        }
+        if (!productName) {
+            setFieldInvalid('productName', 'Product name is required');
+            isValid = false;
+        }
+
+        if (!isValid) {
+            showToast('Please fill in all required fields', 'warning');
             return;
         }
 
@@ -930,7 +965,6 @@
             vendor: vendor,
             product_name: productName,
             version: document.getElementById('version').value.trim(),
-            criticality: criticality,
             keywords: document.getElementById('keywords').value.trim(),
             description: document.getElementById('description').value.trim(),
             active: document.getElementById('active').checked,
@@ -1020,6 +1054,173 @@
                 loadProducts();
             } else {
                 showToast('✗ Error deleting product', 'danger');
+            }
+        } catch (error) {
+            showToast(`✗ Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Delete all versions of a product group
+    async function deleteProductGroup(versionIds, productName) {
+        const ids = versionIds.split(',').filter(id => id);
+        const versionCount = ids.length;
+
+        const confirmed = await showConfirm(
+            `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove <strong>${versionCount} version(s)</strong> and all vulnerability matches.`,
+            'Delete Product',
+            'Delete All',
+            'btn-danger'
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        showLoading();
+        let deleted = 0;
+        let errors = 0;
+
+        for (const id of ids) {
+            try {
+                const response = await fetch(`/api/products/${id}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    deleted++;
+                } else {
+                    errors++;
+                }
+            } catch (error) {
+                errors++;
+            }
+        }
+
+        hideLoading();
+
+        if (errors === 0) {
+            showToast(`✓ Deleted ${deleted} version(s) successfully`, 'success');
+        } else {
+            showToast(`Deleted ${deleted} version(s), ${errors} failed`, 'warning');
+        }
+
+        loadProducts();
+    }
+
+    // Toggle selection for a group of products
+    function toggleGroupSelect(versionIds, checkbox) {
+        const ids = versionIds.split(',').filter(id => id);
+        ids.forEach(id => {
+            if (checkbox.checked) {
+                selectedProducts.add(parseInt(id));
+            } else {
+                selectedProducts.delete(parseInt(id));
+            }
+        });
+        updateBulkActionButtons();
+    }
+
+    // Show modal with all versions of a product
+    function showVersionsModal(vendor, productName, versions) {
+        // Create or get modal
+        let modalEl = document.getElementById('versionsModal');
+        if (!modalEl) {
+            modalEl = document.createElement('div');
+            modalEl.id = 'versionsModal';
+            modalEl.className = 'modal fade';
+            modalEl.tabIndex = -1;
+            modalEl.innerHTML = `
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-layers me-2"></i>Product Versions</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" id="versionsModalBody"></div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modalEl);
+        }
+
+        const modalBody = document.getElementById('versionsModalBody');
+        modalBody.innerHTML = `
+            <h6 class="mb-3">${escapeHtml(vendor)} - ${escapeHtml(productName)}</h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>Version</th>
+                            <th>Status</th>
+                            <th>Vulnerabilities</th>
+                            <th>Source</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${versions.map(v => `
+                            <tr>
+                                <td>
+                                    <span class="badge ${v.is_vulnerable ? 'bg-danger' : 'bg-info'}">
+                                        ${v.is_vulnerable ? '<i class="bi bi-exclamation-triangle-fill me-1"></i>' : ''}
+                                        ${escapeHtml(v.version)}
+                                    </span>
+                                </td>
+                                <td>${v.active ? '<span class="badge badge-status-active">Active</span>' : '<span class="badge badge-status-inactive">Inactive</span>'}</td>
+                                <td>${v.vulnerability_count > 0 ? `<span class="badge bg-danger">${v.vulnerability_count} CVEs</span>` : '<span class="text-success">None</span>'}</td>
+                                <td><span class="badge bg-secondary">${escapeHtml(v.source || 'manual')}</span></td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        ${userPermissions.canManageProducts ? `
+                                        <button class="btn btn-sm btn-outline-primary" onclick="editProduct(${v.id}); bootstrap.Modal.getInstance(document.getElementById('versionsModal')).hide();" title="Edit">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" onclick="deleteVersionFromModal(${v.id}, '${escapeHtml(v.version)}')" title="Delete">
+                                            <i class="bi bi-trash3"></i>
+                                        </button>` : ''}
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+    }
+
+    // Delete a single version from the versions modal
+    async function deleteVersionFromModal(versionId, versionName) {
+        const confirmed = await showConfirm(
+            `Delete version "<strong>${escapeHtml(versionName)}</strong>"?`,
+            'Delete Version',
+            'Delete',
+            'btn-danger'
+        );
+
+        if (!confirmed) return;
+
+        showLoading();
+        try {
+            const response = await fetch(`/api/products/${versionId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                showToast('✓ Version deleted', 'success');
+                // Close modal and refresh
+                const modalEl = document.getElementById('versionsModal');
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                if (modal) modal.hide();
+                loadProducts();
+            } else {
+                showToast('✗ Error deleting version', 'danger');
             }
         } catch (error) {
             showToast(`✗ Error: ${error.message}`, 'danger');
@@ -1287,8 +1488,7 @@
                         version: version,
                         keywords: service.keywords || '',
                         service_catalog_id: catalogId,
-                        active: true,
-                        criticality: 'medium'
+                        active: true
                     };
 
                     // Don't set organization_id when creating - we'll use multi-org assignment
@@ -1779,53 +1979,6 @@
         }
     }
 
-    async function bulkChangePriority(newPriority) {
-        if (selectedProducts.size === 0) return;
-
-        const priorityLabel = newPriority.charAt(0).toUpperCase() + newPriority.slice(1);
-        const priorityColors = {
-            critical: 'text-danger',
-            high: 'text-warning',
-            medium: 'text-info',
-            low: 'text-secondary'
-        };
-
-        const confirmed = await showConfirm(
-            `Set priority to <strong class="${priorityColors[newPriority]}">${priorityLabel}</strong> for <strong>${selectedProducts.size}</strong> product(s)?`,
-            'Change Priority',
-            'Change',
-            'btn-warning'
-        );
-
-        if (!confirmed) return;
-
-        showLoading();
-        try {
-            const promises = Array.from(selectedProducts.keys()).map(productId =>
-                fetch(`/api/products/${productId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ criticality: newPriority })
-                })
-            );
-
-            const results = await Promise.all(promises);
-            const successCount = results.filter(r => r.ok).length;
-
-            if (successCount === selectedProducts.size) {
-                showToast(`✓ Priority set to ${priorityLabel} for ${successCount} product(s)`, 'success');
-            } else {
-                showToast(`Priority changed for ${successCount}/${selectedProducts.size} products`, 'warning');
-            }
-            clearSelection();
-            loadProducts();
-        } catch (error) {
-            showToast(`Error: ${error.message}`, 'danger');
-        } finally {
-            hideLoading();
-        }
-    }
-
     // Organization management functions
     let currentOrgProductId = null;
     let currentOrgProductName = '';
@@ -1860,7 +2013,7 @@
             }
 
             // Create and show new modal
-            const modal = new bootstrap.Modal(modalElement, {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElement, {
                 backdrop: true,
                 keyboard: true
             });
@@ -2254,47 +2407,39 @@
         const formattedVendor = vendor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
         // Set hidden CPE fields
-        document.getElementById('cpeVendor').value = vendor;
-        document.getElementById('cpeProduct').value = product;
-        document.getElementById('cpeUri').value = `cpe:2.3:a:${vendor}:${product}:${versionStr}:*:*:*:*:*:*:*`;
+        safeSetValue('cpeVendor', vendor);
+        safeSetValue('cpeProduct', product);
+        safeSetValue('cpeUri', `cpe:2.3:a:${vendor}:${product}:${versionStr}:*:*:*:*:*:*:*`);
 
         // Show selected product card with full vendor - product name
         const fullSelectedName = `${formattedVendor} - ${displayName}`;
-        document.getElementById('nvdSelectedName').textContent = fullSelectedName;
+        safeSetText('nvdSelectedName', fullSelectedName);
         const versionBadge = document.getElementById('nvdSelectedVersion');
-        versionBadge.textContent = version ? `v${version}` : 'All versions';
-        versionBadge.className = version ? 'badge bg-primary ms-1' : 'badge bg-secondary ms-1';
-        document.getElementById('nvdSelectedCpe').textContent = `CPE: ${vendor}:${product}:${versionStr}`;
-        document.getElementById('nvdSelectedProduct').style.display = 'block';
+        if (versionBadge) {
+            versionBadge.textContent = version ? `v${version}` : 'All versions';
+            versionBadge.className = version ? 'badge bg-primary ms-1' : 'badge bg-secondary ms-1';
+        }
+        safeSetText('nvdSelectedCpe', `CPE: ${vendor}:${product}:${versionStr}`);
+        safeSetDisplay('nvdSelectedProduct', 'block');
 
         // Hide search results and manual entry toggle
-        document.getElementById('nvdResultsList').style.display = 'none';
-        document.getElementById('nvdSearchStatus').style.display = 'none';
-        const toggle = document.getElementById('manualEntryToggle');
-        if (toggle) toggle.style.display = 'none';
+        safeSetDisplay('nvdResultsList', 'none');
+        safeSetDisplay('nvdSearchStatus', 'none');
+        safeSetDisplay('manualEntryToggle', 'none');
 
         // Auto-fill vendor and product name fields
-        const vendorInput = document.getElementById('vendor');
-        const productInput = document.getElementById('productName');
-        const versionInput = document.getElementById('version');
-
         // Format product for display (capitalize words, replace underscores)
         const formattedProduct = product.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
-        vendorInput.value = formattedVendor;
-        productInput.value = formattedProduct;
-        versionInput.value = version || '';
+        safeSetValue('vendor', formattedVendor);
+        safeSetValue('productName', formattedProduct);
+        safeSetValue('version', version || '');
 
         // Update CPE status in advanced options
-        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
-        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
-        const cpeDisplayUri = document.getElementById('cpeDisplayUri');
-        const clearCpeBtn = document.getElementById('clearCpeBtn');
-
-        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'block';
-        if (cpeDisplayUri) cpeDisplayUri.textContent = `${vendor}:${product}`;
-        if (cpeNotLinkedInfo) cpeNotLinkedInfo.style.display = 'none';
-        if (clearCpeBtn) clearCpeBtn.style.display = 'inline-block';
+        safeSetDisplay('cpeSelectedInfo', 'block');
+        safeSetText('cpeDisplayUri', `${vendor}:${product}`);
+        safeSetDisplay('cpeNotLinkedInfo', 'none');
+        safeSetDisplay('clearCpeBtn', 'inline-block');
 
         currentExpandedProduct = null;
     }
@@ -2304,45 +2449,39 @@
         nvdSelectedProduct = null;
 
         // Clear hidden fields
-        document.getElementById('cpeVendor').value = '';
-        document.getElementById('cpeProduct').value = '';
-        document.getElementById('cpeUri').value = '';
+        safeSetValue('cpeVendor', '');
+        safeSetValue('cpeProduct', '');
+        safeSetValue('cpeUri', '');
 
         // Hide selected product card
-        document.getElementById('nvdSelectedProduct').style.display = 'none';
-        document.getElementById('nvdSelectedName').textContent = '';
-        document.getElementById('nvdSelectedCpe').textContent = '';
+        safeSetDisplay('nvdSelectedProduct', 'none');
+        safeSetText('nvdSelectedName', '');
+        safeSetText('nvdSelectedCpe', '');
         const versionBadge = document.getElementById('nvdSelectedVersion');
         if (versionBadge) versionBadge.textContent = '';
 
         // Clear form fields
-        document.getElementById('vendor').value = '';
-        document.getElementById('productName').value = '';
-        document.getElementById('version').value = '';
+        safeSetValue('vendor', '');
+        safeSetValue('productName', '');
+        safeSetValue('version', '');
         const versionSuggestions = document.getElementById('versionSuggestions');
         if (versionSuggestions) versionSuggestions.innerHTML = '';
-        const loadVersionsBtn = document.getElementById('loadVersionsBtn');
-        if (loadVersionsBtn) loadVersionsBtn.style.display = 'none';
+        safeSetDisplay('loadVersionsBtn', 'none');
 
         // Reset CPE status in advanced options
-        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
-        const cpeNotLinkedInfo = document.getElementById('cpeNotLinkedInfo');
-        const clearCpeBtn = document.getElementById('clearCpeBtn');
-        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'none';
-        if (cpeNotLinkedInfo) cpeNotLinkedInfo.style.display = 'block';
-        if (clearCpeBtn) clearCpeBtn.style.display = 'none';
+        safeSetDisplay('cpeSelectedInfo', 'none');
+        safeSetDisplay('cpeNotLinkedInfo', 'block');
+        safeSetDisplay('clearCpeBtn', 'none');
 
         // Show search input and results (don't clear, let user refine)
-        document.getElementById('nvdSearchStatus').style.display = 'block';
-        document.getElementById('nvdResultsList').style.display = 'block';
+        safeSetDisplay('nvdSearchStatus', 'block');
+        safeSetDisplay('nvdResultsList', 'block');
 
         // Hide manual fields section
-        const manualFields = document.getElementById('manualFieldsSection');
-        if (manualFields) manualFields.style.display = 'none';
+        safeSetDisplay('manualFieldsSection', 'none');
 
         // Show manual entry toggle again
-        const toggle = document.getElementById('manualEntryToggle');
-        if (toggle) toggle.style.display = 'block';
+        safeSetDisplay('manualEntryToggle', 'block');
 
         currentExpandedProduct = null;
     }
@@ -2396,22 +2535,37 @@
     function resetNVDSearch() {
         nvdSelectedVendor = null;
         nvdSelectedProduct = null;
-        document.getElementById('nvdSearchInput').value = '';
-        document.getElementById('nvdSearchStatus').style.display = 'none';
-        document.getElementById('nvdResultsList').style.display = 'none';
-        document.getElementById('nvdResultsList').innerHTML = '';
-        document.getElementById('nvdSelectedProduct').style.display = 'none';
-        document.getElementById('versionSuggestions').innerHTML = '';
-        document.getElementById('loadVersionsBtn').style.display = 'none';
+
+        // Safe element access with null checks
+        // Use different names to avoid shadowing the state variables
+        const nvdSearchInputEl = document.getElementById('nvdSearchInput');
+        const nvdSearchStatusEl = document.getElementById('nvdSearchStatus');
+        const nvdResultsListEl = document.getElementById('nvdResultsList');
+        const nvdSelectedProductEl = document.getElementById('nvdSelectedProduct');
+        const versionSuggestionsEl = document.getElementById('versionSuggestions');
+        const loadVersionsBtnEl = document.getElementById('loadVersionsBtn');
+        const cpeSelectedInfoEl = document.getElementById('cpeSelectedInfo');
+        const cpeNotLinkedInfoEl = document.getElementById('cpeNotLinkedInfo');
+        const clearCpeBtnEl = document.getElementById('clearCpeBtn');
+        const toggleEl = document.getElementById('manualEntryToggle');
+
+        if (nvdSearchInputEl) nvdSearchInputEl.value = '';
+        if (nvdSearchStatusEl) nvdSearchStatusEl.style.display = 'none';
+        if (nvdResultsListEl) {
+            nvdResultsListEl.style.display = 'none';
+            nvdResultsListEl.innerHTML = '';
+        }
+        if (nvdSelectedProductEl) nvdSelectedProductEl.style.display = 'none';
+        if (versionSuggestionsEl) versionSuggestionsEl.innerHTML = '';
+        if (loadVersionsBtnEl) loadVersionsBtnEl.style.display = 'none';
 
         // Reset CPE status display
-        document.getElementById('cpeSelectedInfo').style.display = 'none';
-        document.getElementById('cpeNotLinkedInfo').style.display = 'block';
-        document.getElementById('clearCpeBtn').style.display = 'none';
+        if (cpeSelectedInfoEl) cpeSelectedInfoEl.style.display = 'none';
+        if (cpeNotLinkedInfoEl) cpeNotLinkedInfoEl.style.display = 'block';
+        if (clearCpeBtnEl) clearCpeBtnEl.style.display = 'none';
 
         // Show manual entry toggle
-        const toggle = document.getElementById('manualEntryToggle');
-        if (toggle) toggle.style.display = 'block';
+        if (toggleEl) toggleEl.style.display = 'block';
     }
 
     // =========================================================================
@@ -2545,18 +2699,28 @@
     }
 
     function clearCPE() {
-        document.getElementById('cpeVendor').value = '';
-        document.getElementById('cpeProduct').value = '';
-        document.getElementById('cpeUri').value = '';
-        document.getElementById('cpeSelectedInfo').style.display = 'none';
-        document.getElementById('matchType').value = 'auto';
+        const cpeVendor = document.getElementById('cpeVendor');
+        const cpeProduct = document.getElementById('cpeProduct');
+        const cpeUri = document.getElementById('cpeUri');
+        const cpeSelectedInfo = document.getElementById('cpeSelectedInfo');
+        const matchType = document.getElementById('matchType');
+
+        if (cpeVendor) cpeVendor.value = '';
+        if (cpeProduct) cpeProduct.value = '';
+        if (cpeUri) cpeUri.value = '';
+        if (cpeSelectedInfo) cpeSelectedInfo.style.display = 'none';
+        if (matchType) matchType.value = 'auto';
     }
 
     function resetCPEForm() {
         clearCPE();
-        document.getElementById('cpeSearchResults').style.display = 'none';
-        document.getElementById('cpeSearchInput').value = '';
-        document.getElementById('cpeResultsList').innerHTML = '';
+        const cpeSearchResults = document.getElementById('cpeSearchResults');
+        const cpeSearchInput = document.getElementById('cpeSearchInput');
+        const cpeResultsList = document.getElementById('cpeResultsList');
+
+        if (cpeSearchResults) cpeSearchResults.style.display = 'none';
+        if (cpeSearchInput) cpeSearchInput.value = '';
+        if (cpeResultsList) cpeResultsList.innerHTML = '';
     }
 
     function loadCPEIntoForm(product) {
@@ -2567,44 +2731,44 @@
             nvdSelectedProduct = product.cpe_product;
 
             // Set hidden fields
-            document.getElementById('cpeVendor').value = product.cpe_vendor;
-            document.getElementById('cpeProduct').value = product.cpe_product;
-            document.getElementById('cpeUri').value = product.cpe_uri || '';
+            safeSetValue('cpeVendor', product.cpe_vendor);
+            safeSetValue('cpeProduct', product.cpe_product);
+            safeSetValue('cpeUri', product.cpe_uri || '');
 
             // Show NVD selected product display (primary UI)
             const displayName = `${product.vendor} ${product.product_name}`;
-            document.getElementById('nvdSelectedName').textContent = displayName;
-            document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${product.cpe_vendor}:${product.cpe_product}:*`;
-            document.getElementById('nvdSelectedProduct').style.display = 'block';
-            document.getElementById('loadVersionsBtn').style.display = 'inline-block';
+            safeSetText('nvdSelectedName', displayName);
+            safeSetText('nvdSelectedCpe', `cpe:2.3:a:${product.cpe_vendor}:${product.cpe_product}:*`);
+            safeSetDisplay('nvdSelectedProduct', 'block');
+            safeSetDisplay('loadVersionsBtn', 'inline-block');
 
             // Update CPE status in advanced options
-            document.getElementById('cpeSelectedInfo').style.display = 'block';
-            document.getElementById('cpeDisplayUri').textContent = `${product.cpe_vendor}:${product.cpe_product}`;
-            document.getElementById('cpeNotLinkedInfo').style.display = 'none';
-            document.getElementById('clearCpeBtn').style.display = 'inline-block';
+            safeSetDisplay('cpeSelectedInfo', 'block');
+            safeSetText('cpeDisplayUri', `${product.cpe_vendor}:${product.cpe_product}`);
+            safeSetDisplay('cpeNotLinkedInfo', 'none');
+            safeSetDisplay('clearCpeBtn', 'inline-block');
         } else if (product.effective_cpe_vendor && product.effective_cpe_product) {
             // Show effective CPE from catalog (linked via ServiceCatalog)
             nvdSelectedVendor = product.effective_cpe_vendor;
             nvdSelectedProduct = product.effective_cpe_product;
 
             const displayName = `${product.vendor} ${product.product_name}`;
-            document.getElementById('nvdSelectedName').textContent = `${displayName} (from catalog)`;
-            document.getElementById('nvdSelectedCpe').textContent = `cpe:2.3:a:${product.effective_cpe_vendor}:${product.effective_cpe_product}:*`;
-            document.getElementById('nvdSelectedProduct').style.display = 'block';
-            document.getElementById('loadVersionsBtn').style.display = 'inline-block';
+            safeSetText('nvdSelectedName', `${displayName} (from catalog)`);
+            safeSetText('nvdSelectedCpe', `cpe:2.3:a:${product.effective_cpe_vendor}:${product.effective_cpe_product}:*`);
+            safeSetDisplay('nvdSelectedProduct', 'block');
+            safeSetDisplay('loadVersionsBtn', 'inline-block');
 
             // Update CPE status in advanced options
-            document.getElementById('cpeSelectedInfo').style.display = 'block';
-            document.getElementById('cpeDisplayUri').textContent = `${product.effective_cpe_vendor}:${product.effective_cpe_product} (from catalog)`;
-            document.getElementById('cpeNotLinkedInfo').style.display = 'none';
+            safeSetDisplay('cpeSelectedInfo', 'block');
+            safeSetText('cpeDisplayUri', `${product.effective_cpe_vendor}:${product.effective_cpe_product} (from catalog)`);
+            safeSetDisplay('cpeNotLinkedInfo', 'none');
         } else {
             // No CPE data - show manual entry state
             resetNVDSearch();
             resetCPEForm();
         }
 
-        document.getElementById('matchType').value = product.match_type || 'auto';
+        safeSetValue('matchType', product.match_type || 'auto');
     }
 
     // Admin Tools Modal Functions
@@ -2627,7 +2791,7 @@
             icon.classList.add('bi-info-circle-fill', 'text-info');
         }
 
-        const bsModal = new bootstrap.Modal(modal);
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
         bsModal.show();
     }
 
@@ -2640,7 +2804,7 @@
         titleEl.textContent = title;
         bodyEl.innerHTML = body;
 
-        const bsModal = new bootstrap.Modal(modal);
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
 
         // Remove old event listeners
         const newOkBtn = okBtn.cloneNode(true);

@@ -417,6 +417,16 @@
                     <button class="btn btn-sm btn-success" id="bulkAckBtn" onclick="bulkAcknowledge()" disabled>
                         <i class="bi bi-check-circle me-1"></i>Acknowledge
                     </button>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-outline-warning dropdown-toggle" id="bulkSnoozeBtn" data-bs-toggle="dropdown" disabled>
+                            <i class="bi bi-clock me-1"></i>Snooze
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="bulkSnooze(24); return false;">24 hours</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="bulkSnooze(72); return false;">3 days</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="bulkSnooze(168); return false;">1 week</a></li>
+                        </ul>
+                    </div>
                     <button class="btn btn-sm btn-outline-secondary" id="bulkUnackBtn" onclick="bulkUnacknowledge()" disabled>
                         <i class="bi bi-x-circle me-1"></i>Unacknowledge
                     </button>
@@ -485,8 +495,9 @@
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Share Filtered View Modal -->
+<!-- Share Filtered View Modal -->
     <div class="modal fade" id="shareModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -1075,15 +1086,13 @@
         const vuln = match.vulnerability;
         const product = match.product;
         const priority = match.effective_priority;
-        const productCriticality = match.product_criticality;
 
         const ransomwareBadge = vuln.known_ransomware ?
             '<span class="badge badge-critical"><i class="bi bi-shield-exclamation"></i> Ransomware</span>' : '';
         const ackBadge = match.acknowledged ?
             '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Acknowledged</span>' :
             '<span class="badge bg-warning text-dark"><i class="bi bi-circle"></i> Needs Review</span>';
-        const priorityBadge = `<span class="badge ${getPriorityBadgeClass(priority)}"><i class="bi ${getPriorityIcon(priority)}"></i> ${priority.toUpperCase()} Priority</span>`;
-        const criticalityBadge = `<span class="badge ${getPriorityBadgeClass(productCriticality)} badge-outline">${productCriticality.toUpperCase()} Criticality Product</span>`;
+        const priorityBadge = `<span class="badge ${getPriorityBadgeClass(priority)}"><i class="bi ${getPriorityIcon(priority)}"></i> ${priority.toUpperCase()} Severity</span>`;
 
         // CVSS Severity Badge
         const severityBadge = vuln.severity ?
@@ -1130,7 +1139,6 @@
                                     <p class="mb-0">
                                         <strong>${product.vendor}</strong> - ${product.product_name}
                                         ${product.version ? `<span class="badge bg-info">v${product.version}</span>` : ''}
-                                        ${criticalityBadge}
                                     </p>
                                 </div>
                             </div>
@@ -1154,7 +1162,17 @@
                                 ${!match.acknowledged ?
                                     `<button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${match.id})">
                                         <i class="bi bi-check-circle"></i> Acknowledge
-                                    </button>` :
+                                    </button>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-warning dropdown-toggle" data-bs-toggle="dropdown">
+                                            <i class="bi bi-clock"></i> Snooze
+                                        </button>
+                                        <ul class="dropdown-menu">
+                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 24); return false;">24 hours</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 72); return false;">3 days</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 168); return false;">1 week</a></li>
+                                        </ul>
+                                    </div>` :
                                     `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${match.id})">
                                         <i class="bi bi-arrow-counterclockwise"></i> Unacknowledge
                                     </button>`
@@ -1205,6 +1223,7 @@
         const bulkAckBtnEl = document.getElementById('bulkAckBtn');
         const bulkUnackBtnEl = document.getElementById('bulkUnackBtn');
         const bulkExportBtnEl = document.getElementById('bulkExportBtn');
+        const bulkSnoozeBtnEl = document.getElementById('bulkSnoozeBtn');
 
         // Show/hide bulk actions bar
         if (bulkActionsBar) {
@@ -1215,6 +1234,7 @@
         if (bulkAckBtnEl) bulkAckBtnEl.disabled = count === 0;
         if (bulkUnackBtnEl) bulkUnackBtnEl.disabled = count === 0;
         if (bulkExportBtnEl) bulkExportBtnEl.disabled = count === 0;
+        if (bulkSnoozeBtnEl) bulkSnoozeBtnEl.disabled = count === 0;
     }
 
     function clearSelection() {
@@ -1293,6 +1313,47 @@
         loadStats();
     }
 
+    async function bulkSnooze(hours) {
+        if (selectedVulns.size === 0) return;
+
+        const timeLabel = hours >= 168 ? '1 week' : hours >= 72 ? '3 days' : '24 hours';
+        const confirmed = await showConfirm(
+            `Snooze ${selectedVulns.size} vulnerabilities for ${timeLabel}?`,
+            'Bulk Snooze',
+            'Snooze',
+            'btn-warning'
+        );
+
+        if (!confirmed) return;
+
+        showLoading();
+        let success = 0;
+        let failed = 0;
+
+        for (const matchId of selectedVulns) {
+            try {
+                const response = await fetch(`/api/matches/${matchId}/snooze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hours: hours })
+                });
+                if (response.ok) {
+                    success++;
+                } else {
+                    failed++;
+                }
+            } catch {
+                failed++;
+            }
+        }
+
+        hideLoading();
+        showToast(`Snoozed ${success} vulnerabilities for ${timeLabel}${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'warning' : 'danger');
+        selectedVulns.clear();
+        updateBulkActions();
+        loadVulnerabilities();
+    }
+
     async function bulkExport() {
         if (selectedVulns.size === 0) return;
 
@@ -1349,6 +1410,23 @@
         }
     }
 
+    async function snoozeMatch(matchId, hours) {
+        try {
+            const response = await fetch(`/api/matches/${matchId}/snooze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hours: hours })
+            });
+            if (!response.ok) throw new Error('Failed to snooze');
+            const data = await response.json();
+            const snoozeUntil = new Date(data.snoozed_until);
+            showToast(`✓ Snoozed until ${snoozeUntil.toLocaleString()}`, 'warning');
+            loadVulnerabilities();
+        } catch (error) {
+            showToast(`✗ Error: ${error.message}`, 'danger');
+        }
+    }
+
     async function loadLastSync() {
         try {
             const response = await fetch('/api/sync/status');
@@ -1392,7 +1470,7 @@
                 `;
             }).join('');
 
-            new bootstrap.Modal(document.getElementById('syncHistoryModal')).show();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('syncHistoryModal')).show();
         } catch (error) {
             showToast('Failed to load sync history', 'danger');
         }
@@ -1426,7 +1504,6 @@
             required_action: match.vulnerability.required_action,
             ransomware: match.vulnerability.known_ransomware,
             your_product: `${match.product.vendor} - ${match.product.product_name}`,
-            product_criticality: match.product_criticality,
             acknowledged: match.acknowledged,
             match_reason: match.match_reason
         }));
@@ -1559,7 +1636,7 @@
         document.getElementById('createShareBtn').style.display = 'block';
 
         // Show modal
-        const modal = new bootstrap.Modal(document.getElementById('shareModal'));
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('shareModal'));
         modal.show();
     }
 
@@ -1687,7 +1764,10 @@
                     ${result.shared_view.description ? `<br><small>${result.shared_view.description}</small>` : ''}
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 `;
-                document.querySelector('.fade-in').insertBefore(notification, document.querySelector('.fade-in').firstChild);
+                const fadeInContainer = document.querySelector('.fade-in');
+                if (fadeInContainer) {
+                    fadeInContainer.insertBefore(notification, fadeInContainer.firstChild);
+                }
 
                 // Load vulnerabilities with these filters
                 loadVulnerabilities();
@@ -1843,7 +1923,6 @@
                     <div>
                         ${ackIcon}
                         <strong class="ms-2">${prod.vendor}</strong> - ${prod.product_name}
-                        <span class="badge bg-light text-dark ms-1">${prod.criticality} criticality</span>
                     </div>
                     <div>
                         ${prodPriorityBadge}

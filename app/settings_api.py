@@ -11,10 +11,12 @@ Enterprise Configuration Pattern:
 
 from flask import Blueprint, request, jsonify, session
 from app import db, csrf
+from sqlalchemy import func
 from app.models import SystemSettings, User, Vulnerability, SyncLog
 from app.auth import admin_required
 from app.encryption import encrypt_value, decrypt_value
 from app.licensing import requires_professional
+from app.error_utils import ERROR_MSGS
 import os
 import json
 from datetime import datetime
@@ -283,7 +285,8 @@ def save_ldap_settings():
 
         return jsonify({'success': True, 'message': 'LDAP settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save LDAP settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/ldap/test', methods=['POST'])
 @admin_required
@@ -327,7 +330,8 @@ def test_ldap_connection():
     except ImportError:
         return jsonify({'success': False, 'error': 'ldap3 library not installed. Run: pip install ldap3'})
     except Exception as e:
-        return jsonify({'success': False, 'error': f'LDAP connection failed: {str(e)}'})
+        logger.warning(f"LDAP connection test failed: {e}")
+        return jsonify({'success': False, 'error': ERROR_MSGS['ldap']})
 
 
 # ============================================================================
@@ -352,7 +356,6 @@ def get_smtp_settings():
 
 @settings_bp.route('/smtp', methods=['POST'])
 @admin_required
-@requires_professional('Email Alerts')
 def save_smtp_settings():
     """Save global SMTP settings"""
     data = request.get_json()
@@ -373,17 +376,18 @@ def save_smtp_settings():
 
         return jsonify({'success': True, 'message': 'SMTP settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save SMTP settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/smtp/test', methods=['POST'])
 @admin_required
-@requires_professional('Email Alerts')
 def test_smtp_connection():
     """Test global SMTP connection by sending test email"""
     try:
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
+        import socket
 
         # Get current user's email to send test to
         user_id = session.get('user_id')
@@ -393,7 +397,10 @@ def test_smtp_connection():
             test_recipient = user.email if user else None
 
         if not test_recipient:
-            return jsonify({'success': False, 'error': 'No email address found for current user'})
+            return jsonify({
+                'success': False,
+                'error': 'No email address found for your user account. Please add an email to your profile first.'
+            })
 
         smtp_config = {
             'host': get_setting('smtp_host'),
@@ -406,8 +413,11 @@ def test_smtp_connection():
             'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true'
         }
 
-        if not smtp_config['host'] or not smtp_config['from_email']:
-            return jsonify({'success': False, 'error': 'SMTP not configured'})
+        if not smtp_config['host']:
+            return jsonify({'success': False, 'error': 'SMTP server hostname is not configured'})
+
+        if not smtp_config['from_email']:
+            return jsonify({'success': False, 'error': 'SMTP "From" email address is not configured'})
 
         # Create test email
         msg = MIMEMultipart()
@@ -444,27 +454,79 @@ def test_smtp_connection():
         """
         msg.attach(MIMEText(body, 'html'))
 
-        # Send email - check SSL first, then plain SMTP with optional TLS
-        if smtp_config['use_ssl']:
-            server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'])
-        else:
-            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
-            if smtp_config['use_tls']:
-                server.starttls()
+        # Send email with proper error handling
+        server = None
+        try:
+            # Set socket timeout for connection
+            socket.setdefaulttimeout(30)
 
-        if smtp_config['username'] and smtp_config['password']:
-            server.login(smtp_config['username'], smtp_config['password'])
+            if smtp_config['use_ssl']:
+                server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
+            else:
+                server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
+                if smtp_config['use_tls']:
+                    server.starttls()
 
-        server.send_message(msg)
-        server.quit()
+            if smtp_config['username'] and smtp_config['password']:
+                server.login(smtp_config['username'], smtp_config['password'])
+
+            server.send_message(msg)
+
+        except socket.timeout:
+            return jsonify({
+                'success': False,
+                'error': f'Connection timeout: Could not connect to {smtp_config["host"]}:{smtp_config["port"]} within 30 seconds. Check firewall settings.'
+            })
+        except smtplib.SMTPAuthenticationError as e:
+            return jsonify({
+                'success': False,
+                'error': f'Authentication failed: Invalid username or password. Server said: {str(e)}'
+            })
+        except smtplib.SMTPConnectError as e:
+            return jsonify({
+                'success': False,
+                'error': f'Connection refused: Could not connect to {smtp_config["host"]}:{smtp_config["port"]}. Check server address and port.'
+            })
+        except smtplib.SMTPRecipientsRefused as e:
+            return jsonify({
+                'success': False,
+                'error': f'Recipient rejected: The server refused to send to {test_recipient}. Check if the address is valid.'
+            })
+        except smtplib.SMTPSenderRefused as e:
+            return jsonify({
+                'success': False,
+                'error': f'Sender rejected: The server refused the "From" address {smtp_config["from_email"]}. You may need to verify this address.'
+            })
+        except smtplib.SMTPException as e:
+            return jsonify({
+                'success': False,
+                'error': f'SMTP error: {str(e)}'
+            })
+        except socket.gaierror as e:
+            return jsonify({
+                'success': False,
+                'error': f'DNS lookup failed: Could not resolve hostname "{smtp_config["host"]}". Check the server address.'
+            })
+        except ConnectionRefusedError:
+            return jsonify({
+                'success': False,
+                'error': f'Connection refused by {smtp_config["host"]}:{smtp_config["port"]}. Check if SMTP server is running and port is correct.'
+            })
+        finally:
+            if server:
+                try:
+                    server.quit()
+                except:
+                    pass
 
         return jsonify({
             'success': True,
-            'message': f'✓ Test email sent successfully to {test_recipient}'
+            'message': f'✓ Test email sent successfully to {test_recipient}. Please check your inbox (and spam folder).'
         })
 
     except Exception as e:
-        return jsonify({'success': False, 'error': f'SMTP test failed: {str(e)}'})
+        logger.warning(f"SMTP test failed: {e}")
+        return jsonify({'success': False, 'error': f'Unexpected error: {str(e)}'})
 
 
 # ============================================================================
@@ -507,7 +569,8 @@ def save_sync_settings():
 
         return jsonify({'success': True, 'message': 'Sync settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save sync settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/sync/status', methods=['GET'])
 @admin_required
@@ -518,7 +581,7 @@ def get_sync_status():
         last_sync = SyncLog.query.order_by(SyncLog.sync_date.desc()).first()
 
         # Get total vulnerabilities
-        total_vulns = Vulnerability.query.count()
+        total_vulns = Vulnerability.query.count() or 0
 
         # Calculate next sync (simplified - would need proper scheduling logic)
         auto_sync = get_setting('auto_sync_enabled', 'false') == 'true'
@@ -527,14 +590,15 @@ def get_sync_status():
         return jsonify({
             'last_sync': last_sync.sync_date.strftime('%Y-%m-%d %H:%M:%S UTC') if last_sync else None,
             'last_sync_status': last_sync.status if last_sync else None,
-            'last_sync_added': last_sync.vulnerabilities_added if last_sync else 0,
-            'last_sync_updated': last_sync.vulnerabilities_updated if last_sync else 0,
+            'last_sync_added': last_sync.vulnerabilities_count if last_sync else 0,
+            'last_sync_updated': 0,  # Not tracked in current model
             'next_sync': next_sync,
             'total_vulnerabilities': total_vulns,
             'auto_sync_enabled': auto_sync
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to get sync status")
+        return jsonify({'error': ERROR_MSGS['database']}), 500
 
 # ============================================================================
 # General Settings
@@ -567,7 +631,8 @@ def save_general_settings():
 
         return jsonify({'success': True, 'message': 'General settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save general settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 
 # ============================================================================
@@ -612,7 +677,8 @@ def save_security_settings():
 
         return jsonify({'success': True, 'message': 'Security settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save security settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 
 # ============================================================================
@@ -648,7 +714,8 @@ def save_branding_settings():
 
         return jsonify({'success': True, 'message': 'Branding settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save branding settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 
 # ============================================================================
@@ -730,7 +797,8 @@ def save_notification_settings():
 
         return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save notification settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/notifications/test', methods=['POST'])
 @admin_required
@@ -900,11 +968,14 @@ def test_notification():
     except requests.exceptions.Timeout:
         return jsonify({'success': False, 'error': 'Connection timed out after 30 seconds. Check your proxy settings and network connectivity.'})
     except requests.exceptions.ProxyError as e:
-        return jsonify({'success': False, 'error': f'Proxy error: {str(e)}'})
+        logger.warning(f"Webhook proxy error: {e}")
+        return jsonify({'success': False, 'error': 'Proxy error. Check your proxy settings.'})
     except requests.exceptions.SSLError as e:
-        return jsonify({'success': False, 'error': f'SSL error: {str(e)}. Try disabling SSL verification in General Settings if using self-signed certificates.'})
+        logger.warning(f"Webhook SSL error: {e}")
+        return jsonify({'success': False, 'error': 'SSL error. Try disabling SSL verification in General Settings if using self-signed certificates.'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.exception("Webhook test failed")
+        return jsonify({'success': False, 'error': ERROR_MSGS['external']})
 
 
 # ============================================================================
@@ -935,7 +1006,8 @@ def save_retention_settings():
 
         return jsonify({'success': True, 'message': 'Retention settings saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Failed to save retention settings")
+        return jsonify({'error': ERROR_MSGS['config']}), 500
 
 
 # ============================================================================
@@ -975,8 +1047,9 @@ def upload_logo():
         return jsonify({'error': f'File too large. Maximum size: {MAX_LOGO_SIZE // (1024*1024)}MB'}), 400
 
     try:
-        # Create uploads directory if it doesn't exist
-        upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'uploads')
+        # Create uploads directory in /app/data (persistent volume)
+        data_dir = os.environ.get('DATA_DIR', '/app/data')
+        upload_dir = os.path.join(data_dir, 'uploads')
         os.makedirs(upload_dir, exist_ok=True)
 
         # Generate safe filename
@@ -987,8 +1060,8 @@ def upload_logo():
         # Save file
         file.save(filepath)
 
-        # Update branding setting with logo path
-        logo_url = f'/static/uploads/{filename}'
+        # Update branding setting with logo path (served via /data/uploads route)
+        logo_url = f'/data/uploads/{filename}'
         set_setting('logo_url', logo_url, 'branding', 'Custom logo URL')
 
         return jsonify({
@@ -997,8 +1070,8 @@ def upload_logo():
             'logo_url': logo_url
         })
     except Exception as e:
-        logger.error(f"Logo upload failed: {e}")
-        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+        logger.exception("Logo upload failed")
+        return jsonify({'error': ERROR_MSGS['upload']}), 500
 
 @settings_bp.route('/branding/logo', methods=['DELETE'])
 @admin_required
@@ -1010,9 +1083,35 @@ def delete_logo():
         # Get current logo path
         logo_url = get_setting('logo_url', '')
 
-        if logo_url and logo_url.startswith('/static/uploads/'):
-            # Delete file
-            filepath = os.path.join(os.path.dirname(os.path.dirname(__file__)), logo_url.lstrip('/'))
+        if logo_url and logo_url.startswith('/data/uploads/'):
+            # Delete file from persistent data directory
+            # Use basename to prevent path traversal attacks
+            data_dir = os.environ.get('DATA_DIR', '/app/data')
+            safe_filename = os.path.basename(logo_url)
+            # Extra validation: reject any suspicious patterns
+            if '..' in safe_filename or safe_filename.startswith('/'):
+                return jsonify({'error': 'Invalid logo path'}), 400
+            filepath = os.path.join(data_dir, 'uploads', safe_filename)
+            # Verify filepath is within uploads directory (belt and suspenders)
+            real_filepath = os.path.realpath(filepath)
+            real_uploads_dir = os.path.realpath(os.path.join(data_dir, 'uploads'))
+            if not real_filepath.startswith(real_uploads_dir):
+                return jsonify({'error': 'Invalid logo path'}), 400
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        elif logo_url and logo_url.startswith('/static/uploads/'):
+            # Legacy: delete file from static directory
+            # Use basename to prevent path traversal attacks
+            safe_filename = os.path.basename(logo_url)
+            if '..' in safe_filename or safe_filename.startswith('/'):
+                return jsonify({'error': 'Invalid logo path'}), 400
+            static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'uploads')
+            filepath = os.path.join(static_dir, safe_filename)
+            # Verify filepath is within static/uploads directory
+            real_filepath = os.path.realpath(filepath)
+            real_static_dir = os.path.realpath(static_dir)
+            if not real_filepath.startswith(real_static_dir):
+                return jsonify({'error': 'Invalid logo path'}), 400
             if os.path.exists(filepath):
                 os.remove(filepath)
 
@@ -1024,8 +1123,8 @@ def delete_logo():
 
         return jsonify({'success': True, 'message': 'Logo removed, reverted to default'})
     except Exception as e:
-        logger.error(f"Logo deletion failed: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Logo deletion failed")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
 # ============================================================================
@@ -1166,8 +1265,8 @@ def create_backup():
         )
 
     except Exception as e:
-        logger.error(f"Backup creation failed: {e}")
-        return jsonify({'error': f'Backup failed: {str(e)}'}), 500
+        logger.exception("Backup creation failed")
+        return jsonify({'error': ERROR_MSGS['backup']}), 500
 
 
 @settings_bp.route('/restore', methods=['POST'])
@@ -1237,8 +1336,8 @@ def restore_backup():
         return jsonify({'error': 'Invalid JSON file'}), 400
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Restore failed: {e}")
-        return jsonify({'error': f'Restore failed: {str(e)}'}), 500
+        logger.exception("Restore failed")
+        return jsonify({'error': ERROR_MSGS['restore']}), 500
 
 
 @settings_bp.route('/restore-full', methods=['POST'])
@@ -1449,5 +1548,5 @@ def restore_full_backup():
         return jsonify({'error': 'Invalid JSON file'}), 400
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Full restore failed: {e}")
-        return jsonify({'error': f'Full restore failed: {str(e)}'}), 500
+        logger.exception("Full restore failed")
+        return jsonify({'error': ERROR_MSGS['restore']}), 500

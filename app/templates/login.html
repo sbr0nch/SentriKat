@@ -94,6 +94,31 @@
             border: none;
         }
 
+        .form-control.is-invalid {
+            border-color: #dc3545;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' width='12' height='12' fill='none' stroke='%23dc3545'%3e%3ccircle cx='6' cy='6' r='4.5'/%3e%3cpath stroke-linejoin='round' d='M5.8 3.6h.4L6 6.5z'/%3e%3ccircle cx='6' cy='8.2' r='.6' fill='%23dc3545' stroke='none'/%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right calc(0.375em + 0.1875rem) center;
+            background-size: calc(0.75em + 0.375rem) calc(0.75em + 0.375rem);
+        }
+
+        .form-control.is-invalid:focus {
+            border-color: #dc3545;
+            box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.15);
+        }
+
+        .invalid-feedback {
+            display: none;
+            width: 100%;
+            margin-top: 0.25rem;
+            font-size: 0.875em;
+            color: #dc3545;
+        }
+
+        .form-control.is-invalid ~ .invalid-feedback {
+            display: block;
+        }
+
         .copyright {
             text-align: center;
             color: white;
@@ -142,15 +167,17 @@
             </div>
 
             <!-- Step 1: Username/Password -->
-            <form id="loginForm">
+            <form id="loginForm" novalidate>
                 <div class="mb-3">
                     <label for="username" class="form-label fw-semibold">Username</label>
                     <input type="text" class="form-control" id="username" name="username" required autofocus>
+                    <div class="invalid-feedback" id="usernameFeedback">Please enter your username</div>
                 </div>
 
                 <div class="mb-4">
                     <label for="password" class="form-label fw-semibold">Password</label>
                     <input type="password" class="form-control" id="password" name="password" required>
+                    <div class="invalid-feedback" id="passwordFeedback">Please enter your password</div>
                 </div>
 
                 <button type="submit" class="btn btn-login" id="loginBtn">
@@ -165,7 +192,7 @@
             </form>
 
             <!-- Step 2: Two-Factor Authentication -->
-            <form id="totpForm" class="d-none">
+            <form id="totpForm" class="d-none" novalidate>
                 <div class="step-indicator">
                     <i class="bi bi-phone me-1"></i>Two-Factor Authentication Required
                 </div>
@@ -174,6 +201,7 @@
                     <label for="totpCode" class="form-label fw-semibold">Enter Authentication Code</label>
                     <input type="text" class="form-control totp-input" id="totpCode" name="totpCode"
                            maxlength="6" pattern="[0-9]{6}" placeholder="000000" required autocomplete="off">
+                    <div class="invalid-feedback" id="totpCodeFeedback">Please enter a valid 6-digit code</div>
                     <small class="form-text text-muted">Enter the 6-digit code from your authenticator app</small>
                 </div>
 
@@ -193,7 +221,7 @@
             </form>
 
             <!-- Step 3: Password Change (for expired passwords) -->
-            <form id="passwordChangeForm" class="d-none">
+            <form id="passwordChangeForm" class="d-none" novalidate>
                 <div class="step-indicator">
                     <i class="bi bi-key me-1"></i>Password Change Required
                 </div>
@@ -206,16 +234,19 @@
                 <div class="mb-3">
                     <label for="currentPassword" class="form-label fw-semibold">Current Password</label>
                     <input type="password" class="form-control" id="currentPassword" name="currentPassword" required>
+                    <div class="invalid-feedback" id="currentPasswordFeedback">Please enter your current password</div>
                 </div>
 
                 <div class="mb-3">
                     <label for="newPassword" class="form-label fw-semibold">New Password</label>
-                    <input type="password" class="form-control" id="newPassword" name="newPassword" required>
+                    <input type="password" class="form-control" id="newPassword" name="newPassword" required minlength="8">
+                    <div class="invalid-feedback" id="newPasswordFeedback">Password must be at least 8 characters</div>
                 </div>
 
                 <div class="mb-4">
                     <label for="confirmPassword" class="form-label fw-semibold">Confirm New Password</label>
                     <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" required>
+                    <div class="invalid-feedback" id="confirmPasswordFeedback">Passwords do not match</div>
                 </div>
 
                 <button type="submit" class="btn btn-login" id="changePasswordBtn">
@@ -266,6 +297,30 @@
         function hideMessages() {
             document.getElementById('errorMessage').classList.add('d-none');
             document.getElementById('successMessage').classList.add('d-none');
+        }
+
+        function clearValidation() {
+            document.querySelectorAll('.form-control.is-invalid').forEach(el => {
+                el.classList.remove('is-invalid');
+            });
+        }
+
+        function setFieldInvalid(fieldId, message) {
+            const field = document.getElementById(fieldId);
+            const feedback = document.getElementById(fieldId + 'Feedback');
+            if (field) {
+                field.classList.add('is-invalid');
+                if (feedback && message) {
+                    feedback.textContent = message;
+                }
+            }
+        }
+
+        function setFieldValid(fieldId) {
+            const field = document.getElementById(fieldId);
+            if (field) {
+                field.classList.remove('is-invalid');
+            }
         }
 
         function setButtonLoading(btnId, loading) {
@@ -325,10 +380,24 @@
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             hideMessages();
-            setButtonLoading('loginBtn', true);
+            clearValidation();
 
-            const username = document.getElementById('username').value;
+            const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
+
+            // Client-side validation
+            let isValid = true;
+            if (!username) {
+                setFieldInvalid('username', 'Please enter your username');
+                isValid = false;
+            }
+            if (!password) {
+                setFieldInvalid('password', 'Please enter your password');
+                isValid = false;
+            }
+            if (!isValid) return;
+
+            setButtonLoading('loginBtn', true);
 
             try {
                 const response = await fetch('/api/auth/login', {
@@ -351,6 +420,12 @@
                         showStep('password');
                         // Pre-fill current password
                         document.getElementById('currentPassword').value = password;
+                    } else if (data.must_setup_2fa) {
+                        // Admin requires 2FA setup - redirect to security settings
+                        showSuccess('Login successful! You are required to set up two-factor authentication. Redirecting to security settings...');
+                        setTimeout(() => {
+                            window.location.href = '/profile?setup_2fa=required';
+                        }, 1500);
                     } else {
                         // Success - show message and redirect
                         showSuccess('Login successful! Redirecting...');
@@ -359,7 +434,14 @@
                         }, 500);
                     }
                 } else {
-                    showError(data.error || 'Login failed');
+                    // Show field-specific errors if available
+                    if (data.error && data.error.toLowerCase().includes('username')) {
+                        setFieldInvalid('username', data.error);
+                    } else if (data.error && data.error.toLowerCase().includes('password')) {
+                        setFieldInvalid('password', data.error);
+                    } else {
+                        showError(data.error || 'Login failed');
+                    }
                     setButtonLoading('loginBtn', false);
                 }
             } catch (error) {
@@ -372,9 +454,17 @@
         document.getElementById('totpForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             hideMessages();
-            setButtonLoading('totpBtn', true);
+            clearValidation();
 
-            const totpCode = document.getElementById('totpCode').value;
+            const totpCode = document.getElementById('totpCode').value.trim();
+
+            // Client-side validation
+            if (!totpCode || totpCode.length !== 6 || !/^\d{6}$/.test(totpCode)) {
+                setFieldInvalid('totpCode', 'Please enter a valid 6-digit code');
+                return;
+            }
+
+            setButtonLoading('totpBtn', true);
 
             try {
                 const response = await fetch('/api/auth/login', {
@@ -393,11 +483,16 @@
                     if (data.password_expired) {
                         showStep('password');
                         document.getElementById('currentPassword').value = pendingCredentials.password;
+                    } else if (data.must_setup_2fa) {
+                        showSuccess('Login successful! Redirecting to security settings...');
+                        setTimeout(() => {
+                            window.location.href = '/profile?setup_2fa=required';
+                        }, 1000);
                     } else {
                         window.location.href = nextUrl;
                     }
                 } else {
-                    showError(data.error || 'Invalid authentication code');
+                    setFieldInvalid('totpCode', data.error || 'Invalid authentication code');
                     setButtonLoading('totpBtn', false);
                     document.getElementById('totpCode').value = '';
                     document.getElementById('totpCode').focus();
@@ -412,20 +507,37 @@
         document.getElementById('passwordChangeForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             hideMessages();
+            clearValidation();
 
             const currentPassword = document.getElementById('currentPassword').value;
             const newPassword = document.getElementById('newPassword').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
 
-            if (newPassword !== confirmPassword) {
-                showError('New passwords do not match');
-                return;
+            // Client-side validation
+            let isValid = true;
+
+            if (!currentPassword) {
+                setFieldInvalid('currentPassword', 'Please enter your current password');
+                isValid = false;
             }
 
-            if (newPassword.length < 8) {
-                showError('Password must be at least 8 characters');
-                return;
+            if (!newPassword) {
+                setFieldInvalid('newPassword', 'Please enter a new password');
+                isValid = false;
+            } else if (newPassword.length < 8) {
+                setFieldInvalid('newPassword', 'Password must be at least 8 characters');
+                isValid = false;
             }
+
+            if (!confirmPassword) {
+                setFieldInvalid('confirmPassword', 'Please confirm your new password');
+                isValid = false;
+            } else if (newPassword !== confirmPassword) {
+                setFieldInvalid('confirmPassword', 'Passwords do not match');
+                isValid = false;
+            }
+
+            if (!isValid) return;
 
             setButtonLoading('changePasswordBtn', true);
 
@@ -447,7 +559,14 @@
                         window.location.href = nextUrl;
                     }, 1500);
                 } else {
-                    showError(data.error || 'Password change failed');
+                    // Show field-specific error if possible
+                    if (data.error && data.error.toLowerCase().includes('current')) {
+                        setFieldInvalid('currentPassword', data.error);
+                    } else if (data.error && (data.error.toLowerCase().includes('policy') || data.error.toLowerCase().includes('new password'))) {
+                        setFieldInvalid('newPassword', data.error);
+                    } else {
+                        showError(data.error || 'Password change failed');
+                    }
                     setButtonLoading('changePasswordBtn', false);
                 }
             } catch (error) {
@@ -459,6 +578,15 @@
         // Auto-format TOTP input (numbers only)
         document.getElementById('totpCode').addEventListener('input', function(e) {
             this.value = this.value.replace(/[^0-9]/g, '').slice(0, 6);
+            setFieldValid('totpCode');
+        });
+
+        // Clear validation on input for all fields
+        ['username', 'password', 'currentPassword', 'newPassword', 'confirmPassword'].forEach(fieldId => {
+            const field = document.getElementById(fieldId);
+            if (field) {
+                field.addEventListener('input', () => setFieldValid(fieldId));
+            }
         });
     </script>
 </body>

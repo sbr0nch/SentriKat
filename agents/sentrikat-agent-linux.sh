@@ -190,15 +190,61 @@ get_installed_software() {
     local products=()
     local count=0
 
+    # Security-relevant package patterns to include (case-insensitive matching)
+    # These are packages commonly tracked for CVEs
+    is_security_relevant() {
+        local pkg="$1"
+        local pkg_lower="${pkg,,}"  # Convert to lowercase
+
+        # Include these important package categories
+        case "$pkg_lower" in
+            # Web servers & proxies
+            apache*|httpd*|nginx*|haproxy*|traefik*|caddy*|lighttpd*) return 0 ;;
+            # Databases
+            mysql*|mariadb*|postgres*|mongodb*|redis*|memcached*|sqlite*|elasticsearch*) return 0 ;;
+            # Programming languages & runtimes
+            php*|python3|ruby*|nodejs*|node|npm|java*|openjdk*|golang*|dotnet*|mono*) return 0 ;;
+            # Security & crypto
+            openssl*|openssh*|gnupg*|gpg*|libssl*|libcrypto*|ca-certificates*) return 0 ;;
+            # Container & virtualization
+            docker*|containerd*|podman*|kubernetes*|kubectl*|helm*|vagrant*|virtualbox*|qemu*) return 0 ;;
+            # System services
+            systemd*|dbus*|polkit*|sudo*|cron*) return 0 ;;
+            # Network services
+            bind9*|named*|dnsmasq*|postfix*|dovecot*|exim*|sendmail*|samba*|nfs*|vsftpd*|proftpd*) return 0 ;;
+            # Monitoring & logging
+            prometheus*|grafana*|zabbix*|nagios*|rsyslog*|syslog*|logrotate*) return 0 ;;
+            # Security tools
+            fail2ban*|iptables*|nftables*|ufw*|firewalld*|selinux*|apparmor*|aide*|tripwire*|clamav*) return 0 ;;
+            # Version control
+            git|git-core|subversion*|mercurial*) return 0 ;;
+            # Message queues
+            rabbitmq*|kafka*|activemq*|zeromq*) return 0 ;;
+            # Common vulnerable software
+            log4j*|struts*|tomcat*|jetty*|wildfly*|jboss*|spring*) return 0 ;;
+            # Kernel & boot
+            linux-image*|linux-headers*|grub*|kernel*) return 0 ;;
+            # Package managers (for tracking)
+            apt|dpkg|rpm|yum|dnf|pip*|gem*|composer*|cargo*) return 0 ;;
+            # Common utilities with CVE history
+            curl|wget|tar|gzip|bzip2|xz*|unzip*|bash|zsh|vim*|tmux*) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+
     # Debian/Ubuntu: dpkg
     if command -v dpkg &>/dev/null; then
         while IFS=$'\t' read -r name version; do
             [[ -z "$name" ]] && continue
 
+            # Filter to security-relevant packages only
+            if ! is_security_relevant "$name"; then
+                continue
+            fi
+
             # Extract vendor from package name or use "Debian" as fallback
             local vendor="Debian"
             case "$name" in
-                lib*|python*|perl*|ruby*) vendor="Community" ;;
                 apache*|httpd*) vendor="Apache" ;;
                 nginx*) vendor="Nginx" ;;
                 mysql*|mariadb*) vendor="Oracle/MariaDB" ;;
@@ -207,9 +253,16 @@ get_installed_software() {
                 docker*) vendor="Docker" ;;
                 openssl*|openssh*) vendor="OpenSSL/OpenSSH" ;;
                 curl*) vendor="Curl" ;;
-                git*) vendor="Git" ;;
-                vim*|nano*|emacs*) vendor="Community" ;;
+                git|git-core) vendor="Git" ;;
                 linux-*|kernel-*) vendor="Linux" ;;
+                php*) vendor="PHP" ;;
+                python*) vendor="Python" ;;
+                nodejs*|node|npm) vendor="Node.js" ;;
+                java*|openjdk*) vendor="Oracle/OpenJDK" ;;
+                mongodb*) vendor="MongoDB" ;;
+                elasticsearch*) vendor="Elastic" ;;
+                prometheus*) vendor="Prometheus" ;;
+                grafana*) vendor="Grafana" ;;
             esac
 
             # Escape JSON special characters
@@ -224,6 +277,12 @@ get_installed_software() {
     if command -v rpm &>/dev/null && [[ ! -f /etc/debian_version ]]; then
         while IFS=$'\t' read -r name version vendor; do
             [[ -z "$name" ]] && continue
+
+            # Filter to security-relevant packages only
+            if ! is_security_relevant "$name"; then
+                continue
+            fi
+
             [[ "$vendor" == "(none)" ]] && vendor="Community"
 
             # Escape JSON special characters
@@ -239,6 +298,12 @@ get_installed_software() {
     if command -v apk &>/dev/null; then
         while IFS='-' read -r name version; do
             [[ -z "$name" ]] && continue
+
+            # Filter to security-relevant packages only
+            if ! is_security_relevant "$name"; then
+                continue
+            fi
+
             name=$(json_escape "$name")
             version=$(json_escape "$version")
             products+=("{\"vendor\": \"Alpine\", \"product\": \"$name\", \"version\": \"$version\"}")
@@ -250,6 +315,12 @@ get_installed_software() {
     if command -v pacman &>/dev/null; then
         while IFS=' ' read -r name version; do
             [[ -z "$name" ]] && continue
+
+            # Filter to security-relevant packages only
+            if ! is_security_relevant "$name"; then
+                continue
+            fi
+
             name=$(json_escape "$name")
             version=$(json_escape "$version")
             products+=("{\"vendor\": \"Arch\", \"product\": \"$name\", \"version\": \"$version\"}")
@@ -257,7 +328,7 @@ get_installed_software() {
         done < <(pacman -Q 2>/dev/null)
     fi
 
-    # Snap packages
+    # Snap packages (include all - typically user-installed apps)
     if command -v snap &>/dev/null; then
         while read -r name version; do
             [[ -z "$name" || "$name" == "Name" ]] && continue
@@ -268,7 +339,7 @@ get_installed_software() {
         done < <(snap list 2>/dev/null | awk 'NR>1 {print $1, $2}')
     fi
 
-    # Flatpak packages
+    # Flatpak packages (include all - typically user-installed apps)
     if command -v flatpak &>/dev/null; then
         while IFS=$'\t' read -r name version origin; do
             [[ -z "$name" || "$name" == "Name" ]] && continue
@@ -316,6 +387,11 @@ send_inventory() {
     payload=$(echo "$system_info" | sed 's/}$//')
     payload="${payload}, \"products\": ${products}}"
 
+    # Write payload to temp file to avoid "Argument list too long" error
+    local tmpfile
+    tmpfile=$(mktemp)
+    echo "$payload" > "$tmpfile"
+
     # Retry logic
     local max_retries=3
     local retry_delay=5
@@ -324,11 +400,12 @@ send_inventory() {
         local response
         local http_code
 
+        # Use --data-binary @file to avoid argument list limits
         response=$(curl -s -w "\n%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
             -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
-            --data "$payload" \
+            --data-binary "@${tmpfile}" \
             --max-time 120 \
             2>&1) || true
 
@@ -339,6 +416,7 @@ send_inventory() {
         if [[ "$http_code" == "200" || "$http_code" == "202" ]]; then
             log_info "Inventory sent successfully (HTTP $http_code)"
             log_info "Response: $body"
+            rm -f "$tmpfile"
             return 0
         else
             log_warn "Attempt $i failed: HTTP $http_code - $body"
@@ -351,6 +429,7 @@ send_inventory() {
         fi
     done
 
+    rm -f "$tmpfile"
     log_error "Failed to send inventory after $max_retries attempts"
     return 1
 }

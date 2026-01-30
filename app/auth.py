@@ -7,8 +7,13 @@ from functools import wraps
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, flash
 from app import db, csrf, limiter
 from app.models import User, Organization
+from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -18,6 +23,36 @@ csrf.exempt(auth_bp)
 # Authentication is ALWAYS enabled by default (security requirement)
 # Only disable for testing with DISABLE_AUTH=true (NOT recommended)
 AUTH_ENABLED = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
+
+
+def _safe_get_user(user_id):
+    """
+    Safely get a user from the database, handling session state issues.
+
+    Returns the User object or None if not found or error occurs.
+    """
+    if user_id is None:
+        return None
+
+    try:
+        # Use a fresh query instead of db.session.get() to avoid session state issues
+        user = User.query.filter_by(id=user_id).first()
+        return user
+    except SQLAlchemyError as e:
+        # If there's a database error, try to rollback and retry
+        logger.warning(f"Database error getting user {user_id}: {e}")
+        try:
+            db.session.rollback()
+            # Retry with fresh query
+            user = User.query.filter_by(id=user_id).first()
+            return user
+        except Exception as retry_error:
+            logger.error(f"Failed to recover user query: {retry_error}")
+            db.session.rollback()
+            return None
+    except Exception as e:
+        logger.error(f"Unexpected error getting user {user_id}: {e}")
+        return None
 
 def login_required(f):
     """Decorator to require login for routes"""
@@ -33,8 +68,8 @@ def login_required(f):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
-        # Verify user still exists and is active
-        user = User.query.get(session['user_id'])
+        # Verify user still exists and is active (use safe query to handle session issues)
+        user = _safe_get_user(session['user_id'])
         if not user or not user.is_active:
             session.clear()
             if request.is_json or request.path.startswith('/api/'):
@@ -73,7 +108,7 @@ def admin_required(f):
             return redirect(url_for('auth.login', next=request.url))
 
         # Check if user is super_admin or has legacy is_admin flag
-        user = User.query.get(session['user_id'])
+        user = _safe_get_user(session['user_id'])
         if not user:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'User not found'}), 401
@@ -114,7 +149,7 @@ def manager_required(f):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
-        user = User.query.get(session['user_id'])
+        user = _safe_get_user(session['user_id'])
         if not user:
             logger.error(f"User {session['user_id']} not found in database")
             if request.is_json or request.path.startswith('/api/'):
@@ -159,7 +194,7 @@ def org_admin_required(f):
             return redirect(url_for('auth.login', next=request.url))
 
         # Check if user is org_admin, super_admin, or legacy is_admin
-        user = User.query.get(session['user_id'])
+        user = _safe_get_user(session['user_id'])
         if not user:
             logger.error(f"User {session['user_id']} not found in database")
             if request.is_json or request.path.startswith('/api/'):
@@ -197,7 +232,7 @@ def get_current_user():
         return None
 
     if 'user_id' in session:
-        return User.query.get(session['user_id'])
+        return _safe_get_user(session['user_id'])
     return None
 
 @auth_bp.route('/login', methods=['GET'])
@@ -410,6 +445,12 @@ def api_login():
 
         logger.info(f"2FA verified for {username}")
 
+    # Check if user must set up 2FA (admin required it but not yet enabled)
+    must_setup_2fa = False
+    if user.auth_type == 'local' and getattr(user, 'totp_required', False) and not user.totp_enabled:
+        must_setup_2fa = True
+        logger.info(f"2FA setup required for {username} (admin mandated)")
+
     # Check for password expiration (local users only)
     password_expired = False
     if user.auth_type == 'local' and user.is_password_expired():
@@ -437,6 +478,10 @@ def api_login():
     if password_expired:
         session['must_change_password'] = True
 
+    # Set flag for 2FA setup requirement
+    if must_setup_2fa:
+        session['must_setup_2fa'] = True
+
     # Set organization
     if user.organization_id:
         session['organization_id'] = user.organization_id
@@ -449,6 +494,7 @@ def api_login():
     return jsonify({
         'success': True,
         'password_expired': password_expired,
+        'must_setup_2fa': must_setup_2fa,
         'user': user.to_dict(),
         'redirect': url_for('main.index')
     })
@@ -529,9 +575,6 @@ def setup_2fa():
     current_user = get_current_user()
     if not current_user:
         return jsonify({'error': 'Not authenticated'}), 401
-
-    if current_user.auth_type != 'local':
-        return jsonify({'error': '2FA is only available for local users'}), 400
 
     if current_user.totp_enabled:
         return jsonify({'error': '2FA is already enabled. Disable it first to set up again.'}), 400
@@ -636,9 +679,17 @@ def disable_2fa():
     if not password:
         return jsonify({'error': 'Password is required to disable 2FA'}), 400
 
-    if not current_user.check_password(password):
-        logger.warning(f"2FA disable failed for {current_user.username}: incorrect password")
-        return jsonify({'error': 'Incorrect password'}), 401
+    # Verify password based on auth type
+    if current_user.auth_type == 'ldap':
+        # For LDAP users, verify against LDAP server
+        if not authenticate_ldap(current_user, password):
+            logger.warning(f"2FA disable failed for {current_user.username}: LDAP authentication failed")
+            return jsonify({'error': 'Incorrect password'}), 401
+    else:
+        # For local users, verify against stored hash
+        if not current_user.check_password(password):
+            logger.warning(f"2FA disable failed for {current_user.username}: incorrect password")
+            return jsonify({'error': 'Incorrect password'}), 401
 
     current_user.disable_totp()
     db.session.commit()
@@ -656,7 +707,7 @@ def get_2fa_status():
 
     return jsonify({
         'enabled': current_user.totp_enabled or False,
-        'available': current_user.auth_type == 'local'
+        'available': True  # 2FA available for all users (local and LDAP)
     })
 
 def authenticate_ldap(user, password):
