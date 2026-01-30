@@ -6964,6 +6964,32 @@ async function updateQueueItemOrg(itemId, orgId) {
 }
 
 async function approveQueueItem(itemId) {
+    // Find the item to check if it has CPE
+    const item = importQueueData.find(i => i.id === itemId);
+
+    // If no CPE mapping, warn the user
+    if (item && (!item.cpe_vendor || !item.cpe_product)) {
+        const confirmed = await showConfirm(
+            `<div class="text-start">
+                <div class="alert alert-warning mb-3">
+                    <i class="bi bi-shield-exclamation me-2"></i>
+                    <strong>No CPE mapping found</strong>
+                </div>
+                <p><strong>${escapeHtml(item.vendor)} ${escapeHtml(item.product_name)}</strong> has no CPE identifier.</p>
+                <p class="mb-2">This means:</p>
+                <ul class="mb-3">
+                    <li>Vulnerabilities <strong>will NOT be detected</strong> for this software</li>
+                    <li>You can manually assign CPE later in Products</li>
+                </ul>
+                <p class="mb-0 text-muted small">Tip: After adding, go to Products → Edit → Use NVD Search to find the correct CPE.</p>
+            </div>`,
+            'Approve Without CPE?',
+            'Approve Anyway',
+            'btn-warning'
+        );
+        if (!confirmed) return;
+    }
+
     try {
         const response = await fetch(`/api/import/queue/${itemId}/approve`, { method: 'POST' });
         if (!response.ok) {
@@ -6991,11 +7017,47 @@ async function rejectQueueItem(itemId) {
 async function bulkApproveQueue() {
     if (selectedQueueItems.size === 0) return;
 
+    // Check how many items lack CPE
+    const selectedItems = importQueueData.filter(i => selectedQueueItems.has(i.id));
+    const withoutCpe = selectedItems.filter(i => !i.cpe_vendor || !i.cpe_product);
+    const withCpe = selectedItems.length - withoutCpe.length;
+
+    let confirmMessage = `Approve ${selectedQueueItems.size} item(s) and add to product inventory?`;
+
+    if (withoutCpe.length > 0) {
+        confirmMessage = `
+            <div class="text-start">
+                <p>Approve <strong>${selectedQueueItems.size}</strong> item(s) and add to product inventory?</p>
+                <div class="row text-center mb-3">
+                    <div class="col-6">
+                        <div class="border rounded p-2 bg-success-subtle">
+                            <div class="fs-4 fw-bold text-success">${withCpe}</div>
+                            <small class="text-muted">With CPE</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2 bg-warning-subtle">
+                            <div class="fs-4 fw-bold text-warning">${withoutCpe.length}</div>
+                            <small class="text-muted">Without CPE</small>
+                        </div>
+                    </div>
+                </div>
+                ${withoutCpe.length > 0 ? `
+                    <div class="alert alert-warning mb-0 small">
+                        <i class="bi bi-shield-exclamation me-1"></i>
+                        <strong>${withoutCpe.length} item(s)</strong> have no CPE mapping and won't detect vulnerabilities.
+                        You can assign CPE later in Products.
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
     const confirmed = await showConfirm(
-        `Approve ${selectedQueueItems.size} item(s) and add to product inventory?`,
+        confirmMessage,
         'Bulk Approve',
         'Approve All',
-        'btn-success'
+        withoutCpe.length > 0 ? 'btn-warning' : 'btn-success'
     );
 
     if (!confirmed) return;
