@@ -1270,7 +1270,7 @@ async function showAddOrgMembershipModal() {
         return;
     }
 
-    SK.DOM.getValue('addOrgMembershipUserId') = currentUserId;
+    SK.DOM.setValue('addOrgMembershipUserId', currentUserId);
 
     // Load available organizations
     try {
@@ -1344,7 +1344,7 @@ async function updateOrgMembershipRole(userId, orgId, newRole, isPrimary) {
             showToast(result.message || 'Role updated successfully', 'success');
             // If this is the primary org, also update the role dropdown in the main form
             if (isPrimary) {
-                SK.DOM.getValue('userRole') = newRole;
+                SK.DOM.setValue('userRole', newRole);
             }
             loadUserOrgMemberships(userId);
         } else {
@@ -1831,9 +1831,9 @@ async function editOrganization(orgId) {
         const org = await response.json();
 
         // Basic info
-        SK.DOM.getValue('orgName') = org.name;
-        SK.DOM.getValue('orgDisplayName') = org.display_name;
-        SK.DOM.getValue('orgDescription') = org.description || '';
+        SK.DOM.setValue('orgName', org.name);
+        SK.DOM.setValue('orgDisplayName', org.display_name);
+        SK.DOM.setValue('orgDescription', org.description || '');
 
         // Parse emails
         let emails = [];
@@ -1842,18 +1842,18 @@ async function editOrganization(orgId) {
         } catch (e) {
             emails = [];
         }
-        SK.DOM.getValue('orgEmails') = emails.join(', ');
+        SK.DOM.setValue('orgEmails', emails.join(', '));
         SK.DOM.getChecked('orgActive') = org.active;
 
         // SMTP settings
-        SK.DOM.getValue('smtpHost') = org.smtp_host || '';
-        SK.DOM.getValue('smtpPort') = org.smtp_port || 587;
-        SK.DOM.getValue('smtpUsername') = org.smtp_username || '';
+        SK.DOM.setValue('smtpHost', org.smtp_host || '');
+        SK.DOM.setValue('smtpPort', org.smtp_port || 587);
+        SK.DOM.setValue('smtpUsername', org.smtp_username || '');
         // Don't pre-fill masked password - leave blank so user can enter new one if needed
-        SK.DOM.getValue('smtpPassword') = '';
+        SK.DOM.setValue('smtpPassword', '');
         SK.DOM.get('smtpPassword').placeholder = org.smtp_password ? '(password saved - leave blank to keep)' : 'Password';
-        SK.DOM.getValue('smtpFromEmail') = org.smtp_from_email || '';
-        SK.DOM.getValue('smtpFromName') = org.smtp_from_name || 'SentriKat Alerts';
+        SK.DOM.setValue('smtpFromEmail', org.smtp_from_email || '');
+        SK.DOM.setValue('smtpFromName', org.smtp_from_name || 'SentriKat Alerts');
         SK.DOM.getChecked('smtpUseTls') = org.smtp_use_tls !== false;
         SK.DOM.getChecked('smtpUseSsl') = org.smtp_use_ssl === true;
 
@@ -1866,15 +1866,15 @@ async function editOrganization(orgId) {
         // Alert mode settings (org.alert_settings contains nested values)
         const alertMode = org.alert_settings?.mode || '';
         const escalationDays = org.alert_settings?.escalation_days || '';
-        SK.DOM.getValue('orgAlertMode') = alertMode;
-        SK.DOM.getValue('orgEscalationDays') = escalationDays;
+        SK.DOM.setValue('orgAlertMode', alertMode);
+        SK.DOM.setValue('orgEscalationDays', escalationDays);
 
         // Webhook settings
         SK.DOM.getChecked('orgWebhookEnabled') = org.webhook_enabled || false;
-        SK.DOM.getValue('orgWebhookUrl') = org.webhook_url || '';
-        SK.DOM.getValue('orgWebhookFormat') = org.webhook_format || 'slack';
-        SK.DOM.getValue('orgWebhookName') = org.webhook_name || '';
-        SK.DOM.getValue('orgWebhookToken') = '';
+        SK.DOM.setValue('orgWebhookUrl', org.webhook_url || '');
+        SK.DOM.setValue('orgWebhookFormat', org.webhook_format || 'slack');
+        SK.DOM.setValue('orgWebhookName', org.webhook_name || '');
+        SK.DOM.setValue('orgWebhookToken', '');
         SK.DOM.get('orgWebhookToken').placeholder = org.webhook_token ? '(token saved - leave blank to keep)' : 'Leave empty if not needed';
 
         // Disable name field for existing orgs
@@ -3779,10 +3779,10 @@ function buildLdapPagination(currentPage, totalPages) {
  */
 async function showInviteLdapUserModalInline(user) {
     // Use correct field IDs matching the modal
-    SK.DOM.getValue('ldapInviteUsername') = user.username;
-    SK.DOM.getValue('ldapInviteEmail') = user.email;
-    SK.DOM.getValue('ldapInviteFullName') = user.full_name || '';
-    SK.DOM.getValue('ldapUserDN') = user.dn;
+    SK.DOM.setValue('ldapInviteUsername', user.username);
+    SK.DOM.setValue('ldapInviteEmail', user.email);
+    SK.DOM.setValue('ldapInviteFullName', user.full_name || '');
+    SK.DOM.setValue('ldapUserDN', user.dn);
 
     // Set groups loading state
     const groupsSpan = SK.DOM.get('ldapGroupsList');
@@ -3966,10 +3966,10 @@ async function searchLdapUsers() {
 async function showInviteLdapUserModal(userData) {
     try {
         // Populate form with user data
-        SK.DOM.getValue('ldapUserDN') = userData.dn;
-        SK.DOM.getValue('ldapInviteUsername') = userData.username;
-        SK.DOM.getValue('ldapInviteEmail') = userData.email;
-        SK.DOM.getValue('ldapInviteFullName') = userData.full_name || '';
+        SK.DOM.setValue('ldapUserDN', userData.dn);
+        SK.DOM.setValue('ldapInviteUsername', userData.username);
+        SK.DOM.setValue('ldapInviteEmail', userData.email);
+        SK.DOM.setValue('ldapInviteFullName', userData.full_name || '');
 
         // Load organizations into dropdown
         const orgResponse = await fetch('/api/organizations');
@@ -4314,19 +4314,19 @@ async function editGroupMapping(mappingId) {
             }
 
             // Populate form
-            SK.DOM.getValue('mappingId') = mapping.id;
-            SK.DOM.getValue('ldapGroupDn') = mapping.ldap_group_dn;
-            SK.DOM.getValue('ldapGroupCn') = mapping.ldap_group_cn;
-            SK.DOM.getValue('ldapGroupDescription') = mapping.ldap_group_description || '';
-            SK.DOM.getValue('mappingRole') = mapping.role;
-            SK.DOM.getValue('mappingPriority') = mapping.priority;
+            SK.DOM.setValue('mappingId', mapping.id);
+            SK.DOM.setValue('ldapGroupDn', mapping.ldap_group_dn);
+            SK.DOM.setValue('ldapGroupCn', mapping.ldap_group_cn);
+            SK.DOM.setValue('ldapGroupDescription', mapping.ldap_group_description || '');
+            SK.DOM.setValue('mappingRole', mapping.role);
+            SK.DOM.setValue('mappingPriority', mapping.priority);
             SK.DOM.getChecked('autoProvision') = mapping.auto_provision;
             SK.DOM.getChecked('autoDeprovision') = mapping.auto_deprovision;
             SK.DOM.getChecked('syncEnabled') = mapping.sync_enabled;
 
             // Load organizations and set selected
             await loadOrganizationsForMapping();
-            SK.DOM.getValue('mappingOrganization') = mapping.organization_id || '';
+            SK.DOM.setValue('mappingOrganization', mapping.organization_id || '');
 
             SK.DOM.get('groupMappingModalTitle').textContent = 'Edit Group Mapping';
 
@@ -4729,10 +4729,10 @@ function createMappingFromDiscovery(dn, cn, description, memberCount) {
     // Pre-fill mapping form
     const form = SK.DOM.get('groupMappingForm');
     form.reset();
-    SK.DOM.getValue('mappingId') = '';
-    SK.DOM.getValue('ldapGroupDn') = dn;
-    SK.DOM.getValue('ldapGroupCn') = cn;
-    SK.DOM.getValue('ldapGroupDescription') = description;
+    SK.DOM.setValue('mappingId', '');
+    SK.DOM.setValue('ldapGroupDn', dn);
+    SK.DOM.setValue('ldapGroupCn', cn);
+    SK.DOM.setValue('ldapGroupDescription', description);
     // Store member count in data attribute for submission
     form.dataset.memberCount = memberCount || 0;
     SK.DOM.get('groupMappingModalTitle').textContent = 'Create Group Mapping';
@@ -5362,14 +5362,14 @@ function sortAuditLogs(field) {
 }
 
 function clearAuditFilters() {
-    SK.DOM.getValue('auditSearchInput') = '';
-    SK.DOM.getValue('auditActionFilter') = '';
-    SK.DOM.getValue('auditResourceFilter') = '';
-    SK.DOM.getValue('auditStartDate') = '';
-    SK.DOM.getValue('auditEndDate') = '';
-    SK.DOM.getValue('auditPerPage') = '50';
-    SK.DOM.getValue('auditSortField') = 'timestamp';
-    SK.DOM.getValue('auditSortOrder') = 'desc';
+    SK.DOM.setValue('auditSearchInput', '');
+    SK.DOM.setValue('auditActionFilter', '');
+    SK.DOM.setValue('auditResourceFilter', '');
+    SK.DOM.setValue('auditStartDate', '');
+    SK.DOM.setValue('auditEndDate', '');
+    SK.DOM.setValue('auditPerPage', '50');
+    SK.DOM.setValue('auditSortField', 'timestamp');
+    SK.DOM.setValue('auditSortOrder', 'desc');
     loadAuditLogs(1);
 }
 
@@ -7479,7 +7479,7 @@ async function showIntegrationApiKey(integrationId) {
 
         if (integration.api_key) {
             SK.DOM.get('viewApiKeyTitle').textContent = `API Key - ${integration.name}`;
-            SK.DOM.getValue('viewApiKeyValue') = integration.api_key;
+            SK.DOM.setValue('viewApiKeyValue', integration.api_key);
             const modal = bootstrap.Modal.getOrCreateInstance(SK.DOM.get('viewApiKeyModal'));
             modal.show();
         } else {
