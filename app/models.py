@@ -2323,3 +2323,144 @@ class VulnerabilitySnapshot(db.Model):
         ).order_by(cls.snapshot_date.asc())
 
         return query.all()
+
+
+class ScheduledReport(db.Model):
+    """
+    Configuration for scheduled vulnerability reports.
+    Defines when and to whom reports should be sent.
+    """
+    __tablename__ = 'scheduled_reports'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+
+    # Schedule configuration
+    frequency = db.Column(db.String(20), nullable=False, default='weekly')  # daily, weekly, monthly
+    day_of_week = db.Column(db.Integer, nullable=True)  # 0=Monday, 6=Sunday (for weekly)
+    day_of_month = db.Column(db.Integer, nullable=True)  # 1-28 (for monthly)
+    time_of_day = db.Column(db.String(5), nullable=False, default='09:00')  # HH:MM format
+
+    # Report configuration
+    report_type = db.Column(db.String(20), nullable=False, default='summary')  # summary, full, critical_only
+    include_acknowledged = db.Column(db.Boolean, default=True)
+    include_pending = db.Column(db.Boolean, default=True)
+    include_trends = db.Column(db.Boolean, default=True)
+    priority_filter = db.Column(db.String(20), nullable=True)  # critical, high, medium, low or None for all
+
+    # Recipients (comma-separated email addresses or role-based)
+    recipients = db.Column(db.Text, nullable=False)  # email1@example.com,email2@example.com
+    send_to_managers = db.Column(db.Boolean, default=False)  # Also send to org managers
+    send_to_admins = db.Column(db.Boolean, default=True)  # Also send to org admins
+
+    # Status
+    enabled = db.Column(db.Boolean, default=True)
+    last_sent = db.Column(db.DateTime, nullable=True)
+    last_status = db.Column(db.String(50), nullable=True)  # success, failed, no_recipients
+    next_run = db.Column(db.DateTime, nullable=True)
+
+    # Audit
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('scheduled_reports', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('created_reports', lazy='dynamic'))
+
+    FREQUENCY_CHOICES = ['daily', 'weekly', 'monthly']
+    REPORT_TYPE_CHOICES = ['summary', 'full', 'critical_only']
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'name': self.name,
+            'description': self.description,
+            'frequency': self.frequency,
+            'day_of_week': self.day_of_week,
+            'day_of_month': self.day_of_month,
+            'time_of_day': self.time_of_day,
+            'report_type': self.report_type,
+            'include_acknowledged': self.include_acknowledged,
+            'include_pending': self.include_pending,
+            'include_trends': self.include_trends,
+            'priority_filter': self.priority_filter,
+            'recipients': self.recipients,
+            'send_to_managers': self.send_to_managers,
+            'send_to_admins': self.send_to_admins,
+            'enabled': self.enabled,
+            'last_sent': self.last_sent.isoformat() if self.last_sent else None,
+            'last_status': self.last_status,
+            'next_run': self.next_run.isoformat() if self.next_run else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_by': self.created_by
+        }
+
+    def calculate_next_run(self):
+        """Calculate the next run time based on frequency and schedule"""
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        hour, minute = map(int, self.time_of_day.split(':'))
+
+        if self.frequency == 'daily':
+            # Next occurrence of the specified time
+            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if next_run <= now:
+                next_run += timedelta(days=1)
+
+        elif self.frequency == 'weekly':
+            # Next occurrence of the specified day and time
+            days_ahead = self.day_of_week - now.weekday()
+            if days_ahead < 0:
+                days_ahead += 7
+            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=days_ahead)
+            if next_run <= now:
+                next_run += timedelta(days=7)
+
+        elif self.frequency == 'monthly':
+            # Next occurrence of the specified day of month
+            day = min(self.day_of_month or 1, 28)  # Cap at 28 to avoid month-end issues
+            next_run = now.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+            if next_run <= now:
+                # Move to next month
+                if now.month == 12:
+                    next_run = next_run.replace(year=now.year + 1, month=1)
+                else:
+                    next_run = next_run.replace(month=now.month + 1)
+
+        else:
+            next_run = now + timedelta(days=1)
+
+        self.next_run = next_run
+        return next_run
+
+    def get_recipient_emails(self):
+        """Get list of email addresses to send to"""
+        emails = set()
+
+        # Add explicit recipients
+        if self.recipients:
+            for email in self.recipients.split(','):
+                email = email.strip()
+                if email and '@' in email:
+                    emails.add(email)
+
+        # Add role-based recipients
+        if self.send_to_managers or self.send_to_admins:
+            org_users = User.query.filter_by(
+                organization_id=self.organization_id,
+                is_active=True
+            ).all()
+
+            for user in org_users:
+                if user.email:
+                    if self.send_to_admins and user.role in ['org_admin', 'super_admin']:
+                        emails.add(user.email)
+                    elif self.send_to_managers and user.role == 'manager':
+                        emails.add(user.email)
+
+        return list(emails)
