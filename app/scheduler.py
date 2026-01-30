@@ -85,6 +85,16 @@ def start_scheduler(app):
     )
     logger.info("Data retention cleanup scheduled at 03:00")
 
+    # Schedule daily vulnerability snapshot (at 2 AM)
+    scheduler.add_job(
+        func=lambda: vulnerability_snapshot_job(app),
+        trigger=CronTrigger(hour=2, minute=0),
+        id='daily_vulnerability_snapshot',
+        name='Daily Vulnerability Snapshot',
+        replace_existing=True
+    )
+    logger.info("Vulnerability snapshot scheduled at 02:00")
+
     scheduler.start()
     logger.info(f"Scheduler started. CISA KEV sync scheduled at {Config.SYNC_HOUR:02d}:{Config.SYNC_MINUTE:02d}")
 
@@ -297,3 +307,38 @@ def data_retention_cleanup_job(app):
 
         except Exception as e:
             logger.error(f"Data retention cleanup failed: {str(e)}", exc_info=True)
+
+
+def vulnerability_snapshot_job(app):
+    """Job to take daily vulnerability snapshots for trend analysis"""
+    with app.app_context():
+        try:
+            from app.models import VulnerabilitySnapshot, Organization
+
+            logger.info("Starting daily vulnerability snapshots...")
+
+            # Take snapshots for each organization
+            organizations = Organization.query.filter_by(active=True).all()
+            snapshot_count = 0
+            error_count = 0
+
+            for org in organizations:
+                try:
+                    VulnerabilitySnapshot.take_snapshot(organization_id=org.id)
+                    snapshot_count += 1
+                except Exception as e:
+                    logger.error(f"Error taking snapshot for org {org.name}: {e}")
+                    error_count += 1
+
+            # Also take a global snapshot (organization_id=None)
+            try:
+                VulnerabilitySnapshot.take_snapshot(organization_id=None)
+                snapshot_count += 1
+            except Exception as e:
+                logger.error(f"Error taking global snapshot: {e}")
+                error_count += 1
+
+            logger.info(f"Vulnerability snapshots completed: {snapshot_count} successful, {error_count} errors")
+
+        except Exception as e:
+            logger.error(f"Vulnerability snapshot job failed: {str(e)}", exc_info=True)

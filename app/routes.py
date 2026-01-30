@@ -1216,6 +1216,94 @@ def get_vulnerability_stats():
     })
 
 
+@bp.route('/api/vulnerabilities/trends', methods=['GET'])
+@login_required
+def get_vulnerability_trends():
+    """
+    Get historical vulnerability trend data for charts.
+
+    Query params:
+    - days: Number of days to look back (default: 30, max: 90)
+
+    Returns daily snapshots of vulnerability metrics.
+    """
+    from app.models import VulnerabilitySnapshot
+
+    days = request.args.get('days', 30, type=int)
+    days = min(max(days, 7), 90)  # Clamp between 7 and 90
+
+    # Get current organization
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
+    # Get trend data
+    snapshots = VulnerabilitySnapshot.get_trend_data(organization_id=org_id, days=days)
+
+    # Format for charts
+    trend_data = {
+        'dates': [],
+        'total_matches': [],
+        'unacknowledged': [],
+        'acknowledged': [],
+        'critical': [],
+        'high': [],
+        'medium': [],
+        'low': [],
+        'products_tracked': []
+    }
+
+    for snapshot in snapshots:
+        trend_data['dates'].append(snapshot.snapshot_date.strftime('%Y-%m-%d'))
+        trend_data['total_matches'].append(snapshot.total_matches)
+        trend_data['unacknowledged'].append(snapshot.unacknowledged)
+        trend_data['acknowledged'].append(snapshot.acknowledged)
+        trend_data['critical'].append(snapshot.critical_count)
+        trend_data['high'].append(snapshot.high_count)
+        trend_data['medium'].append(snapshot.medium_count)
+        trend_data['low'].append(snapshot.low_count)
+        trend_data['products_tracked'].append(snapshot.products_tracked)
+
+    return jsonify({
+        'days': days,
+        'snapshot_count': len(snapshots),
+        'trends': trend_data
+    })
+
+
+@bp.route('/api/vulnerabilities/trends/snapshot', methods=['POST'])
+@login_required
+def take_vulnerability_snapshot():
+    """
+    Manually trigger a vulnerability snapshot.
+    Useful for testing or initial setup.
+    Requires admin privileges.
+    """
+    from app.models import VulnerabilitySnapshot
+
+    # Check admin
+    if not session.get('is_admin'):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    # Get current organization
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
+    try:
+        snapshot = VulnerabilitySnapshot.take_snapshot(organization_id=org_id)
+        return jsonify({
+            'success': True,
+            'message': 'Snapshot taken successfully',
+            'snapshot': snapshot.to_dict()
+        })
+    except Exception as e:
+        logger.exception("Error taking snapshot")
+        return jsonify({'error': str(e)}), 500
+
+
 @bp.route('/api/vulnerabilities/grouped', methods=['GET'])
 @login_required
 def get_vulnerabilities_grouped():

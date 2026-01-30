@@ -2133,3 +2133,193 @@ class UserCpeMapping(db.Model):
         if not text:
             return ''
         return text.lower().strip()
+
+
+# ============================================================================
+# VULNERABILITY TREND TRACKING - Historical data for analytics
+# ============================================================================
+
+class VulnerabilitySnapshot(db.Model):
+    """
+    Daily snapshots of vulnerability statistics for trend analysis.
+    Captures key metrics at a point in time for historical comparison.
+    """
+    __tablename__ = 'vulnerability_snapshots'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True, index=True)
+    snapshot_date = db.Column(db.Date, nullable=False, index=True)
+
+    # Core metrics
+    total_vulnerabilities = db.Column(db.Integer, default=0)  # Total CVEs in CISA KEV
+    total_matches = db.Column(db.Integer, default=0)  # CVEs matching our products
+    unacknowledged = db.Column(db.Integer, default=0)  # Unacked matches
+    acknowledged = db.Column(db.Integer, default=0)  # Acked matches
+    snoozed = db.Column(db.Integer, default=0)  # Snoozed matches
+
+    # Severity breakdown
+    critical_count = db.Column(db.Integer, default=0)
+    high_count = db.Column(db.Integer, default=0)
+    medium_count = db.Column(db.Integer, default=0)
+    low_count = db.Column(db.Integer, default=0)
+
+    # Product metrics
+    products_tracked = db.Column(db.Integer, default=0)
+    products_with_vulns = db.Column(db.Integer, default=0)
+
+    # Agent metrics (optional)
+    active_agents = db.Column(db.Integer, default=0)
+
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'snapshot_date', name='uq_org_snapshot_date'),
+    )
+
+    # Relationship
+    organization = db.relationship('Organization', backref=db.backref('vulnerability_snapshots', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'snapshot_date': self.snapshot_date.isoformat() if self.snapshot_date else None,
+            'total_vulnerabilities': self.total_vulnerabilities,
+            'total_matches': self.total_matches,
+            'unacknowledged': self.unacknowledged,
+            'acknowledged': self.acknowledged,
+            'snoozed': self.snoozed,
+            'critical_count': self.critical_count,
+            'high_count': self.high_count,
+            'medium_count': self.medium_count,
+            'low_count': self.low_count,
+            'products_tracked': self.products_tracked,
+            'products_with_vulns': self.products_with_vulns,
+            'active_agents': self.active_agents
+        }
+
+    @classmethod
+    def take_snapshot(cls, organization_id=None):
+        """
+        Take a snapshot of current vulnerability statistics.
+        If organization_id is None, takes a global snapshot.
+        """
+        from sqlalchemy import func
+
+        today = date.today()
+
+        # Check if snapshot already exists for today
+        existing = cls.query.filter_by(
+            organization_id=organization_id,
+            snapshot_date=today
+        ).first()
+
+        if existing:
+            return existing  # Already have today's snapshot
+
+        # Build query filters
+        if organization_id:
+            product_filter = Product.organization_id == organization_id
+        else:
+            product_filter = True  # No filter for global
+
+        # Get total KEV vulnerabilities
+        total_vulns = Vulnerability.query.count()
+
+        # Get match statistics
+        match_query = db.session.query(
+            func.count(VulnerabilityMatch.id).label('total'),
+            func.sum(db.case((VulnerabilityMatch.acknowledged == False, 1), else_=0)).label('unacked'),
+            func.sum(db.case((VulnerabilityMatch.acknowledged == True, 1), else_=0)).label('acked'),
+            func.sum(db.case((VulnerabilityMatch.snoozed_until != None, 1), else_=0)).label('snoozed')
+        )
+
+        if organization_id:
+            match_query = match_query.join(Product, VulnerabilityMatch.product_id == Product.id).filter(
+                Product.organization_id == organization_id
+            )
+
+        match_stats = match_query.first()
+
+        # Get severity breakdown
+        severity_query = db.session.query(
+            Vulnerability.severity,
+            func.count(VulnerabilityMatch.id)
+        ).join(
+            VulnerabilityMatch, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+        ).filter(
+            VulnerabilityMatch.acknowledged == False
+        )
+
+        if organization_id:
+            severity_query = severity_query.join(
+                Product, VulnerabilityMatch.product_id == Product.id
+            ).filter(Product.organization_id == organization_id)
+
+        severity_query = severity_query.group_by(Vulnerability.severity)
+        severity_counts = dict(severity_query.all())
+
+        # Get product counts
+        products_query = Product.query.filter(Product.active == True)
+        if organization_id:
+            products_query = products_query.filter(Product.organization_id == organization_id)
+        products_tracked = products_query.count()
+
+        # Products with vulnerabilities
+        products_with_vulns_query = db.session.query(
+            func.count(func.distinct(VulnerabilityMatch.product_id))
+        ).join(Product, VulnerabilityMatch.product_id == Product.id).filter(
+            Product.active == True,
+            VulnerabilityMatch.acknowledged == False
+        )
+        if organization_id:
+            products_with_vulns_query = products_with_vulns_query.filter(
+                Product.organization_id == organization_id
+            )
+        products_with_vulns = products_with_vulns_query.scalar() or 0
+
+        # Get agent count
+        agents_query = Asset.query.filter(Asset.active == True)
+        if organization_id:
+            agents_query = agents_query.filter(Asset.organization_id == organization_id)
+        active_agents = agents_query.count()
+
+        # Create snapshot
+        snapshot = cls(
+            organization_id=organization_id,
+            snapshot_date=today,
+            total_vulnerabilities=total_vulns,
+            total_matches=match_stats.total or 0,
+            unacknowledged=match_stats.unacked or 0,
+            acknowledged=match_stats.acked or 0,
+            snoozed=match_stats.snoozed or 0,
+            critical_count=severity_counts.get('CRITICAL', 0),
+            high_count=severity_counts.get('HIGH', 0),
+            medium_count=severity_counts.get('MEDIUM', 0),
+            low_count=severity_counts.get('LOW', 0),
+            products_tracked=products_tracked,
+            products_with_vulns=products_with_vulns,
+            active_agents=active_agents
+        )
+
+        db.session.add(snapshot)
+        db.session.commit()
+
+        return snapshot
+
+    @classmethod
+    def get_trend_data(cls, organization_id=None, days=30):
+        """
+        Get trend data for the last N days.
+        Returns list of snapshots ordered by date.
+        """
+        from datetime import timedelta
+        start_date = date.today() - timedelta(days=days)
+
+        query = cls.query.filter(
+            cls.organization_id == organization_id,
+            cls.snapshot_date >= start_date
+        ).order_by(cls.snapshot_date.asc())
+
+        return query.all()
