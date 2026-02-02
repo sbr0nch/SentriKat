@@ -783,7 +783,7 @@
                             </td>
                             <td data-column="vendor">${escapeHtml(group.vendor)}</td>
                             <td data-column="version">${versionDisplay}</td>
-                            <td data-column="cpe">${cpeDisplay}</td>
+                            <td data-column="cpe" data-sort-value="${hasCpe ? 'true' : 'false'}">${cpeDisplay}</td>
                             <td data-column="platform">${platformDisplay}</td>
                             <td data-column="organization">${orgDisplay}</td>
                             <td data-column="status">${statusBadge}</td>

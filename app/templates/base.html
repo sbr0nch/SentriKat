@@ -3712,6 +3712,11 @@
             getCellValue: function(cell, sortType) {
                 if (!cell) return '';
 
+                // Check for explicit sort value (useful for icon-only cells like CPE badges)
+                if (cell.dataset.sortValue !== undefined) {
+                    return cell.dataset.sortValue.toLowerCase();
+                }
+
                 const text = cell.textContent.trim();
 
                 // Check for badge content
