@@ -246,6 +246,7 @@ def get_products():
     filter_org = request.args.get('filter_org', type=int)
     criticality = request.args.get('criticality', '').strip().lower()
     status = request.args.get('status', '').strip().lower()
+    cpe_filter = request.args.get('cpe_filter', '').strip().lower()  # with_cpe or without_cpe
     page = request.args.get('page', type=int)
     per_page = request.args.get('per_page', 25, type=int)
     per_page = min(per_page, 100)  # Limit max items per page
@@ -333,6 +334,24 @@ def get_products():
     elif status == 'inactive':
         query = query.filter(Product.active == False)
 
+    # Apply CPE filter
+    if cpe_filter == 'with_cpe':
+        query = query.filter(
+            Product.cpe_vendor.isnot(None),
+            Product.cpe_vendor != '',
+            Product.cpe_product.isnot(None),
+            Product.cpe_product != ''
+        )
+    elif cpe_filter == 'without_cpe':
+        query = query.filter(
+            db.or_(
+                Product.cpe_vendor.is_(None),
+                Product.cpe_vendor == '',
+                Product.cpe_product.is_(None),
+                Product.cpe_product == ''
+            )
+        )
+
     # Order by vendor, product name (no distinct needed with subquery approach)
     query = query.order_by(Product.vendor, Product.product_name)
 
@@ -351,11 +370,13 @@ def get_products():
                     'product_name': p.product_name,
                     'cpe_vendor': p.cpe_vendor,
                     'cpe_product': p.cpe_product,
+                    'has_cpe': bool(p.cpe_vendor and p.cpe_product),
                     'keywords': p.keywords,
                     'active': p.active,
                     'versions': [],
                     'organization_ids': set(),
                     'organization_names': set(),
+                    'platforms': set(),  # Track platforms from installations
                     'total_vulnerabilities': 0,
                     'has_vulnerable_version': False
                 }
@@ -384,11 +405,37 @@ def get_products():
                 grouped_products[key]['has_vulnerable_version'] = True
             grouped_products[key]['total_vulnerabilities'] += version_entry['vulnerability_count']
 
+        # Batch query platforms for all products at once for efficiency
+        all_product_ids = [v['id'] for group in grouped_products.values() for v in group['versions']]
+        if all_product_ids:
+            platform_data = db.session.query(
+                ProductInstallation.product_id,
+                ProductInstallation.detected_on_os
+            ).filter(
+                ProductInstallation.product_id.in_(all_product_ids),
+                ProductInstallation.detected_on_os.isnot(None),
+                ProductInstallation.detected_on_os != ''
+            ).distinct().all()
+
+            # Build product_id -> platforms mapping
+            product_platforms = {}
+            for product_id, platform in platform_data:
+                if product_id not in product_platforms:
+                    product_platforms[product_id] = set()
+                product_platforms[product_id].add(platform)
+
+            # Assign platforms to groups
+            for key, group in grouped_products.items():
+                for v in group['versions']:
+                    if v['id'] in product_platforms:
+                        group['platforms'].update(product_platforms[v['id']])
+
         # Convert to list and clean up sets
         result = []
         for key, group in grouped_products.items():
             group['organization_ids'] = list(group['organization_ids'])
             group['organization_names'] = list(group['organization_names'])
+            group['platforms'] = sorted(list(group['platforms']))  # Convert platforms set to sorted list
             # Sort versions - put specific versions first, 'Any' last
             group['versions'].sort(key=lambda v: (v['version'] == 'Any', v['version'] or ''))
             result.append(group)
