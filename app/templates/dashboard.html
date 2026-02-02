@@ -2180,13 +2180,13 @@
                     </div>
 
                     <div class="mb-2">
-                        <small class="text-muted fw-semibold d-flex justify-content-between align-items-center">
-                            AFFECTED PRODUCTS IN YOUR INVENTORY
-                            <button class="btn btn-sm btn-link p-0" type="button" data-bs-toggle="collapse" data-bs-target="#products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}" aria-expanded="true">
-                                <i class="bi bi-chevron-down"></i> Toggle
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <small class="text-muted fw-semibold">AFFECTED PRODUCTS IN YOUR INVENTORY</small>
+                            <button class="btn btn-sm btn-outline-secondary px-2 py-0" type="button" data-bs-toggle="collapse" data-bs-target="#products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}" aria-expanded="false">
+                                <i class="bi bi-chevron-right me-1"></i>Show Products
                             </button>
-                        </small>
-                        <div class="collapse show" id="products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}">
+                        </div>
+                        <div class="collapse" id="products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}">
                             <div class="border rounded p-2 bg-light mt-1">
                                 ${productsHtml}
                             </div>

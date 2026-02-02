@@ -2524,16 +2524,16 @@
                         </div>
 
                         <div class="col-md-6" id="primaryOrgField">
-                            <label for="organization" class="form-label fw-semibold">Primary Organization *</label>
-                            <select class="form-select" id="organization" required>
+                            <label for="organization" class="form-label fw-semibold">Primary Organization <span id="orgRequired">*</span></label>
+                            <select class="form-select" id="organization">
                                 <option value="">Loading...</option>
                             </select>
-                            <small class="text-muted">Initial organization for the user. Additional orgs can be added after creation.</small>
+                            <small class="text-muted" id="orgHelp">Initial organization for the user. Additional orgs can be added after creation.</small>
                         </div>
 
                         <div class="col-md-12">
                             <label for="userRole" class="form-label fw-semibold">Role *</label>
-                            <select class="form-select" id="userRole" onchange="updateRoleDescription()">
+                            <select class="form-select" id="userRole" onchange="updateRoleDescription(); updateOrgRequirement()">
                                 <option value="user">User - View-only access to vulnerabilities</option>
                                 <option value="manager">Manager - Can manage products and view vulnerabilities</option>
                                 <option value="org_admin">Organization Admin - Full access within their organization</option>

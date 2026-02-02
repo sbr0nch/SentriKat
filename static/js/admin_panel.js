@@ -1441,14 +1441,23 @@ async function saveUser() {
         }
     }
 
+    const role = SK.DOM.getValue('userRole');
+    const orgId = parseInt(SK.DOM.getValue('organization')) || null;
+
+    // Organization is required for non-super_admin users
+    if (role !== 'super_admin' && !orgId) {
+        showToast('Organization is required for this role', 'warning');
+        return;
+    }
+
     const userData = {
         username: username,
         email: email,
         full_name: SK.DOM.getValue('fullName').trim(),
-        organization_id: parseInt(SK.DOM.getValue('organization')) || null,
+        organization_id: orgId,
         auth_type: authType,
-        role: SK.DOM.getValue('userRole'),
-        is_admin: SK.DOM.getValue('userRole') !== 'user' && SK.DOM.getValue('userRole') !== 'manager',
+        role: role,
+        is_admin: role !== 'user' && role !== 'manager',
         can_manage_products: SK.DOM.getChecked('canManageProducts'),
         can_view_all_orgs: SK.DOM.getChecked('canViewAllOrgs'),
         is_active: SK.DOM.getChecked('isActive')
@@ -2161,6 +2170,25 @@ function updateRoleDescription() {
     }
     if (canManageProductsEl) canManageProductsEl.checked = desc.canManageProducts;
     if (viewAllOrgsCheck) viewAllOrgsCheck.style.display = desc.showViewAllOrgs ? 'block' : 'none';
+}
+
+function updateOrgRequirement() {
+    const role = SK.DOM.getValue('userRole');
+    const orgSelect = SK.DOM.get('organization');
+    const orgRequired = SK.DOM.get('orgRequired');
+    const orgHelp = SK.DOM.get('orgHelp');
+
+    if (role === 'super_admin') {
+        // Super admins don't require an organization
+        if (orgSelect) orgSelect.required = false;
+        if (orgRequired) orgRequired.style.display = 'none';
+        if (orgHelp) orgHelp.textContent = 'Optional for Super Admin. Leave empty for system-wide access.';
+    } else {
+        // All other roles require an organization
+        if (orgSelect) orgSelect.required = true;
+        if (orgRequired) orgRequired.style.display = 'inline';
+        if (orgHelp) orgHelp.textContent = 'Initial organization for the user. Additional orgs can be added after creation.';
+    }
 }
 
 function escapeHtml(text) {
@@ -6784,8 +6812,8 @@ function renderAssetProductsTable() {
         let aVal, bVal;
         switch (assetProductsSortField) {
             case 'product':
-                aVal = `${a.vendor || ''} ${a.product_name || a.name || ''}`.toLowerCase();
-                bVal = `${b.vendor || ''} ${b.product_name || b.name || ''}`.toLowerCase();
+                aVal = (a.product_name || '').toLowerCase();
+                bVal = (b.product_name || '').toLowerCase();
                 break;
             case 'version':
                 aVal = (a.version || '').toLowerCase();
@@ -6835,8 +6863,8 @@ function renderAssetProductsTable() {
                 <tbody>
                     ${pageProducts.map(p => `
                         <tr>
-                            <td class="text-truncate" style="max-width: 300px;" title="${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}">
-                                ${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}
+                            <td class="text-truncate" style="max-width: 300px;" title="${escapeHtml(p.product_name || 'Unknown')}">
+                                ${escapeHtml(p.product_name || 'Unknown')}
                             </td>
                             <td><code class="small">${escapeHtml(p.version || '-')}</code></td>
                             <td>
