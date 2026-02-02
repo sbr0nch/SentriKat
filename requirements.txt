@@ -19,6 +19,9 @@ Pillow==10.2.0
 # Database
 psycopg2-binary==2.9.9
 
+# SAML SSO (optional - requires system packages: libxml2-dev libxmlsec1-dev)
+python3-saml==1.16.0
+
 # Testing
 pytest==7.4.3
 pytest-cov==4.1.0

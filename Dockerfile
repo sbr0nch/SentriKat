@@ -12,12 +12,16 @@ ENV http_proxy=${HTTP_PROXY}
 ENV https_proxy=${HTTPS_PROXY}
 ENV no_proxy=${NO_PROXY}
 
-# Install system dependencies for PostgreSQL and other requirements
+# Install system dependencies for PostgreSQL, SAML, and other requirements
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
     ca-certificates \
+    pkg-config \
+    libxml2-dev \
+    libxmlsec1-dev \
+    libxmlsec1-openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
