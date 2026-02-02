@@ -25,6 +25,9 @@ def _apply_schema_migrations(logger, db_uri):
         ('agent_api_keys', 'auto_approve', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
         ('inventory_jobs', 'api_key_id', 'INTEGER', 'INTEGER'),
         ('users', 'totp_required', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('vulnerability_matches', 'auto_acknowledged', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('vulnerability_matches', 'resolution_reason', 'VARCHAR(50)', 'VARCHAR(50)'),
+        ('vulnerability_matches', 'acknowledged_at', 'DATETIME', 'TIMESTAMP'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
