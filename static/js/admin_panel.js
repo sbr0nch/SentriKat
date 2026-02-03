@@ -2537,6 +2537,75 @@ async function loadSyncStatus() {
     } catch (error) {
         console.error('Error loading sync status:', error);
     }
+
+    // Also load EPSS status
+    loadEpssStatus();
+}
+
+// ============================================================================
+// EPSS (Exploit Prediction Scoring System) Functions
+// ============================================================================
+
+async function loadEpssStatus() {
+    try {
+        const response = await fetch('/api/sync/epss/status');
+        if (!response.ok) return;
+
+        const status = await response.json();
+
+        const epssTotal = SK.DOM.get('epssTotal');
+        const epssHighRisk = SK.DOM.get('epssHighRisk');
+        const epssCoverage = SK.DOM.get('epssCoverage');
+        const epssLastSync = SK.DOM.get('epssLastSync');
+
+        if (epssTotal) epssTotal.textContent = status.with_epss_scores || 0;
+        if (epssHighRisk) epssHighRisk.textContent = status.high_risk_count || 0;
+        if (epssCoverage) epssCoverage.textContent = (status.coverage_percent || 0) + '%';
+        if (epssLastSync) {
+            epssLastSync.textContent = status.last_sync
+                ? new Date(status.last_sync).toLocaleString()
+                : 'Never';
+        }
+    } catch (error) {
+        console.error('Error loading EPSS status:', error);
+    }
+}
+
+async function syncEpssScores(force = false) {
+    const btn = force ? SK.DOM.get('btnSyncEpssForce') : SK.DOM.get('btnSyncEpss');
+    const originalHtml = btn ? btn.innerHTML : '';
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing...';
+        }
+
+        showToast('Syncing EPSS scores from FIRST.org...', 'info');
+
+        const url = force ? '/api/sync/epss?force=true' : '/api/sync/epss';
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(`EPSS sync complete: ${result.message}`, 'success');
+            loadEpssStatus();
+        } else {
+            showToast(`EPSS sync failed: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        console.error('EPSS sync error:', error);
+        showToast(`EPSS sync error: ${error.message}`, 'danger');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
 }
 
 // Manual Critical CVE Alert Trigger
@@ -5826,6 +5895,22 @@ document.addEventListener('DOMContentLoaded', function() {
             loadAssets();
         });
     }
+
+    // Jira Integration sub-tab handler
+    const jiraIntegrationTab = SK.DOM.get('jira-integration-tab');
+    if (jiraIntegrationTab) {
+        jiraIntegrationTab.addEventListener('shown.bs.tab', function() {
+            loadJiraSettings();
+        });
+    }
+
+    // Compliance Reports tab handler
+    const complianceReportsTab = SK.DOM.get('compliance-reports-tab');
+    if (complianceReportsTab) {
+        complianceReportsTab.addEventListener('shown.bs.tab', function() {
+            loadComplianceData();
+        });
+    }
 });
 
 // ============================================================================
@@ -7726,6 +7811,331 @@ async function loadIntegrations() {
             </tr>
         `;
     }
+}
+
+// ============================================================================
+// JIRA INTEGRATION SETTINGS
+// ============================================================================
+
+async function loadJiraSettings() {
+    try {
+        const response = await fetch('/api/settings?category=jira');
+        if (!response.ok) return;
+
+        const settings = await response.json();
+
+        SK.DOM.setChecked('jiraEnabled', settings.jira_enabled === 'true');
+        SK.DOM.setValue('jiraUrl', settings.jira_url || '');
+        SK.DOM.setValue('jiraEmail', settings.jira_email || '');
+        SK.DOM.setValue('jiraProjectKey', settings.jira_project_key || '');
+        SK.DOM.setValue('jiraIssueType', settings.jira_issue_type || 'Task');
+
+        // Don't populate API token for security
+    } catch (error) {
+        console.error('Error loading Jira settings:', error);
+    }
+}
+
+async function saveJiraSettings() {
+    const settings = {
+        jira_enabled: SK.DOM.getChecked('jiraEnabled') ? 'true' : 'false',
+        jira_url: SK.DOM.getValue('jiraUrl'),
+        jira_email: SK.DOM.getValue('jiraEmail'),
+        jira_project_key: SK.DOM.getValue('jiraProjectKey'),
+        jira_issue_type: SK.DOM.getValue('jiraIssueType')
+    };
+
+    // Only include API token if changed
+    const apiToken = SK.DOM.getValue('jiraApiToken');
+    if (apiToken && apiToken !== '********') {
+        settings.jira_api_token = apiToken;
+    }
+
+    try {
+        const response = await fetch('/api/settings/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                category: 'jira',
+                settings: settings,
+                encrypt_keys: ['jira_api_token']
+            })
+        });
+
+        if (response.ok) {
+            showToast('Jira settings saved successfully', 'success');
+            // Clear the password field
+            SK.DOM.setValue('jiraApiToken', '');
+        } else {
+            const error = await response.json();
+            showToast(`Error saving Jira settings: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving Jira settings: ${error.message}`, 'danger');
+    }
+}
+
+async function testJiraConnection() {
+    const resultDiv = SK.DOM.get('jiraTestResult');
+    const alertDiv = SK.DOM.get('jiraTestAlert');
+    const messageSpan = SK.DOM.get('jiraTestMessage');
+
+    const url = SK.DOM.getValue('jiraUrl');
+    const email = SK.DOM.getValue('jiraEmail');
+    const apiToken = SK.DOM.getValue('jiraApiToken');
+
+    if (!url || !email || !apiToken) {
+        resultDiv.style.display = 'block';
+        alertDiv.className = 'alert alert-warning';
+        messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL, email, and API token to test connection.';
+        return;
+    }
+
+    resultDiv.style.display = 'block';
+    alertDiv.className = 'alert alert-info';
+    messageSpan.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Testing connection...';
+
+    try {
+        const response = await fetch('/api/integrations/jira/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, email, api_token: apiToken })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alertDiv.className = 'alert alert-success';
+            messageSpan.innerHTML = `<i class="bi bi-check-circle me-2"></i>${result.message}`;
+        } else {
+            alertDiv.className = 'alert alert-danger';
+            messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>${result.error || result.message}`;
+        }
+    } catch (error) {
+        alertDiv.className = 'alert alert-danger';
+        messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>Connection test failed: ${error.message}`;
+    }
+}
+
+function toggleJiraTokenVisibility() {
+    const input = SK.DOM.get('jiraApiToken');
+    const icon = SK.DOM.get('jiraTokenIcon');
+
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'bi bi-eye-slash';
+    } else {
+        input.type = 'password';
+        icon.className = 'bi bi-eye';
+    }
+}
+
+// ============================================================================
+// COMPLIANCE REPORTS
+// ============================================================================
+
+async function loadComplianceData() {
+    try {
+        const response = await fetch('/api/reports/compliance/bod-22-01');
+
+        if (response.status === 403) {
+            const error = await response.json();
+            showToast(error.error || 'Professional license required for compliance reports', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to load compliance data');
+        }
+
+        const data = await response.json();
+
+        // Update overview cards
+        SK.DOM.setText('complianceTotalMatches', data.summary.total_matches);
+        SK.DOM.setText('complianceAcknowledged', data.summary.acknowledged);
+        SK.DOM.setText('compliancePending', data.summary.pending);
+        SK.DOM.setText('complianceOverdue', data.summary.overdue_count);
+
+        // Update compliance percentage
+        const percentage = data.summary.compliance_percentage || 0;
+        SK.DOM.setText('compliancePercentage', `${percentage.toFixed(1)}%`);
+
+        const progressBar = SK.DOM.get('complianceProgressBar');
+        if (progressBar) {
+            progressBar.style.width = `${percentage}%`;
+            progressBar.setAttribute('aria-valuenow', percentage);
+
+            // Color based on compliance level
+            progressBar.className = 'progress-bar';
+            if (percentage >= 90) {
+                progressBar.classList.add('bg-success');
+            } else if (percentage >= 70) {
+                progressBar.classList.add('bg-info');
+            } else if (percentage >= 50) {
+                progressBar.classList.add('bg-warning');
+            } else {
+                progressBar.classList.add('bg-danger');
+            }
+        }
+
+        // Update severity breakdown
+        const severity = data.summary.severity_breakdown || {};
+        SK.DOM.setText('severityCritical', severity.CRITICAL || 0);
+        SK.DOM.setText('severityHigh', severity.HIGH || 0);
+        SK.DOM.setText('severityMedium', severity.MEDIUM || 0);
+        SK.DOM.setText('severityLow', severity.LOW || 0);
+        SK.DOM.setText('severityUnknown', severity.UNKNOWN || 0);
+
+        // Update ransomware exposure
+        SK.DOM.setText('ransomwareExposureCount', data.summary.ransomware_exposure || 0);
+
+        const ransomwareDetails = SK.DOM.get('ransomwareExposureDetails');
+        if (ransomwareDetails) {
+            if (data.summary.ransomware_exposure > 0) {
+                ransomwareDetails.innerHTML = `<span class="text-danger fw-semibold">${data.summary.ransomware_exposure} unacknowledged vulnerabilities with known ransomware usage detected.</span>`;
+            } else {
+                ransomwareDetails.innerHTML = '<span class="text-success">No unacknowledged vulnerabilities with known ransomware usage.</span>';
+            }
+        }
+
+        showToast('Compliance data loaded successfully', 'success');
+
+    } catch (error) {
+        console.error('Error loading compliance data:', error);
+        showToast(`Error loading compliance data: ${error.message}`, 'danger');
+    }
+}
+
+async function downloadComplianceReport(format) {
+    try {
+        const response = await fetch(`/api/reports/compliance/bod-22-01?format=${format}`);
+
+        if (response.status === 403) {
+            const error = await response.json();
+            showToast(error.error || 'Professional license required', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to generate report');
+        }
+
+        const data = await response.json();
+        const filename = `bod-22-01-compliance-report-${new Date().toISOString().split('T')[0]}.${format}`;
+
+        if (format === 'json') {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            downloadBlob(blob, filename);
+        } else if (format === 'csv') {
+            // Convert to CSV
+            const csv = convertComplianceToCSV(data);
+            const blob = new Blob([csv], { type: 'text/csv' });
+            downloadBlob(blob, filename);
+        }
+
+        showToast(`Compliance report downloaded: ${filename}`, 'success');
+
+    } catch (error) {
+        console.error('Error downloading compliance report:', error);
+        showToast(`Error: ${error.message}`, 'danger');
+    }
+}
+
+function convertComplianceToCSV(data) {
+    const lines = [];
+
+    // Summary section
+    lines.push('CISA BOD 22-01 Compliance Report');
+    lines.push(`Generated: ${data.generated_at}`);
+    lines.push('');
+    lines.push('Summary');
+    lines.push(`Total KEV Matches,${data.summary.total_matches}`);
+    lines.push(`Acknowledged,${data.summary.acknowledged}`);
+    lines.push(`Pending,${data.summary.pending}`);
+    lines.push(`Overdue,${data.summary.overdue_count}`);
+    lines.push(`Compliance Percentage,${data.summary.compliance_percentage.toFixed(1)}%`);
+    lines.push(`Ransomware Exposure,${data.summary.ransomware_exposure}`);
+    lines.push('');
+
+    // Overdue items
+    if (data.overdue && data.overdue.length > 0) {
+        lines.push('Overdue Vulnerabilities');
+        lines.push('CVE ID,Product,Due Date,Days Overdue,Severity,Known Ransomware');
+        data.overdue.forEach(item => {
+            lines.push(`${item.cve_id},"${item.product}",${item.due_date},${item.days_overdue},${item.severity},${item.known_ransomware ? 'Yes' : 'No'}`);
+        });
+        lines.push('');
+    }
+
+    // Due soon items
+    if (data.due_soon && data.due_soon.length > 0) {
+        lines.push('Due Within 7 Days');
+        lines.push('CVE ID,Product,Due Date,Days Remaining,Severity');
+        data.due_soon.forEach(item => {
+            lines.push(`${item.cve_id},"${item.product}",${item.due_date},${item.days_remaining},${item.severity}`);
+        });
+    }
+
+    return lines.join('\n');
+}
+
+async function downloadOverdueReport() {
+    try {
+        const response = await fetch('/api/reports/compliance/bod-22-01');
+
+        if (response.status === 403) {
+            const error = await response.json();
+            showToast(error.error || 'Professional license required', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to generate report');
+        }
+
+        const data = await response.json();
+
+        if (!data.overdue || data.overdue.length === 0) {
+            showToast('No overdue vulnerabilities found', 'info');
+            return;
+        }
+
+        // Generate CSV for overdue items only
+        const lines = [
+            'CISA BOD 22-01 - Overdue Vulnerabilities Report',
+            `Generated: ${data.generated_at}`,
+            '',
+            'CVE ID,Product,Due Date,Days Overdue,Severity,Known Ransomware'
+        ];
+
+        data.overdue.forEach(item => {
+            lines.push(`${item.cve_id},"${item.product}",${item.due_date},${item.days_overdue},${item.severity},${item.known_ransomware ? 'Yes' : 'No'}`);
+        });
+
+        const filename = `overdue-vulnerabilities-${new Date().toISOString().split('T')[0]}.csv`;
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        downloadBlob(blob, filename);
+
+        showToast(`Overdue report downloaded: ${filename}`, 'success');
+
+    } catch (error) {
+        console.error('Error downloading overdue report:', error);
+        showToast(`Error: ${error.message}`, 'danger');
+    }
+}
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function showCreateIntegrationModal() {

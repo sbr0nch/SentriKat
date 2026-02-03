@@ -507,6 +507,13 @@
                         <i class="bi bi-cloud-upload me-2"></i>Push Agents
                     </button>
                 </li>
+                {% if license and license.is_professional() %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="jira-integration-tab" data-bs-toggle="pill" data-bs-target="#jiraIntegration" type="button">
+                        <i class="bi bi-kanban me-2"></i>Jira
+                    </button>
+                </li>
+                {% endif %}
             </ul>
 
             <div class="tab-content" id="integrationsTabContent">
@@ -834,6 +841,97 @@
                         </div>
                     </div>
                 </div>
+
+                {% if license and license.is_professional() %}
+                <!-- Jira Integration Sub-Tab -->
+                <div class="tab-pane fade" id="jiraIntegration" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-kanban me-2"></i>Jira Integration
+                            <span class="badge bg-primary ms-2">Pro Feature</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info mb-4">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>Jira Integration:</strong> Create Jira issues directly from vulnerabilities for tracking remediation.
+                                Supports both Jira Cloud (atlassian.net) and Jira Server/Data Center.
+                            </div>
+
+                            <form id="jiraSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="jiraEnabled">
+                                            <label class="form-check-label fw-semibold" for="jiraEnabled">
+                                                Enable Jira Integration
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="jiraUrl" class="form-label fw-semibold">Jira URL</label>
+                                        <input type="url" class="form-control" id="jiraUrl" placeholder="https://yourcompany.atlassian.net">
+                                        <small class="form-text text-muted">Your Jira instance URL (Cloud or Server)</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="jiraEmail" class="form-label fw-semibold">Email / Username</label>
+                                        <input type="text" class="form-control" id="jiraEmail" placeholder="user@example.com">
+                                        <small class="form-text text-muted">Email for Cloud, username for Server</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="jiraApiToken" class="form-label fw-semibold">API Token / Password</label>
+                                        <div class="input-group">
+                                            <input type="password" class="form-control" id="jiraApiToken" placeholder="Enter API token">
+                                            <button class="btn btn-outline-secondary" type="button" onclick="toggleJiraTokenVisibility()">
+                                                <i class="bi bi-eye" id="jiraTokenIcon"></i>
+                                            </button>
+                                        </div>
+                                        <small class="form-text text-muted">
+                                            <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">Generate API token</a> for Cloud
+                                        </small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="jiraProjectKey" class="form-label fw-semibold">Default Project Key</label>
+                                        <input type="text" class="form-control" id="jiraProjectKey" placeholder="SEC">
+                                        <small class="form-text text-muted">Project key for new issues (e.g., SEC, VULN)</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="jiraIssueType" class="form-label fw-semibold">Default Issue Type</label>
+                                        <select class="form-select" id="jiraIssueType">
+                                            <option value="Task">Task</option>
+                                            <option value="Bug">Bug</option>
+                                            <option value="Story">Story</option>
+                                            <option value="Vulnerability">Vulnerability</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <hr>
+                                        <div class="d-flex gap-2">
+                                            <button type="button" class="btn btn-primary" onclick="saveJiraSettings()">
+                                                <i class="bi bi-check-lg me-1"></i>Save Settings
+                                            </button>
+                                            <button type="button" class="btn btn-outline-secondary" onclick="testJiraConnection()">
+                                                <i class="bi bi-plug me-1"></i>Test Connection
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-12" id="jiraTestResult" style="display: none;">
+                                        <div class="alert" id="jiraTestAlert">
+                                            <span id="jiraTestMessage"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
         {% endif %}
@@ -915,6 +1013,11 @@
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="audit-logs-tab" data-bs-toggle="pill" data-bs-target="#auditLogs" type="button">
                         <i class="bi bi-journal-text me-2"></i>Audit Logs
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="compliance-reports-tab" data-bs-toggle="pill" data-bs-target="#complianceReports" type="button">
+                        <i class="bi bi-clipboard-check me-2"></i>Compliance Reports
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -1430,6 +1533,61 @@
                                         <div id="alertResultsContent"></div>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- EPSS (Exploit Prediction Scoring System) Sync -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <i class="bi bi-lightning-charge me-2"></i>EPSS Scoring (Exploit Prediction)
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info mb-3">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>EPSS (Exploit Prediction Scoring System):</strong> Fetches probability scores from FIRST.org
+                                indicating how likely each CVE is to be exploited in the next 30 days. Higher scores = higher priority.
+                                EPSS automatically syncs after each CISA KEV sync.
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <h3 class="mb-0" id="epssTotal">-</h3>
+                                            <small class="text-muted">CVEs with EPSS</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <h3 class="mb-0 text-danger" id="epssHighRisk">-</h3>
+                                            <small class="text-muted">High Risk (Top 15%)</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <h3 class="mb-0 text-success" id="epssCoverage">-</h3>
+                                            <small class="text-muted">Coverage %</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-3">
+                                <small class="text-muted">Last EPSS Sync: <span id="epssLastSync">Never</span></small>
+                            </div>
+
+                            <div class="mt-3">
+                                <button type="button" class="btn btn-primary" onclick="syncEpssScores()" id="btnSyncEpss">
+                                    <i class="bi bi-lightning-charge me-1"></i>Sync EPSS Scores Now
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary ms-2" onclick="syncEpssScores(true)" id="btnSyncEpssForce">
+                                    <i class="bi bi-arrow-repeat me-1"></i>Force Refresh All
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -2114,6 +2272,169 @@
                                     <ul class="pagination pagination-sm mb-0" id="auditPagination">
                                     </ul>
                                 </nav>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Compliance Reports -->
+                <div class="tab-pane fade" id="complianceReports" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-clipboard-check me-2"></i>Compliance Reports
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info mb-4">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>CISA BOD 22-01 Compliance:</strong> Generate reports showing your organization's compliance status with
+                                <a href="https://www.cisa.gov/binding-operational-directive-22-01" target="_blank">CISA Binding Operational Directive 22-01</a>,
+                                which requires remediation of Known Exploited Vulnerabilities (KEV) by their designated due dates.
+                            </div>
+
+                            <!-- Compliance Overview Cards -->
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-3">
+                                    <div class="card bg-light h-100">
+                                        <div class="card-body text-center">
+                                            <h6 class="card-subtitle mb-2 text-muted">Total KEV Matches</h6>
+                                            <h2 class="card-title mb-0" id="complianceTotalMatches">-</h2>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card bg-success text-white h-100">
+                                        <div class="card-body text-center">
+                                            <h6 class="card-subtitle mb-2 opacity-75">Acknowledged</h6>
+                                            <h2 class="card-title mb-0" id="complianceAcknowledged">-</h2>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card bg-warning h-100">
+                                        <div class="card-body text-center">
+                                            <h6 class="card-subtitle mb-2">Pending Review</h6>
+                                            <h2 class="card-title mb-0" id="compliancePending">-</h2>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card bg-danger text-white h-100">
+                                        <div class="card-body text-center">
+                                            <h6 class="card-subtitle mb-2 opacity-75">Overdue</h6>
+                                            <h2 class="card-title mb-0" id="complianceOverdue">-</h2>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Compliance Percentage -->
+                            <div class="card bg-light mb-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="fw-semibold">Overall Compliance Rate</span>
+                                        <span class="h4 mb-0" id="compliancePercentage">-</span>
+                                    </div>
+                                    <div class="progress" style="height: 24px;">
+                                        <div class="progress-bar bg-success" role="progressbar" id="complianceProgressBar"
+                                             style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                    <small class="text-muted mt-1 d-block">Percentage of KEV vulnerabilities that have been acknowledged/remediated</small>
+                                </div>
+                            </div>
+
+                            <!-- Report Actions -->
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-6">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h6 class="card-title">
+                                                <i class="bi bi-file-earmark-text me-2"></i>BOD 22-01 Compliance Report
+                                            </h6>
+                                            <p class="card-text text-muted small">
+                                                Full compliance report including all KEV vulnerabilities, their status, due dates,
+                                                overdue items, and severity breakdown.
+                                            </p>
+                                            <div class="btn-group">
+                                                <button class="btn btn-primary" onclick="downloadComplianceReport('json')">
+                                                    <i class="bi bi-filetype-json me-1"></i>JSON
+                                                </button>
+                                                <button class="btn btn-outline-primary" onclick="downloadComplianceReport('csv')">
+                                                    <i class="bi bi-filetype-csv me-1"></i>CSV
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h6 class="card-title">
+                                                <i class="bi bi-exclamation-triangle me-2"></i>Overdue Items Report
+                                            </h6>
+                                            <p class="card-text text-muted small">
+                                                List of all vulnerabilities that have exceeded their CISA-mandated due dates
+                                                and require immediate attention.
+                                            </p>
+                                            <button class="btn btn-danger" onclick="downloadOverdueReport()">
+                                                <i class="bi bi-download me-1"></i>Download Overdue Report
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Severity Breakdown -->
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <i class="bi bi-bar-chart me-2"></i>Pending by Severity
+                                </div>
+                                <div class="card-body">
+                                    <div class="row text-center" id="complianceSeverityBreakdown">
+                                        <div class="col">
+                                            <span class="badge bg-danger fs-5" id="severityCritical">0</span>
+                                            <div class="small text-muted mt-1">Critical</div>
+                                        </div>
+                                        <div class="col">
+                                            <span class="badge bg-warning text-dark fs-5" id="severityHigh">0</span>
+                                            <div class="small text-muted mt-1">High</div>
+                                        </div>
+                                        <div class="col">
+                                            <span class="badge bg-info text-dark fs-5" id="severityMedium">0</span>
+                                            <div class="small text-muted mt-1">Medium</div>
+                                        </div>
+                                        <div class="col">
+                                            <span class="badge bg-success fs-5" id="severityLow">0</span>
+                                            <div class="small text-muted mt-1">Low</div>
+                                        </div>
+                                        <div class="col">
+                                            <span class="badge bg-secondary fs-5" id="severityUnknown">0</span>
+                                            <div class="small text-muted mt-1">Unknown</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Ransomware Exposure -->
+                            <div class="card">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span><i class="bi bi-shield-exclamation me-2"></i>Ransomware Exposure</span>
+                                    <span class="badge bg-danger" id="ransomwareExposureCount">0</span>
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted small mb-2">
+                                        Number of unacknowledged vulnerabilities that are known to be used in ransomware campaigns.
+                                        These should be prioritized for immediate remediation.
+                                    </p>
+                                    <div id="ransomwareExposureDetails" class="text-muted">
+                                        Click "Refresh Data" to load compliance statistics.
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 text-center">
+                                <button class="btn btn-primary" onclick="loadComplianceData()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh Data
+                                </button>
                             </div>
                         </div>
                     </div>

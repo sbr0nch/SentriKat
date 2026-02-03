@@ -627,6 +627,15 @@
         return colors[priority?.toLowerCase()] || '#6b7280';
     }
 
+    // EPSS Badge Class - color based on percentile (higher = more likely to be exploited)
+    function getEpssBadgeClass(percentile) {
+        if (percentile == null) return 'bg-secondary';
+        if (percentile >= 0.95) return 'bg-danger';        // Top 5% - Critical risk
+        if (percentile >= 0.85) return 'bg-warning text-dark'; // Top 15% - High risk
+        if (percentile >= 0.70) return 'bg-info text-dark';    // Top 30% - Medium risk
+        return 'bg-success';  // Lower risk
+    }
+
     // Report Export Functions
     function initReportFields() {
         // Populate year dropdown
@@ -1302,6 +1311,12 @@
             `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}"><i class="bi bi-graph-up"></i> CVSS: ${vuln.severity} ${vuln.cvss_score ? `(${vuln.cvss_score})` : ''}</span>` :
             '<span class="badge bg-secondary"><i class="bi bi-question-circle"></i> No CVSS Data</span>';
 
+        // EPSS (Exploit Prediction Scoring System) Badge
+        const epssBadge = vuln.epss_score != null ?
+            `<span class="badge ${getEpssBadgeClass(vuln.epss_percentile)}" title="EPSS: ${(vuln.epss_score * 100).toFixed(1)}% probability of exploitation in next 30 days (Top ${((1 - vuln.epss_percentile) * 100).toFixed(0)}%)">
+                <i class="bi bi-lightning-charge"></i> EPSS: ${(vuln.epss_score * 100).toFixed(1)}%
+            </span>` : '';
+
         return `
             <div class="card vuln-card mb-3" id="match-${match.id}" style="border-left: 4px solid ${getPriorityColor(priority)};">
                 <div class="card-body">
@@ -1320,6 +1335,7 @@
                                     <div class="mb-2">
                                         ${priorityBadge}
                                         ${severityBadge}
+                                        ${epssBadge}
                                         ${ransomwareBadge}
                                         ${ackBadge}
                                         <span class="badge bg-secondary">
@@ -1387,6 +1403,10 @@
                                 <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
                                     <i class="bi bi-share"></i> Share
                                 </button>
+                                ${window.jiraEnabled ? `
+                                <button class="btn btn-sm btn-outline-secondary" onclick="createJiraIssue(${vuln.id}, ${product.id}, '${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')" title="Create Jira Issue">
+                                    <i class="bi bi-kanban"></i> Jira
+                                </button>` : ''}
                             </div>
                         </div>
                     </div>
@@ -1755,6 +1775,9 @@
             document.getElementById('filterCVE').value = sharedCVE;
         }
 
+        // Check if Jira integration is enabled
+        loadJiraEnabled();
+
         // Always use grouped view by default
         loadGroupedVulnerabilities();
         loadStats();
@@ -1764,6 +1787,66 @@
         // Auto-refresh stats every 5 minutes
         setInterval(loadStats, 300000);
     });
+
+    // Initialize Jira enabled state
+    window.jiraEnabled = false;
+
+    async function loadJiraEnabled() {
+        try {
+            const response = await fetch('/api/settings?keys=jira_enabled');
+            if (response.ok) {
+                const settings = await response.json();
+                window.jiraEnabled = settings.jira_enabled === 'true';
+            }
+        } catch (error) {
+            console.warn('Could not load Jira settings:', error);
+        }
+    }
+
+    // Create Jira issue from vulnerability
+    async function createJiraIssue(vulnId, productId, cveId, vulnName) {
+        if (!window.jiraEnabled) {
+            showToast('Jira integration is not enabled. Configure it in Admin Panel > Integrations.', 'warning');
+            return;
+        }
+
+        const confirmed = await showConfirm(
+            `Create a Jira issue for ${cveId}?\n\n"${vulnName}"`,
+            'Create Jira Issue',
+            'Create Issue',
+            'btn-primary'
+        );
+
+        if (!confirmed) return;
+
+        try {
+            showLoading();
+            const response = await fetch('/api/integrations/jira/create-issue', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vulnerability_id: vulnId,
+                    product_id: productId
+                })
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                showToast(`Jira issue created: ${result.issue_key}`, 'success');
+                // Optionally open the issue in a new tab
+                if (result.issue_url) {
+                    window.open(result.issue_url, '_blank');
+                }
+            } else {
+                showToast(`Failed to create Jira issue: ${result.error || result.message}`, 'danger');
+            }
+        } catch (error) {
+            showToast(`Error creating Jira issue: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
 
     // Handle Enter key in filter inputs
     document.querySelectorAll('#filterCVE, #filterVendor, #filterProduct').forEach(input => {
@@ -2116,6 +2199,12 @@
             `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}"><i class="bi bi-graph-up"></i> CVSS: ${vuln.severity} ${vuln.cvss_score ? `(${vuln.cvss_score})` : ''}</span>` :
             '<span class="badge bg-secondary"><i class="bi bi-question-circle"></i> No CVSS</span>';
 
+        // EPSS Badge for grouped view
+        const epssBadge = vuln.epss_score != null ?
+            `<span class="badge ${getEpssBadgeClass(vuln.epss_percentile)}" title="EPSS: ${(vuln.epss_score * 100).toFixed(1)}% probability of exploitation (Top ${((1 - vuln.epss_percentile) * 100).toFixed(0)}%)">
+                <i class="bi bi-lightning-charge"></i> EPSS: ${(vuln.epss_score * 100).toFixed(1)}%
+            </span>` : '';
+
         // Build affected products list
         const productsHtml = group.affected_products.map(prod => {
             const prodPriorityBadge = `<span class="badge ${getPriorityBadgeClass(prod.effective_priority)} badge-sm">${prod.effective_priority}</span>`;
@@ -2155,6 +2244,7 @@
                             <div class="mb-2">
                                 ${priorityBadge}
                                 ${severityBadge}
+                                ${epssBadge}
                                 ${ransomwareBadge}
                                 <span class="badge bg-info">
                                     <i class="bi bi-box-seam"></i> ${group.product_count} product${group.product_count > 1 ? 's' : ''} affected
@@ -2210,6 +2300,10 @@
                             <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
                                 <i class="bi bi-share"></i> Share
                             </button>
+                            ${window.jiraEnabled ? `
+                            <button class="btn btn-sm btn-outline-secondary" onclick="createJiraIssue(${vuln.id}, null, '${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')" title="Create Jira Issue">
+                                <i class="bi bi-kanban"></i> Jira
+                            </button>` : ''}
                         </div>
                     </div>
                 </div>
