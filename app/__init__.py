@@ -25,6 +25,9 @@ def _apply_schema_migrations(logger, db_uri):
         ('agent_api_keys', 'auto_approve', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
         ('inventory_jobs', 'api_key_id', 'INTEGER', 'INTEGER'),
         ('users', 'totp_required', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('vulnerability_matches', 'auto_acknowledged', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('vulnerability_matches', 'resolution_reason', 'VARCHAR(50)', 'VARCHAR(50)'),
+        ('vulnerability_matches', 'acknowledged_at', 'DATETIME', 'TIMESTAMP'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
@@ -125,7 +128,7 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
@@ -137,6 +140,8 @@ def create_app(config_class=Config):
     app.register_blueprint(cpe_api.bp)
     app.register_blueprint(agent_api.agent_bp)
     app.register_blueprint(integrations_api.bp)
+    app.register_blueprint(saml_api.saml_bp)
+    app.register_blueprint(reports_api.bp)
 
     # Make current user and branding available in all templates
     @app.context_processor

@@ -6,8 +6,30 @@ import time
 import logging
 from config import Config
 import urllib3
+from app.nvd_rate_limiter import get_rate_limiter, NVDRateLimitError
 
 logger = logging.getLogger(__name__)
+
+
+def _get_api_key():
+    """Get NVD API key from database or environment."""
+    import os
+    try:
+        from app.models import SystemSettings
+        from app.encryption import decrypt_value
+
+        setting = SystemSettings.query.filter_by(key='nvd_api_key').first()
+        if setting and setting.value:
+            if setting.is_encrypted:
+                try:
+                    return decrypt_value(setting.value)
+                except Exception:
+                    return setting.value
+            return setting.value
+    except Exception:
+        pass
+
+    return os.environ.get('NVD_API_KEY')
 
 
 def fetch_cvss_data(cve_id):
@@ -16,26 +38,36 @@ def fetch_cvss_data(cve_id):
     Returns: (cvss_score, severity) or (None, None) if not found
     """
     try:
+        # Use centralized rate limiter
+        limiter = get_rate_limiter()
+        if not limiter.acquire(timeout=30.0, block=True):
+            logger.warning(f"Rate limit timeout for {cve_id}")
+            return None, None
+
         # NVD API 2.0 endpoint
         url = f"https://services.nvd.nist.gov/rest/json/cves/2.0"
         params = {'cveId': cve_id}
 
         proxies = Config.get_proxies()
-        verify_ssl = Config.get_verify_ssl()  # GUI settings > .env settings
+        verify_ssl = Config.get_verify_ssl()
 
         # Suppress SSL warnings if verification is disabled
         if not verify_ssl:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        # Add delay to respect NVD rate limits (5 requests per 30 seconds for public API)
-        time.sleep(0.6)  # 600ms delay
+        # Add API key if available
+        headers = {}
+        api_key = _get_api_key()
+        if api_key:
+            headers['apiKey'] = api_key
 
         response = requests.get(
             url,
             params=params,
+            headers=headers,
             timeout=10,
             proxies=proxies,
-            verify=verify_ssl  # Use configured SSL verification setting
+            verify=verify_ssl
         )
 
         if response.status_code == 200:

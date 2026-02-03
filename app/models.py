@@ -374,6 +374,7 @@ class Product(db.Model):
             'keywords': self.keywords,
             'description': self.description,
             'active': self.active,
+            'criticality': self.criticality or 'medium',
             'platforms': platform_list,  # OS platforms detected on (Windows, Linux, macOS)
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -596,6 +597,11 @@ class VulnerabilityMatch(db.Model):
     match_method = db.Column(db.String(20), default='keyword')  # cpe, keyword, vendor_product
     match_confidence = db.Column(db.String(20), default='medium')  # high (CPE), medium (vendor+product), low (keyword)
 
+    # Auto-acknowledge tracking
+    auto_acknowledged = db.Column(db.Boolean, default=False)  # True if auto-ack'd (not manual)
+    resolution_reason = db.Column(db.String(50), nullable=True)  # manual, software_removed, version_upgraded
+    acknowledged_at = db.Column(db.DateTime, nullable=True)  # When it was acknowledged
+
     # Composite indexes for common query patterns
     __table_args__ = (
         db.Index('idx_match_product_ack', 'product_id', 'acknowledged'),
@@ -628,6 +634,9 @@ class VulnerabilityMatch(db.Model):
             'match_method': self.match_method or 'keyword',
             'match_confidence': self.match_confidence or 'medium',
             'acknowledged': self.acknowledged,
+            'auto_acknowledged': self.auto_acknowledged,
+            'resolution_reason': self.resolution_reason,
+            'acknowledged_at': self.acknowledged_at.isoformat() if self.acknowledged_at else None,
             'snoozed_until': self.snoozed_until.isoformat() if self.snoozed_until else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'effective_priority': self.calculate_effective_priority()
@@ -1620,8 +1629,14 @@ class AgentLicense(db.Model):
     max_api_keys = db.Column(db.Integer, default=2, nullable=False)  # Max API keys per org
 
     # Current usage (cached, updated on agent changes)
-    current_agents = db.Column(db.Integer, default=0)  # Active agents count
+    current_agents = db.Column(db.Integer, default=0)  # Active agents count (total)
     peak_agents = db.Column(db.Integer, default=0)  # Peak usage in current period
+
+    # Server vs Client breakdown (for tiered pricing like S1)
+    server_count = db.Column(db.Integer, default=0)  # Servers, appliances, containers
+    client_count = db.Column(db.Integer, default=0)  # Workstations, desktops, laptops
+    peak_servers = db.Column(db.Integer, default=0)  # Peak server count
+    peak_clients = db.Column(db.Integer, default=0)  # Peak client count
 
     # License status
     status = db.Column(db.String(20), default='active', index=True)  # active, trial, suspended, expired, grace_period
@@ -1704,19 +1719,66 @@ class AgentLicense(db.Model):
             return 100
         return round((self.current_agents / self.max_agents) * 100, 1)
 
+    # Asset types considered as "servers" (higher cost/value)
+    SERVER_TYPES = ['server', 'container', 'appliance', 'virtual_machine', 'vm']
+    # Asset types considered as "clients" (lower cost/value)
+    CLIENT_TYPES = ['workstation', 'desktop', 'laptop', 'endpoint', 'client']
+
     def update_agent_count(self):
-        """Update current_agents count from database."""
+        """
+        Update current_agents count from database with server/client breakdown.
+
+        Server vs Client pricing model (similar to SentinelOne):
+        - Servers: Higher value, typically 1 full unit
+        - Clients: Lower value, typically 0.5 units
+        """
         from app.models import Asset
-        self.current_agents = Asset.query.filter_by(
+
+        # Get all active assets for this org
+        active_assets = Asset.query.filter_by(
             organization_id=self.organization_id,
             active=True
-        ).filter(Asset.status.in_(['online', 'offline'])).count()
+        ).filter(Asset.status.in_(['online', 'offline'])).all()
 
-        # Update peak if needed
+        # Count by type
+        server_count = 0
+        client_count = 0
+
+        for asset in active_assets:
+            asset_type = (asset.asset_type or 'server').lower()
+            if asset_type in self.CLIENT_TYPES:
+                client_count += 1
+            else:
+                # Default to server for unknown types (conservative approach)
+                server_count += 1
+
+        # Update counts
+        self.server_count = server_count
+        self.client_count = client_count
+        self.current_agents = server_count + client_count
+
+        # Update peaks if needed
+        if self.server_count > self.peak_servers:
+            self.peak_servers = self.server_count
+        if self.client_count > self.peak_clients:
+            self.peak_clients = self.client_count
         if self.current_agents > self.peak_agents:
             self.peak_agents = self.current_agents
 
         return self.current_agents
+
+    def get_weighted_units(self, server_weight=1.0, client_weight=0.5):
+        """
+        Calculate weighted license units based on server/client breakdown.
+
+        Args:
+            server_weight: Weight per server (default 1.0)
+            client_weight: Weight per client/workstation (default 0.5)
+
+        Returns:
+            float: Total weighted units
+        """
+        return (self.server_count * server_weight) + (self.client_count * client_weight)
 
     def to_dict(self):
         return {
@@ -1727,6 +1789,12 @@ class AgentLicense(db.Model):
             'max_api_keys': self.max_api_keys,
             'current_agents': self.current_agents,
             'peak_agents': self.peak_agents,
+            # Server vs Client breakdown
+            'server_count': self.server_count,
+            'client_count': self.client_count,
+            'peak_servers': self.peak_servers,
+            'peak_clients': self.peak_clients,
+            'weighted_units': self.get_weighted_units(),
             'usage_percent': self.get_usage_percent(),
             'status': self.status,
             'is_active': self.is_active(),
@@ -1991,3 +2059,409 @@ class StaleAssetNotification(db.Model):
             'resolved': self.resolved,
             'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None
         }
+
+
+class UserCpeMapping(db.Model):
+    """
+    User-learned CPE mappings for software that isn't in the curated database.
+
+    These mappings are:
+    - Created when users manually assign CPE to unmapped products
+    - Exportable/importable for sharing between instances
+    - Used with higher priority than curated database (user knows best)
+    """
+    __tablename__ = 'user_cpe_mappings'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Source software identification (normalized)
+    vendor_pattern = db.Column(db.String(200), nullable=False, index=True)
+    product_pattern = db.Column(db.String(200), nullable=False, index=True)
+
+    # Target CPE identifiers
+    cpe_vendor = db.Column(db.String(200), nullable=False)
+    cpe_product = db.Column(db.String(200), nullable=False)
+
+    # Metadata
+    confidence = db.Column(db.Float, default=0.95)  # User mappings are high confidence
+    source = db.Column(db.String(50), default='user')  # user, import, community
+    notes = db.Column(db.Text, nullable=True)  # Optional notes about this mapping
+
+    # Audit
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    usage_count = db.Column(db.Integer, default=0)  # Track how often this mapping is used
+
+    # Relationships
+    creator = db.relationship('User', backref=db.backref('cpe_mappings', lazy='dynamic'))
+
+    # Unique constraint to prevent duplicates
+    __table_args__ = (
+        db.UniqueConstraint('vendor_pattern', 'product_pattern', name='uq_user_cpe_mapping'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'vendor_pattern': self.vendor_pattern,
+            'product_pattern': self.product_pattern,
+            'cpe_vendor': self.cpe_vendor,
+            'cpe_product': self.cpe_product,
+            'confidence': self.confidence,
+            'source': self.source,
+            'notes': self.notes,
+            'usage_count': self.usage_count,
+            'created_by': self.creator.display_name if self.creator else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+    def to_export_dict(self):
+        """Minimal format for export/import (no internal IDs)"""
+        return {
+            'vendor_pattern': self.vendor_pattern,
+            'product_pattern': self.product_pattern,
+            'cpe_vendor': self.cpe_vendor,
+            'cpe_product': self.cpe_product,
+            'confidence': self.confidence,
+            'notes': self.notes
+        }
+
+    @staticmethod
+    def normalize_pattern(text):
+        """Normalize vendor/product name for matching"""
+        if not text:
+            return ''
+        return text.lower().strip()
+
+
+# ============================================================================
+# VULNERABILITY TREND TRACKING - Historical data for analytics
+# ============================================================================
+
+class VulnerabilitySnapshot(db.Model):
+    """
+    Daily snapshots of vulnerability statistics for trend analysis.
+    Captures key metrics at a point in time for historical comparison.
+    """
+    __tablename__ = 'vulnerability_snapshots'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True, index=True)
+    snapshot_date = db.Column(db.Date, nullable=False, index=True)
+
+    # Core metrics
+    total_vulnerabilities = db.Column(db.Integer, default=0)  # Total CVEs in CISA KEV
+    total_matches = db.Column(db.Integer, default=0)  # CVEs matching our products
+    unacknowledged = db.Column(db.Integer, default=0)  # Unacked matches
+    acknowledged = db.Column(db.Integer, default=0)  # Acked matches
+    snoozed = db.Column(db.Integer, default=0)  # Snoozed matches
+
+    # Severity breakdown
+    critical_count = db.Column(db.Integer, default=0)
+    high_count = db.Column(db.Integer, default=0)
+    medium_count = db.Column(db.Integer, default=0)
+    low_count = db.Column(db.Integer, default=0)
+
+    # Product metrics
+    products_tracked = db.Column(db.Integer, default=0)
+    products_with_vulns = db.Column(db.Integer, default=0)
+
+    # Agent metrics (optional)
+    active_agents = db.Column(db.Integer, default=0)
+
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'snapshot_date', name='uq_org_snapshot_date'),
+    )
+
+    # Relationship
+    organization = db.relationship('Organization', backref=db.backref('vulnerability_snapshots', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'snapshot_date': self.snapshot_date.isoformat() if self.snapshot_date else None,
+            'total_vulnerabilities': self.total_vulnerabilities,
+            'total_matches': self.total_matches,
+            'unacknowledged': self.unacknowledged,
+            'acknowledged': self.acknowledged,
+            'snoozed': self.snoozed,
+            'critical_count': self.critical_count,
+            'high_count': self.high_count,
+            'medium_count': self.medium_count,
+            'low_count': self.low_count,
+            'products_tracked': self.products_tracked,
+            'products_with_vulns': self.products_with_vulns,
+            'active_agents': self.active_agents
+        }
+
+    @classmethod
+    def take_snapshot(cls, organization_id=None):
+        """
+        Take a snapshot of current vulnerability statistics.
+        If organization_id is None, takes a global snapshot.
+        """
+        from sqlalchemy import func
+
+        today = date.today()
+
+        # Check if snapshot already exists for today
+        existing = cls.query.filter_by(
+            organization_id=organization_id,
+            snapshot_date=today
+        ).first()
+
+        if existing:
+            return existing  # Already have today's snapshot
+
+        # Build query filters
+        if organization_id:
+            product_filter = Product.organization_id == organization_id
+        else:
+            product_filter = True  # No filter for global
+
+        # Get total KEV vulnerabilities
+        total_vulns = Vulnerability.query.count()
+
+        # Get match statistics
+        match_query = db.session.query(
+            func.count(VulnerabilityMatch.id).label('total'),
+            func.sum(db.case((VulnerabilityMatch.acknowledged == False, 1), else_=0)).label('unacked'),
+            func.sum(db.case((VulnerabilityMatch.acknowledged == True, 1), else_=0)).label('acked'),
+            func.sum(db.case((VulnerabilityMatch.snoozed_until != None, 1), else_=0)).label('snoozed')
+        )
+
+        if organization_id:
+            match_query = match_query.join(Product, VulnerabilityMatch.product_id == Product.id).filter(
+                Product.organization_id == organization_id
+            )
+
+        match_stats = match_query.first()
+
+        # Get severity breakdown
+        severity_query = db.session.query(
+            Vulnerability.severity,
+            func.count(VulnerabilityMatch.id)
+        ).join(
+            VulnerabilityMatch, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+        ).filter(
+            VulnerabilityMatch.acknowledged == False
+        )
+
+        if organization_id:
+            severity_query = severity_query.join(
+                Product, VulnerabilityMatch.product_id == Product.id
+            ).filter(Product.organization_id == organization_id)
+
+        severity_query = severity_query.group_by(Vulnerability.severity)
+        severity_counts = dict(severity_query.all())
+
+        # Get product counts
+        products_query = Product.query.filter(Product.active == True)
+        if organization_id:
+            products_query = products_query.filter(Product.organization_id == organization_id)
+        products_tracked = products_query.count()
+
+        # Products with vulnerabilities
+        products_with_vulns_query = db.session.query(
+            func.count(func.distinct(VulnerabilityMatch.product_id))
+        ).join(Product, VulnerabilityMatch.product_id == Product.id).filter(
+            Product.active == True,
+            VulnerabilityMatch.acknowledged == False
+        )
+        if organization_id:
+            products_with_vulns_query = products_with_vulns_query.filter(
+                Product.organization_id == organization_id
+            )
+        products_with_vulns = products_with_vulns_query.scalar() or 0
+
+        # Get agent count
+        agents_query = Asset.query.filter(Asset.active == True)
+        if organization_id:
+            agents_query = agents_query.filter(Asset.organization_id == organization_id)
+        active_agents = agents_query.count()
+
+        # Create snapshot
+        snapshot = cls(
+            organization_id=organization_id,
+            snapshot_date=today,
+            total_vulnerabilities=total_vulns,
+            total_matches=match_stats.total or 0,
+            unacknowledged=match_stats.unacked or 0,
+            acknowledged=match_stats.acked or 0,
+            snoozed=match_stats.snoozed or 0,
+            critical_count=severity_counts.get('CRITICAL', 0),
+            high_count=severity_counts.get('HIGH', 0),
+            medium_count=severity_counts.get('MEDIUM', 0),
+            low_count=severity_counts.get('LOW', 0),
+            products_tracked=products_tracked,
+            products_with_vulns=products_with_vulns,
+            active_agents=active_agents
+        )
+
+        db.session.add(snapshot)
+        db.session.commit()
+
+        return snapshot
+
+    @classmethod
+    def get_trend_data(cls, organization_id=None, days=30):
+        """
+        Get trend data for the last N days.
+        Returns list of snapshots ordered by date.
+        """
+        from datetime import timedelta
+        start_date = date.today() - timedelta(days=days)
+
+        query = cls.query.filter(
+            cls.organization_id == organization_id,
+            cls.snapshot_date >= start_date
+        ).order_by(cls.snapshot_date.asc())
+
+        return query.all()
+
+
+class ScheduledReport(db.Model):
+    """
+    Configuration for scheduled vulnerability reports.
+    Defines when and to whom reports should be sent.
+    """
+    __tablename__ = 'scheduled_reports'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+
+    # Schedule configuration
+    frequency = db.Column(db.String(20), nullable=False, default='weekly')  # daily, weekly, monthly
+    day_of_week = db.Column(db.Integer, nullable=True)  # 0=Monday, 6=Sunday (for weekly)
+    day_of_month = db.Column(db.Integer, nullable=True)  # 1-28 (for monthly)
+    time_of_day = db.Column(db.String(5), nullable=False, default='09:00')  # HH:MM format
+
+    # Report configuration
+    report_type = db.Column(db.String(20), nullable=False, default='summary')  # summary, full, critical_only
+    include_acknowledged = db.Column(db.Boolean, default=True)
+    include_pending = db.Column(db.Boolean, default=True)
+    include_trends = db.Column(db.Boolean, default=True)
+    priority_filter = db.Column(db.String(20), nullable=True)  # critical, high, medium, low or None for all
+
+    # Recipients (comma-separated email addresses or role-based)
+    recipients = db.Column(db.Text, nullable=False)  # email1@example.com,email2@example.com
+    send_to_managers = db.Column(db.Boolean, default=False)  # Also send to org managers
+    send_to_admins = db.Column(db.Boolean, default=True)  # Also send to org admins
+
+    # Status
+    enabled = db.Column(db.Boolean, default=True)
+    last_sent = db.Column(db.DateTime, nullable=True)
+    last_status = db.Column(db.String(50), nullable=True)  # success, failed, no_recipients
+    next_run = db.Column(db.DateTime, nullable=True)
+
+    # Audit
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('scheduled_reports', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('created_reports', lazy='dynamic'))
+
+    FREQUENCY_CHOICES = ['daily', 'weekly', 'monthly']
+    REPORT_TYPE_CHOICES = ['summary', 'full', 'critical_only']
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'name': self.name,
+            'description': self.description,
+            'frequency': self.frequency,
+            'day_of_week': self.day_of_week,
+            'day_of_month': self.day_of_month,
+            'time_of_day': self.time_of_day,
+            'report_type': self.report_type,
+            'include_acknowledged': self.include_acknowledged,
+            'include_pending': self.include_pending,
+            'include_trends': self.include_trends,
+            'priority_filter': self.priority_filter,
+            'recipients': self.recipients,
+            'send_to_managers': self.send_to_managers,
+            'send_to_admins': self.send_to_admins,
+            'enabled': self.enabled,
+            'last_sent': self.last_sent.isoformat() if self.last_sent else None,
+            'last_status': self.last_status,
+            'next_run': self.next_run.isoformat() if self.next_run else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_by': self.created_by
+        }
+
+    def calculate_next_run(self):
+        """Calculate the next run time based on frequency and schedule"""
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        hour, minute = map(int, self.time_of_day.split(':'))
+
+        if self.frequency == 'daily':
+            # Next occurrence of the specified time
+            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if next_run <= now:
+                next_run += timedelta(days=1)
+
+        elif self.frequency == 'weekly':
+            # Next occurrence of the specified day and time
+            days_ahead = self.day_of_week - now.weekday()
+            if days_ahead < 0:
+                days_ahead += 7
+            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=days_ahead)
+            if next_run <= now:
+                next_run += timedelta(days=7)
+
+        elif self.frequency == 'monthly':
+            # Next occurrence of the specified day of month
+            day = min(self.day_of_month or 1, 28)  # Cap at 28 to avoid month-end issues
+            next_run = now.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+            if next_run <= now:
+                # Move to next month
+                if now.month == 12:
+                    next_run = next_run.replace(year=now.year + 1, month=1)
+                else:
+                    next_run = next_run.replace(month=now.month + 1)
+
+        else:
+            next_run = now + timedelta(days=1)
+
+        self.next_run = next_run
+        return next_run
+
+    def get_recipient_emails(self):
+        """Get list of email addresses to send to"""
+        emails = set()
+
+        # Add explicit recipients
+        if self.recipients:
+            for email in self.recipients.split(','):
+                email = email.strip()
+                if email and '@' in email:
+                    emails.add(email)
+
+        # Add role-based recipients
+        if self.send_to_managers or self.send_to_admins:
+            org_users = User.query.filter_by(
+                organization_id=self.organization_id,
+                is_active=True
+            ).all()
+
+            for user in org_users:
+                if user.email:
+                    if self.send_to_admins and user.role in ['org_admin', 'super_admin']:
+                        emails.add(user.email)
+                    elif self.send_to_managers and user.role == 'manager':
+                        emails.add(user.email)
+
+        return list(emails)

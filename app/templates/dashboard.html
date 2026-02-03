@@ -248,6 +248,43 @@
         </div>
     </div>
 
+    <!-- Vulnerability Trends Chart -->
+    <div class="card mb-3" id="trendChartCard">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-graph-up me-2"></i>Vulnerability Trends (30 Days)</span>
+            <div>
+                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="loadTrendChart()" title="Refresh">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-bs-toggle="collapse" data-bs-target="#trendChartBody">
+                    <i class="bi bi-chevron-down"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body py-3 collapse show" id="trendChartBody">
+            <div id="trendChartContainer" style="position: relative; height: 250px;">
+                <canvas id="trendChart"></canvas>
+            </div>
+            <div id="trendNoData" class="text-center text-muted py-4 d-none">
+                <i class="bi bi-bar-chart fs-1 opacity-50"></i>
+                <p class="mt-2 mb-0">No trend data available yet. Snapshots are taken daily at 2 AM.</p>
+                {% if session.get('is_admin') %}
+                <button class="btn btn-sm btn-outline-primary mt-2" onclick="takeManualSnapshot()">
+                    <i class="bi bi-camera"></i> Take Snapshot Now
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Unmapped Products Warning -->
+    <div id="unmappedWarning" class="alert alert-warning d-none mb-3" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
+        These cannot be checked for vulnerabilities.
+        <a href="/admin#products" class="alert-link">Review and assign CPE mappings</a> to ensure complete coverage.
+    </div>
+
     <!-- Advanced Filters Panel -->
     <div class="card mb-3">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
@@ -556,6 +593,8 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- Chart.js for trend visualization -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
     // Helper functions for priority styling
     function getPriorityBadgeClass(priority) {
@@ -869,6 +908,16 @@
             document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
             document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
 
+            // Show/hide unmapped products warning
+            const unmappedWarning = document.getElementById('unmappedWarning');
+            const unmappedCount = document.getElementById('unmappedCount');
+            if (unmappedWarning && stats.products_unmapped > 0) {
+                unmappedCount.textContent = stats.products_unmapped;
+                unmappedWarning.classList.remove('d-none');
+            } else if (unmappedWarning) {
+                unmappedWarning.classList.add('d-none');
+            }
+
             // Update priority counts - CVE counts and match counts
             document.getElementById('criticalCves').textContent = formatNumber(stats.critical_cves || 0);
             document.getElementById('criticalCount').textContent = formatNumber(stats.critical_count || 0);
@@ -894,6 +943,160 @@
             document.getElementById('lowCves').textContent = '-';
             document.getElementById('lowCount').textContent = '-';
             showToast('Failed to load statistics. Try refreshing.', 'danger');
+        }
+    }
+
+    // Trend chart instance
+    let trendChartInstance = null;
+
+    async function loadTrendChart() {
+        try {
+            const response = await fetch('/api/vulnerabilities/trends?days=30');
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            const trends = data.trends;
+
+            // Check if we have data
+            if (!trends.dates || trends.dates.length === 0) {
+                document.getElementById('trendChartContainer').classList.add('d-none');
+                document.getElementById('trendNoData').classList.remove('d-none');
+                return;
+            }
+
+            document.getElementById('trendChartContainer').classList.remove('d-none');
+            document.getElementById('trendNoData').classList.add('d-none');
+
+            const ctx = document.getElementById('trendChart').getContext('2d');
+
+            // Destroy existing chart if any
+            if (trendChartInstance) {
+                trendChartInstance.destroy();
+            }
+
+            // Format dates for display
+            const labels = trends.dates.map(d => {
+                const date = new Date(d);
+                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            });
+
+            trendChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Critical',
+                            data: trends.critical,
+                            borderColor: '#dc2626',
+                            backgroundColor: 'rgba(220, 38, 38, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5
+                        },
+                        {
+                            label: 'High',
+                            data: trends.high,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5
+                        },
+                        {
+                            label: 'Medium',
+                            data: trends.medium,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5
+                        },
+                        {
+                            label: 'Unacknowledged',
+                            data: trends.unacknowledged,
+                            borderColor: '#6b7280',
+                            borderDash: [5, 5],
+                            fill: false,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 15,
+                                font: { size: 11 }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            padding: 12,
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 12 },
+                            callbacks: {
+                                title: function(context) {
+                                    const idx = context[0].dataIndex;
+                                    return trends.dates[idx];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { font: { size: 10 } }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                            ticks: {
+                                font: { size: 10 },
+                                stepSize: 1,
+                                precision: 0
+                            }
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error loading trend chart:', error);
+            document.getElementById('trendChartContainer').classList.add('d-none');
+            document.getElementById('trendNoData').classList.remove('d-none');
+        }
+    }
+
+    async function takeManualSnapshot() {
+        try {
+            const response = await fetch('/api/vulnerabilities/trends/snapshot', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || 'Failed to take snapshot');
+            }
+
+            showToast('Snapshot taken successfully!', 'success');
+            loadTrendChart();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
         }
     }
 
@@ -1556,6 +1759,7 @@
         loadGroupedVulnerabilities();
         loadStats();
         loadLastSync();
+        loadTrendChart();
 
         // Auto-refresh stats every 5 minutes
         setInterval(loadStats, 300000);
@@ -1976,13 +2180,13 @@
                     </div>
 
                     <div class="mb-2">
-                        <small class="text-muted fw-semibold d-flex justify-content-between align-items-center">
-                            AFFECTED PRODUCTS IN YOUR INVENTORY
-                            <button class="btn btn-sm btn-link p-0" type="button" data-bs-toggle="collapse" data-bs-target="#products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}" aria-expanded="true">
-                                <i class="bi bi-chevron-down"></i> Toggle
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <small class="text-muted fw-semibold">AFFECTED PRODUCTS IN YOUR INVENTORY</small>
+                            <button class="btn btn-sm btn-outline-secondary px-2 py-0" type="button" data-bs-toggle="collapse" data-bs-target="#products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}" aria-expanded="false">
+                                <i class="bi bi-chevron-right me-1"></i>Show Products
                             </button>
-                        </small>
-                        <div class="collapse show" id="products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}">
+                        </div>
+                        <div class="collapse" id="products-${vuln.cve_id.replace(/[^a-zA-Z0-9]/g, '')}">
                             <div class="border rounded p-2 bg-light mt-1">
                                 ${productsHtml}
                             </div>

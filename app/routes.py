@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, send_from_directory
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, send_from_directory, current_app
 from app import db, csrf, limiter
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
@@ -246,6 +246,7 @@ def get_products():
     filter_org = request.args.get('filter_org', type=int)
     criticality = request.args.get('criticality', '').strip().lower()
     status = request.args.get('status', '').strip().lower()
+    cpe_filter = request.args.get('cpe_filter', '').strip().lower()  # with_cpe or without_cpe
     page = request.args.get('page', type=int)
     per_page = request.args.get('per_page', 25, type=int)
     per_page = min(per_page, 100)  # Limit max items per page
@@ -333,6 +334,24 @@ def get_products():
     elif status == 'inactive':
         query = query.filter(Product.active == False)
 
+    # Apply CPE filter
+    if cpe_filter == 'with_cpe':
+        query = query.filter(
+            Product.cpe_vendor.isnot(None),
+            Product.cpe_vendor != '',
+            Product.cpe_product.isnot(None),
+            Product.cpe_product != ''
+        )
+    elif cpe_filter == 'without_cpe':
+        query = query.filter(
+            db.or_(
+                Product.cpe_vendor.is_(None),
+                Product.cpe_vendor == '',
+                Product.cpe_product.is_(None),
+                Product.cpe_product == ''
+            )
+        )
+
     # Order by vendor, product name (no distinct needed with subquery approach)
     query = query.order_by(Product.vendor, Product.product_name)
 
@@ -351,11 +370,13 @@ def get_products():
                     'product_name': p.product_name,
                     'cpe_vendor': p.cpe_vendor,
                     'cpe_product': p.cpe_product,
+                    'has_cpe': bool(p.cpe_vendor and p.cpe_product),
                     'keywords': p.keywords,
                     'active': p.active,
                     'versions': [],
                     'organization_ids': set(),
                     'organization_names': set(),
+                    'platforms': set(),  # Track platforms from installations
                     'total_vulnerabilities': 0,
                     'has_vulnerable_version': False
                 }
@@ -384,11 +405,37 @@ def get_products():
                 grouped_products[key]['has_vulnerable_version'] = True
             grouped_products[key]['total_vulnerabilities'] += version_entry['vulnerability_count']
 
+        # Batch query platforms for all products at once for efficiency
+        all_product_ids = [v['id'] for group in grouped_products.values() for v in group['versions']]
+        if all_product_ids:
+            platform_data = db.session.query(
+                ProductInstallation.product_id,
+                ProductInstallation.detected_on_os
+            ).filter(
+                ProductInstallation.product_id.in_(all_product_ids),
+                ProductInstallation.detected_on_os.isnot(None),
+                ProductInstallation.detected_on_os != ''
+            ).distinct().all()
+
+            # Build product_id -> platforms mapping
+            product_platforms = {}
+            for product_id, platform in platform_data:
+                if product_id not in product_platforms:
+                    product_platforms[product_id] = set()
+                product_platforms[product_id].add(platform)
+
+            # Assign platforms to groups
+            for key, group in grouped_products.items():
+                for v in group['versions']:
+                    if v['id'] in product_platforms:
+                        group['platforms'].update(product_platforms[v['id']])
+
         # Convert to list and clean up sets
         result = []
         for key, group in grouped_products.items():
             group['organization_ids'] = list(group['organization_ids'])
             group['organization_names'] = list(group['organization_names'])
+            group['platforms'] = sorted(list(group['platforms']))  # Convert platforms set to sorted list
             # Sort versions - put specific versions first, 'Any' last
             group['versions'].sort(key=lambda v: (v['version'] == 'Any', v['version'] or ''))
             result.append(group)
@@ -488,6 +535,25 @@ def create_product():
             'error': 'A product with the same vendor, name, and version already exists. You can assign it to additional organizations from the product list.'
         }), 409
 
+    # Auto-match CPE if not provided
+    cpe_vendor = data.get('cpe_vendor')
+    cpe_product = data.get('cpe_product')
+    cpe_confidence = 0.0
+
+    if not cpe_vendor or not cpe_product:
+        try:
+            from app.integrations_api import attempt_cpe_match
+            matched_vendor, matched_product, cpe_confidence = attempt_cpe_match(
+                data['vendor'].strip(),
+                data['product_name'].strip()
+            )
+            if matched_vendor and matched_product:
+                cpe_vendor = matched_vendor
+                cpe_product = matched_product
+                current_app.logger.info(f"Auto-matched CPE: {data['product_name']} -> {cpe_vendor}:{cpe_product} ({cpe_confidence:.2f})")
+        except Exception as e:
+            current_app.logger.warning(f"CPE auto-match failed: {e}")
+
     product = Product(
         organization_id=data.get('organization_id', org_id),
         service_catalog_id=data.get('service_catalog_id'),
@@ -498,8 +564,8 @@ def create_product():
         description=data.get('description'),
         active=data.get('active', True),
         # CPE fields for NVD matching
-        cpe_vendor=data.get('cpe_vendor'),
-        cpe_product=data.get('cpe_product'),
+        cpe_vendor=cpe_vendor,
+        cpe_product=cpe_product,
         cpe_uri=data.get('cpe_uri'),
         match_type=data.get('match_type', 'auto')
     )
@@ -525,7 +591,12 @@ def create_product():
     # Re-run matching for new product
     match_vulnerabilities_to_products()
 
-    return jsonify(product.to_dict()), 201
+    # Return product with CPE match info
+    response = product.to_dict()
+    response['cpe_matched'] = bool(cpe_vendor and cpe_product)
+    response['cpe_confidence'] = cpe_confidence if (cpe_vendor and cpe_product) else 0.0
+
+    return jsonify(response), 201
 
 @bp.route('/api/products/<int:product_id>', methods=['GET'])
 @login_required
@@ -600,10 +671,26 @@ def update_product(product_id):
     if 'active' in data:
         product.active = data['active']
     # CPE fields for NVD matching
+    old_cpe_vendor = product.cpe_vendor
+    old_cpe_product = product.cpe_product
     if 'cpe_vendor' in data:
         product.cpe_vendor = data['cpe_vendor']
     if 'cpe_product' in data:
         product.cpe_product = data['cpe_product']
+
+    # Learn from user CPE assignments - save for future auto-matching
+    if (product.cpe_vendor and product.cpe_product and
+        (product.cpe_vendor != old_cpe_vendor or product.cpe_product != old_cpe_product)):
+        try:
+            from app.cpe_mappings import save_user_mapping
+            save_user_mapping(
+                product.vendor, product.product_name,
+                product.cpe_vendor, product.cpe_product,
+                user_id=current_user_id,
+                notes=f"Learned from product edit: {product.product_name}"
+            )
+        except Exception as e:
+            current_app.logger.warning(f"Failed to save user CPE mapping: {e}")
     if 'cpe_uri' in data:
         product.cpe_uri = data['cpe_uri']
     if 'match_type' in data:
@@ -1111,6 +1198,17 @@ def get_vulnerability_stats():
     ransomware = ransomware_query.count()
     products_tracked = products_tracked_query.count()
 
+    # Count products without CPE mapping (blind spots)
+    products_unmapped = Product.query.filter(
+        Product.active == True,
+        db.or_(
+            Product.cpe_vendor.is_(None),
+            Product.cpe_vendor == '',
+            Product.cpe_product.is_(None),
+            Product.cpe_product == ''
+        )
+    ).count()
+
     # Calculate priority-based stats (both CVE counts and match counts)
     # Use selectinload to eagerly load relationships and avoid column mapping issues
     all_matches = unacknowledged_query.options(
@@ -1147,21 +1245,110 @@ def get_vulnerability_stats():
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
         'unacknowledged': unacknowledged,
-        'unacknowledged_cves': total_cves,  # NEW: unique CVE count
+        'unacknowledged_cves': total_cves,  # Unique CVE count
         'ransomware_related': ransomware,
         'products_tracked': products_tracked,
+        'products_unmapped': products_unmapped,  # Products without CPE (blind spots)
         'priority_breakdown': priority_counts,
-        'cve_priority_breakdown': cve_priority_counts,  # NEW: CVE-level counts
+        'cve_priority_breakdown': cve_priority_counts,  # CVE-level counts
         'critical_count': priority_counts['critical'],
         'high_count': priority_counts['high'],
         'medium_count': priority_counts['medium'],
         'low_count': priority_counts['low'],
-        # NEW: CVE counts for dashboard display
+        # CVE counts for dashboard display
         'critical_cves': cve_priority_counts['critical'],
         'high_cves': cve_priority_counts['high'],
         'medium_cves': cve_priority_counts['medium'],
         'low_cves': cve_priority_counts['low']
     })
+
+
+@bp.route('/api/vulnerabilities/trends', methods=['GET'])
+@login_required
+def get_vulnerability_trends():
+    """
+    Get historical vulnerability trend data for charts.
+
+    Query params:
+    - days: Number of days to look back (default: 30, max: 90)
+
+    Returns daily snapshots of vulnerability metrics.
+    """
+    from app.models import VulnerabilitySnapshot
+
+    days = request.args.get('days', 30, type=int)
+    days = min(max(days, 7), 90)  # Clamp between 7 and 90
+
+    # Get current organization
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
+    # Get trend data
+    snapshots = VulnerabilitySnapshot.get_trend_data(organization_id=org_id, days=days)
+
+    # Format for charts
+    trend_data = {
+        'dates': [],
+        'total_matches': [],
+        'unacknowledged': [],
+        'acknowledged': [],
+        'critical': [],
+        'high': [],
+        'medium': [],
+        'low': [],
+        'products_tracked': []
+    }
+
+    for snapshot in snapshots:
+        trend_data['dates'].append(snapshot.snapshot_date.strftime('%Y-%m-%d'))
+        trend_data['total_matches'].append(snapshot.total_matches)
+        trend_data['unacknowledged'].append(snapshot.unacknowledged)
+        trend_data['acknowledged'].append(snapshot.acknowledged)
+        trend_data['critical'].append(snapshot.critical_count)
+        trend_data['high'].append(snapshot.high_count)
+        trend_data['medium'].append(snapshot.medium_count)
+        trend_data['low'].append(snapshot.low_count)
+        trend_data['products_tracked'].append(snapshot.products_tracked)
+
+    return jsonify({
+        'days': days,
+        'snapshot_count': len(snapshots),
+        'trends': trend_data
+    })
+
+
+@bp.route('/api/vulnerabilities/trends/snapshot', methods=['POST'])
+@login_required
+def take_vulnerability_snapshot():
+    """
+    Manually trigger a vulnerability snapshot.
+    Useful for testing or initial setup.
+    Requires admin privileges.
+    """
+    from app.models import VulnerabilitySnapshot
+
+    # Check admin
+    if not session.get('is_admin'):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    # Get current organization
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
+    try:
+        snapshot = VulnerabilitySnapshot.take_snapshot(organization_id=org_id)
+        return jsonify({
+            'success': True,
+            'message': 'Snapshot taken successfully',
+            'snapshot': snapshot.to_dict()
+        })
+    except Exception as e:
+        logger.exception("Error taking snapshot")
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/api/vulnerabilities/grouped', methods=['GET'])

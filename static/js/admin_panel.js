@@ -1441,14 +1441,23 @@ async function saveUser() {
         }
     }
 
+    const role = SK.DOM.getValue('userRole');
+    const orgId = parseInt(SK.DOM.getValue('organization')) || null;
+
+    // Organization is required for non-super_admin users
+    if (role !== 'super_admin' && !orgId) {
+        showToast('Organization is required for this role', 'warning');
+        return;
+    }
+
     const userData = {
         username: username,
         email: email,
         full_name: SK.DOM.getValue('fullName').trim(),
-        organization_id: parseInt(SK.DOM.getValue('organization')) || null,
+        organization_id: orgId,
         auth_type: authType,
-        role: SK.DOM.getValue('userRole'),
-        is_admin: SK.DOM.getValue('userRole') !== 'user' && SK.DOM.getValue('userRole') !== 'manager',
+        role: role,
+        is_admin: role !== 'user' && role !== 'manager',
         can_manage_products: SK.DOM.getChecked('canManageProducts'),
         can_view_all_orgs: SK.DOM.getChecked('canViewAllOrgs'),
         is_active: SK.DOM.getChecked('isActive')
@@ -2163,6 +2172,25 @@ function updateRoleDescription() {
     if (viewAllOrgsCheck) viewAllOrgsCheck.style.display = desc.showViewAllOrgs ? 'block' : 'none';
 }
 
+function updateOrgRequirement() {
+    const role = SK.DOM.getValue('userRole');
+    const orgSelect = SK.DOM.get('organization');
+    const orgRequired = SK.DOM.get('orgRequired');
+    const orgHelp = SK.DOM.get('orgHelp');
+
+    if (role === 'super_admin') {
+        // Super admins don't require an organization
+        if (orgSelect) orgSelect.required = false;
+        if (orgRequired) orgRequired.style.display = 'none';
+        if (orgHelp) orgHelp.textContent = 'Optional for Super Admin. Leave empty for system-wide access.';
+    } else {
+        // All other roles require an organization
+        if (orgSelect) orgSelect.required = true;
+        if (orgRequired) orgRequired.style.display = 'inline';
+        if (orgHelp) orgHelp.textContent = 'Initial organization for the user. Additional orgs can be added after creation.';
+    }
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -2336,9 +2364,16 @@ async function saveSyncSettings() {
         auto_sync_enabled: SK.DOM.getChecked('autoSyncEnabled'),
         sync_interval: SK.DOM.getValue('syncInterval'),
         sync_time: SK.DOM.getValue('syncTime'),
-        nvd_api_key: SK.DOM.getValue('nvdApiKey'),
         cisa_kev_url: SK.DOM.getValue('cisaKevUrl')
     };
+
+    // Only include NVD API key if user entered a new one
+    // Empty field = don't change existing key (user can use Clear button to remove)
+    const nvdKeyValue = SK.DOM.getValue('nvdApiKey');
+    if (nvdKeyValue) {
+        settings.nvd_api_key = nvdKeyValue;
+    }
+    // Note: To clear the key, user must use the Clear button which sends explicit empty string
 
     try {
         const response = await fetch('/api/settings/sync', {
@@ -2348,7 +2383,14 @@ async function saveSyncSettings() {
         });
 
         if (response.ok) {
-            showToast('✓ Sync settings saved successfully', 'success');
+            const result = await response.json();
+            showToast('Sync settings saved successfully', 'success');
+            // Update NVD key state if a new key was set
+            if (nvdKeyValue) {
+                nvdKeyConfigured = true;
+                updateNvdKeyUI();
+                checkNvdHealth();  // Refresh status with new key
+            }
             loadSyncStatus();
         } else {
             const error = await response.json();
@@ -2356,6 +2398,114 @@ async function saveSyncSettings() {
         }
     } catch (error) {
         showToast(`Error saving sync settings: ${error.message}`, 'danger');
+    }
+}
+
+// Track if NVD API key is configured (for clear button visibility)
+let nvdKeyConfigured = false;
+
+/**
+ * Clear the NVD API key
+ */
+async function clearNvdApiKey() {
+    const confirmed = await showConfirm(
+        'Are you sure you want to clear the NVD API key? Product search will still work but with rate limiting (5 requests per 30 seconds instead of 50).',
+        'Clear NVD API Key',
+        'Clear Key',
+        'btn-warning'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/api/settings/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                auto_sync_enabled: SK.DOM.getChecked('autoSyncEnabled'),
+                sync_interval: SK.DOM.getValue('syncInterval'),
+                sync_time: SK.DOM.getValue('syncTime'),
+                nvd_api_key: '',  // Explicitly clear
+                cisa_kev_url: SK.DOM.getValue('cisaKevUrl')
+            })
+        });
+
+        if (response.ok) {
+            nvdKeyConfigured = false;
+            updateNvdKeyUI();
+            showToast('NVD API key cleared successfully', 'success');
+            checkNvdHealth();  // Refresh status
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error clearing NVD API key: ${error.message}`, 'danger');
+    }
+}
+
+/**
+ * Update the NVD API key field UI based on configuration state
+ */
+function updateNvdKeyUI() {
+    const nvdKeyInput = SK.DOM.get('nvdApiKey');
+    const clearBtn = SK.DOM.get('btnClearNvdKey');
+
+    if (nvdKeyInput) {
+        nvdKeyInput.value = '';
+        nvdKeyInput.placeholder = nvdKeyConfigured
+            ? '(API key saved - enter new key to replace)'
+            : 'Enter your NVD API key (optional)';
+    }
+
+    if (clearBtn) {
+        if (nvdKeyConfigured) {
+            clearBtn.classList.remove('d-none');
+        } else {
+            clearBtn.classList.add('d-none');
+        }
+    }
+}
+
+/**
+ * Check NVD API health status
+ */
+async function checkNvdHealth() {
+    const statusEl = SK.DOM.get('nvdHealthStatus');
+    const detailsEl = SK.DOM.get('nvdHealthDetails');
+
+    if (!statusEl) return;
+
+    // Show loading
+    statusEl.innerHTML = '<span class="spinner-border spinner-border-sm text-muted" role="status"></span> <span class="text-muted">Checking...</span>';
+    if (detailsEl) detailsEl.classList.add('d-none');
+
+    try {
+        const response = await fetch('/api/settings/sync/nvd-status');
+        const result = await response.json();
+
+        if (result.reachable) {
+            statusEl.innerHTML = '<i class="bi bi-check-circle-fill text-success me-1"></i><span class="text-success">Connected</span>';
+            if (detailsEl) {
+                let details = `Rate limit: ${result.rate_limit}`;
+                if (result.api_key_configured) {
+                    details += ' <span class="badge bg-success">API Key Active</span>';
+                } else {
+                    details += ' <span class="badge bg-secondary">No API Key</span>';
+                }
+                detailsEl.innerHTML = details;
+                detailsEl.classList.remove('d-none');
+            }
+        } else {
+            statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-danger me-1"></i><span class="text-danger">Connection Failed</span>';
+            if (detailsEl && result.error) {
+                detailsEl.innerHTML = `<span class="text-danger">${result.error}</span>`;
+                detailsEl.classList.remove('d-none');
+            }
+        }
+    } catch (error) {
+        statusEl.innerHTML = '<i class="bi bi-question-circle text-muted me-1"></i><span class="text-muted">Unable to check</span>';
+        console.error('Error checking NVD health:', error);
     }
 }
 
@@ -2551,9 +2701,13 @@ async function triggerWebhookAlerts() {
     }
 }
 
-// Proxy Settings
+// General Settings (Date/Time + Network/Proxy)
 async function saveProxySettings() {
     const settings = {
+        // Date & Time settings
+        display_timezone: SK.DOM.getValue('displayTimezone') || 'UTC',
+        date_format: SK.DOM.getValue('dateFormat') || 'YYYY-MM-DD HH:mm',
+        // Network/Proxy settings
         verify_ssl: SK.DOM.getChecked('verifySSL'),
         http_proxy: SK.DOM.getValue('httpProxy'),
         https_proxy: SK.DOM.getValue('httpsProxy'),
@@ -2568,13 +2722,17 @@ async function saveProxySettings() {
         });
 
         if (response.ok) {
-            showToast('Proxy settings saved successfully', 'success');
+            showToast('General settings saved successfully', 'success');
+            // Update global app settings for immediate effect
+            window.appSettings = window.appSettings || {};
+            window.appSettings.displayTimezone = settings.display_timezone;
+            window.appSettings.dateFormat = settings.date_format;
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
         }
     } catch (error) {
-        showToast(`Error saving proxy settings: ${error.message}`, 'danger');
+        showToast(`Error saving general settings: ${error.message}`, 'danger');
     }
 }
 
@@ -2669,6 +2827,154 @@ async function loadSecuritySettings() {
         }
     } catch (error) {
         console.error('Error loading security settings:', error);
+    }
+}
+
+// ============================================================================
+// SAML SSO Settings
+// ============================================================================
+
+async function loadSamlSettings() {
+    try {
+        const response = await fetch('/api/settings/saml');
+        if (response.ok) {
+            const settings = await response.json();
+
+            // Basic settings
+            const samlEnabled = SK.DOM.get('samlEnabled');
+            if (samlEnabled) samlEnabled.checked = settings.saml_enabled === true;
+
+            // SP information (read-only)
+            const spEntityId = SK.DOM.get('samlSpEntityId');
+            const acsUrl = SK.DOM.get('samlAcsUrl');
+            if (spEntityId) spEntityId.value = settings.saml_sp_entity_id || `${window.location.origin}/api/saml/metadata`;
+            if (acsUrl) acsUrl.value = settings.saml_sp_acs_url || `${window.location.origin}/saml/acs`;
+
+            // IdP metadata
+            const idpMetadata = SK.DOM.get('samlIdpMetadata');
+            if (idpMetadata) idpMetadata.value = settings.saml_idp_metadata || '';
+
+            // User provisioning
+            const autoProvision = SK.DOM.get('samlAutoProvision');
+            const updateUserInfo = SK.DOM.get('samlUpdateUserInfo');
+            if (autoProvision) autoProvision.checked = settings.saml_auto_provision !== false;
+            if (updateUserInfo) updateUserInfo.checked = settings.saml_update_user_info !== false;
+
+            // Load organizations for default org dropdown
+            await loadSamlOrganizations(settings.saml_default_org_id);
+
+            // Attribute mapping
+            try {
+                const mapping = JSON.parse(settings.saml_user_mapping || '{}');
+                const attrUsername = SK.DOM.get('samlAttrUsername');
+                const attrEmail = SK.DOM.get('samlAttrEmail');
+                const attrFullName = SK.DOM.get('samlAttrFullName');
+                if (attrUsername && mapping.username) attrUsername.value = mapping.username;
+                if (attrEmail && mapping.email) attrEmail.value = mapping.email;
+                if (attrFullName && mapping.full_name) attrFullName.value = mapping.full_name;
+            } catch (e) {
+                console.error('Error parsing SAML user mapping:', e);
+            }
+
+            // Show warning if SAML library not installed
+            if (!settings.saml_available) {
+                showToast('SAML library not installed. Run: pip install python3-saml', 'warning');
+            }
+        } else if (response.status === 403) {
+            console.log('SAML settings require Professional license');
+        }
+    } catch (error) {
+        console.error('Error loading SAML settings:', error);
+    }
+}
+
+async function loadSamlOrganizations(selectedOrgId) {
+    try {
+        const response = await fetch('/api/organizations');
+        if (response.ok) {
+            const orgs = await response.json();
+            const select = SK.DOM.get('samlDefaultOrg');
+            if (select) {
+                select.innerHTML = '<option value="">Select organization...</option>';
+                orgs.forEach(org => {
+                    const option = document.createElement('option');
+                    option.value = org.id;
+                    option.textContent = org.display_name || org.name;
+                    if (selectedOrgId && org.id.toString() === selectedOrgId.toString()) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error loading organizations for SAML:', error);
+    }
+}
+
+async function saveSamlSettings() {
+    const settings = {
+        saml_enabled: SK.DOM.getChecked('samlEnabled'),
+        saml_idp_metadata: SK.DOM.getValue('samlIdpMetadata'),
+        saml_sp_entity_id: SK.DOM.getValue('samlSpEntityId'),
+        saml_sp_acs_url: SK.DOM.getValue('samlAcsUrl'),
+        saml_default_org_id: SK.DOM.getValue('samlDefaultOrg'),
+        saml_auto_provision: SK.DOM.getChecked('samlAutoProvision'),
+        saml_update_user_info: SK.DOM.getChecked('samlUpdateUserInfo'),
+        saml_user_mapping: JSON.stringify({
+            username: SK.DOM.getValue('samlAttrUsername'),
+            email: SK.DOM.getValue('samlAttrEmail'),
+            full_name: SK.DOM.getValue('samlAttrFullName')
+        })
+    };
+
+    try {
+        const response = await fetch('/api/settings/saml', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        const result = await response.json();
+        if (response.ok && result.success) {
+            showToast('SAML settings saved successfully', 'success');
+        } else {
+            showToast(`Error: ${result.error || 'Failed to save SAML settings'}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving SAML settings: ${error.message}`, 'danger');
+    }
+}
+
+async function testSamlConfig() {
+    try {
+        const response = await fetch('/api/settings/saml/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+        if (response.ok && result.success) {
+            showToast(`SAML configuration is valid! IdP: ${result.idp_entity_id}`, 'success');
+        } else {
+            showToast(`SAML configuration error: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error testing SAML configuration: ${error.message}`, 'danger');
+    }
+}
+
+function copySamlValue(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        navigator.clipboard.writeText(element.value).then(() => {
+            showToast('Copied to clipboard', 'success');
+        }).catch(() => {
+            // Fallback for older browsers
+            element.select();
+            document.execCommand('copy');
+            showToast('Copied to clipboard', 'success');
+        });
     }
 }
 
@@ -3060,7 +3366,8 @@ async function saveRetentionSettings() {
     const settings = {
         audit_log_retention_days: parseInt(SK.DOM.getValue('auditLogRetention')) || 365,
         sync_history_retention_days: parseInt(SK.DOM.getValue('syncHistoryRetention')) || 90,
-        session_log_retention_days: parseInt(SK.DOM.getValue('sessionLogRetention')) || 30
+        session_log_retention_days: parseInt(SK.DOM.getValue('sessionLogRetention')) || 30,
+        auto_acknowledge_removed_software: SK.DOM.getChecked('autoAcknowledgeRemovedSoftware')
     };
 
     try {
@@ -3089,13 +3396,56 @@ async function loadRetentionSettings() {
             const auditLogRetention = SK.DOM.get('auditLogRetention');
             const syncHistoryRetention = SK.DOM.get('syncHistoryRetention');
             const sessionLogRetention = SK.DOM.get('sessionLogRetention');
+            const autoAcknowledge = SK.DOM.get('autoAcknowledgeRemovedSoftware');
 
             if (auditLogRetention) auditLogRetention.value = settings.audit_log_retention_days || 365;
             if (syncHistoryRetention) syncHistoryRetention.value = settings.sync_history_retention_days || 90;
             if (sessionLogRetention) sessionLogRetention.value = settings.session_log_retention_days || 30;
+            if (autoAcknowledge) autoAcknowledge.checked = settings.auto_acknowledge_removed_software !== false;
         }
     } catch (error) {
         console.error('Error loading retention settings:', error);
+    }
+}
+
+/**
+ * Manually run auto-acknowledge for removed software
+ */
+async function runAutoAcknowledge() {
+    const confirmed = await showConfirm(
+        'This will auto-acknowledge vulnerability matches for software that is no longer installed on any asset. Continue?',
+        'Run Auto-Acknowledge',
+        'Run Now',
+        'btn-primary'
+    );
+
+    if (!confirmed) return;
+
+    showLoading();
+
+    try {
+        const response = await fetch('/api/settings/maintenance/auto-acknowledge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: false })
+        });
+
+        hideLoading();
+
+        if (response.ok) {
+            const result = await response.json();
+            if (result.acknowledged_count > 0) {
+                showToast(`Auto-acknowledged ${result.acknowledged_count} vulnerability matches`, 'success');
+            } else {
+                showToast('No vulnerability matches found for removed software', 'info');
+            }
+        } else {
+            const error = await response.json();
+            showToast(`Error: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        hideLoading();
+        showToast(`Error: ${error.message}`, 'danger');
     }
 }
 
@@ -3327,30 +3677,40 @@ async function loadAllSettings() {
                     const syncInterval = SK.DOM.get('syncInterval');
                     const syncTime = SK.DOM.get('syncTime');
                     const cisaKevUrl = SK.DOM.get('cisaKevUrl');
-                    const nvdKeyInput = SK.DOM.get('nvdApiKey');
 
                     if (autoSyncEnabled) autoSyncEnabled.checked = sync.auto_sync_enabled || false;
                     if (syncInterval) syncInterval.value = sync.sync_interval || 'daily';
                     if (syncTime) syncTime.value = sync.sync_time || '02:00';
                     if (cisaKevUrl) cisaKevUrl.value = sync.cisa_kev_url || 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
-                    if (nvdKeyInput) {
-                        nvdKeyInput.value = '';
-                        nvdKeyInput.placeholder = sync.nvd_api_key_configured
-                            ? '(API key saved - leave blank to keep)'
-                            : 'Enter your NVD API key (optional)';
-                    }
+
+                    // Update NVD key UI with clear button
+                    nvdKeyConfigured = sync.nvd_api_key_configured || false;
+                    updateNvdKeyUI();
+
                     console.log('Sync settings loaded');
                 }
             })
             .catch(err => console.error('Failed to load sync settings:', err))
     );
 
-    // Load Proxy/General settings
+    // Load General settings (Date/Time + Proxy/Network)
     loadPromises.push(
         fetchWithRetry('/api/settings/general', {}, 3, 800)
             .then(async response => {
                 if (response.ok) {
                     const general = await response.json();
+                    // Date & Time settings
+                    const displayTimezone = SK.DOM.get('displayTimezone');
+                    const dateFormat = SK.DOM.get('dateFormat');
+                    if (displayTimezone) displayTimezone.value = general.display_timezone || 'UTC';
+                    if (dateFormat) dateFormat.value = general.date_format || 'YYYY-MM-DD HH:mm';
+
+                    // Store in global settings for date formatting functions
+                    window.appSettings = window.appSettings || {};
+                    window.appSettings.displayTimezone = general.display_timezone || 'UTC';
+                    window.appSettings.dateFormat = general.date_format || 'YYYY-MM-DD HH:mm';
+
+                    // Proxy/Network settings
                     const verifySSL = SK.DOM.get('verifySSL');
                     const httpProxy = SK.DOM.get('httpProxy');
                     const httpsProxy = SK.DOM.get('httpsProxy');
@@ -3359,19 +3719,21 @@ async function loadAllSettings() {
                     if (httpProxy) httpProxy.value = general.http_proxy || '';
                     if (httpsProxy) httpsProxy.value = general.https_proxy || '';
                     if (noProxy) noProxy.value = general.no_proxy || '';
-                    console.log('Proxy settings loaded');
+                    console.log('General settings loaded');
                 }
             })
-            .catch(err => console.error('Failed to load proxy settings:', err))
+            .catch(err => console.error('Failed to load general settings:', err))
     );
 
     // Wait for all critical settings, then load additional ones
     await Promise.allSettled(loadPromises);
 
     loadSyncStatus();
+    checkNvdHealth();  // Check NVD API connection status
 
     // Load additional settings (these can fail independently)
     loadSecuritySettings();
+    loadSamlSettings();
     loadBrandingSettings();
     loadNotificationSettings();
     loadRetentionSettings();
@@ -5737,6 +6099,11 @@ function displayLicenseInfo(data) {
         return `<span class="${colorClass}">${current}</span> / ${max}`;
     };
 
+    // Agent usage with server/client breakdown
+    const agentUsage = data.agent_usage || {};
+    const agents = agentUsage.agents || {};
+    const breakdown = agentUsage.breakdown || {};
+
     usageEl.innerHTML = `
         <table class="table table-sm table-borderless mb-0">
             <tr>
@@ -5751,6 +6118,33 @@ function displayLicenseInfo(data) {
                 <td class="text-muted">Products</td>
                 <td>${formatLimit(usage.products || 0, limits.max_products)}</td>
             </tr>
+            ${agents.current > 0 || limits.max_agents > 0 ? `
+            <tr>
+                <td colspan="2" class="pt-2"><small class="text-muted fw-bold">Agents</small></td>
+            </tr>
+            <tr>
+                <td class="text-muted ps-2">Total</td>
+                <td>${formatLimit(agents.current || 0, limits.max_agents)}</td>
+            </tr>
+            ${breakdown.servers !== undefined ? `
+            <tr>
+                <td class="text-muted ps-2">
+                    <i class="bi bi-hdd-rack text-primary me-1"></i>Servers
+                </td>
+                <td>${breakdown.servers || 0}</td>
+            </tr>
+            <tr>
+                <td class="text-muted ps-2">
+                    <i class="bi bi-pc-display text-info me-1"></i>Workstations
+                </td>
+                <td>${breakdown.clients || 0}</td>
+            </tr>
+            <tr>
+                <td class="text-muted ps-2">Weighted Units</td>
+                <td><span class="badge bg-secondary">${(breakdown.weighted_units || 0).toFixed(1)}</span></td>
+            </tr>
+            ` : ''}
+            ` : ''}
         </table>
         ${!data.is_professional && (
             (usage.users >= limits.max_users) ||
@@ -6418,8 +6812,8 @@ function renderAssetProductsTable() {
         let aVal, bVal;
         switch (assetProductsSortField) {
             case 'product':
-                aVal = `${a.vendor || ''} ${a.product_name || a.name || ''}`.toLowerCase();
-                bVal = `${b.vendor || ''} ${b.product_name || b.name || ''}`.toLowerCase();
+                aVal = (a.product_name || '').toLowerCase();
+                bVal = (b.product_name || '').toLowerCase();
                 break;
             case 'version':
                 aVal = (a.version || '').toLowerCase();
@@ -6469,8 +6863,8 @@ function renderAssetProductsTable() {
                 <tbody>
                     ${pageProducts.map(p => `
                         <tr>
-                            <td class="text-truncate" style="max-width: 300px;" title="${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}">
-                                ${escapeHtml(p.vendor || '')} ${escapeHtml(p.product_name || p.name || 'Unknown')}
+                            <td class="text-truncate" style="max-width: 300px;" title="${escapeHtml(p.product_name || 'Unknown')}">
+                                ${escapeHtml(p.product_name || 'Unknown')}
                             </td>
                             <td><code class="small">${escapeHtml(p.version || '-')}</code></td>
                             <td>
@@ -6757,7 +7151,13 @@ function renderImportQueue() {
                            ${item.status !== 'pending' ? 'disabled' : ''}>
                 </td>
                 <td>
-                    <div class="fw-semibold">${escapeHtml(item.vendor)}</div>
+                    <div class="fw-semibold">
+                        ${escapeHtml(item.vendor)}
+                        ${item.cpe_vendor && item.cpe_product
+                            ? `<span class="badge bg-success-subtle text-success ms-1" title="CPE matched: ${escapeHtml(item.cpe_vendor)}:${escapeHtml(item.cpe_product)} (${Math.round((item.cpe_match_confidence || 0) * 100)}%)"><i class="bi bi-shield-check"></i></span>`
+                            : `<span class="badge bg-warning-subtle text-warning ms-1" title="No CPE match - vulnerabilities may not be detected"><i class="bi bi-shield-exclamation"></i></span>`
+                        }
+                    </div>
                     <div class="text-muted small">${escapeHtml(item.product_name)}</div>
                 </td>
                 <td>
@@ -6861,6 +7261,30 @@ async function loadImportQueue() {
         const data = await response.json();
         importQueueData = data.items || [];
 
+        // Update CPE coverage summary in the info alert
+        if (status === 'pending' && importQueueData.length > 0) {
+            const withCpe = importQueueData.filter(i => i.cpe_vendor && i.cpe_product).length;
+            const withoutCpe = importQueueData.length - withCpe;
+            const infoAlert = document.querySelector('#importQueue .alert-info');
+            if (infoAlert) {
+                infoAlert.innerHTML = `
+                    <i class="bi bi-info-circle me-2"></i>
+                    Software discovered from integrations and agents appears here for review.
+                    ${withoutCpe > 0 ? `
+                        <span class="ms-2 badge bg-warning text-dark">
+                            <i class="bi bi-shield-exclamation me-1"></i>${withoutCpe} without CPE
+                        </span>
+                        <small class="text-muted ms-1">(won't detect vulnerabilities)</small>
+                    ` : ''}
+                    ${withCpe > 0 ? `
+                        <span class="ms-2 badge bg-success">
+                            <i class="bi bi-shield-check me-1"></i>${withCpe} matched
+                        </span>
+                    ` : ''}
+                `;
+            }
+        }
+
         renderImportQueue();
         loadImportQueueCount();
 
@@ -6934,6 +7358,32 @@ async function updateQueueItemOrg(itemId, orgId) {
 }
 
 async function approveQueueItem(itemId) {
+    // Find the item to check if it has CPE
+    const item = importQueueData.find(i => i.id === itemId);
+
+    // If no CPE mapping, warn the user
+    if (item && (!item.cpe_vendor || !item.cpe_product)) {
+        const confirmed = await showConfirm(
+            `<div class="text-start">
+                <div class="alert alert-warning mb-3">
+                    <i class="bi bi-shield-exclamation me-2"></i>
+                    <strong>No CPE mapping found</strong>
+                </div>
+                <p><strong>${escapeHtml(item.vendor)} ${escapeHtml(item.product_name)}</strong> has no CPE identifier.</p>
+                <p class="mb-2">This means:</p>
+                <ul class="mb-3">
+                    <li>Vulnerabilities <strong>will NOT be detected</strong> for this software</li>
+                    <li>You can manually assign CPE later in Products</li>
+                </ul>
+                <p class="mb-0 text-muted small">Tip: After adding, go to Products → Edit → Use NVD Search to find the correct CPE.</p>
+            </div>`,
+            'Approve Without CPE?',
+            'Approve Anyway',
+            'btn-warning'
+        );
+        if (!confirmed) return;
+    }
+
     try {
         const response = await fetch(`/api/import/queue/${itemId}/approve`, { method: 'POST' });
         if (!response.ok) {
@@ -6961,11 +7411,47 @@ async function rejectQueueItem(itemId) {
 async function bulkApproveQueue() {
     if (selectedQueueItems.size === 0) return;
 
+    // Check how many items lack CPE
+    const selectedItems = importQueueData.filter(i => selectedQueueItems.has(i.id));
+    const withoutCpe = selectedItems.filter(i => !i.cpe_vendor || !i.cpe_product);
+    const withCpe = selectedItems.length - withoutCpe.length;
+
+    let confirmMessage = `Approve ${selectedQueueItems.size} item(s) and add to product inventory?`;
+
+    if (withoutCpe.length > 0) {
+        confirmMessage = `
+            <div class="text-start">
+                <p>Approve <strong>${selectedQueueItems.size}</strong> item(s) and add to product inventory?</p>
+                <div class="row text-center mb-3">
+                    <div class="col-6">
+                        <div class="border rounded p-2 bg-success-subtle">
+                            <div class="fs-4 fw-bold text-success">${withCpe}</div>
+                            <small class="text-muted">With CPE</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2 bg-warning-subtle">
+                            <div class="fs-4 fw-bold text-warning">${withoutCpe.length}</div>
+                            <small class="text-muted">Without CPE</small>
+                        </div>
+                    </div>
+                </div>
+                ${withoutCpe.length > 0 ? `
+                    <div class="alert alert-warning mb-0 small">
+                        <i class="bi bi-shield-exclamation me-1"></i>
+                        <strong>${withoutCpe.length} item(s)</strong> have no CPE mapping and won't detect vulnerabilities.
+                        You can assign CPE later in Products.
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
     const confirmed = await showConfirm(
-        `Approve ${selectedQueueItems.size} item(s) and add to product inventory?`,
+        confirmMessage,
         'Bulk Approve',
         'Approve All',
-        'btn-success'
+        withoutCpe.length > 0 ? 'btn-warning' : 'btn-success'
     );
 
     if (!confirmed) return;

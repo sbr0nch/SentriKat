@@ -5,6 +5,7 @@ Provides real-time search against the NVD CPE database for software product iden
 and vulnerability matching.
 """
 from flask import Blueprint, request, jsonify, session
+from datetime import datetime
 from app import db, csrf
 from app.auth import login_required, manager_required, admin_required
 from app.models import Product, Vulnerability, ServiceCatalog
@@ -626,3 +627,162 @@ def bulk_link_cpe():
         'success_count': success_count,
         'message': f'{success_count} products linked successfully'
     })
+
+
+# =============================================================================
+# USER CPE MAPPINGS - Export/Import
+# =============================================================================
+
+@bp.route('/user-mappings', methods=['GET'])
+@manager_required
+def get_user_mappings():
+    """
+    Get all user-defined CPE mappings.
+
+    Query params:
+        format: 'json' (default) or 'export' (minimal for sharing)
+
+    Returns list of user CPE mappings.
+    """
+    from app.models import UserCpeMapping
+
+    export_format = request.args.get('format', 'json') == 'export'
+
+    mappings = UserCpeMapping.query.order_by(UserCpeMapping.usage_count.desc()).all()
+
+    if export_format:
+        return jsonify({
+            'mappings': [m.to_export_dict() for m in mappings],
+            'total': len(mappings),
+            'export_date': datetime.utcnow().isoformat()
+        })
+    else:
+        return jsonify({
+            'mappings': [m.to_dict() for m in mappings],
+            'total': len(mappings)
+        })
+
+
+@bp.route('/user-mappings/export', methods=['GET'])
+@admin_required
+def export_user_mappings():
+    """
+    Export user CPE mappings as a downloadable JSON file.
+
+    Returns a JSON file attachment.
+    """
+    from flask import Response
+    from app.cpe_mappings import get_all_user_mappings
+    import json
+    from datetime import datetime
+
+    mappings = get_all_user_mappings()
+
+    export_data = {
+        'version': '1.0',
+        'export_date': datetime.utcnow().isoformat(),
+        'source': 'sentrikat',
+        'mappings': mappings
+    }
+
+    json_data = json.dumps(export_data, indent=2)
+
+    return Response(
+        json_data,
+        mimetype='application/json',
+        headers={
+            'Content-Disposition': f'attachment; filename=cpe_mappings_{datetime.utcnow().strftime("%Y%m%d")}.json'
+        }
+    )
+
+
+@bp.route('/user-mappings/import', methods=['POST'])
+@admin_required
+def import_user_mappings_api():
+    """
+    Import user CPE mappings from JSON.
+
+    Request body:
+        {
+            "mappings": [
+                {
+                    "vendor_pattern": "some vendor",
+                    "product_pattern": "some product",
+                    "cpe_vendor": "vendor",
+                    "cpe_product": "product",
+                    "notes": "optional notes"
+                }
+            ],
+            "overwrite": false
+        }
+
+    Or upload a JSON file with multipart/form-data.
+
+    Returns import results.
+    """
+    from flask_login import current_user
+    from app.cpe_mappings import import_user_mappings
+
+    # Handle both JSON body and file upload
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        # File upload
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if not file.filename.endswith('.json'):
+            return jsonify({'error': 'File must be JSON'}), 400
+
+        try:
+            import json
+            data = json.load(file)
+        except json.JSONDecodeError:
+            return jsonify({'error': 'Invalid JSON file'}), 400
+    else:
+        # JSON body
+        data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    mappings = data.get('mappings', [])
+    overwrite = data.get('overwrite', False)
+
+    if not mappings:
+        return jsonify({'error': 'No mappings in data'}), 400
+
+    result = import_user_mappings(
+        mappings,
+        user_id=current_user.id if current_user else None,
+        overwrite=overwrite
+    )
+
+    return jsonify({
+        'success': True,
+        'imported': result['imported'],
+        'skipped': result['skipped'],
+        'errors': result['errors'],
+        'message': f"Imported {result['imported']} mappings, skipped {result['skipped']}, {result['errors']} errors"
+    })
+
+
+@bp.route('/user-mappings/<int:mapping_id>', methods=['DELETE'])
+@admin_required
+def delete_user_mapping(mapping_id):
+    """Delete a specific user CPE mapping."""
+    from app.cpe_mappings import delete_user_mapping as delete_mapping
+
+    if delete_mapping(mapping_id):
+        return jsonify({'success': True, 'message': 'Mapping deleted'})
+    else:
+        return jsonify({'error': 'Mapping not found or delete failed'}), 404
+
+
+@bp.route('/user-mappings/stats', methods=['GET'])
+@manager_required
+def user_mapping_stats():
+    """Get statistics about user CPE mappings."""
+    from app.cpe_mappings import get_user_mapping_stats
+
+    stats = get_user_mapping_stats()
+    return jsonify(stats)

@@ -856,6 +856,11 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="saml-settings-tab" data-bs-toggle="pill" data-bs-target="#samlSettings" type="button">
+                        <i class="bi bi-key-fill me-2"></i>SAML SSO
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
                     <button class="nav-link" id="smtp-settings-tab" data-bs-toggle="pill" data-bs-target="#smtpSettings" type="button">
                         <i class="bi bi-envelope me-2"></i>Global SMTP
                     </button>
@@ -882,7 +887,7 @@
                 {% if current_user and current_user.is_super_admin() %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="proxy-settings-tab" data-bs-toggle="pill" data-bs-target="#proxySettings" type="button">
-                        <i class="bi bi-hdd-network me-2"></i>Proxy
+                        <i class="bi bi-gear me-2"></i>General
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -1065,6 +1070,131 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- SAML SSO Settings (Super Admin + Professional License Only) -->
+                <div class="tab-pane fade" id="samlSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-key-fill me-2"></i>SAML Single Sign-On (SSO)</span>
+                            <span class="badge bg-primary">Professional</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure SAML 2.0 SSO to allow users to log in using your Identity Provider (IdP) like Okta, Azure AD, or OneLogin.
+                            </div>
+
+                            <form id="samlSettingsForm">
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="samlEnabled">
+                                            <label class="form-check-label" for="samlEnabled">Enable SAML SSO</label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-cloud-download me-2"></i>Service Provider (SP) Information</h6>
+                                        <p class="text-muted small">Use these values when configuring your Identity Provider:</p>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label class="form-label">SP Entity ID</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="samlSpEntityId" readonly>
+                                            <button class="btn btn-outline-secondary" type="button" onclick="copySamlValue('samlSpEntityId')">
+                                                <i class="bi bi-clipboard"></i>
+                                            </button>
+                                        </div>
+                                        <small class="form-text text-muted">Also known as Audience URI</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label class="form-label">ACS URL</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="samlAcsUrl" readonly>
+                                            <button class="btn btn-outline-secondary" type="button" onclick="copySamlValue('samlAcsUrl')">
+                                                <i class="bi bi-clipboard"></i>
+                                            </button>
+                                        </div>
+                                        <small class="form-text text-muted">Assertion Consumer Service URL</small>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <a href="/api/saml/metadata" target="_blank" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-download me-1"></i>Download SP Metadata XML
+                                        </a>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-cloud-upload me-2"></i>Identity Provider (IdP) Configuration</h6>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label for="samlIdpMetadata" class="form-label">IdP Metadata (XML or URL)</label>
+                                        <textarea class="form-control" id="samlIdpMetadata" rows="6" placeholder="Paste your IdP metadata XML here, or enter the metadata URL"></textarea>
+                                        <small class="form-text text-muted">You can paste the full XML metadata or provide a URL to fetch it from</small>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-person-badge me-2"></i>User Provisioning</h6>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="samlDefaultOrg" class="form-label">Default Organization</label>
+                                        <select class="form-select" id="samlDefaultOrg">
+                                            <option value="">Select organization...</option>
+                                        </select>
+                                        <small class="form-text text-muted">Organization for new SAML users</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <div class="mt-4">
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="samlAutoProvision" checked>
+                                                <label class="form-check-label" for="samlAutoProvision">Auto-provision new users</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="samlUpdateUserInfo" checked>
+                                                <label class="form-check-label" for="samlUpdateUserInfo">Update user info on login</label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-arrow-left-right me-2"></i>Attribute Mapping</h6>
+                                        <p class="text-muted small">Map SAML assertion attributes to user fields. Default values work with most IdPs.</p>
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label class="form-label">Username Attribute</label>
+                                        <input type="text" class="form-control" id="samlAttrUsername" value="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name">
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label class="form-label">Email Attribute</label>
+                                        <input type="text" class="form-control" id="samlAttrEmail" value="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress">
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label class="form-label">Full Name Attribute</label>
+                                        <input type="text" class="form-control" id="samlAttrFullName" value="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname">
+                                    </div>
+
+                                    <div class="col-12 mt-4">
+                                        <hr>
+                                        <button type="button" class="btn btn-primary me-2" onclick="saveSamlSettings()">
+                                            <i class="bi bi-check-circle me-1"></i>Save SAML Settings
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" onclick="testSamlConfig()">
+                                            <i class="bi bi-check2-circle me-1"></i>Test Configuration
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
                 {% endif %}
 
                 <!-- Global SMTP Settings -->
@@ -1191,7 +1321,12 @@
 
                                     <div class="col-md-6">
                                         <label for="nvdApiKey" class="form-label fw-semibold">NVD API Key</label>
-                                        <input type="password" class="form-control" id="nvdApiKey" placeholder="Optional - for CVSS enrichment">
+                                        <div class="input-group">
+                                            <input type="password" class="form-control" id="nvdApiKey" placeholder="Optional - for CVSS enrichment">
+                                            <button class="btn btn-outline-secondary d-none" type="button" id="btnClearNvdKey" onclick="clearNvdApiKey()" title="Clear API Key">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        </div>
                                         <small class="form-text text-muted">Get from <a href="https://nvd.nist.gov/developers/request-an-api-key" target="_blank">NIST NVD</a></small>
                                     </div>
 
@@ -1199,6 +1334,27 @@
                                         <label for="cisaKevUrl" class="form-label fw-semibold">CISA KEV URL</label>
                                         <input type="text" class="form-control" id="cisaKevUrl" value="https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json">
                                         <small class="form-text text-muted">Usually leave as default</small>
+                                    </div>
+
+                                    <!-- NVD Health Status -->
+                                    <div class="col-md-12">
+                                        <div class="card border-0 bg-light">
+                                            <div class="card-body py-2">
+                                                <div class="d-flex align-items-center justify-content-between">
+                                                    <div>
+                                                        <strong><i class="bi bi-shield-check me-1"></i>NVD Connection Status:</strong>
+                                                        <span id="nvdHealthStatus" class="ms-2">
+                                                            <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
+                                                            <span class="text-muted">Checking...</span>
+                                                        </span>
+                                                    </div>
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="checkNvdHealth()" title="Refresh NVD Status">
+                                                        <i class="bi bi-arrow-clockwise"></i>
+                                                    </button>
+                                                </div>
+                                                <div id="nvdHealthDetails" class="mt-2 small text-muted d-none"></div>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div class="col-md-12">
@@ -1280,21 +1436,64 @@
                 </div>
 
                 {% if current_user and current_user.is_super_admin() %}
-                <!-- Proxy Settings (Super Admin Only) -->
+                <!-- General Settings (Super Admin Only) -->
                 <div class="tab-pane fade" id="proxySettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
-                            <i class="bi bi-hdd-network me-2"></i>Proxy & Network Settings
+                            <i class="bi bi-gear me-2"></i>General Settings
                         </div>
                         <div class="card-body">
-                            <div class="alert alert-info">
-                                <i class="bi bi-info-circle me-2"></i>
-                                Configure proxy settings for external API connections (CISA KEV, NVD). Required if SentriKat is behind a corporate proxy.
-                            </div>
-
                             <form id="proxySettingsForm">
                                 <div class="row g-3">
+                                    <!-- Date & Time Display -->
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-clock me-2"></i>Date & Time Display</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="displayTimezone" class="form-label fw-semibold">Display Timezone</label>
+                                        <select class="form-select" id="displayTimezone">
+                                            <option value="UTC">UTC (Coordinated Universal Time)</option>
+                                            <option value="local">Browser Local Time</option>
+                                            <option value="America/New_York">Eastern Time (US)</option>
+                                            <option value="America/Chicago">Central Time (US)</option>
+                                            <option value="America/Denver">Mountain Time (US)</option>
+                                            <option value="America/Los_Angeles">Pacific Time (US)</option>
+                                            <option value="Europe/London">London (UK)</option>
+                                            <option value="Europe/Paris">Paris (CET)</option>
+                                            <option value="Europe/Berlin">Berlin (CET)</option>
+                                            <option value="Europe/Rome">Rome (CET)</option>
+                                            <option value="Europe/Madrid">Madrid (CET)</option>
+                                            <option value="Europe/Amsterdam">Amsterdam (CET)</option>
+                                            <option value="Europe/Zurich">Zurich (CET)</option>
+                                            <option value="Asia/Tokyo">Tokyo (Japan)</option>
+                                            <option value="Asia/Shanghai">Shanghai (China)</option>
+                                            <option value="Asia/Singapore">Singapore</option>
+                                            <option value="Asia/Dubai">Dubai (UAE)</option>
+                                            <option value="Australia/Sydney">Sydney (Australia)</option>
+                                        </select>
+                                        <small class="form-text text-muted">Timezone for displaying dates throughout the app</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="dateFormat" class="form-label fw-semibold">Date Format</label>
+                                        <select class="form-select" id="dateFormat">
+                                            <option value="YYYY-MM-DD HH:mm">2024-01-15 14:30 (ISO)</option>
+                                            <option value="DD/MM/YYYY HH:mm">15/01/2024 14:30 (European)</option>
+                                            <option value="MM/DD/YYYY hh:mm A">01/15/2024 02:30 PM (US)</option>
+                                            <option value="DD MMM YYYY HH:mm">15 Jan 2024 14:30</option>
+                                            <option value="MMM DD, YYYY hh:mm A">Jan 15, 2024 02:30 PM</option>
+                                        </select>
+                                        <small class="form-text text-muted">Format for displaying dates and times</small>
+                                    </div>
+
+                                    <!-- Network/Proxy Settings -->
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-hdd-network me-2"></i>Network & Proxy</h6>
+                                    </div>
                                     <div class="col-md-12">
+                                        <div class="alert alert-info mb-3">
+                                            <i class="bi bi-info-circle me-2"></i>
+                                            Configure proxy settings for external API connections (CISA KEV, NVD). Required if SentriKat is behind a corporate proxy.
+                                        </div>
                                         <div class="form-check form-switch">
                                             <input type="checkbox" class="form-check-input" id="verifySSL" checked>
                                             <label class="form-check-label fw-semibold" for="verifySSL">
@@ -1738,10 +1937,29 @@
                                         <small class="form-text text-muted">User login sessions</small>
                                     </div>
 
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-check2-circle me-2"></i>Auto-Acknowledge</h6>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch">
+                                            <input type="checkbox" class="form-check-input" id="autoAcknowledgeRemovedSoftware" checked>
+                                            <label class="form-check-label fw-semibold" for="autoAcknowledgeRemovedSoftware">
+                                                Auto-acknowledge vulnerabilities when software is removed
+                                            </label>
+                                        </div>
+                                        <small class="form-text text-muted d-block mt-1">
+                                            Automatically acknowledge CVE matches when the affected software is no longer installed on any asset.
+                                            This reduces alert fatigue for vulnerabilities that no longer apply.
+                                        </small>
+                                    </div>
+
                                     <div class="col-md-12">
                                         <hr>
                                         <button type="button" class="btn btn-primary" onclick="saveRetentionSettings()">
                                             <i class="bi bi-check-circle me-1"></i>Save Retention Settings
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary ms-2" onclick="runAutoAcknowledge()">
+                                            <i class="bi bi-play-circle me-1"></i>Run Auto-Acknowledge Now
                                         </button>
                                     </div>
                                 </div>
@@ -2306,16 +2524,16 @@
                         </div>
 
                         <div class="col-md-6" id="primaryOrgField">
-                            <label for="organization" class="form-label fw-semibold">Primary Organization *</label>
-                            <select class="form-select" id="organization" required>
+                            <label for="organization" class="form-label fw-semibold">Primary Organization <span id="orgRequired">*</span></label>
+                            <select class="form-select" id="organization">
                                 <option value="">Loading...</option>
                             </select>
-                            <small class="text-muted">Initial organization for the user. Additional orgs can be added after creation.</small>
+                            <small class="text-muted" id="orgHelp">Initial organization for the user. Additional orgs can be added after creation.</small>
                         </div>
 
                         <div class="col-md-12">
                             <label for="userRole" class="form-label fw-semibold">Role *</label>
-                            <select class="form-select" id="userRole" onchange="updateRoleDescription()">
+                            <select class="form-select" id="userRole" onchange="updateRoleDescription(); updateOrgRequirement()">
                                 <option value="user">User - View-only access to vulnerabilities</option>
                                 <option value="manager">Manager - Can manage products and view vulnerabilities</option>
                                 <option value="org_admin">Organization Admin - Full access within their organization</option>

@@ -225,19 +225,39 @@ class EmailAlertManager:
         """
         total_count = len(matches)
 
-        # Group by priority
+        # Group by priority (CVE-based, not match-based)
+        # One CVE affecting 20 products = 1 critical CVE, not 20 matches
         by_priority = {'critical': [], 'high': [], 'medium': [], 'low': []}
+        cve_priority_seen = {}  # Track which CVEs we've counted
+
         for match in matches:
             priority = match.calculate_effective_priority()
-            by_priority[priority].append(match)
+            cve_id = match.vulnerability.cve_id
+
+            # Only count each CVE once at its highest priority
+            if cve_id not in cve_priority_seen:
+                cve_priority_seen[cve_id] = priority
+                by_priority[priority].append(match)
+            elif priority == 'critical' and cve_priority_seen[cve_id] != 'critical':
+                # Upgrade to critical if we see a critical match for same CVE
+                by_priority[cve_priority_seen[cve_id]] = [m for m in by_priority[cve_priority_seen[cve_id]] if m.vulnerability.cve_id != cve_id]
+                by_priority['critical'].append(match)
+                cve_priority_seen[cve_id] = 'critical'
+
+        # Unique CVE counts (what users care about)
+        unique_cve_count = len(cve_priority_seen)
 
         # Group by product for executive summary
         by_product = {}
+        product_cves = {}  # Track unique CVEs per product
         for match in matches:
             product_key = f"{match.product.vendor} {match.product.product_name}"
+            cve_id = match.vulnerability.cve_id
             if product_key not in by_product:
-                by_product[product_key] = {'product': match.product, 'matches': []}
-            by_product[product_key]['matches'].append(match)
+                by_product[product_key] = {'product': match.product, 'matches': [], 'cve_ids': set()}
+            if cve_id not in by_product[product_key]['cve_ids']:
+                by_product[product_key]['matches'].append(match)
+                by_product[product_key]['cve_ids'].add(cve_id)
 
         priority_colors = {
             'critical': '#dc2626',
@@ -304,7 +324,7 @@ class EmailAlertManager:
                                     <tr>
                                         <td>
                                             <span style="font-size: 18px; font-weight: 700; color: #991b1b;">
-                                                {f'{new_count} New CVE{"s" if new_count != 1 else ""} ({total_count} total)' if new_count > 0 else f'{total_count} Critical Vulnerabilities'}
+                                                {f'{new_count} New CVE{"s" if new_count != 1 else ""} ({unique_cve_count} total CVEs)' if new_count > 0 else f'{unique_cve_count} Unique CVEs Detected'}
                                             </span>
                                             <p style="margin: 4px 0 0 0; font-size: 14px; color: #7f1d1d;">
                                                 Affecting <strong>{organization.display_name}</strong> - Immediate action required
@@ -1454,3 +1474,143 @@ def _build_password_change_forced_email_html(user, organization, forced_by_usern
 """
 
     return html
+
+
+# ============================================================================
+# Scheduled Report Email
+# ============================================================================
+
+def send_scheduled_report(recipients, report_name, org_name, pdf_buffer):
+    """
+    Send a scheduled vulnerability report via email with PDF attachment.
+
+    Args:
+        recipients: List of email addresses to send to
+        report_name: Name of the scheduled report
+        org_name: Organization display name
+        pdf_buffer: BytesIO object containing the PDF report
+
+    Returns:
+        dict: {'success': bool, 'error': str} result
+    """
+    from email.mime.base import MIMEBase
+    from email import encoders
+    from app.settings_api import get_setting
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get global SMTP settings
+        smtp_config = {
+            'host': get_setting('smtp_host'),
+            'port': int(get_setting('smtp_port', '587') or '587'),
+            'username': get_setting('smtp_username'),
+            'password': get_setting('smtp_password'),
+            'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+            'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+            'from_email': get_setting('smtp_from_email'),
+            'from_name': get_setting('smtp_from_name', 'SentriKat Reports')
+        }
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            return {'success': False, 'error': 'SMTP not configured'}
+
+        # Create message
+        msg = MIMEMultipart('mixed')
+        msg['From'] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
+        msg['To'] = ', '.join(recipients)
+        msg['Subject'] = f"[SentriKat] {report_name} - {org_name}"
+
+        # Email body
+        html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f3f4f6; margin: 0; padding: 0;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">Scheduled Report</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">{report_name}</p>
+        </div>
+
+        <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+            <p style="font-size: 16px; color: #374151; line-height: 1.6;">
+                Hello,
+            </p>
+
+            <p style="font-size: 16px; color: #374151; line-height: 1.6;">
+                Please find attached the scheduled vulnerability report for <strong>{org_name}</strong>.
+            </p>
+
+            <div style="background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0; color: #1e40af;">
+                    <strong>Report:</strong> {report_name}<br>
+                    <strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </p>
+            </div>
+
+            <p style="color: #6b7280; font-size: 14px;">
+                Open the attached PDF to view the full vulnerability report.
+            </p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{get_app_url()}" style="display: inline-block; background: #1e40af; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px;">
+                    View Dashboard
+                </a>
+            </div>
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>This is an automated report from SentriKat</p>
+            <p>© {datetime.now().year} {org_name}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        # Attach HTML body
+        html_part = MIMEText(html_body, 'html', 'utf-8')
+        msg.attach(html_part)
+
+        # Attach PDF
+        pdf_buffer.seek(0)
+        pdf_attachment = MIMEBase('application', 'pdf')
+        pdf_attachment.set_payload(pdf_buffer.read())
+        encoders.encode_base64(pdf_attachment)
+
+        filename = f"{report_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        pdf_attachment.add_header(
+            'Content-Disposition',
+            'attachment',
+            filename=filename
+        )
+        msg.attach(pdf_attachment)
+
+        # Send email
+        if smtp_config['use_ssl']:
+            server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
+        else:
+            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
+            if smtp_config['use_tls']:
+                server.starttls()
+
+        if smtp_config['username'] and smtp_config['password']:
+            server.login(smtp_config['username'], smtp_config['password'])
+
+        server.sendmail(smtp_config['from_email'], recipients, msg.as_string())
+        server.quit()
+
+        logger.info(f"Scheduled report '{report_name}' sent to {len(recipients)} recipients")
+        return {'success': True}
+
+    except Exception as e:
+        logger.exception(f"Failed to send scheduled report '{report_name}'")
+        return {'success': False, 'error': str(e)}
+
+
+# Make the function accessible from the EmailAlertManager class
+EmailAlertManager.send_scheduled_report = staticmethod(send_scheduled_report)

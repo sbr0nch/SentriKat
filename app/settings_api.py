@@ -563,14 +563,177 @@ def save_sync_settings():
         set_setting('sync_time', data.get('sync_time', '02:00'), 'sync', 'Preferred sync time (UTC)')
         set_setting('cisa_kev_url', data.get('cisa_kev_url', ''), 'sync', 'CISA KEV feed URL')
 
-        # Encrypt NVD API key
-        if data.get('nvd_api_key'):
-            set_setting('nvd_api_key', data['nvd_api_key'], 'sync', 'NVD API key', is_encrypted=True)
+        # Handle NVD API key - validate before saving
+        # Only process if key is explicitly included in the request
+        if 'nvd_api_key' in data:
+            nvd_key = (data.get('nvd_api_key') or '').strip()
+            if nvd_key and nvd_key != '********':
+                # Validate the API key by making a test request
+                is_valid, error_msg = _validate_nvd_api_key(nvd_key)
+                if not is_valid:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Invalid NVD API key: {error_msg}. Key was not saved.'
+                    }), 400
+
+                set_setting('nvd_api_key', nvd_key, 'sync', 'NVD API key', is_encrypted=True)
+            elif nvd_key == '':
+                # User explicitly cleared the API key (via Clear button)
+                set_setting('nvd_api_key', '', 'sync', 'NVD API key')
+        # If 'nvd_api_key' not in data, don't change the existing key
 
         return jsonify({'success': True, 'message': 'Sync settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save sync settings")
         return jsonify({'error': ERROR_MSGS['config']}), 500
+
+
+def _validate_nvd_api_key(api_key):
+    """
+    Validate an NVD API key by making a test request.
+    Returns (is_valid, error_message)
+    """
+    import requests
+    from config import Config
+
+    try:
+        url = 'https://services.nvd.nist.gov/rest/json/cpes/2.0'
+        params = {'keywordSearch': 'test', 'resultsPerPage': 1}
+        headers = {'apiKey': api_key}
+
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+
+        response = requests.get(
+            url,
+            params=params,
+            headers=headers,
+            proxies=proxies,
+            verify=verify_ssl,
+            timeout=15
+        )
+
+        if response.status_code == 200:
+            return True, None
+        elif response.status_code == 403:
+            return False, 'API key rejected (403 Forbidden)'
+        elif response.status_code == 404:
+            return False, 'API key invalid or expired (404 Not Found)'
+        else:
+            return False, f'Unexpected response: {response.status_code}'
+
+    except requests.exceptions.Timeout:
+        return False, 'Connection timeout - check network/proxy settings'
+    except requests.exceptions.ConnectionError as e:
+        return False, f'Connection error: {str(e)}'
+    except Exception as e:
+        return False, f'Validation failed: {str(e)}'
+
+
+@settings_bp.route('/sync/nvd-status', methods=['GET'])
+@admin_required
+def get_nvd_status():
+    """
+    Check NVD API connectivity and key status.
+    Returns status for display in UI health indicator.
+    """
+    import requests
+    from config import Config
+    from app.nvd_rate_limiter import get_rate_limiter, get_nvd_stats
+
+    result = {
+        'api_key_configured': False,
+        'api_key_valid': None,
+        'reachable': False,
+        'rate_limit': '5 req/30s',
+        'error': None,
+        'rate_limiter_stats': None
+    }
+
+    try:
+        nvd_key = get_setting('nvd_api_key', '')
+        result['api_key_configured'] = bool(nvd_key)
+
+        if nvd_key:
+            result['rate_limit'] = '50 req/30s'
+
+        # Include rate limiter stats
+        try:
+            result['rate_limiter_stats'] = get_nvd_stats()
+        except Exception:
+            pass
+
+        # Use rate limiter for the test request
+        limiter = get_rate_limiter()
+        if not limiter.acquire(timeout=10.0, block=True):
+            result['error'] = 'Rate limit - too many recent requests'
+            return jsonify(result)
+
+        # Test connection
+        url = 'https://services.nvd.nist.gov/rest/json/cpes/2.0'
+        params = {'keywordSearch': 'test', 'resultsPerPage': 1}
+        headers = {'apiKey': nvd_key} if nvd_key else {}
+
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+
+        response = requests.get(
+            url,
+            params=params,
+            headers=headers,
+            proxies=proxies,
+            verify=verify_ssl,
+            timeout=15
+        )
+
+        if response.status_code == 200:
+            result['reachable'] = True
+            result['api_key_valid'] = True if nvd_key else None
+        elif response.status_code == 403:
+            result['reachable'] = True
+            result['api_key_valid'] = False
+            result['error'] = 'API key rejected or rate limited'
+        elif response.status_code == 404:
+            result['reachable'] = True
+            result['api_key_valid'] = False
+            result['error'] = 'API key invalid or expired'
+        else:
+            result['error'] = f'Unexpected status: {response.status_code}'
+
+    except requests.exceptions.Timeout:
+        result['error'] = 'Connection timeout'
+    except requests.exceptions.ConnectionError:
+        result['error'] = 'Cannot connect to NVD API'
+    except Exception as e:
+        result['error'] = str(e)
+
+    return jsonify(result)
+
+
+@settings_bp.route('/sync/nvd-rate-limit', methods=['GET'])
+@admin_required
+def get_nvd_rate_limit_stats():
+    """
+    Get NVD API rate limiter statistics.
+    Useful for monitoring API usage and troubleshooting.
+    """
+    try:
+        from app.nvd_rate_limiter import get_nvd_stats
+        stats = get_nvd_stats()
+
+        return jsonify({
+            'success': True,
+            'stats': stats,
+            'message': f"Using {stats['requests_in_window']}/{stats['effective_limit']} slots "
+                       f"({stats['available_slots']} available)"
+        })
+    except Exception as e:
+        logger.exception("Failed to get rate limiter stats")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 
 @settings_bp.route('/sync/status', methods=['GET'])
 @admin_required
@@ -607,8 +770,12 @@ def get_sync_status():
 @settings_bp.route('/general', methods=['GET'])
 @admin_required
 def get_general_settings():
-    """Get general system settings (proxy/network)"""
+    """Get general system settings (date/time, proxy/network)"""
     settings = {
+        # Date & Time display settings
+        'display_timezone': get_setting('display_timezone', 'UTC'),
+        'date_format': get_setting('date_format', 'YYYY-MM-DD HH:mm'),
+        # Network/Proxy settings
         'verify_ssl': get_setting('verify_ssl', 'true') == 'true',
         'http_proxy': get_setting('http_proxy', ''),
         'https_proxy': get_setting('https_proxy', ''),
@@ -619,15 +786,18 @@ def get_general_settings():
 @settings_bp.route('/general', methods=['POST'])
 @admin_required
 def save_general_settings():
-    """Save general system settings (proxy/network)"""
+    """Save general system settings (date/time, proxy/network)"""
     data = request.get_json()
 
     try:
+        # Date & Time display settings
+        set_setting('display_timezone', data.get('display_timezone', 'UTC'), 'general', 'Display timezone')
+        set_setting('date_format', data.get('date_format', 'YYYY-MM-DD HH:mm'), 'general', 'Date display format')
+        # Network/Proxy settings
         set_setting('verify_ssl', 'true' if data.get('verify_ssl') else 'false', 'general', 'Verify SSL certificates')
         set_setting('http_proxy', data.get('http_proxy', ''), 'general', 'HTTP proxy URL')
         set_setting('https_proxy', data.get('https_proxy', ''), 'general', 'HTTPS proxy URL')
         set_setting('no_proxy', data.get('no_proxy', ''), 'general', 'No proxy bypass list')
-        # Note: session_timeout is handled in security settings endpoint only
 
         return jsonify({'success': True, 'message': 'General settings saved successfully'})
     except Exception as e:
@@ -989,7 +1159,8 @@ def get_retention_settings():
     settings = {
         'audit_log_retention_days': int(get_setting('audit_log_retention_days', '365')),
         'sync_history_retention_days': int(get_setting('sync_history_retention_days', '90')),
-        'session_log_retention_days': int(get_setting('session_log_retention_days', '30'))
+        'session_log_retention_days': int(get_setting('session_log_retention_days', '30')),
+        'auto_acknowledge_removed_software': get_setting('auto_acknowledge_removed_software', 'true') == 'true'
     }
     return jsonify(settings)
 
@@ -1003,11 +1174,37 @@ def save_retention_settings():
         set_setting('audit_log_retention_days', str(data.get('audit_log_retention_days', 365)), 'retention', 'Audit log retention (days)')
         set_setting('sync_history_retention_days', str(data.get('sync_history_retention_days', 90)), 'retention', 'Sync history retention (days)')
         set_setting('session_log_retention_days', str(data.get('session_log_retention_days', 30)), 'retention', 'Session log retention (days)')
+        set_setting('auto_acknowledge_removed_software', 'true' if data.get('auto_acknowledge_removed_software', True) else 'false', 'retention', 'Auto-acknowledge CVEs when software is removed')
 
         return jsonify({'success': True, 'message': 'Retention settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save retention settings")
         return jsonify({'error': ERROR_MSGS['config']}), 500
+
+
+@settings_bp.route('/maintenance/auto-acknowledge', methods=['POST'])
+@admin_required
+def run_auto_acknowledge():
+    """
+    Manually trigger auto-acknowledge for removed software vulnerabilities.
+    Useful for testing or immediate cleanup without waiting for scheduled maintenance.
+    """
+    try:
+        from app.maintenance import auto_acknowledge_resolved_vulnerabilities
+
+        dry_run = request.get_json().get('dry_run', False) if request.is_json else False
+
+        count = auto_acknowledge_resolved_vulnerabilities(dry_run=dry_run)
+
+        return jsonify({
+            'success': True,
+            'acknowledged_count': count,
+            'dry_run': dry_run,
+            'message': f"{'Would acknowledge' if dry_run else 'Acknowledged'} {count} vulnerability matches"
+        })
+    except Exception as e:
+        logger.exception("Failed to run auto-acknowledge")
+        return jsonify({'error': str(e)}), 500
 
 
 # ============================================================================
@@ -1161,7 +1358,7 @@ def create_backup():
 
         backup_data = {
             'backup_info': {
-                'version': '1.0',
+                'version': '1.1',  # Updated version for CPE mappings support
                 'created_at': datetime.utcnow().isoformat(),
                 'created_by': current_user.username,
                 'app_name': get_setting('app_name', 'SentriKat')
@@ -1170,7 +1367,8 @@ def create_backup():
             'organizations': [],
             'users': [],
             'products': [],
-            'service_catalog': []
+            'service_catalog': [],
+            'user_cpe_mappings': []  # User-learned CPE mappings
         }
 
         # Export settings
@@ -1249,6 +1447,15 @@ def create_backup():
                 'is_popular': catalog.is_popular
             }
             backup_data['service_catalog'].append(catalog_data)
+
+        # Export user CPE mappings
+        try:
+            from app.models import UserCpeMapping
+            for mapping in UserCpeMapping.query.all():
+                mapping_data = mapping.to_export_dict()
+                backup_data['user_cpe_mappings'].append(mapping_data)
+        except Exception as e:
+            logger.warning(f"Could not export CPE mappings: {e}")
 
         # Generate filename
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
@@ -1531,6 +1738,21 @@ def restore_full_backup():
                         value.get('description', '')
                     )
                     stats['settings'] += 1
+
+        # 6. Restore user CPE mappings
+        stats['cpe_mappings'] = 0
+        if 'user_cpe_mappings' in backup_data:
+            try:
+                from app.cpe_mappings import import_user_mappings
+                result = import_user_mappings(
+                    backup_data['user_cpe_mappings'],
+                    user_id=current_user.id,
+                    overwrite=False  # Don't overwrite existing
+                )
+                stats['cpe_mappings'] = result.get('imported', 0)
+                stats['skipped'] += result.get('skipped', 0)
+            except Exception as e:
+                logger.warning(f"Could not restore CPE mappings: {e}")
 
         db.session.commit()
 

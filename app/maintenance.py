@@ -37,6 +37,7 @@ class MaintenanceResult:
         self.products_cleaned = 0
         self.products_auto_disabled = 0
         self.import_queue_cleaned = 0
+        self.vulnerabilities_auto_acknowledged = 0
         self.errors = []
 
     def to_dict(self):
@@ -47,6 +48,7 @@ class MaintenanceResult:
             'products_cleaned': self.products_cleaned,
             'products_auto_disabled': self.products_auto_disabled,
             'import_queue_cleaned': self.import_queue_cleaned,
+            'vulnerabilities_auto_acknowledged': self.vulnerabilities_auto_acknowledged,
             'errors': self.errors,
             'success': len(self.errors) == 0
         }
@@ -313,6 +315,73 @@ def cleanup_import_queue(days=None, dry_run=False):
     return count
 
 
+def auto_acknowledge_resolved_vulnerabilities(dry_run=False):
+    """
+    Auto-acknowledge vulnerability matches for products that are no longer installed anywhere.
+
+    When an agent stops reporting a product (software uninstalled), and the product
+    has no remaining installations on any asset, we can auto-acknowledge the related
+    vulnerability matches since the software is no longer present.
+
+    This reduces alert fatigue by automatically resolving CVEs for software that
+    has been removed from all systems.
+
+    Args:
+        dry_run: If True, don't actually modify, just count
+
+    Returns:
+        Number of vulnerability matches auto-acknowledged
+    """
+    from app.models import VulnerabilityMatch
+
+    # Find products with no active installations
+    # These are products where software has been removed from all assets
+    products_without_installations = Product.query.outerjoin(
+        ProductInstallation,
+        Product.id == ProductInstallation.product_id
+    ).group_by(Product.id).having(
+        db.func.count(ProductInstallation.id) == 0
+    ).filter(
+        Product.active == True  # Only active products (not manually disabled)
+    ).all()
+
+    if not products_without_installations:
+        return 0
+
+    product_ids = [p.id for p in products_without_installations]
+
+    # Find unacknowledged matches for these products
+    matches_to_ack = VulnerabilityMatch.query.filter(
+        VulnerabilityMatch.product_id.in_(product_ids),
+        VulnerabilityMatch.acknowledged == False
+    )
+
+    count = matches_to_ack.count()
+
+    if count > 0 and not dry_run:
+        # Update in batches
+        now = datetime.utcnow()
+        matches_to_ack.update({
+            'acknowledged': True,
+            'auto_acknowledged': True,
+            'resolution_reason': 'software_removed',
+            'acknowledged_at': now
+        }, synchronize_session=False)
+        db.session.commit()
+
+        # Log which products were affected
+        product_names = [f"{p.vendor} {p.product_name}" for p in products_without_installations[:5]]
+        if len(products_without_installations) > 5:
+            product_names.append(f"... and {len(products_without_installations) - 5} more")
+
+        logger.info(
+            f"Auto-acknowledged {count} vulnerability matches for removed software: "
+            f"{', '.join(product_names)}"
+        )
+
+    return count
+
+
 def run_full_maintenance(dry_run=False, settings=None):
     """
     Run all maintenance tasks.
@@ -376,6 +445,19 @@ def run_full_maintenance(dry_run=False, settings=None):
     except Exception as e:
         result.errors.append(f"Product auto-disable failed: {str(e)}")
         logger.error(f"Product auto-disable failed: {e}", exc_info=True)
+
+    try:
+        # 6. Auto-acknowledge vulnerabilities for removed software (if enabled)
+        auto_ack_enabled = settings.get('auto_acknowledge_removed_software', True)
+        if auto_ack_enabled:
+            result.vulnerabilities_auto_acknowledged = auto_acknowledge_resolved_vulnerabilities(
+                dry_run=dry_run
+            )
+        else:
+            logger.debug("Auto-acknowledge for removed software is disabled")
+    except Exception as e:
+        result.errors.append(f"Vulnerability auto-acknowledge failed: {str(e)}")
+        logger.error(f"Vulnerability auto-acknowledge failed: {e}", exc_info=True)
 
     return result
 

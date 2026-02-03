@@ -85,6 +85,26 @@ def start_scheduler(app):
     )
     logger.info("Data retention cleanup scheduled at 03:00")
 
+    # Schedule daily vulnerability snapshot (at 2 AM)
+    scheduler.add_job(
+        func=lambda: vulnerability_snapshot_job(app),
+        trigger=CronTrigger(hour=2, minute=0),
+        id='daily_vulnerability_snapshot',
+        name='Daily Vulnerability Snapshot',
+        replace_existing=True
+    )
+    logger.info("Vulnerability snapshot scheduled at 02:00")
+
+    # Schedule report processing (every 15 minutes to check for due reports)
+    scheduler.add_job(
+        func=lambda: process_scheduled_reports_job(app),
+        trigger=IntervalTrigger(minutes=15),
+        id='process_scheduled_reports',
+        name='Process Scheduled Reports',
+        replace_existing=True
+    )
+    logger.info("Scheduled reports processor running every 15 minutes")
+
     scheduler.start()
     logger.info(f"Scheduler started. CISA KEV sync scheduled at {Config.SYNC_HOUR:02d}:{Config.SYNC_MINUTE:02d}")
 
@@ -297,3 +317,142 @@ def data_retention_cleanup_job(app):
 
         except Exception as e:
             logger.error(f"Data retention cleanup failed: {str(e)}", exc_info=True)
+
+
+def vulnerability_snapshot_job(app):
+    """Job to take daily vulnerability snapshots for trend analysis"""
+    with app.app_context():
+        try:
+            from app.models import VulnerabilitySnapshot, Organization
+
+            logger.info("Starting daily vulnerability snapshots...")
+
+            # Take snapshots for each organization
+            organizations = Organization.query.filter_by(active=True).all()
+            snapshot_count = 0
+            error_count = 0
+
+            for org in organizations:
+                try:
+                    VulnerabilitySnapshot.take_snapshot(organization_id=org.id)
+                    snapshot_count += 1
+                except Exception as e:
+                    logger.error(f"Error taking snapshot for org {org.name}: {e}")
+                    error_count += 1
+
+            # Also take a global snapshot (organization_id=None)
+            try:
+                VulnerabilitySnapshot.take_snapshot(organization_id=None)
+                snapshot_count += 1
+            except Exception as e:
+                logger.error(f"Error taking global snapshot: {e}")
+                error_count += 1
+
+            logger.info(f"Vulnerability snapshots completed: {snapshot_count} successful, {error_count} errors")
+
+        except Exception as e:
+            logger.error(f"Vulnerability snapshot job failed: {str(e)}", exc_info=True)
+
+
+def process_scheduled_reports_job(app):
+    """Job to check and send scheduled reports that are due"""
+    with app.app_context():
+        try:
+            from app.models import ScheduledReport, Organization
+            from app.reports import VulnerabilityReportGenerator
+            from app.email_alerts import EmailAlertManager
+            from datetime import datetime, timedelta
+
+            logger.info("Checking for due scheduled reports...")
+
+            now = datetime.utcnow()
+
+            # Find reports that are due (next_run <= now and enabled)
+            due_reports = ScheduledReport.query.filter(
+                ScheduledReport.enabled == True,
+                ScheduledReport.next_run <= now
+            ).all()
+
+            if not due_reports:
+                logger.debug("No scheduled reports due")
+                return
+
+            sent_count = 0
+            error_count = 0
+
+            for report in due_reports:
+                try:
+                    org = Organization.query.get(report.organization_id)
+                    if not org:
+                        logger.warning(f"Org not found for report {report.id}")
+                        continue
+
+                    # Generate the report
+                    generator = VulnerabilityReportGenerator(organization_id=report.organization_id)
+
+                    if report.report_type == 'summary':
+                        pdf_buffer = generator.generate_monthly_report()
+                    elif report.report_type == 'critical_only':
+                        # Generate report with only critical/high priority
+                        end_date = datetime.now()
+                        start_date = end_date - timedelta(days=30)
+                        pdf_buffer = generator.generate_custom_report(
+                            start_date=start_date,
+                            end_date=end_date,
+                            include_acknowledged=False,
+                            include_pending=True
+                        )
+                    else:
+                        # Full report
+                        end_date = datetime.now()
+                        start_date = end_date - timedelta(days=30)
+                        pdf_buffer = generator.generate_custom_report(
+                            start_date=start_date,
+                            end_date=end_date,
+                            include_acknowledged=report.include_acknowledged,
+                            include_pending=report.include_pending
+                        )
+
+                    # Get recipients
+                    recipients = report.get_recipient_emails()
+                    if not recipients:
+                        logger.warning(f"No recipients for report '{report.name}'")
+                        report.last_status = 'no_recipients'
+                        report.calculate_next_run()
+                        db.session.commit()
+                        continue
+
+                    # Send email
+                    result = EmailAlertManager.send_scheduled_report(
+                        recipients=recipients,
+                        report_name=report.name,
+                        org_name=org.display_name,
+                        pdf_buffer=pdf_buffer
+                    )
+
+                    # Update report status
+                    report.last_sent = now
+                    if result.get('success'):
+                        report.last_status = 'success'
+                        sent_count += 1
+                        logger.info(f"Sent report '{report.name}' to {len(recipients)} recipients")
+                    else:
+                        report.last_status = f"failed: {result.get('error', 'unknown')}"
+                        error_count += 1
+                        logger.error(f"Failed to send report '{report.name}': {result.get('error')}")
+
+                    # Calculate next run time
+                    report.calculate_next_run()
+                    db.session.commit()
+
+                except Exception as e:
+                    error_count += 1
+                    logger.error(f"Error processing report '{report.name}': {e}", exc_info=True)
+                    report.last_status = f"error: {str(e)}"
+                    report.calculate_next_run()
+                    db.session.commit()
+
+            logger.info(f"Scheduled reports processed: {sent_count} sent, {error_count} errors")
+
+        except Exception as e:
+            logger.error(f"Scheduled reports job failed: {str(e)}", exc_info=True)

@@ -233,6 +233,27 @@
             color: var(--text-color);
         }
 
+        /* Dark mode code and strong element styling */
+        [data-theme="dark"] code {
+            color: #93c5fd;
+            background-color: rgba(59, 130, 246, 0.15);
+        }
+
+        [data-theme="dark"] strong {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .table td,
+        [data-theme="dark"] .modal-body td {
+            color: var(--text-color);
+        }
+
+        [data-theme="dark"] .table code,
+        [data-theme="dark"] .modal-body code {
+            color: #93c5fd;
+            background-color: rgba(59, 130, 246, 0.15);
+        }
+
         [data-theme="dark"] .btn-outline-secondary {
             color: var(--text-muted);
             border-color: var(--border-color);
@@ -3711,6 +3732,11 @@
              */
             getCellValue: function(cell, sortType) {
                 if (!cell) return '';
+
+                // Check for explicit sort value (useful for icon-only cells like CPE badges)
+                if (cell.dataset.sortValue !== undefined) {
+                    return cell.dataset.sortValue.toLowerCase();
+                }
 
                 const text = cell.textContent.trim();
 

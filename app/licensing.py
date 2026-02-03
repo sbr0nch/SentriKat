@@ -679,17 +679,48 @@ def check_agent_api_key_limit():
 def get_agent_usage():
     """
     Get current agent usage statistics for display.
-    Returns dict with counts and limits.
+    Returns dict with counts and limits, including server/client breakdown.
     """
-    from app.models import Asset, AgentApiKey
+    from app.models import Asset, AgentApiKey, AgentLicense
     license_info = get_license()
     limits = license_info.get_effective_limits()
 
+    # Get total count
+    total_agents = Asset.query.filter(Asset.active == True).count() or 0
+
+    # Get server/client breakdown
+    # Server types: server, container, appliance, virtual_machine, vm
+    # Client types: workstation, desktop, laptop, endpoint, client
+    server_types = AgentLicense.SERVER_TYPES
+    client_types = AgentLicense.CLIENT_TYPES
+
+    server_count = Asset.query.filter(
+        Asset.active == True,
+        func.lower(Asset.asset_type).in_(server_types)
+    ).count() or 0
+
+    client_count = Asset.query.filter(
+        Asset.active == True,
+        func.lower(Asset.asset_type).in_(client_types)
+    ).count() or 0
+
+    # Anything not matched is counted as server (unknown defaults to server)
+    other_count = total_agents - server_count - client_count
+    server_count += other_count
+
+    # Calculate weighted units (servers=1, clients=0.5)
+    weighted_units = server_count + (client_count * 0.5)
+
     return {
         'agents': {
-            'current': Asset.query.filter(Asset.active == True).count() or 0,
+            'current': total_agents,
             'limit': limits['max_agents'],
             'unlimited': limits['max_agents'] == -1
+        },
+        'breakdown': {
+            'servers': server_count,
+            'clients': client_count,
+            'weighted_units': weighted_units
         },
         'api_keys': {
             'current': AgentApiKey.query.filter(AgentApiKey.active == True).count() or 0,

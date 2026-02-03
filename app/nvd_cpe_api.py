@@ -4,8 +4,8 @@ NVD CPE API integration for searching and matching software products.
 Uses the NVD CPE API 2.0 for on-demand product searches:
 https://services.nvd.nist.gov/rest/json/cpes/2.0
 
-Rate Limits:
-- Without API key: 5 requests per 30 seconds (0.6s delay)
+Rate Limits (managed by centralized rate limiter):
+- Without API key: 5 requests per 30 seconds
 - With API key: 50 requests per 30 seconds (free key from NVD)
 """
 import requests
@@ -19,6 +19,7 @@ from threading import Lock
 from typing import Optional, Dict, List, Tuple, Any
 from config import Config
 import urllib3
+from app.nvd_rate_limiter import get_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,9 @@ logger = logging.getLogger(__name__)
 # In-memory cache for CPE searches (15-minute TTL)
 _cpe_cache: Dict[str, Tuple[List[Dict], datetime]] = {}
 _cache_lock = Lock()
-_last_request_time: float = 0
-_request_lock = Lock()
 
 # Cache TTL (15 minutes)
 CACHE_TTL_MINUTES = 15
-
-# Rate limiting: 5 requests per 30 seconds = 0.6s delay
-# With API key: 50 requests per 30 seconds = 0.06s delay
-MIN_REQUEST_DELAY = 0.6  # Default (no API key)
 
 
 def _get_api_key() -> Optional[str]:
@@ -67,24 +62,14 @@ def _get_api_key() -> Optional[str]:
     return os.environ.get('NVD_API_KEY')
 
 
-def _get_request_delay() -> float:
-    """Get appropriate delay based on API key availability."""
-    api_key = _get_api_key()
-    if api_key:
-        return 0.06  # 50 requests per 30 seconds with API key
-    return MIN_REQUEST_DELAY  # 5 requests per 30 seconds without key
-
-
 def _rate_limit():
-    """Enforce rate limiting between NVD API requests."""
-    global _last_request_time
-
-    with _request_lock:
-        delay = _get_request_delay()
-        elapsed = time.time() - _last_request_time
-        if elapsed < delay:
-            time.sleep(delay - elapsed)
-        _last_request_time = time.time()
+    """
+    Enforce rate limiting using centralized rate limiter.
+    Blocks until a request slot is available.
+    """
+    limiter = get_rate_limiter()
+    if not limiter.acquire(timeout=60.0, block=True):
+        logger.warning("NVD rate limit timeout - request may fail")
 
 
 def _get_cache_key(query: str, **params) -> str:
