@@ -758,14 +758,17 @@
                     if (platforms.length === 0) {
                         platformDisplay = '<span class="text-muted">-</span>';
                     } else {
+                        // Map supports both lowercase (from backend) and capitalized versions
                         const platformIcons = {
-                            'Windows': '<i class="bi bi-windows text-info" title="Windows"></i>',
-                            'Linux': '<i class="bi bi-ubuntu text-warning" title="Linux"></i>',
-                            'macOS': '<i class="bi bi-apple text-secondary" title="macOS"></i>',
-                            'BSD': '<i class="bi bi-terminal text-danger" title="BSD"></i>'
+                            'windows': '<i class="bi bi-windows text-info" title="Windows"></i>',
+                            'linux': '<i class="bi bi-ubuntu text-warning" title="Linux"></i>',
+                            'macos': '<i class="bi bi-apple text-secondary" title="macOS"></i>',
+                            'bsd': '<i class="bi bi-terminal text-danger" title="BSD"></i>',
+                            'unix': '<i class="bi bi-terminal-fill text-success" title="Unix"></i>'
                         };
                         platformDisplay = platforms.map(p => {
-                            const icon = platformIcons[p] || `<span class="badge bg-secondary">${escapeHtml(p)}</span>`;
+                            // Normalize to lowercase for lookup
+                            const icon = platformIcons[p.toLowerCase()] || `<span class="badge bg-secondary">${escapeHtml(p)}</span>`;
                             return icon;
                         }).join(' ');
                     }

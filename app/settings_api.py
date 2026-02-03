@@ -17,6 +17,7 @@ from app.auth import admin_required
 from app.encryption import encrypt_value, decrypt_value
 from app.licensing import requires_professional
 from app.error_utils import ERROR_MSGS
+from app.logging_config import log_audit_event
 import os
 import json
 from datetime import datetime
@@ -160,6 +161,8 @@ ALLOWED_SETTING_KEYS = {
     'auto_match_enabled', 'cisa_kev_url', 'nvd_api_key',
     # General/Proxy settings
     'app_name', 'app_url', 'verify_ssl', 'http_proxy', 'https_proxy', 'no_proxy',
+    # Date & Time display settings
+    'display_timezone', 'date_format',
     # Security settings
     'session_timeout', 'session_timeout_minutes', 'max_login_attempts', 'max_failed_logins',
     'lockout_duration', 'lockout_duration_minutes', 'require_2fa',
@@ -181,7 +184,7 @@ ALLOWED_SETTING_KEYS = {
     # Retention settings
     'audit_log_retention_days', 'audit_retention_days',
     'sync_history_retention_days', 'sync_log_retention_days',
-    'session_log_retention_days',
+    'session_log_retention_days', 'auto_acknowledge_removed_software',
 }
 
 
@@ -1261,6 +1264,15 @@ def upload_logo():
         logo_url = f'/data/uploads/{filename}'
         set_setting('logo_url', logo_url, 'branding', 'Custom logo URL')
 
+        # Log audit event for logo upload
+        log_audit_event(
+            'UPDATE',
+            'branding',
+            resource_id='logo',
+            new_value={'logo_url': logo_url, 'filename': filename},
+            details=f'Custom logo uploaded: {filename}'
+        )
+
         return jsonify({
             'success': True,
             'message': 'Logo uploaded successfully',
@@ -1317,6 +1329,15 @@ def delete_logo():
         if setting:
             db.session.delete(setting)
             db.session.commit()
+
+        # Log audit event for logo deletion
+        log_audit_event(
+            'DELETE',
+            'branding',
+            resource_id='logo',
+            old_value={'logo_url': logo_url} if logo_url else None,
+            details='Custom logo removed, reverted to default'
+        )
 
         return jsonify({'success': True, 'message': 'Logo removed, reverted to default'})
     except Exception as e:

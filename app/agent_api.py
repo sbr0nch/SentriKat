@@ -927,10 +927,12 @@ def process_inventory_job(job):
                 except Exception:
                     pass
 
-        # Update asset inventory timestamp
+        # Update asset inventory and checkin timestamps
         asset = Asset.query.get(asset_id)  # Re-fetch to ensure fresh object
         if asset:
             asset.last_inventory_at = datetime.utcnow()
+            asset.last_checkin = datetime.utcnow()
+            asset.status = 'online'
 
         # Finalize job - re-fetch to ensure fresh object
         job = InventoryJob.query.get(job_id)
