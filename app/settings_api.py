@@ -185,6 +185,9 @@ ALLOWED_SETTING_KEYS = {
     'audit_log_retention_days', 'audit_retention_days',
     'sync_history_retention_days', 'sync_log_retention_days',
     'session_log_retention_days', 'auto_acknowledge_removed_software',
+    # Jira integration settings
+    'jira_enabled', 'jira_url', 'jira_email', 'jira_api_token',
+    'jira_project_key', 'jira_issue_type',
 }
 
 

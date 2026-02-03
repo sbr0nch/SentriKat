@@ -97,7 +97,9 @@ PROFESSIONAL_FEATURES = [
     'backup_restore',
     'audit_export',
     'multi_org',
-    'push_agents'  # Agent deployment feature
+    'push_agents',  # Agent deployment feature
+    'jira_integration',  # Jira ticket creation
+    'compliance_reports'  # CISA BOD 22-01 compliance reports
 ]
 
 
@@ -419,8 +421,14 @@ def validate_license(license_key):
     license_info = LicenseInfo()
 
     try:
-        # Development key for testing
+        # Development key for testing - ONLY works in non-production environments
+        # Set SENTRIKAT_ENV=production to disable dev license key
+        is_production = os.environ.get('SENTRIKAT_ENV', '').lower() == 'production'
         if license_key == 'SENTRIKAT-DEV-PROFESSIONAL':
+            if is_production:
+                logger.warning("Attempted to use development license key in production mode")
+                license_info.error = 'Development license key is disabled in production'
+                return license_info
             license_info.edition = 'professional'
             license_info.customer = 'Development Mode'
             license_info.license_id = 'DEV-001'
@@ -432,7 +440,7 @@ def validate_license(license_key):
             license_info.max_agents = -1  # Unlimited agents in dev mode
             license_info.max_agent_api_keys = -1
             license_info.features = PROFESSIONAL_FEATURES + ['push_agents']
-            logger.info("Development license activated")
+            logger.info("Development license activated (non-production environment)")
             return license_info
 
         # Split license key into payload and signature

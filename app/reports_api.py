@@ -424,3 +424,282 @@ def download_report():
     except Exception as e:
         logger.exception("Error generating report")
         return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# CISA BOD 22-01 Compliance Report
+# ============================================================================
+
+@bp.route('/api/reports/compliance/bod-22-01', methods=['GET'])
+@login_required
+def generate_compliance_report():
+    """
+    Generate CISA BOD 22-01 compliance report.
+
+    CISA Binding Operational Directive 22-01 requires federal agencies to:
+    1. Remediate known exploited vulnerabilities (KEV) by their due dates
+    2. Report compliance status
+
+    This report shows:
+    - Total KEV vulnerabilities applicable to your products
+    - Remediation status (acknowledged vs pending)
+    - Overdue vulnerabilities
+    - Compliance percentage
+    - Timeline analysis
+
+    Query Parameters:
+        format: 'json' or 'pdf' (default: json)
+        organization_id: Filter by organization (admin only)
+    """
+    from app.licensing import requires_professional, get_license
+    from app.models import Vulnerability, VulnerabilityMatch, Product, Organization
+    from sqlalchemy import func
+    from datetime import date, timedelta
+    from io import BytesIO
+
+    # Check professional license
+    license_info = get_license()
+    if not license_info or not license_info.is_professional():
+        return jsonify({
+            'error': 'CISA BOD 22-01 Compliance Reports require a Professional license',
+            'feature': 'compliance_reports'
+        }), 403
+
+    output_format = request.args.get('format', 'json').lower()
+    org_id = request.args.get('organization_id', type=int)
+
+    user = User.query.get(session.get('user_id'))
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Determine organization scope
+    if user.role == 'super_admin' and org_id:
+        org_filter = [org_id]
+    elif user.role == 'super_admin':
+        org_filter = None  # All organizations
+    else:
+        org_filter = [m.organization_id for m in user.org_memberships.all()]
+
+    today = date.today()
+
+    # Build query for matches
+    matches_query = db.session.query(
+        VulnerabilityMatch,
+        Vulnerability,
+        Product
+    ).join(
+        Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+    ).join(
+        Product, VulnerabilityMatch.product_id == Product.id
+    )
+
+    if org_filter:
+        matches_query = matches_query.filter(Product.organization_id.in_(org_filter))
+
+    matches = matches_query.all()
+
+    # Calculate metrics
+    total_matches = len(matches)
+    acknowledged = sum(1 for m, v, p in matches if m.acknowledged)
+    pending = total_matches - acknowledged
+
+    # Overdue analysis
+    overdue = []
+    due_soon = []  # Due within 7 days
+    on_track = []
+
+    for match, vuln, product in matches:
+        if match.acknowledged:
+            continue
+
+        if vuln.due_date:
+            if vuln.due_date < today:
+                overdue.append({
+                    'cve_id': vuln.cve_id,
+                    'product': f"{product.vendor} {product.product_name}",
+                    'due_date': vuln.due_date.isoformat(),
+                    'days_overdue': (today - vuln.due_date).days,
+                    'severity': vuln.severity,
+                    'known_ransomware': vuln.known_ransomware
+                })
+            elif vuln.due_date <= today + timedelta(days=7):
+                due_soon.append({
+                    'cve_id': vuln.cve_id,
+                    'product': f"{product.vendor} {product.product_name}",
+                    'due_date': vuln.due_date.isoformat(),
+                    'days_remaining': (vuln.due_date - today).days,
+                    'severity': vuln.severity
+                })
+            else:
+                on_track.append({
+                    'cve_id': vuln.cve_id,
+                    'product': f"{product.vendor} {product.product_name}",
+                    'due_date': vuln.due_date.isoformat()
+                })
+
+    # Severity breakdown for pending
+    severity_breakdown = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0, 'UNKNOWN': 0}
+    for match, vuln, product in matches:
+        if not match.acknowledged:
+            sev = vuln.severity or 'UNKNOWN'
+            severity_breakdown[sev] = severity_breakdown.get(sev, 0) + 1
+
+    # Ransomware exposure
+    ransomware_exposure = sum(
+        1 for m, v, p in matches
+        if not m.acknowledged and v.known_ransomware
+    )
+
+    # Calculate compliance percentage
+    compliance_percent = round((acknowledged / total_matches * 100), 1) if total_matches > 0 else 100.0
+
+    # Build report data
+    report = {
+        'report_type': 'CISA BOD 22-01 Compliance',
+        'generated_at': datetime.utcnow().isoformat() + 'Z',
+        'report_period': {
+            'as_of_date': today.isoformat()
+        },
+        'summary': {
+            'total_kev_matches': total_matches,
+            'remediated': acknowledged,
+            'pending_remediation': pending,
+            'compliance_percentage': compliance_percent,
+            'overdue_count': len(overdue),
+            'due_within_7_days': len(due_soon),
+            'ransomware_exposure': ransomware_exposure
+        },
+        'compliance_status': 'COMPLIANT' if len(overdue) == 0 and compliance_percent >= 95 else 'NON-COMPLIANT',
+        'severity_breakdown': severity_breakdown,
+        'overdue_vulnerabilities': sorted(overdue, key=lambda x: x['days_overdue'], reverse=True)[:20],
+        'due_soon': sorted(due_soon, key=lambda x: x['days_remaining'])[:10],
+        'recommendations': []
+    }
+
+    # Add recommendations
+    if len(overdue) > 0:
+        report['recommendations'].append(
+            f"URGENT: {len(overdue)} vulnerabilities are past their CISA due date. "
+            "Immediate remediation required per BOD 22-01."
+        )
+    if ransomware_exposure > 0:
+        report['recommendations'].append(
+            f"HIGH RISK: {ransomware_exposure} unpatched vulnerabilities are known to be "
+            "used in ransomware campaigns. Prioritize these for immediate remediation."
+        )
+    if len(due_soon) > 0:
+        report['recommendations'].append(
+            f"ATTENTION: {len(due_soon)} vulnerabilities have due dates within the next 7 days."
+        )
+    if severity_breakdown.get('CRITICAL', 0) > 0:
+        report['recommendations'].append(
+            f"CRITICAL: {severity_breakdown['CRITICAL']} critical severity vulnerabilities "
+            "require immediate attention."
+        )
+
+    if output_format == 'json':
+        return jsonify(report)
+
+    # Generate PDF
+    elif output_format == 'pdf':
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+
+            # Title
+            title_style = ParagraphStyle(
+                'Title',
+                parent=styles['Heading1'],
+                fontSize=18,
+                spaceAfter=20
+            )
+            story.append(Paragraph("CISA BOD 22-01 Compliance Report", title_style))
+            story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}", styles['Normal']))
+            story.append(Spacer(1, 20))
+
+            # Compliance Status
+            status_color = colors.green if report['compliance_status'] == 'COMPLIANT' else colors.red
+            status_style = ParagraphStyle(
+                'Status',
+                parent=styles['Heading2'],
+                textColor=status_color
+            )
+            story.append(Paragraph(f"Status: {report['compliance_status']}", status_style))
+            story.append(Paragraph(f"Compliance: {compliance_percent}%", styles['Normal']))
+            story.append(Spacer(1, 20))
+
+            # Summary table
+            summary_data = [
+                ['Metric', 'Value'],
+                ['Total KEV Matches', str(total_matches)],
+                ['Remediated', str(acknowledged)],
+                ['Pending', str(pending)],
+                ['Overdue', str(len(overdue))],
+                ['Due Within 7 Days', str(len(due_soon))],
+                ['Ransomware Exposure', str(ransomware_exposure)]
+            ]
+            summary_table = Table(summary_data, colWidths=[3*inch, 2*inch])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ]))
+            story.append(summary_table)
+            story.append(Spacer(1, 20))
+
+            # Recommendations
+            if report['recommendations']:
+                story.append(Paragraph("Recommendations:", styles['Heading2']))
+                for rec in report['recommendations']:
+                    story.append(Paragraph(f"• {rec}", styles['Normal']))
+                story.append(Spacer(1, 20))
+
+            # Overdue vulnerabilities
+            if overdue:
+                story.append(Paragraph("Overdue Vulnerabilities (Top 10):", styles['Heading2']))
+                overdue_data = [['CVE ID', 'Product', 'Days Overdue', 'Severity']]
+                for item in overdue[:10]:
+                    overdue_data.append([
+                        item['cve_id'],
+                        item['product'][:30],
+                        str(item['days_overdue']),
+                        item['severity'] or 'N/A'
+                    ])
+                overdue_table = Table(overdue_data, colWidths=[1.5*inch, 2.5*inch, 1*inch, 1*inch])
+                overdue_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkred),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ]))
+                story.append(overdue_table)
+
+            doc.build(story)
+            buffer.seek(0)
+
+            filename = f"bod_22_01_compliance_{today.strftime('%Y%m%d')}.pdf"
+            return send_file(
+                buffer,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=filename
+            )
+
+        except ImportError:
+            return jsonify({'error': 'PDF generation requires reportlab library'}), 500
+        except Exception as e:
+            logger.exception("Error generating compliance PDF")
+            return jsonify({'error': f'PDF generation failed: {str(e)}'}), 500
+
+    else:
+        return jsonify({'error': 'Invalid format. Use json or pdf'}), 400

@@ -1416,3 +1416,108 @@ echo "Agent completed successfully!"
         mimetype='text/plain',
         headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-linux.sh'}
     )
+
+
+# ============================================================================
+# Jira Integration Endpoints
+# ============================================================================
+
+@bp.route('/api/integrations/jira/test', methods=['POST'])
+@admin_required
+@requires_professional('Jira Integration')
+def test_jira_connection():
+    """Test Jira connection with provided credentials."""
+    from app.jira_integration import JiraClient
+
+    data = request.get_json()
+
+    url = data.get('url', '').strip()
+    email = data.get('email', '').strip()
+    api_token = data.get('api_token', '').strip()
+
+    if not all([url, email, api_token]):
+        return jsonify({'success': False, 'error': 'URL, email, and API token are required'}), 400
+
+    # Detect Cloud vs Server
+    is_cloud = 'atlassian.net' in url.lower()
+
+    client = JiraClient(url, email, api_token, is_cloud)
+    success, message = client.test_connection()
+
+    return jsonify({
+        'success': success,
+        'message': message,
+        'is_cloud': is_cloud
+    })
+
+
+@bp.route('/api/integrations/jira/projects', methods=['GET'])
+@admin_required
+@requires_professional('Jira Integration')
+def get_jira_projects():
+    """Get available Jira projects."""
+    from app.jira_integration import get_jira_client
+
+    client = get_jira_client()
+    if not client:
+        return jsonify({'error': 'Jira not configured or disabled'}), 400
+
+    projects = client.get_projects()
+    return jsonify({'projects': projects})
+
+
+@bp.route('/api/integrations/jira/issue-types/<project_key>', methods=['GET'])
+@admin_required
+@requires_professional('Jira Integration')
+def get_jira_issue_types(project_key):
+    """Get available issue types for a Jira project."""
+    from app.jira_integration import get_jira_client
+
+    client = get_jira_client()
+    if not client:
+        return jsonify({'error': 'Jira not configured or disabled'}), 400
+
+    issue_types = client.get_issue_types(project_key)
+    return jsonify({'issue_types': issue_types})
+
+
+@bp.route('/api/integrations/jira/create-issue', methods=['POST'])
+@login_required
+@requires_professional('Jira Integration')
+def create_jira_issue():
+    """Create a Jira issue for a vulnerability."""
+    from app.jira_integration import create_vulnerability_issue
+
+    data = request.get_json()
+
+    vulnerability_id = data.get('vulnerability_id')
+    product_id = data.get('product_id')
+    custom_summary = data.get('summary')
+    custom_description = data.get('description')
+
+    if not vulnerability_id:
+        return jsonify({'error': 'vulnerability_id is required'}), 400
+
+    success, message, issue_key = create_vulnerability_issue(
+        vulnerability_id=vulnerability_id,
+        product_id=product_id,
+        custom_summary=custom_summary,
+        custom_description=custom_description
+    )
+
+    if success:
+        from app.settings_api import get_setting
+        jira_url = get_setting('jira_url', '')
+        issue_url = f"{jira_url.rstrip('/')}/browse/{issue_key}" if jira_url else None
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'issue_key': issue_key,
+            'issue_url': issue_url
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': message
+        }), 400

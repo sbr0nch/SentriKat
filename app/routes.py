@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Application version
 APP_VERSION = "1.0.0"
+API_VERSION = "v1"  # API version for future versioned endpoints (/api/v1/...)
 APP_NAME = "SentriKat"
 
 bp = Blueprint('main', __name__)
@@ -91,9 +92,12 @@ def get_version():
     return jsonify({
         'name': APP_NAME,
         'version': APP_VERSION,
+        'api_version': API_VERSION,
         'edition': license_info.edition if license_info else 'community',
         'python': '3.11+',
-        'database': 'PostgreSQL'
+        'database': 'PostgreSQL',
+        'api_base': '/api',
+        'api_docs': '/docs/API.md'
     })
 
 
@@ -1995,6 +1999,65 @@ def sync_history():
     limit = request.args.get('limit', 10, type=int)
     syncs = SyncLog.query.order_by(SyncLog.sync_date.desc()).limit(limit).all()
     return jsonify([s.to_dict() for s in syncs])
+
+
+@bp.route('/api/sync/epss', methods=['POST'])
+@admin_required
+@limiter.limit("5/minute")
+def sync_epss():
+    """
+    Manually trigger EPSS (Exploit Prediction Scoring System) sync.
+
+    Fetches exploit probability scores from FIRST.org for all vulnerabilities.
+
+    Query Parameters:
+        force: If 'true', refresh all scores regardless of age
+
+    Permissions:
+        - Admin only
+    """
+    from app.epss_sync import sync_epss_scores
+
+    force = request.args.get('force', '').lower() == 'true'
+
+    try:
+        updated, errors, message = sync_epss_scores(force=force)
+        return jsonify({
+            'success': True,
+            'updated': updated,
+            'errors': errors,
+            'message': message
+        })
+    except Exception as e:
+        logger.exception("EPSS sync failed")
+        return jsonify({
+            'success': False,
+            'error': f'EPSS sync failed: {str(e)}'
+        }), 500
+
+
+@bp.route('/api/sync/epss/status', methods=['GET'])
+@login_required
+def epss_status():
+    """Get EPSS sync status - how many CVEs have scores, when last updated."""
+    from app.models import Vulnerability
+    from sqlalchemy import func
+
+    total_vulns = Vulnerability.query.count()
+    with_epss = Vulnerability.query.filter(Vulnerability.epss_score.isnot(None)).count()
+    last_fetch = db.session.query(func.max(Vulnerability.epss_fetched_at)).scalar()
+
+    # Get score distribution
+    high_risk = Vulnerability.query.filter(Vulnerability.epss_percentile >= 0.85).count()
+
+    return jsonify({
+        'total_vulnerabilities': total_vulns,
+        'with_epss_scores': with_epss,
+        'without_epss_scores': total_vulns - with_epss,
+        'high_risk_count': high_risk,  # EPSS percentile >= 85%
+        'last_sync': last_fetch.isoformat() if last_fetch else None,
+        'coverage_percent': round((with_epss / total_vulns * 100), 1) if total_vulns > 0 else 0
+    })
 
 
 @bp.route('/api/sync/test-connection', methods=['POST'])

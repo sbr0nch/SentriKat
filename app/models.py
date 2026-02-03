@@ -485,6 +485,13 @@ class Vulnerability(db.Model):
     cpe_data = db.Column(db.Text, nullable=True)  # JSON array of affected CPE entries
     cpe_fetched_at = db.Column(db.DateTime, nullable=True)  # When CPE data was last fetched
 
+    # EPSS (Exploit Prediction Scoring System) data from FIRST
+    # Score: Probability of exploitation in the next 30 days (0-1)
+    # Percentile: How this CVE ranks compared to all other CVEs (0-1)
+    epss_score = db.Column(db.Float, nullable=True, index=True)
+    epss_percentile = db.Column(db.Float, nullable=True)
+    epss_fetched_at = db.Column(db.DateTime, nullable=True)
+
     def calculate_priority(self):
         """
         Calculate priority based on multiple factors:
@@ -570,7 +577,11 @@ class Vulnerability(db.Model):
             'priority': self.calculate_priority(),
             'days_old': (date.today() - self.date_added).days if self.date_added else None,
             'has_cpe_data': self.has_cpe_data(),
-            'cpe_fetched_at': self.cpe_fetched_at.isoformat() if self.cpe_fetched_at else None
+            'cpe_fetched_at': self.cpe_fetched_at.isoformat() if self.cpe_fetched_at else None,
+            # EPSS (Exploit Prediction Scoring System)
+            'epss_score': self.epss_score,
+            'epss_percentile': self.epss_percentile,
+            'epss_fetched_at': self.epss_fetched_at.isoformat() if self.epss_fetched_at else None
         }
 
 class VulnerabilityMatch(db.Model):

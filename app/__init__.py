@@ -28,6 +28,10 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerability_matches', 'auto_acknowledged', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
         ('vulnerability_matches', 'resolution_reason', 'VARCHAR(50)', 'VARCHAR(50)'),
         ('vulnerability_matches', 'acknowledged_at', 'DATETIME', 'TIMESTAMP'),
+        # EPSS (Exploit Prediction Scoring System) columns
+        ('vulnerabilities', 'epss_score', 'REAL', 'DOUBLE PRECISION'),
+        ('vulnerabilities', 'epss_percentile', 'REAL', 'DOUBLE PRECISION'),
+        ('vulnerabilities', 'epss_fetched_at', 'DATETIME', 'TIMESTAMP'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
@@ -246,6 +250,16 @@ def create_app(config_class=Config):
             # Redirect to setup wizard
             if request.endpoint != 'setup.setup_wizard':
                 return redirect(url_for('setup.setup_wizard'))
+
+    # Add API version headers to all API responses
+    @app.after_request
+    def add_api_version_headers(response):
+        from flask import request
+        # Only add headers to API responses
+        if request.path.startswith('/api/'):
+            response.headers['X-API-Version'] = 'v1'
+            response.headers['X-App-Version'] = '1.0.0'
+        return response
 
     with app.app_context():
         # Check if database exists before auto-creating
