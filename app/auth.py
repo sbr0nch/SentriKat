@@ -211,15 +211,7 @@ def org_admin_required(f):
                 f"(role={user.role}, is_admin={user.is_admin}) from {request.remote_addr}"
             )
             if request.is_json or request.path.startswith('/api/'):
-                return jsonify({
-                    'error': 'Organization admin privileges required',
-                    'debug': {
-                        'user': user.username,
-                        'role': user.role,
-                        'is_admin': user.is_admin,
-                        'required': 'org_admin or super_admin'
-                    }
-                }), 403
+                return jsonify({'error': 'Organization admin privileges required'}), 403
             return redirect(url_for('main.index'))
 
         return f(*args, **kwargs)

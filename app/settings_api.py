@@ -17,6 +17,7 @@ from app.auth import admin_required
 from app.encryption import encrypt_value, decrypt_value
 from app.licensing import requires_professional
 from app.error_utils import ERROR_MSGS
+from app.logging_config import log_audit_event
 import os
 import json
 from datetime import datetime
@@ -160,6 +161,8 @@ ALLOWED_SETTING_KEYS = {
     'auto_match_enabled', 'cisa_kev_url', 'nvd_api_key',
     # General/Proxy settings
     'app_name', 'app_url', 'verify_ssl', 'http_proxy', 'https_proxy', 'no_proxy',
+    # Date & Time display settings
+    'display_timezone', 'date_format',
     # Security settings
     'session_timeout', 'session_timeout_minutes', 'max_login_attempts', 'max_failed_logins',
     'lockout_duration', 'lockout_duration_minutes', 'require_2fa',
@@ -181,7 +184,20 @@ ALLOWED_SETTING_KEYS = {
     # Retention settings
     'audit_log_retention_days', 'audit_retention_days',
     'sync_history_retention_days', 'sync_log_retention_days',
-    'session_log_retention_days',
+    'session_log_retention_days', 'auto_acknowledge_removed_software',
+    # Issue Tracker integration settings (multi-tracker support)
+    'issue_tracker_type',  # 'disabled', 'jira', 'youtrack', 'github', 'gitlab', 'webhook'
+    # Jira settings
+    'jira_enabled', 'jira_url', 'jira_email', 'jira_api_token',
+    'jira_project_key', 'jira_issue_type', 'jira_use_pat', 'jira_custom_fields',
+    # YouTrack settings
+    'youtrack_url', 'youtrack_token', 'youtrack_project_id',
+    # GitHub Issues settings
+    'github_token', 'github_owner', 'github_repo',
+    # GitLab Issues settings
+    'gitlab_url', 'gitlab_token', 'gitlab_project_id',
+    # Generic Webhook settings
+    'webhook_url', 'webhook_method', 'webhook_auth_type', 'webhook_auth_value',
 }
 
 
@@ -233,6 +249,71 @@ def set_setting(key, value, category, description=None, is_encrypted=False, skip
 
     db.session.commit()
     return setting
+
+# ============================================================================
+# Batch Settings Endpoint
+# ============================================================================
+
+@settings_bp.route('/batch', methods=['POST'])
+@admin_required
+def save_batch_settings():
+    """
+    Save multiple settings at once.
+
+    Request body:
+    {
+        "category": "issue_tracker",
+        "settings": {
+            "jira_url": "https://...",
+            "jira_email": "...",
+            ...
+        },
+        "encrypt_keys": ["jira_api_token"]  // Keys to encrypt
+    }
+    """
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    category = data.get('category', 'general')
+    settings = data.get('settings', {})
+    encrypt_keys = data.get('encrypt_keys', [])
+
+    if not settings:
+        return jsonify({'error': 'No settings provided'}), 400
+
+    try:
+        saved_count = 0
+        for key, value in settings.items():
+            # Check if key is allowed
+            if key not in ALLOWED_SETTING_KEYS:
+                logger.warning(f"Skipping disallowed setting key: {key}")
+                continue
+
+            # Determine if this key should be encrypted
+            should_encrypt = key in encrypt_keys
+
+            # Only save non-empty values (or explicitly set to clear)
+            if value is not None and value != '':
+                set_setting(key, str(value), category, is_encrypted=should_encrypt)
+                saved_count += 1
+
+        db.session.commit()
+        logger.info(f"Saved {saved_count} settings in category '{category}'")
+
+        return jsonify({
+            'success': True,
+            'message': f'Saved {saved_count} settings',
+            'saved_count': saved_count
+        })
+
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.exception(f"Error saving batch settings: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to save settings'}), 500
 
 # ============================================================================
 # LDAP Settings
@@ -1261,6 +1342,15 @@ def upload_logo():
         logo_url = f'/data/uploads/{filename}'
         set_setting('logo_url', logo_url, 'branding', 'Custom logo URL')
 
+        # Log audit event for logo upload
+        log_audit_event(
+            'UPDATE',
+            'branding',
+            resource_id='logo',
+            new_value={'logo_url': logo_url, 'filename': filename},
+            details=f'Custom logo uploaded: {filename}'
+        )
+
         return jsonify({
             'success': True,
             'message': 'Logo uploaded successfully',
@@ -1317,6 +1407,15 @@ def delete_logo():
         if setting:
             db.session.delete(setting)
             db.session.commit()
+
+        # Log audit event for logo deletion
+        log_audit_event(
+            'DELETE',
+            'branding',
+            resource_id='logo',
+            old_value={'logo_url': logo_url} if logo_url else None,
+            details='Custom logo removed, reverted to default'
+        )
 
         return jsonify({'success': True, 'message': 'Logo removed, reverted to default'})
     except Exception as e:

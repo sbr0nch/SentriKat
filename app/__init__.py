@@ -28,6 +28,15 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerability_matches', 'auto_acknowledged', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
         ('vulnerability_matches', 'resolution_reason', 'VARCHAR(50)', 'VARCHAR(50)'),
         ('vulnerability_matches', 'acknowledged_at', 'DATETIME', 'TIMESTAMP'),
+        # EPSS (Exploit Prediction Scoring System) columns
+        ('vulnerabilities', 'epss_score', 'REAL', 'DOUBLE PRECISION'),
+        ('vulnerabilities', 'epss_percentile', 'REAL', 'DOUBLE PRECISION'),
+        ('vulnerabilities', 'epss_fetched_at', 'DATETIME', 'TIMESTAMP'),
+        # Agent Command & Control columns
+        ('assets', 'pending_scan', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('assets', 'scan_interval_override', 'INTEGER', 'INTEGER'),
+        ('assets', 'pending_scan_requested_at', 'DATETIME', 'TIMESTAMP'),
+        ('assets', 'pending_scan_requested_by', 'VARCHAR(100)', 'VARCHAR(100)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
@@ -128,7 +137,7 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
@@ -142,6 +151,7 @@ def create_app(config_class=Config):
     app.register_blueprint(integrations_api.bp)
     app.register_blueprint(saml_api.saml_bp)
     app.register_blueprint(reports_api.bp)
+    app.register_blueprint(api_docs.api_docs_bp)
 
     # Make current user and branding available in all templates
     @app.context_processor
@@ -246,6 +256,16 @@ def create_app(config_class=Config):
             # Redirect to setup wizard
             if request.endpoint != 'setup.setup_wizard':
                 return redirect(url_for('setup.setup_wizard'))
+
+    # Add API version headers to all API responses
+    @app.after_request
+    def add_api_version_headers(response):
+        from flask import request
+        # Only add headers to API responses
+        if request.path.startswith('/api/'):
+            response.headers['X-API-Version'] = 'v1'
+            response.headers['X-App-Version'] = '1.0.0'
+        return response
 
     with app.app_context():
         # Check if database exists before auto-creating

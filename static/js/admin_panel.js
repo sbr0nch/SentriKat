@@ -2537,6 +2537,75 @@ async function loadSyncStatus() {
     } catch (error) {
         console.error('Error loading sync status:', error);
     }
+
+    // Also load EPSS status
+    loadEpssStatus();
+}
+
+// ============================================================================
+// EPSS (Exploit Prediction Scoring System) Functions
+// ============================================================================
+
+async function loadEpssStatus() {
+    try {
+        const response = await fetch('/api/sync/epss/status');
+        if (!response.ok) return;
+
+        const status = await response.json();
+
+        const epssTotal = SK.DOM.get('epssTotal');
+        const epssHighRisk = SK.DOM.get('epssHighRisk');
+        const epssCoverage = SK.DOM.get('epssCoverage');
+        const epssLastSync = SK.DOM.get('epssLastSync');
+
+        if (epssTotal) epssTotal.textContent = status.with_epss_scores || 0;
+        if (epssHighRisk) epssHighRisk.textContent = status.high_risk_count || 0;
+        if (epssCoverage) epssCoverage.textContent = (status.coverage_percent || 0) + '%';
+        if (epssLastSync) {
+            epssLastSync.textContent = status.last_sync
+                ? new Date(status.last_sync).toLocaleString()
+                : 'Never';
+        }
+    } catch (error) {
+        console.error('Error loading EPSS status:', error);
+    }
+}
+
+async function syncEpssScores(force = false) {
+    const btn = force ? SK.DOM.get('btnSyncEpssForce') : SK.DOM.get('btnSyncEpss');
+    const originalHtml = btn ? btn.innerHTML : '';
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing...';
+        }
+
+        showToast('Syncing EPSS scores from FIRST.org...', 'info');
+
+        const url = force ? '/api/sync/epss?force=true' : '/api/sync/epss';
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(`EPSS sync complete: ${result.message}`, 'success');
+            loadEpssStatus();
+        } else {
+            showToast(`EPSS sync failed: ${result.error}`, 'danger');
+        }
+    } catch (error) {
+        console.error('EPSS sync error:', error);
+        showToast(`EPSS sync error: ${error.message}`, 'danger');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
 }
 
 // Manual Critical CVE Alert Trigger
@@ -5826,6 +5895,22 @@ document.addEventListener('DOMContentLoaded', function() {
             loadAssets();
         });
     }
+
+    // Jira Integration sub-tab handler
+    const jiraIntegrationTab = SK.DOM.get('jira-integration-tab');
+    if (jiraIntegrationTab) {
+        jiraIntegrationTab.addEventListener('shown.bs.tab', function() {
+            loadJiraSettings();
+        });
+    }
+
+    // Compliance Reports tab handler
+    const complianceReportsTab = SK.DOM.get('compliance-reports-tab');
+    if (complianceReportsTab) {
+        complianceReportsTab.addEventListener('shown.bs.tab', function() {
+            loadComplianceData();
+        });
+    }
 });
 
 // ============================================================================
@@ -7726,6 +7811,861 @@ async function loadIntegrations() {
             </tr>
         `;
     }
+}
+
+// ============================================================================
+// ISSUE TRACKER INTEGRATION SETTINGS (Multi-tracker support)
+// ============================================================================
+
+function showTrackerConfig(trackerType) {
+    // Hide all config sections
+    document.querySelectorAll('.tracker-config').forEach(el => {
+        el.style.display = 'none';
+    });
+
+    // Show selected config
+    if (trackerType && trackerType !== 'disabled') {
+        const configEl = SK.DOM.get(`trackerConfig-${trackerType}`);
+        if (configEl) {
+            configEl.style.display = 'block';
+        }
+    }
+
+    // Setup Jira URL change listener for Cloud/Server detection
+    if (trackerType === 'jira') {
+        const jiraUrlInput = SK.DOM.get('jiraUrl');
+        if (jiraUrlInput && !jiraUrlInput.hasAttribute('data-listener-added')) {
+            jiraUrlInput.addEventListener('input', updateJiraLabels);
+            jiraUrlInput.setAttribute('data-listener-added', 'true');
+        }
+        // Setup PAT checkbox listener
+        const patCheckbox = SK.DOM.get('jiraUsePat');
+        if (patCheckbox && !patCheckbox.hasAttribute('data-listener-added')) {
+            patCheckbox.addEventListener('change', updateJiraLabels);
+            patCheckbox.setAttribute('data-listener-added', 'true');
+        }
+        updateJiraLabels();
+    }
+}
+
+// Detect Jira Cloud vs Server based on URL and update labels
+function updateJiraLabels() {
+    const jiraUrl = (SK.DOM.getValue('jiraUrl') || '').toLowerCase();
+    const isCloud = jiraUrl.includes('atlassian.net');
+
+    const emailLabel = SK.DOM.get('jiraEmailLabel');
+    const tokenLabel = SK.DOM.get('jiraTokenLabel');
+    const emailHelp = SK.DOM.get('jiraEmailHelp');
+    const tokenHelpCloud = SK.DOM.get('jiraTokenHelpCloud');
+    const tokenHelpServer = SK.DOM.get('jiraTokenHelpServer');
+    const emailInput = SK.DOM.get('jiraEmail');
+    const tokenInput = SK.DOM.get('jiraApiToken');
+    const patRow = SK.DOM.get('jiraPatRow');
+    const patCheckbox = SK.DOM.get('jiraUsePat');
+
+    if (isCloud) {
+        // Jira Cloud - use email and API token
+        if (emailLabel) emailLabel.textContent = 'Email';
+        if (tokenLabel) tokenLabel.textContent = 'API Token';
+        if (emailHelp) emailHelp.textContent = 'Your Atlassian account email';
+        if (tokenHelpCloud) tokenHelpCloud.style.display = 'inline';
+        if (tokenHelpServer) tokenHelpServer.style.display = 'none';
+        if (emailInput) emailInput.placeholder = 'user@example.com';
+        if (tokenInput) tokenInput.placeholder = 'API token';
+        // Hide PAT option for Cloud (not needed)
+        if (patRow) patRow.style.display = 'none';
+        if (patCheckbox) patCheckbox.checked = false;
+    } else if (jiraUrl) {
+        // Jira Server - use username and password/PAT
+        if (emailLabel) emailLabel.textContent = 'Username';
+        if (emailHelp) emailHelp.textContent = 'Your Jira Server account username';
+        if (tokenHelpCloud) tokenHelpCloud.style.display = 'none';
+        if (tokenHelpServer) tokenHelpServer.style.display = 'inline';
+        if (emailInput) emailInput.placeholder = 'jira_username';
+        // Show PAT option for Server
+        if (patRow) patRow.style.display = 'block';
+        // Update label based on PAT checkbox
+        if (patCheckbox && patCheckbox.checked) {
+            if (tokenLabel) tokenLabel.textContent = 'Personal Access Token';
+            if (tokenInput) tokenInput.placeholder = 'Personal Access Token';
+        } else {
+            if (tokenLabel) tokenLabel.textContent = 'Password';
+            if (tokenInput) tokenInput.placeholder = 'Password';
+        }
+    } else {
+        // No URL yet - show combined labels
+        if (emailLabel) emailLabel.textContent = 'Email (Cloud) or Username (Server)';
+        if (tokenLabel) tokenLabel.textContent = 'API Token (Cloud) or Password (Server)';
+        if (emailHelp) emailHelp.textContent = 'For Jira Cloud use your email; for Jira Server use your username';
+        if (tokenHelpCloud) tokenHelpCloud.style.display = 'inline';
+        if (tokenHelpServer) tokenHelpServer.style.display = 'none';
+        if (emailInput) emailInput.placeholder = 'user@example.com';
+        if (tokenInput) tokenInput.placeholder = 'API token or password';
+        if (patRow) patRow.style.display = 'none';
+    }
+}
+
+async function fetchJiraIssueTypes() {
+    const url = SK.DOM.getValue('jiraUrl');
+    const email = SK.DOM.getValue('jiraEmail');
+    const apiToken = SK.DOM.getValue('jiraApiToken');
+    const projectKey = SK.DOM.getValue('jiraProjectKey');
+    const patCheckbox = SK.DOM.get('jiraUsePat');
+    const usePat = patCheckbox && patCheckbox.checked;
+    const selectEl = SK.DOM.get('jiraIssueType');
+    const helpEl = SK.DOM.get('jiraIssueTypeHelp');
+
+    if (!url || !email || !apiToken || !projectKey) {
+        if (helpEl) {
+            helpEl.textContent = 'Please fill in URL, username, token, and project key first';
+            helpEl.className = 'form-text text-warning';
+        }
+        return;
+    }
+
+    // Show loading state
+    if (selectEl) {
+        selectEl.innerHTML = '<option value="">Loading...</option>';
+        selectEl.disabled = true;
+    }
+    if (helpEl) {
+        helpEl.textContent = 'Fetching issue types from Jira...';
+        helpEl.className = 'form-text text-muted';
+    }
+
+    try {
+        const response = await fetch('/api/integrations/jira/issue-types', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: url,
+                email: email,
+                api_token: apiToken,
+                project_key: projectKey,
+                use_pat: usePat
+            })
+        });
+
+        const data = await response.json();
+
+        if (selectEl) {
+            selectEl.disabled = false;
+            selectEl.innerHTML = '';
+
+            if (data.error) {
+                selectEl.innerHTML = '<option value="">Error fetching issue types</option>';
+                if (helpEl) {
+                    helpEl.textContent = data.error;
+                    helpEl.className = 'form-text text-danger';
+                }
+                return;
+            }
+
+            if (data.issue_types && data.issue_types.length > 0) {
+                data.issue_types.forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type.name;
+                    option.textContent = type.name;
+                    selectEl.appendChild(option);
+                });
+                // Re-select the saved issue type if we have one
+                if (window._savedJiraIssueType) {
+                    selectEl.value = window._savedJiraIssueType;
+                }
+                if (helpEl) {
+                    helpEl.textContent = `Found ${data.issue_types.length} issue type(s)`;
+                    helpEl.className = 'form-text text-success';
+                }
+            } else {
+                selectEl.innerHTML = '<option value="">No issue types found</option>';
+                if (helpEl) {
+                    helpEl.textContent = data.warning || 'No issue types found for this project';
+                    helpEl.className = 'form-text text-warning';
+                }
+            }
+        }
+    } catch (error) {
+        if (selectEl) {
+            selectEl.disabled = false;
+            selectEl.innerHTML = '<option value="">Error fetching issue types</option>';
+        }
+        if (helpEl) {
+            helpEl.textContent = 'Network error fetching issue types';
+            helpEl.className = 'form-text text-danger';
+        }
+    }
+}
+
+// Store the field definitions globally so we can use them when saving
+window._jiraFieldDefinitions = [];
+
+async function fetchJiraCustomFields() {
+    const url = SK.DOM.getValue('jiraUrl');
+    const email = SK.DOM.getValue('jiraEmail');
+    const apiToken = SK.DOM.getValue('jiraApiToken');
+    const projectKey = SK.DOM.getValue('jiraProjectKey');
+    const issueType = SK.DOM.getValue('jiraIssueType');
+    const patCheckbox = SK.DOM.get('jiraUsePat');
+    const usePat = patCheckbox && patCheckbox.checked;
+    const container = SK.DOM.get('jiraCustomFieldsContainer');
+    const fetchBtn = SK.DOM.get('fetchFieldsBtn');
+
+    if (!url || !email || !projectKey || !issueType) {
+        showToast('Please fill in URL, username, project key, and issue type first', 'warning');
+        return;
+    }
+
+    // Check if we have a token (either from input or saved)
+    // Token might be empty if already saved - that's ok, the backend will use saved token
+    const hasToken = apiToken || true; // Always try - backend might use saved token
+
+    // Show loading state
+    if (fetchBtn) {
+        fetchBtn.disabled = true;
+        fetchBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
+    }
+    if (container) {
+        container.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Fetching fields from Jira...</div>';
+    }
+
+    try {
+        const response = await fetch('/api/integrations/jira/fields', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: url,
+                email: email,
+                api_token: apiToken,
+                project_key: projectKey,
+                issue_type: issueType,
+                use_pat: usePat
+            })
+        });
+
+        const data = await response.json();
+
+        if (fetchBtn) {
+            fetchBtn.disabled = false;
+            fetchBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Fetch Required Fields';
+        }
+
+        if (data.error) {
+            if (container) {
+                container.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>${data.error}</div>`;
+            }
+            return;
+        }
+
+        // Store field definitions
+        window._jiraFieldDefinitions = data.fields || [];
+
+        // Load saved custom field values
+        let savedValues = {};
+        const savedJson = SK.DOM.getValue('jiraCustomFields');
+        if (savedJson) {
+            try {
+                savedValues = JSON.parse(savedJson);
+            } catch (e) {}
+        }
+
+        // Render ALL fields (required + optional) since Jira might enforce fields not marked as required
+        const allFields = data.fields || [];
+        const requiredCount = data.required_count || 0;
+
+        renderJiraCustomFields(allFields, savedValues, container, requiredCount, data.note);
+
+    } catch (error) {
+        if (fetchBtn) {
+            fetchBtn.disabled = false;
+            fetchBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Fetch Required Fields';
+        }
+        if (container) {
+            container.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Network error: ${error.message}</div>`;
+        }
+    }
+}
+
+function renderJiraCustomFields(fields, savedValues, container, requiredCount, note) {
+    if (!container) return;
+
+    // Helper to escape HTML attribute values (handles quotes)
+    const escapeAttr = (str) => {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    };
+
+    if (!fields || fields.length === 0) {
+        container.innerHTML = `<div class="alert alert-warning py-2 mb-0">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            No custom fields found. Check the server logs for details. The createmeta API may have returned empty results.
+        </div>`;
+        return;
+    }
+
+    let html = `<div class="alert alert-info py-2 mb-2">
+        <i class="bi bi-info-circle me-1"></i>
+        Found ${escapeHtml(String(fields.length))} fields (${escapeHtml(String(requiredCount))} marked as required).
+        ${note ? '<br><small>' + escapeHtml(note) + '</small>' : ''}
+    </div>`;
+
+    html += `<div class="table-responsive"><table class="table table-sm table-borderless mb-0">
+        <tbody>`;
+
+    fields.forEach(field => {
+        // Handle both old format (plain string) and new format ({value, type})
+        let savedValue = '';
+        const savedData = savedValues[field.key];
+        if (savedData) {
+            if (typeof savedData === 'object' && savedData.value !== undefined) {
+                savedValue = savedData.value;
+            } else if (typeof savedData === 'string') {
+                savedValue = savedData;
+            }
+        }
+
+        const requiredBadge = field.required ? '<span class="badge bg-danger ms-1">Required</span>' : '';
+
+        html += `<tr>
+            <td class="fw-semibold" style="width: 35%; vertical-align: middle;">
+                ${escapeHtml(field.name)}${requiredBadge}
+                <br><small class="text-muted">${escapeHtml(field.key)}</small>
+            </td>
+            <td>`;
+
+        if (field.allowedValues && field.allowedValues.length > 0) {
+            // Dropdown for fields with allowed values
+            html += `<select class="form-select form-select-sm jira-custom-field" data-field-key="${escapeAttr(field.key)}" data-field-type="${escapeAttr(field.type)}">
+                <option value="">-- Select --</option>`;
+            field.allowedValues.forEach(av => {
+                const selected = savedValue === av.id || savedValue === String(av.id) ? 'selected' : '';
+                html += `<option value="${escapeAttr(av.id)}" ${selected}>${escapeHtml(av.name)}</option>`;
+            });
+            html += `</select>`;
+        } else if (field.type === 'date') {
+            // Date picker
+            html += `<input type="date" class="form-control form-control-sm jira-custom-field"
+                data-field-key="${escapeAttr(field.key)}" data-field-type="date" value="${escapeAttr(savedValue)}">`;
+        } else if (field.type === 'datetime') {
+            // Datetime picker
+            html += `<input type="datetime-local" class="form-control form-control-sm jira-custom-field"
+                data-field-key="${escapeAttr(field.key)}" data-field-type="datetime" value="${escapeAttr(savedValue)}">`;
+        } else if (field.type === 'number') {
+            // Number input
+            html += `<input type="number" class="form-control form-control-sm jira-custom-field"
+                data-field-key="${escapeAttr(field.key)}" data-field-type="number" value="${escapeAttr(savedValue)}">`;
+        } else {
+            // Text input (default)
+            html += `<input type="text" class="form-control form-control-sm jira-custom-field"
+                data-field-key="${escapeAttr(field.key)}" data-field-type="text" value="${escapeAttr(savedValue)}"
+                placeholder="Enter value...">`;
+        }
+
+        html += `</td></tr>`;
+    });
+
+    html += `</tbody></table></div>
+        <small class="text-muted mt-2 d-block">
+            <i class="bi bi-info-circle me-1"></i>These fields will be included when creating Jira issues.
+        </small>`;
+
+    container.innerHTML = html;
+
+    // Add change listeners to update the hidden JSON field
+    container.querySelectorAll('.jira-custom-field').forEach(input => {
+        input.addEventListener('change', updateJiraCustomFieldsJson);
+    });
+}
+
+function updateJiraCustomFieldsJson() {
+    const container = SK.DOM.get('jiraCustomFieldsContainer');
+    const hiddenInput = SK.DOM.get('jiraCustomFields');
+    if (!container || !hiddenInput) return;
+
+    const customFields = {};
+    container.querySelectorAll('.jira-custom-field').forEach(input => {
+        const key = input.dataset.fieldKey;
+        const value = input.value;
+        const fieldType = input.dataset.fieldType || 'text';
+        if (key && value) {
+            // Store both value and type so backend knows how to format it
+            customFields[key] = {
+                value: value,
+                type: fieldType
+            };
+        }
+    });
+
+    hiddenInput.value = JSON.stringify(customFields);
+}
+
+async function loadIssueTrackerSettings() {
+    try {
+        const response = await fetch('/api/integrations/issue-tracker/config');
+        if (!response.ok) return;
+
+        const config = await response.json();
+
+        // Set tracker type
+        SK.DOM.setValue('issueTrackerType', config.type || 'disabled');
+        showTrackerConfig(config.type);
+
+        // Load type-specific settings
+        if (config.type === 'jira') {
+            SK.DOM.setValue('jiraUrl', config.url || '');
+            SK.DOM.setValue('jiraEmail', config.email || '');
+            SK.DOM.setValue('jiraProjectKey', config.project_key || '');
+            // Set PAT checkbox first (before fetching issue types)
+            const patCheckbox = SK.DOM.get('jiraUsePat');
+            if (patCheckbox) patCheckbox.checked = config.use_pat === true;
+            // Update labels based on Cloud vs Server after URL is set
+            updateJiraLabels();
+
+            // If we have saved settings, show the saved issue type and try to fetch the list
+            const selectEl = SK.DOM.get('jiraIssueType');
+            if (selectEl && config.issue_type) {
+                // Add the saved issue type as an option so it's selected even if fetch fails
+                selectEl.innerHTML = `<option value="${config.issue_type}">${config.issue_type}</option>`;
+            }
+            // Store the saved issue type to re-select after fetch
+            window._savedJiraIssueType = config.issue_type || '';
+
+            // Load saved custom fields
+            if (config.custom_fields) {
+                SK.DOM.setValue('jiraCustomFields', config.custom_fields);
+            }
+        } else if (config.type === 'youtrack') {
+            SK.DOM.setValue('youtrackUrl', config.url || '');
+            SK.DOM.setValue('youtrackProjectId', config.project_id || '');
+        } else if (config.type === 'github') {
+            SK.DOM.setValue('githubOwner', config.owner || '');
+            SK.DOM.setValue('githubRepo', config.repo || '');
+        } else if (config.type === 'gitlab') {
+            SK.DOM.setValue('gitlabUrl', config.url || 'https://gitlab.com');
+            SK.DOM.setValue('gitlabProjectId', config.project_id || '');
+        } else if (config.type === 'webhook') {
+            SK.DOM.setValue('webhookUrl', config.url || '');
+            SK.DOM.setValue('webhookMethod', config.method || 'POST');
+        }
+
+    } catch (error) {
+        console.error('Error loading issue tracker settings:', error);
+    }
+}
+
+async function saveIssueTrackerSettings() {
+    const trackerType = SK.DOM.getValue('issueTrackerType');
+
+    const settings = {
+        issue_tracker_type: trackerType
+    };
+
+    const encryptKeys = [];
+
+    if (trackerType === 'jira') {
+        settings.jira_url = SK.DOM.getValue('jiraUrl');
+        settings.jira_email = SK.DOM.getValue('jiraEmail');
+        settings.jira_project_key = SK.DOM.getValue('jiraProjectKey');
+        settings.jira_issue_type = SK.DOM.getValue('jiraIssueType');
+        // Save PAT checkbox
+        const patCheckbox = SK.DOM.get('jiraUsePat');
+        settings.jira_use_pat = patCheckbox && patCheckbox.checked ? 'true' : 'false';
+        const token = SK.DOM.getValue('jiraApiToken');
+        if (token) {
+            settings.jira_api_token = token;
+            encryptKeys.push('jira_api_token');
+        }
+        // Save custom fields
+        const customFields = SK.DOM.getValue('jiraCustomFields');
+        if (customFields) {
+            settings.jira_custom_fields = customFields;
+        }
+    } else if (trackerType === 'youtrack') {
+        settings.youtrack_url = SK.DOM.getValue('youtrackUrl');
+        settings.youtrack_project_id = SK.DOM.getValue('youtrackProjectId');
+        const token = SK.DOM.getValue('youtrackToken');
+        if (token) {
+            settings.youtrack_token = token;
+            encryptKeys.push('youtrack_token');
+        }
+    } else if (trackerType === 'github') {
+        settings.github_owner = SK.DOM.getValue('githubOwner');
+        settings.github_repo = SK.DOM.getValue('githubRepo');
+        const token = SK.DOM.getValue('githubToken');
+        if (token) {
+            settings.github_token = token;
+            encryptKeys.push('github_token');
+        }
+    } else if (trackerType === 'gitlab') {
+        settings.gitlab_url = SK.DOM.getValue('gitlabUrl');
+        settings.gitlab_project_id = SK.DOM.getValue('gitlabProjectId');
+        const token = SK.DOM.getValue('gitlabToken');
+        if (token) {
+            settings.gitlab_token = token;
+            encryptKeys.push('gitlab_token');
+        }
+    } else if (trackerType === 'webhook') {
+        settings.webhook_url = SK.DOM.getValue('webhookUrl');
+        settings.webhook_method = SK.DOM.getValue('webhookMethod');
+        settings.webhook_auth_type = SK.DOM.getValue('webhookAuthType');
+        const authValue = SK.DOM.getValue('webhookAuthValue');
+        if (authValue) {
+            settings.webhook_auth_value = authValue;
+            encryptKeys.push('webhook_auth_value');
+        }
+    }
+
+    try {
+        const response = await fetch('/api/settings/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                category: 'issue_tracker',
+                settings: settings,
+                encrypt_keys: encryptKeys
+            })
+        });
+
+        if (response.ok) {
+            showToast('Issue tracker settings saved successfully', 'success');
+            // Clear sensitive fields
+            SK.DOM.setValue('jiraApiToken', '');
+            SK.DOM.setValue('youtrackToken', '');
+            SK.DOM.setValue('githubToken', '');
+            SK.DOM.setValue('gitlabToken', '');
+            SK.DOM.setValue('webhookAuthValue', '');
+        } else {
+            const error = await response.json();
+            showToast(`Error saving settings: ${error.error}`, 'danger');
+        }
+    } catch (error) {
+        showToast(`Error saving settings: ${error.message}`, 'danger');
+    }
+}
+
+async function testIssueTrackerConnection() {
+    const resultDiv = SK.DOM.get('trackerTestResult');
+    const alertDiv = SK.DOM.get('trackerTestAlert');
+    const messageSpan = SK.DOM.get('trackerTestMessage');
+
+    const trackerType = SK.DOM.getValue('issueTrackerType');
+
+    if (trackerType === 'disabled') {
+        resultDiv.style.display = 'block';
+        alertDiv.className = 'alert alert-warning';
+        messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please select an issue tracker first.';
+        return;
+    }
+
+    // Build test data based on tracker type
+    const testData = { type: trackerType };
+
+    if (trackerType === 'jira') {
+        testData.url = SK.DOM.getValue('jiraUrl');
+        testData.email = SK.DOM.getValue('jiraEmail');
+        testData.api_token = SK.DOM.getValue('jiraApiToken');
+        // Include PAT checkbox for Jira Server
+        const patCheckbox = SK.DOM.get('jiraUsePat');
+        testData.use_pat = patCheckbox && patCheckbox.checked;
+        if (!testData.url || !testData.email || !testData.api_token) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL, username, and token/password.';
+            return;
+        }
+    } else if (trackerType === 'youtrack') {
+        testData.url = SK.DOM.getValue('youtrackUrl');
+        testData.token = SK.DOM.getValue('youtrackToken');
+        if (!testData.url || !testData.token) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL and token.';
+            return;
+        }
+    } else if (trackerType === 'github') {
+        testData.token = SK.DOM.getValue('githubToken');
+        testData.owner = SK.DOM.getValue('githubOwner');
+        testData.repo = SK.DOM.getValue('githubRepo');
+        if (!testData.token || !testData.owner || !testData.repo) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in token, owner, and repo.';
+            return;
+        }
+    } else if (trackerType === 'gitlab') {
+        testData.url = SK.DOM.getValue('gitlabUrl');
+        testData.token = SK.DOM.getValue('gitlabToken');
+        testData.project_id = SK.DOM.getValue('gitlabProjectId');
+        if (!testData.token || !testData.project_id) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in token and project ID.';
+            return;
+        }
+    } else if (trackerType === 'webhook') {
+        testData.url = SK.DOM.getValue('webhookUrl');
+        testData.method = SK.DOM.getValue('webhookMethod');
+        testData.auth_type = SK.DOM.getValue('webhookAuthType');
+        testData.auth_value = SK.DOM.getValue('webhookAuthValue');
+        if (!testData.url) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in webhook URL.';
+            return;
+        }
+    }
+
+    resultDiv.style.display = 'block';
+    alertDiv.className = 'alert alert-info';
+    messageSpan.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Testing connection...';
+
+    try {
+        const response = await fetch('/api/integrations/issue-tracker/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(testData)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alertDiv.className = 'alert alert-success';
+            messageSpan.innerHTML = `<i class="bi bi-check-circle me-2"></i>${result.message} (${result.tracker_name})`;
+        } else {
+            alertDiv.className = 'alert alert-danger';
+            messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>${result.error || result.message}`;
+        }
+    } catch (error) {
+        alertDiv.className = 'alert alert-danger';
+        messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>Connection test failed: ${error.message}`;
+    }
+}
+
+// Legacy function aliases for backwards compatibility
+async function loadJiraSettings() {
+    await loadIssueTrackerSettings();
+}
+
+async function saveJiraSettings() {
+    await saveIssueTrackerSettings();
+}
+
+async function testJiraConnection() {
+    await testIssueTrackerConnection();
+}
+
+function toggleJiraTokenVisibility() {
+    const input = SK.DOM.get('jiraApiToken');
+    if (input) {
+        input.type = input.type === 'password' ? 'text' : 'password';
+    }
+}
+
+// ============================================================================
+// COMPLIANCE REPORTS
+// ============================================================================
+
+async function loadComplianceData() {
+    try {
+        const response = await fetch('/api/reports/compliance/bod-22-01');
+
+        if (response.status === 403) {
+            const error = await response.json();
+            showToast(error.error || 'Professional license required for compliance reports', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to load compliance data');
+        }
+
+        const data = await response.json();
+
+        // Update overview cards
+        SK.DOM.setText('complianceTotalMatches', data.summary.total_matches);
+        SK.DOM.setText('complianceAcknowledged', data.summary.acknowledged);
+        SK.DOM.setText('compliancePending', data.summary.pending);
+        SK.DOM.setText('complianceOverdue', data.summary.overdue_count);
+
+        // Update compliance percentage
+        const percentage = data.summary.compliance_percentage || 0;
+        SK.DOM.setText('compliancePercentage', `${percentage.toFixed(1)}%`);
+
+        const progressBar = SK.DOM.get('complianceProgressBar');
+        if (progressBar) {
+            progressBar.style.width = `${percentage}%`;
+            progressBar.setAttribute('aria-valuenow', percentage);
+
+            // Color based on compliance level
+            progressBar.className = 'progress-bar';
+            if (percentage >= 90) {
+                progressBar.classList.add('bg-success');
+            } else if (percentage >= 70) {
+                progressBar.classList.add('bg-info');
+            } else if (percentage >= 50) {
+                progressBar.classList.add('bg-warning');
+            } else {
+                progressBar.classList.add('bg-danger');
+            }
+        }
+
+        // Update severity breakdown
+        const severity = data.summary.severity_breakdown || {};
+        SK.DOM.setText('severityCritical', severity.CRITICAL || 0);
+        SK.DOM.setText('severityHigh', severity.HIGH || 0);
+        SK.DOM.setText('severityMedium', severity.MEDIUM || 0);
+        SK.DOM.setText('severityLow', severity.LOW || 0);
+        SK.DOM.setText('severityUnknown', severity.UNKNOWN || 0);
+
+        // Update ransomware exposure
+        SK.DOM.setText('ransomwareExposureCount', data.summary.ransomware_exposure || 0);
+
+        const ransomwareDetails = SK.DOM.get('ransomwareExposureDetails');
+        if (ransomwareDetails) {
+            if (data.summary.ransomware_exposure > 0) {
+                ransomwareDetails.innerHTML = `<span class="text-danger fw-semibold">${data.summary.ransomware_exposure} unacknowledged vulnerabilities with known ransomware usage detected.</span>`;
+            } else {
+                ransomwareDetails.innerHTML = '<span class="text-success">No unacknowledged vulnerabilities with known ransomware usage.</span>';
+            }
+        }
+
+        showToast('Compliance data loaded successfully', 'success');
+
+    } catch (error) {
+        console.error('Error loading compliance data:', error);
+        showToast(`Error loading compliance data: ${error.message}`, 'danger');
+    }
+}
+
+async function downloadComplianceReport(format) {
+    try {
+        const response = await fetch(`/api/reports/compliance/bod-22-01?format=${format}`);
+
+        if (response.status === 403) {
+            const error = await response.json();
+            showToast(error.error || 'Professional license required', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to generate report');
+        }
+
+        const data = await response.json();
+        const filename = `bod-22-01-compliance-report-${new Date().toISOString().split('T')[0]}.${format}`;
+
+        if (format === 'json') {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            downloadBlob(blob, filename);
+        } else if (format === 'csv') {
+            // Convert to CSV
+            const csv = convertComplianceToCSV(data);
+            const blob = new Blob([csv], { type: 'text/csv' });
+            downloadBlob(blob, filename);
+        }
+
+        showToast(`Compliance report downloaded: ${filename}`, 'success');
+
+    } catch (error) {
+        console.error('Error downloading compliance report:', error);
+        showToast(`Error: ${error.message}`, 'danger');
+    }
+}
+
+function convertComplianceToCSV(data) {
+    const lines = [];
+
+    // Summary section
+    lines.push('CISA BOD 22-01 Compliance Report');
+    lines.push(`Generated: ${data.generated_at}`);
+    lines.push('');
+    lines.push('Summary');
+    lines.push(`Total KEV Matches,${data.summary.total_matches}`);
+    lines.push(`Acknowledged,${data.summary.acknowledged}`);
+    lines.push(`Pending,${data.summary.pending}`);
+    lines.push(`Overdue,${data.summary.overdue_count}`);
+    lines.push(`Compliance Percentage,${data.summary.compliance_percentage.toFixed(1)}%`);
+    lines.push(`Ransomware Exposure,${data.summary.ransomware_exposure}`);
+    lines.push('');
+
+    // Overdue items
+    if (data.overdue && data.overdue.length > 0) {
+        lines.push('Overdue Vulnerabilities');
+        lines.push('CVE ID,Product,Due Date,Days Overdue,Severity,Known Ransomware');
+        data.overdue.forEach(item => {
+            lines.push(`${item.cve_id},"${item.product}",${item.due_date},${item.days_overdue},${item.severity},${item.known_ransomware ? 'Yes' : 'No'}`);
+        });
+        lines.push('');
+    }
+
+    // Due soon items
+    if (data.due_soon && data.due_soon.length > 0) {
+        lines.push('Due Within 7 Days');
+        lines.push('CVE ID,Product,Due Date,Days Remaining,Severity');
+        data.due_soon.forEach(item => {
+            lines.push(`${item.cve_id},"${item.product}",${item.due_date},${item.days_remaining},${item.severity}`);
+        });
+    }
+
+    return lines.join('\n');
+}
+
+async function downloadOverdueReport() {
+    try {
+        const response = await fetch('/api/reports/compliance/bod-22-01');
+
+        if (response.status === 403) {
+            const error = await response.json();
+            showToast(error.error || 'Professional license required', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to generate report');
+        }
+
+        const data = await response.json();
+
+        if (!data.overdue || data.overdue.length === 0) {
+            showToast('No overdue vulnerabilities found', 'info');
+            return;
+        }
+
+        // Generate CSV for overdue items only
+        const lines = [
+            'CISA BOD 22-01 - Overdue Vulnerabilities Report',
+            `Generated: ${data.generated_at}`,
+            '',
+            'CVE ID,Product,Due Date,Days Overdue,Severity,Known Ransomware'
+        ];
+
+        data.overdue.forEach(item => {
+            lines.push(`${item.cve_id},"${item.product}",${item.due_date},${item.days_overdue},${item.severity},${item.known_ransomware ? 'Yes' : 'No'}`);
+        });
+
+        const filename = `overdue-vulnerabilities-${new Date().toISOString().split('T')[0]}.csv`;
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        downloadBlob(blob, filename);
+
+        showToast(`Overdue report downloaded: ${filename}`, 'success');
+
+    } catch (error) {
+        console.error('Error downloading overdue report:', error);
+        showToast(`Error: ${error.message}`, 'danger');
+    }
+}
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function showCreateIntegrationModal() {

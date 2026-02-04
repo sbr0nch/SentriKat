@@ -1416,3 +1416,403 @@ echo "Agent completed successfully!"
         mimetype='text/plain',
         headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-linux.sh'}
     )
+
+
+# ============================================================================
+# Jira Integration Endpoints
+# ============================================================================
+
+@bp.route('/api/integrations/jira/test', methods=['POST'])
+@admin_required
+@requires_professional('Jira Integration')
+def test_jira_connection():
+    """Test Jira connection with provided credentials."""
+    from app.jira_integration import JiraClient
+
+    data = request.get_json()
+
+    url = data.get('url', '').strip()
+    email = data.get('email', '').strip()
+    api_token = data.get('api_token', '').strip()
+
+    if not all([url, email, api_token]):
+        return jsonify({'success': False, 'error': 'URL, email, and API token are required'}), 400
+
+    # Detect Cloud vs Server
+    is_cloud = 'atlassian.net' in url.lower()
+
+    client = JiraClient(url, email, api_token, is_cloud)
+    success, message = client.test_connection()
+
+    return jsonify({
+        'success': success,
+        'message': message,
+        'is_cloud': is_cloud
+    })
+
+
+@bp.route('/api/integrations/jira/projects', methods=['GET'])
+@admin_required
+@requires_professional('Jira Integration')
+def get_jira_projects():
+    """Get available Jira projects."""
+    from app.jira_integration import get_jira_client
+
+    client = get_jira_client()
+    if not client:
+        return jsonify({'error': 'Jira not configured or disabled'}), 400
+
+    projects = client.get_projects()
+    return jsonify({'projects': projects})
+
+
+@bp.route('/api/integrations/jira/issue-types/<project_key>', methods=['GET'])
+@admin_required
+@requires_professional('Jira Integration')
+def get_jira_issue_types(project_key):
+    """Get available issue types for a Jira project."""
+    from app.jira_integration import get_jira_client
+
+    client = get_jira_client()
+    if not client:
+        return jsonify({'error': 'Jira not configured or disabled'}), 400
+
+    issue_types = client.get_issue_types(project_key)
+    return jsonify({'issue_types': issue_types})
+
+
+@bp.route('/api/integrations/jira/create-issue', methods=['POST'])
+@login_required
+@requires_professional('Jira Integration')
+def create_jira_issue():
+    """Create a Jira issue for a vulnerability."""
+    from app.jira_integration import create_vulnerability_issue
+
+    data = request.get_json()
+
+    vulnerability_id = data.get('vulnerability_id')
+    product_id = data.get('product_id')
+    custom_summary = data.get('summary')
+    custom_description = data.get('description')
+
+    if not vulnerability_id:
+        return jsonify({'error': 'vulnerability_id is required'}), 400
+
+    success, message, issue_key = create_vulnerability_issue(
+        vulnerability_id=vulnerability_id,
+        product_id=product_id,
+        custom_summary=custom_summary,
+        custom_description=custom_description
+    )
+
+    if success:
+        from app.settings_api import get_setting
+        jira_url = get_setting('jira_url', '')
+        issue_url = f"{jira_url.rstrip('/')}/browse/{issue_key}" if jira_url else None
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'issue_key': issue_key,
+            'issue_url': issue_url
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': message
+        }), 400
+
+
+# ============================================================================
+# Generic Issue Tracker Endpoints (Multi-tracker support)
+# ============================================================================
+
+@bp.route('/api/integrations/issue-tracker/config', methods=['GET'])
+@login_required
+def get_issue_tracker_config():
+    """Get current issue tracker configuration."""
+    from app.issue_trackers import get_issue_tracker_config
+    config = get_issue_tracker_config()
+    return jsonify(config)
+
+
+@bp.route('/api/integrations/issue-tracker/test', methods=['POST'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def test_issue_tracker():
+    """Test connection to configured issue tracker."""
+    from app.issue_trackers import (
+        JiraTracker, YouTrackTracker, GitHubTracker, GitLabTracker, WebhookTracker
+    )
+    from app.settings_api import get_setting
+
+    data = request.get_json()
+    tracker_type = data.get('type', 'disabled')
+
+    if tracker_type == 'disabled':
+        return jsonify({'success': False, 'error': 'No tracker type specified'}), 400
+
+    # Get SSL verification setting
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+
+    try:
+        if tracker_type == 'jira':
+            url = data.get('url', '').strip()
+            email = data.get('email', '').strip()
+            api_token = data.get('api_token', '').strip()
+            use_pat = data.get('use_pat', False)  # Use Personal Access Token (Bearer auth)
+            if not all([url, email, api_token]):
+                return jsonify({'success': False, 'error': 'URL, email, and API token required'}), 400
+            tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
+
+        elif tracker_type == 'youtrack':
+            url = data.get('url', '').strip()
+            token = data.get('token', '').strip()
+            if not all([url, token]):
+                return jsonify({'success': False, 'error': 'URL and token required'}), 400
+            tracker = YouTrackTracker(url, token)
+
+        elif tracker_type == 'github':
+            token = data.get('token', '').strip()
+            owner = data.get('owner', '').strip()
+            repo = data.get('repo', '').strip()
+            if not all([token, owner, repo]):
+                return jsonify({'success': False, 'error': 'Token, owner, and repo required'}), 400
+            tracker = GitHubTracker(token, owner, repo)
+
+        elif tracker_type == 'gitlab':
+            url = data.get('url', 'https://gitlab.com').strip()
+            token = data.get('token', '').strip()
+            project_id = data.get('project_id', '').strip()
+            if not all([token, project_id]):
+                return jsonify({'success': False, 'error': 'Token and project ID required'}), 400
+            tracker = GitLabTracker(url, token, project_id)
+
+        elif tracker_type == 'webhook':
+            url = data.get('url', '').strip()
+            if not url:
+                return jsonify({'success': False, 'error': 'Webhook URL required'}), 400
+            method = data.get('method', 'POST')
+            auth_type = data.get('auth_type', 'none')
+            auth_value = data.get('auth_value', '')
+            tracker = WebhookTracker(url, method, auth_type=auth_type, auth_value=auth_value)
+
+        else:
+            return jsonify({'success': False, 'error': f'Unknown tracker type: {tracker_type}'}), 400
+
+        success, message = tracker.test_connection()
+        return jsonify({
+            'success': success,
+            'message': message,
+            'tracker_name': tracker.get_tracker_name()
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/integrations/jira/issue-types', methods=['POST'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def fetch_jira_issue_types_post():
+    """Fetch available issue types from Jira for a specific project."""
+    from app.issue_trackers import JiraTracker
+    from app.settings_api import get_setting
+
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    email = data.get('email', '').strip()
+    api_token = data.get('api_token', '').strip()
+    project_key = data.get('project_key', '').strip()
+    use_pat = data.get('use_pat', False)
+
+    if not all([url, email, api_token, project_key]):
+        return jsonify({'error': 'URL, email, token, and project key required'}), 400
+
+    # Get SSL verification setting
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+
+    try:
+        tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
+        issue_types = tracker.get_issue_types(project_key)
+
+        if not issue_types:
+            return jsonify({
+                'issue_types': [],
+                'warning': f'No issue types found for project {project_key}. Check the project key exists.'
+            })
+
+        return jsonify({'issue_types': issue_types})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/integrations/jira/fields', methods=['POST'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def fetch_jira_create_fields():
+    """Fetch required and optional fields for creating an issue in Jira."""
+    from app.issue_trackers import JiraTracker
+    from app.settings_api import get_setting
+    import logging
+    logger = logging.getLogger(__name__)
+
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    email = data.get('email', '').strip()
+    api_token = data.get('api_token', '').strip()
+    project_key = data.get('project_key', '').strip()
+    issue_type = data.get('issue_type', '').strip()
+    use_pat = data.get('use_pat', False)
+
+    # Fall back to saved credentials if not provided in request
+    if not url:
+        url = get_setting('jira_url', '')
+    if not email:
+        email = get_setting('jira_email', '')
+    if not api_token:
+        api_token = get_setting('jira_api_token', '')
+    if not project_key:
+        project_key = get_setting('jira_project_key', '')
+    if not issue_type:
+        issue_type = get_setting('jira_issue_type', 'Task')
+    if not use_pat:
+        use_pat = get_setting('jira_use_pat', 'false') == 'true'
+
+    if not all([url, email, api_token, project_key, issue_type]):
+        missing = []
+        if not url: missing.append('URL')
+        if not email: missing.append('email/username')
+        if not api_token: missing.append('token/password')
+        if not project_key: missing.append('project key')
+        if not issue_type: missing.append('issue type')
+        return jsonify({'error': f'Missing: {", ".join(missing)}. Save settings first or enter credentials.'}), 400
+
+    # Get SSL verification setting
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+
+    try:
+        logger.info(f"Fetching Jira fields for project={project_key}, issue_type={issue_type}")
+        tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
+        fields = tracker.get_create_fields(project_key, issue_type)
+
+        logger.info(f"Got {len(fields)} fields from Jira createmeta")
+
+        # Separate required and optional fields
+        # Note: Some fields might not be marked as required in createmeta but are enforced by Jira
+        required_fields = [f for f in fields if f.get('required')]
+        optional_fields = [f for f in fields if not f.get('required')]
+
+        # Log field names for debugging
+        if fields:
+            field_names = [f"{f['name']} ({f['key']}, req={f['required']})" for f in fields[:10]]
+            logger.info(f"Sample fields: {field_names}")
+
+        return jsonify({
+            'fields': fields,
+            'required_fields': required_fields,
+            'optional_fields': optional_fields,
+            'total': len(fields),
+            'required_count': len(required_fields),
+            'note': 'Some fields may be required by Jira workflows even if not marked as required here.'
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching Jira fields: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/integrations/jira/projects', methods=['POST'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def fetch_jira_projects_post():
+    """Fetch available projects from Jira."""
+    from app.issue_trackers import JiraTracker
+    from app.settings_api import get_setting
+
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    email = data.get('email', '').strip()
+    api_token = data.get('api_token', '').strip()
+    use_pat = data.get('use_pat', False)
+
+    if not all([url, email, api_token]):
+        return jsonify({'error': 'URL, email, and token required'}), 400
+
+    # Get SSL verification setting
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+
+    try:
+        tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
+        projects = tracker.get_projects()
+
+        if not projects:
+            return jsonify({
+                'projects': [],
+                'warning': 'No projects found. Check your credentials and permissions.'
+            })
+
+        return jsonify({'projects': projects})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/integrations/issue-tracker/create-issue', methods=['POST'])
+@login_required
+@requires_professional('Issue Tracker Integration')
+def create_issue_generic():
+    """Create an issue using the configured tracker."""
+    from app.issue_trackers import create_vulnerability_issue
+
+    data = request.get_json()
+
+    vulnerability_id = data.get('vulnerability_id')
+    product_id = data.get('product_id')
+    custom_summary = data.get('summary')
+    custom_description = data.get('description')
+
+    if not vulnerability_id:
+        return jsonify({'error': 'vulnerability_id is required'}), 400
+
+    success, message, issue_key, issue_url = create_vulnerability_issue(
+        vulnerability_id=vulnerability_id,
+        product_id=product_id,
+        custom_summary=custom_summary,
+        custom_description=custom_description
+    )
+
+    if success:
+        return jsonify({
+            'success': True,
+            'message': message,
+            'issue_key': issue_key,
+            'issue_url': issue_url
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': message
+        }), 400
+
+
+@bp.route('/api/integrations/youtrack/projects', methods=['GET'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def get_youtrack_projects():
+    """Get available YouTrack projects."""
+    from app.issue_trackers import YouTrackTracker
+    from app.settings_api import get_setting
+    # Note: get_setting() already handles decryption for encrypted settings
+
+    url = get_setting('youtrack_url', '')
+    # get_setting() returns decrypted value for encrypted settings
+    token = get_setting('youtrack_token', '')
+
+    if not all([url, token]):
+        return jsonify({'error': 'YouTrack not configured'}), 400
+
+    tracker = YouTrackTracker(url, token)
+    projects = tracker.get_projects()
+    return jsonify({'projects': projects})

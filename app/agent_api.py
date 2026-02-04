@@ -212,6 +212,11 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
     """
     from app.integrations_models import ImportQueue
 
+    # Skip irrelevant software before queuing (don't flood import queue with junk)
+    if _should_skip_software(vendor, product_name):
+        logger.debug(f"Skipping irrelevant software from import queue: {vendor} {product_name}")
+        return False
+
     try:
         # Check if already in queue (avoid duplicates)
         existing = ImportQueue.query.filter_by(
@@ -927,10 +932,12 @@ def process_inventory_job(job):
                 except Exception:
                     pass
 
-        # Update asset inventory timestamp
+        # Update asset inventory and checkin timestamps
         asset = Asset.query.get(asset_id)  # Re-fetch to ensure fresh object
         if asset:
             asset.last_inventory_at = datetime.utcnow()
+            asset.last_checkin = datetime.utcnow()
+            asset.status = 'online'
 
         # Finalize job - re-fetch to ensure fresh object
         job = InventoryJob.query.get(job_id)
@@ -1173,6 +1180,16 @@ def report_inventory():
             version = product_data.get('version')
 
             if not vendor or not product_name:
+                continue
+
+            # Skip irrelevant software (documentation, debug symbols, fonts, etc.)
+            if _should_skip_software(vendor, product_name):
+                continue
+
+            # Skip products that have been explicitly excluded by admin
+            from app.models import ProductExclusion
+            if ProductExclusion.is_excluded(organization.id, vendor, product_name, version):
+                logger.debug(f"Skipping excluded product: {vendor} {product_name}")
                 continue
 
             # Find or create product
@@ -2559,4 +2576,334 @@ def get_license_tiers():
             'enterprise': 'Large organizations with extensive deployments',
             'unlimited': 'Unlimited agents for enterprise customers'
         }
+    })
+
+
+# ============================================================================
+# Agent Command & Control Endpoints
+# ============================================================================
+
+# Current latest agent versions (update when releasing new versions)
+LATEST_AGENT_VERSIONS = {
+    'linux': '1.1.0',
+    'windows': '1.1.0'
+}
+
+
+@agent_bp.route('/api/agent/commands', methods=['GET'])
+@limiter.limit("60/minute", key_func=get_agent_key_for_limit)
+@agent_auth_required
+def get_agent_commands():
+    """
+    Agent polls this endpoint to check for pending commands.
+    Returns commands like: scan_now, update_config, update_agent.
+
+    Agents should poll this endpoint periodically (e.g., every 5 minutes)
+    between full inventory scans.
+    """
+    organization = request.organization
+    data = request.args
+
+    agent_id = data.get('agent_id')
+    hostname = data.get('hostname')
+    agent_version = data.get('version', '1.0.0')
+    platform = data.get('platform', 'linux').lower()
+
+    if not agent_id and not hostname:
+        return jsonify({'error': 'agent_id or hostname required'}), 400
+
+    # Find asset
+    asset = None
+    if agent_id:
+        asset = Asset.query.filter_by(agent_id=agent_id).first()
+    if not asset and hostname:
+        asset = Asset.query.filter_by(
+            organization_id=organization.id,
+            hostname=hostname
+        ).first()
+
+    commands = []
+
+    if asset:
+        # Update last checkin (heartbeat)
+        asset.last_checkin = datetime.utcnow()
+        asset.status = 'online'
+
+        # Check for pending scan request
+        if asset.pending_scan:
+            commands.append({
+                'command': 'scan_now',
+                'message': 'Immediate scan requested by administrator',
+                'requested_at': asset.pending_scan_requested_at.isoformat() if asset.pending_scan_requested_at else None,
+                'requested_by': asset.pending_scan_requested_by
+            })
+            # Clear the pending scan flag
+            asset.pending_scan = False
+            asset.pending_scan_requested_at = None
+            asset.pending_scan_requested_by = None
+
+        # Check for interval override
+        if asset.scan_interval_override:
+            commands.append({
+                'command': 'update_config',
+                'config': {
+                    'scan_interval_minutes': asset.scan_interval_override
+                }
+            })
+
+        db.session.commit()
+
+    # Check for agent update
+    latest_version = LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
+    if _version_compare(agent_version, latest_version) < 0:
+        commands.append({
+            'command': 'update_available',
+            'current_version': agent_version,
+            'latest_version': latest_version,
+            'download_url': f'/api/agent/download/{platform}',
+            'message': f'Agent update available: {agent_version} → {latest_version}'
+        })
+
+    return jsonify({
+        'commands': commands,
+        'server_time': datetime.utcnow().isoformat(),
+        'next_poll_seconds': 300  # Suggest polling every 5 minutes
+    })
+
+
+@agent_bp.route('/api/agent/config', methods=['GET'])
+@limiter.limit("30/minute", key_func=get_agent_key_for_limit)
+@agent_auth_required
+def get_agent_config():
+    """
+    Get server-side configuration for an agent.
+    Agents can use this to synchronize their settings with the server.
+    """
+    organization = request.organization
+    data = request.args
+
+    agent_id = data.get('agent_id')
+    hostname = data.get('hostname')
+
+    if not agent_id and not hostname:
+        return jsonify({'error': 'agent_id or hostname required'}), 400
+
+    # Find asset
+    asset = None
+    if agent_id:
+        asset = Asset.query.filter_by(agent_id=agent_id).first()
+    if not asset and hostname:
+        asset = Asset.query.filter_by(
+            organization_id=organization.id,
+            hostname=hostname
+        ).first()
+
+    config = {
+        'scan_interval_minutes': 240,  # Default: 4 hours
+        'heartbeat_interval_minutes': 5,  # Poll for commands every 5 min
+        'retry_attempts': 3,
+        'retry_delay_seconds': 5
+    }
+
+    if asset and asset.scan_interval_override:
+        config['scan_interval_minutes'] = asset.scan_interval_override
+
+    return jsonify({
+        'config': config,
+        'server_time': datetime.utcnow().isoformat()
+    })
+
+
+@agent_bp.route('/api/agent/version', methods=['GET'])
+@limiter.limit("30/minute")
+def get_agent_version():
+    """
+    Get the latest available agent versions.
+    Public endpoint - no authentication required.
+    """
+    return jsonify({
+        'versions': LATEST_AGENT_VERSIONS,
+        'release_notes_url': '/docs/agent-changelog',
+        'server_time': datetime.utcnow().isoformat()
+    })
+
+
+def _version_compare(v1, v2):
+    """
+    Compare two version strings (e.g., '1.0.0' vs '1.1.0').
+    Returns: -1 if v1 < v2, 0 if equal, 1 if v1 > v2
+    """
+    try:
+        parts1 = [int(x) for x in v1.split('.')]
+        parts2 = [int(x) for x in v2.split('.')]
+
+        # Pad shorter version with zeros
+        while len(parts1) < len(parts2):
+            parts1.append(0)
+        while len(parts2) < len(parts1):
+            parts2.append(0)
+
+        for p1, p2 in zip(parts1, parts2):
+            if p1 < p2:
+                return -1
+            if p1 > p2:
+                return 1
+        return 0
+    except:
+        return 0
+
+
+# ============================================================================
+# Admin Endpoints for Agent Control
+# ============================================================================
+
+@agent_bp.route('/api/admin/assets/<int:asset_id>/trigger-scan', methods=['POST'])
+@login_required
+@limiter.limit("30/minute")
+def trigger_asset_scan(asset_id):
+    """
+    Request an immediate scan from a specific agent.
+    The agent will see this on its next command poll.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    asset = Asset.query.get_or_404(asset_id)
+
+    # Check permission
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if asset.organization_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    # Set pending scan flag
+    asset.pending_scan = True
+    asset.pending_scan_requested_at = datetime.utcnow()
+    asset.pending_scan_requested_by = user.username
+    db.session.commit()
+
+    # Log event
+    _log_agent_event(
+        organization_id=asset.organization_id,
+        asset_id=asset.id,
+        event_type='scan_requested',
+        message=f'Immediate scan requested by {user.username}',
+        source_ip=request.remote_addr
+    )
+
+    return jsonify({
+        'status': 'success',
+        'message': f'Scan requested for {asset.hostname}. Agent will scan on next poll.',
+        'asset_id': asset.id,
+        'hostname': asset.hostname
+    })
+
+
+@agent_bp.route('/api/admin/assets/<int:asset_id>/config', methods=['GET', 'PUT'])
+@login_required
+@limiter.limit("30/minute")
+def manage_asset_config(asset_id):
+    """
+    Get or update server-side configuration for an agent.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    asset = Asset.query.get_or_404(asset_id)
+
+    # Check permission
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if asset.organization_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    if request.method == 'GET':
+        return jsonify({
+            'asset_id': asset.id,
+            'hostname': asset.hostname,
+            'config': {
+                'scan_interval_override': asset.scan_interval_override,
+                'pending_scan': asset.pending_scan or False
+            }
+        })
+
+    # PUT - Update config
+    data = request.get_json() or {}
+
+    if 'scan_interval_minutes' in data:
+        interval = data['scan_interval_minutes']
+        if interval is None:
+            asset.scan_interval_override = None  # Clear override
+        elif isinstance(interval, int) and 15 <= interval <= 10080:  # 15 min to 1 week
+            asset.scan_interval_override = interval
+        else:
+            return jsonify({'error': 'scan_interval_minutes must be between 15 and 10080'}), 400
+
+    db.session.commit()
+
+    # Log event
+    _log_agent_event(
+        organization_id=asset.organization_id,
+        asset_id=asset.id,
+        event_type='config_updated',
+        message=f'Agent configuration updated by {user.username}',
+        source_ip=request.remote_addr
+    )
+
+    return jsonify({
+        'status': 'success',
+        'message': f'Configuration updated for {asset.hostname}',
+        'config': {
+            'scan_interval_override': asset.scan_interval_override
+        }
+    })
+
+
+@agent_bp.route('/api/admin/assets/trigger-scan-all', methods=['POST'])
+@login_required
+@limiter.limit("5/minute")
+def trigger_all_assets_scan():
+    """
+    Request immediate scans from all agents in an organization.
+    Use with caution - could cause load spikes.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    data = request.get_json() or {}
+
+    org_id = data.get('organization_id')
+
+    # Determine which organizations the user can trigger
+    if user.is_super_admin():
+        if org_id:
+            query = Asset.query.filter_by(organization_id=org_id, active=True)
+        else:
+            query = Asset.query.filter_by(active=True)
+    else:
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if org_id and org_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+        if org_id:
+            query = Asset.query.filter_by(organization_id=org_id, active=True)
+        else:
+            query = Asset.query.filter(
+                Asset.organization_id.in_(user_org_ids),
+                Asset.active == True
+            )
+
+    # Update all matching assets
+    count = query.update({
+        'pending_scan': True,
+        'pending_scan_requested_at': datetime.utcnow(),
+        'pending_scan_requested_by': user.username
+    }, synchronize_session=False)
+
+    db.session.commit()
+
+    return jsonify({
+        'status': 'success',
+        'message': f'Scan requested for {count} agents',
+        'agents_triggered': count
     })

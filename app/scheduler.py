@@ -137,12 +137,22 @@ def reschedule_critical_email():
         logger.info("Critical CVE reminder disabled")
 
 def cisa_sync_job(app):
-    """Job wrapper to run CISA KEV sync with app context"""
+    """Job wrapper to run CISA KEV sync with app context, then update EPSS scores"""
     with app.app_context():
         try:
             logger.info("Starting scheduled CISA KEV sync...")
             result = sync_cisa_kev()
             logger.info(f"CISA KEV sync completed: {result}")
+
+            # Also sync EPSS scores after CISA KEV sync
+            try:
+                from app.epss_sync import sync_epss_scores
+                logger.info("Syncing EPSS scores...")
+                updated, errors, message = sync_epss_scores(force=False)
+                logger.info(f"EPSS sync completed: {message}")
+            except Exception as epss_error:
+                logger.warning(f"EPSS sync failed (non-critical): {epss_error}")
+
         except Exception as e:
             logger.error(f"CISA KEV sync job failed: {str(e)}")
 

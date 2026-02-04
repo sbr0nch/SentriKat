@@ -404,12 +404,63 @@ class EmailAlertManager:
             days_until_due = (vuln.due_date - date.today()).days if vuln.due_date else None
 
             # Urgency indicator
-            if days_until_due is not None and days_until_due <= 7:
-                urgency_html = f'<span style="background: #fef2f2; color: #991b1b; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">Due in {days_until_due} days</span>'
-            elif days_until_due is not None:
-                urgency_html = f'<span style="color: #6b7280; font-size: 11px;">Due: {vuln.due_date}</span>'
+            if days_until_due is not None:
+                if days_until_due < 0:
+                    # OVERDUE - past due date
+                    overdue_days = abs(days_until_due)
+                    urgency_html = f'<span style="background: #7f1d1d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">⚠️ OVERDUE by {overdue_days} days</span>'
+                elif days_until_due == 0:
+                    urgency_html = '<span style="background: #dc2626; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">⚠️ DUE TODAY</span>'
+                elif days_until_due <= 7:
+                    urgency_html = f'<span style="background: #fef2f2; color: #991b1b; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">Due in {days_until_due} days</span>'
+                else:
+                    urgency_html = f'<span style="color: #6b7280; font-size: 11px;">Due: {vuln.due_date}</span>'
             else:
                 urgency_html = ''
+
+            # CVSS color based on score
+            cvss_score = vuln.cvss_score or 0
+            if cvss_score >= 9.0:
+                cvss_color = '#dc2626'  # Critical - red
+                cvss_bg = '#fef2f2'
+            elif cvss_score >= 7.0:
+                cvss_color = '#ea580c'  # High - orange
+                cvss_bg = '#fff7ed'
+            elif cvss_score >= 4.0:
+                cvss_color = '#ca8a04'  # Medium - yellow
+                cvss_bg = '#fefce8'
+            else:
+                cvss_color = '#16a34a'  # Low - green
+                cvss_bg = '#f0fdf4'
+
+            # EPSS display
+            epss_html = ''
+            if vuln.epss_score is not None:
+                epss_pct = vuln.epss_score * 100
+                if epss_pct >= 10:
+                    epss_color = '#dc2626'  # High exploitation probability
+                    epss_bg = '#fef2f2'
+                elif epss_pct >= 1:
+                    epss_color = '#ea580c'  # Medium
+                    epss_bg = '#fff7ed'
+                else:
+                    epss_color = '#16a34a'  # Low
+                    epss_bg = '#f0fdf4'
+                epss_html = f'''
+                                                <td style="padding: 0 4px;">
+                                                    <div style="background: {epss_bg}; border-radius: 4px; padding: 6px 10px; text-align: center;">
+                                                        <div style="font-size: 10px; color: #6b7280; text-transform: uppercase;">EPSS</div>
+                                                        <div style="font-size: 14px; font-weight: 700; color: {epss_color};">{epss_pct:.1f}%</div>
+                                                    </div>
+                                                </td>'''
+            else:
+                epss_html = '''
+                                                <td style="padding: 0 4px;">
+                                                    <div style="background: #f3f4f6; border-radius: 4px; padding: 6px 10px; text-align: center;">
+                                                        <div style="font-size: 10px; color: #6b7280; text-transform: uppercase;">EPSS</div>
+                                                        <div style="font-size: 12px; color: #9ca3af;">N/A</div>
+                                                    </div>
+                                                </td>'''
 
             html += f"""
                     <!-- Vulnerability Card -->
@@ -424,16 +475,33 @@ class EmailAlertManager:
                                                 <td>
                                                     <a href="https://nvd.nist.gov/vuln/detail/{vuln.cve_id}" style="font-size: 15px; font-weight: 700; color: #1e40af; text-decoration: none;">{vuln.cve_id}</a>
                                                     {f'<span style="background: #7c2d12; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">RANSOMWARE</span>' if vuln.known_ransomware else ''}
-                                                    {f'<span style="color: #6b7280; font-size: 12px; margin-left: 6px;">CVSS {vuln.cvss_score}</span>' if vuln.cvss_score else ''}
                                                 </td>
                                                 <td align="right">
                                                     {urgency_html}
                                                 </td>
                                             </tr>
                                         </table>
+                                        <!-- Scores Row -->
+                                        <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top: 10px;">
+                                            <tr>
+                                                <td style="padding: 0 4px 0 0;">
+                                                    <div style="background: {cvss_bg}; border-radius: 4px; padding: 6px 10px; text-align: center;">
+                                                        <div style="font-size: 10px; color: #6b7280; text-transform: uppercase;">CVSS</div>
+                                                        <div style="font-size: 14px; font-weight: 700; color: {cvss_color};">{cvss_score if cvss_score else 'N/A'}</div>
+                                                    </div>
+                                                </td>
+                                                {epss_html}
+                                                <td style="padding: 0 4px;">
+                                                    <div style="background: #f3f4f6; border-radius: 4px; padding: 6px 10px; text-align: center;">
+                                                        <div style="font-size: 10px; color: #6b7280; text-transform: uppercase;">Severity</div>
+                                                        <div style="font-size: 12px; font-weight: 600; color: {border_color};">{priority}</div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
                                         <!-- Product -->
-                                        <div style="margin-top: 8px; font-size: 13px;">
-                                            <span style="color: #6b7280;">Product:</span>
+                                        <div style="margin-top: 10px; font-size: 13px;">
+                                            <span style="color: #6b7280;">Affected:</span>
                                             <span style="color: #111827; font-weight: 500;">{product.vendor} - {product.product_name}</span>
                                             {f'<span style="color: #9ca3af;"> v{product.version}</span>' if product.version else ''}
                                         </div>
@@ -442,9 +510,9 @@ class EmailAlertManager:
                                             {vuln.short_description[:180]}{'...' if len(vuln.short_description) > 180 else ''}
                                         </div>
                                         <!-- Action -->
-                                        <div style="margin-top: 10px; padding: 8px 10px; background: #fef2f2; border-radius: 4px;">
-                                            <span style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Action Required:</span>
-                                            <span style="font-size: 12px; color: #991b1b; font-weight: 500;"> {vuln.required_action[:150]}{'...' if len(vuln.required_action) > 150 else ''}</span>
+                                        <div style="margin-top: 10px; padding: 8px 10px; background: #f0fdf4; border-left: 3px solid #16a34a; border-radius: 4px;">
+                                            <span style="font-size: 11px; color: #166534; text-transform: uppercase; font-weight: 600;">How to Fix:</span>
+                                            <span style="font-size: 12px; color: #166534;"> {vuln.required_action[:150]}{'...' if len(vuln.required_action) > 150 else ''}</span>
                                         </div>
                                     </td>
                                 </tr>

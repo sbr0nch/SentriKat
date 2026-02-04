@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 # Installation ID file path (persists across restarts)
 INSTALLATION_ID_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', '.installation_id')
 
+# Environment variable for fixed installation ID (recommended for Docker)
+INSTALLATION_ID_ENV_VAR = 'SENTRIKAT_INSTALLATION_ID'
+
 # Public key file path (shared with generate_license.py)
 PUBLIC_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools', '.license_keys', 'public_key.pem')
 
@@ -97,7 +100,9 @@ PROFESSIONAL_FEATURES = [
     'backup_restore',
     'audit_export',
     'multi_org',
-    'push_agents'  # Agent deployment feature
+    'push_agents',  # Agent deployment feature
+    'jira_integration',  # Jira ticket creation
+    'compliance_reports'  # CISA BOD 22-01 compliance reports
 ]
 
 
@@ -105,28 +110,76 @@ PROFESSIONAL_FEATURES = [
 # Installation ID - Stable Hardware Fingerprint
 # ============================================================================
 
+def _is_docker_environment():
+    """
+    Detect if running inside a Docker container.
+    Uses multiple methods for reliability.
+    """
+    # Method 1: Check for .dockerenv file
+    if os.path.exists('/.dockerenv'):
+        return True
+
+    # Method 2: Check cgroup for docker/containerd
+    try:
+        with open('/proc/1/cgroup', 'r') as f:
+            content = f.read()
+            if 'docker' in content or 'containerd' in content or 'kubepods' in content:
+                return True
+    except Exception:
+        pass
+
+    # Method 3: Check for container-specific environment variables
+    if os.environ.get('KUBERNETES_SERVICE_HOST'):
+        return True
+
+    return False
+
+
 def get_installation_id():
     """
     Get or generate a unique, STABLE installation ID for this instance.
     This ID is persisted to disk and survives restarts.
 
-    The ID is deterministic based on machine characteristics - it will be
-    the same every time for the same installation.
+    Priority order:
+    1. SENTRIKAT_INSTALLATION_ID environment variable (recommended for Docker)
+    2. Existing ID from file (persists across restarts)
+    3. Generate new ID and save to file
 
     Used for hardware-locked licensing: licenses are tied to this ID.
     """
-    # Try to load existing ID from file
+    # Priority 1: Environment variable (best for Docker - survives rebuilds)
+    env_id = os.environ.get(INSTALLATION_ID_ENV_VAR)
+    if env_id and len(env_id) >= 16:
+        # Normalize format if needed
+        if not env_id.startswith('SK-INST-'):
+            # Hash the user-provided ID for consistent format
+            normalized = f"SK-INST-{hashlib.sha256(env_id.encode()).hexdigest()[:32].upper()}"
+            logger.info(f"Using installation ID from environment (normalized): {normalized[:20]}...")
+            return normalized
+        logger.info(f"Using installation ID from environment: {env_id[:20]}...")
+        return env_id
+
+    # Priority 2: Try to load existing ID from file
     if os.path.exists(INSTALLATION_ID_FILE):
         try:
             with open(INSTALLATION_ID_FILE, 'r') as f:
                 installation_id = f.read().strip()
                 if installation_id and len(installation_id) >= 32:
+                    logger.debug(f"Loaded installation ID from file: {installation_id[:20]}...")
                     return installation_id
         except Exception as e:
             logger.warning(f"Could not read installation ID: {e}")
 
-    # Generate new stable installation ID
-    installation_id = _generate_stable_fingerprint()
+    # Priority 3: Generate new stable installation ID
+    is_docker = _is_docker_environment()
+    installation_id = _generate_stable_fingerprint(is_docker=is_docker)
+
+    if is_docker:
+        logger.warning(
+            "Docker environment detected. Installation ID was generated from volatile "
+            "container properties. To ensure license persistence across rebuilds, set "
+            f"the {INSTALLATION_ID_ENV_VAR} environment variable in your docker-compose.yml"
+        )
 
     # Save to file for persistence
     try:
@@ -137,50 +190,93 @@ def get_installation_id():
         with open(INSTALLATION_ID_FILE, 'w') as f:
             f.write(installation_id)
 
-        logger.info(f"Generated installation ID: {installation_id[:16]}...")
+        logger.info(f"Generated and saved installation ID: {installation_id[:20]}...")
     except Exception as e:
         logger.error(f"Could not save installation ID: {e}")
 
     return installation_id
 
 
-def _generate_stable_fingerprint():
+def _generate_stable_fingerprint(is_docker=False):
     """
     Generate a stable fingerprint for this installation.
-    Uses machine characteristics that don't change.
 
-    Components:
-    - MAC address (hardware)
-    - Hostname
-    - Database path (identifies the specific installation)
+    In Docker environments:
+    - Uses database URI hash (stable across rebuilds)
+    - Uses volume mount paths
+    - Adds random component saved to file for uniqueness
+
+    In bare-metal/VM environments:
+    - Uses MAC address (hardware)
+    - Uses hostname
+    - Uses database URI hash
     """
     fingerprint_parts = []
 
-    # MAC address - stable hardware identifier
-    try:
-        mac = uuid.getnode()
-        # uuid.getnode() returns a random value if no MAC found,
-        # but it's consistent within a session
-        fingerprint_parts.append(f"mac:{mac}")
-    except Exception:
-        fingerprint_parts.append("mac:unknown")
+    if is_docker:
+        # Docker-specific: Use only stable identifiers
+        # Database URI is stable in Docker (defined in docker-compose.yml)
+        try:
+            from config import Config
+            db_uri = Config.SQLALCHEMY_DATABASE_URI or ''
+            # Use more of the hash for uniqueness
+            db_hash = hashlib.sha256(db_uri.encode()).hexdigest()[:24]
+            fingerprint_parts.append(f"db:{db_hash}")
+        except Exception:
+            fingerprint_parts.append("db:unknown")
 
-    # Hostname
-    try:
-        hostname = socket.gethostname()
-        fingerprint_parts.append(f"host:{hostname}")
-    except Exception:
-        fingerprint_parts.append("host:unknown")
+        # Add data directory path (stable mount point)
+        data_dir = os.path.dirname(INSTALLATION_ID_FILE)
+        if data_dir:
+            fingerprint_parts.append(f"data:{data_dir}")
 
-    # Database URI - unique per installation
-    try:
-        from config import Config
-        db_uri = Config.SQLALCHEMY_DATABASE_URI or ''
-        # Hash the DB URI for privacy
-        db_hash = hashlib.sha256(db_uri.encode()).hexdigest()[:16]
-        fingerprint_parts.append(f"db:{db_hash}")
-    except Exception:
-        fingerprint_parts.append("db:unknown")
+        # Add a random component for uniqueness (but save it for consistency)
+        random_file = os.path.join(os.path.dirname(INSTALLATION_ID_FILE), '.instance_random')
+        random_component = None
+        if os.path.exists(random_file):
+            try:
+                with open(random_file, 'r') as f:
+                    random_component = f.read().strip()
+            except Exception:
+                pass
+
+        if not random_component:
+            random_component = uuid.uuid4().hex[:16]
+            try:
+                data_dir = os.path.dirname(random_file)
+                if data_dir and not os.path.exists(data_dir):
+                    os.makedirs(data_dir, exist_ok=True)
+                with open(random_file, 'w') as f:
+                    f.write(random_component)
+            except Exception:
+                pass
+
+        fingerprint_parts.append(f"rand:{random_component}")
+
+    else:
+        # Bare-metal/VM: Use hardware identifiers
+        # MAC address - stable hardware identifier
+        try:
+            mac = uuid.getnode()
+            fingerprint_parts.append(f"mac:{mac}")
+        except Exception:
+            fingerprint_parts.append("mac:unknown")
+
+        # Hostname
+        try:
+            hostname = socket.gethostname()
+            fingerprint_parts.append(f"host:{hostname}")
+        except Exception:
+            fingerprint_parts.append("host:unknown")
+
+        # Database URI - unique per installation
+        try:
+            from config import Config
+            db_uri = Config.SQLALCHEMY_DATABASE_URI or ''
+            db_hash = hashlib.sha256(db_uri.encode()).hexdigest()[:16]
+            fingerprint_parts.append(f"db:{db_hash}")
+        except Exception:
+            fingerprint_parts.append("db:unknown")
 
     # Combine and create final hash
     fingerprint_string = '|'.join(fingerprint_parts)
@@ -419,8 +515,14 @@ def validate_license(license_key):
     license_info = LicenseInfo()
 
     try:
-        # Development key for testing
+        # Development key for testing - ONLY works in non-production environments
+        # Set SENTRIKAT_ENV=production to disable dev license key
+        is_production = os.environ.get('SENTRIKAT_ENV', '').lower() == 'production'
         if license_key == 'SENTRIKAT-DEV-PROFESSIONAL':
+            if is_production:
+                logger.warning("Attempted to use development license key in production mode")
+                license_info.error = 'Development license key is disabled in production'
+                return license_info
             license_info.edition = 'professional'
             license_info.customer = 'Development Mode'
             license_info.license_id = 'DEV-001'
@@ -432,7 +534,7 @@ def validate_license(license_key):
             license_info.max_agents = -1  # Unlimited agents in dev mode
             license_info.max_agent_api_keys = -1
             license_info.features = PROFESSIONAL_FEATURES + ['push_agents']
-            logger.info("Development license activated")
+            logger.info("Development license activated (non-production environment)")
             return license_info
 
         # Split license key into payload and signature
@@ -826,19 +928,36 @@ def get_installation_id_api():
         return jsonify({'error': 'Authentication required'}), 401
 
     installation_id = get_installation_id()
+    is_docker = _is_docker_environment()
+    is_from_env = bool(os.environ.get(INSTALLATION_ID_ENV_VAR))
 
     try:
         hostname = socket.gethostname()
     except Exception:
         hostname = 'Unknown'
 
-    return jsonify({
+    response = {
         'installation_id': installation_id,
         'hostname': hostname,
+        'is_docker': is_docker,
+        'is_from_environment': is_from_env,
         'instructions': (
             'To request a license:\n'
             '1. Copy your Installation ID above\n'
             '2. Send it to SentriKat sales with your company details\n'
             '3. You will receive a license key locked to this installation'
         )
-    })
+    }
+
+    # Add Docker-specific warning and instructions if needed
+    if is_docker and not is_from_env:
+        response['docker_warning'] = (
+            'WARNING: Docker detected without fixed Installation ID.\n'
+            'Your license may be lost when you rebuild the container.\n\n'
+            'To fix this, add to your .env file:\n'
+            f'SENTRIKAT_INSTALLATION_ID={installation_id}\n\n'
+            'Then rebuild: docker compose up -d --build\n'
+            'Your Installation ID will remain stable across future rebuilds.'
+        )
+
+    return jsonify(response)

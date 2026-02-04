@@ -16,18 +16,21 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.0.0"
+AGENT_VERSION="1.1.0"
 CONFIG_DIR="/etc/sentrikat"
 CONFIG_FILE="${CONFIG_DIR}/agent.conf"
 LOG_FILE="/var/log/sentrikat-agent.log"
 PID_FILE="/var/run/sentrikat-agent.pid"
 SYSTEMD_SERVICE="/etc/systemd/system/sentrikat-agent.service"
 SYSTEMD_TIMER="/etc/systemd/system/sentrikat-agent.timer"
+HEARTBEAT_SERVICE="/etc/systemd/system/sentrikat-heartbeat.service"
+HEARTBEAT_TIMER="/etc/systemd/system/sentrikat-heartbeat.timer"
 
 # Default settings
 SERVER_URL=""
 API_KEY=""
 INTERVAL_HOURS=4
+HEARTBEAT_MINUTES=5
 AGENT_ID=""
 
 # ============================================================================
@@ -114,6 +117,7 @@ save_config() {
 SERVER_URL="${SERVER_URL}"
 API_KEY="${API_KEY}"
 INTERVAL_HOURS=${INTERVAL_HOURS}
+HEARTBEAT_MINUTES=${HEARTBEAT_MINUTES}
 AGENT_ID="${AGENT_ID}"
 EOF
 
@@ -444,6 +448,74 @@ send_heartbeat() {
         --max-time 30 >/dev/null 2>&1
 }
 
+check_commands() {
+    # Poll the server for pending commands (heartbeat with command check)
+    local endpoint="${SERVER_URL}/api/agent/commands?agent_id=${AGENT_ID}&hostname=$(hostname)&version=${AGENT_VERSION}&platform=linux"
+
+    log_info "Checking for commands from server..."
+
+    local response
+    response=$(curl -s -X GET "$endpoint" \
+        -H "X-Agent-Key: $API_KEY" \
+        -H "Content-Type: application/json" \
+        --max-time 30 2>&1) || {
+        log_warn "Failed to check commands: connection error"
+        return 1
+    }
+
+    # Parse commands (basic parsing without jq dependency)
+    if echo "$response" | grep -q '"command": "scan_now"'; then
+        log_info "Received scan_now command - triggering immediate inventory scan"
+        return 0  # Return 0 to trigger scan
+    fi
+
+    if echo "$response" | grep -q '"command": "update_config"'; then
+        log_info "Received config update command"
+        # Extract new interval if present
+        local new_interval
+        new_interval=$(echo "$response" | grep -o '"scan_interval_minutes": [0-9]*' | grep -o '[0-9]*' | head -1)
+        if [[ -n "$new_interval" && "$new_interval" -ge 15 ]]; then
+            local new_hours=$((new_interval / 60))
+            if [[ $new_hours -gt 0 && $new_hours != "$INTERVAL_HOURS" ]]; then
+                log_info "Updating scan interval from ${INTERVAL_HOURS}h to ${new_hours}h"
+                INTERVAL_HOURS=$new_hours
+                save_config
+                # Update systemd timer if installed
+                if [[ -f "$SYSTEMD_TIMER" ]]; then
+                    update_systemd_timer
+                fi
+            fi
+        fi
+    fi
+
+    if echo "$response" | grep -q '"command": "update_available"'; then
+        local latest_version
+        latest_version=$(echo "$response" | grep -o '"latest_version": "[^"]*"' | cut -d'"' -f4)
+        log_warn "Agent update available: ${AGENT_VERSION} -> ${latest_version}"
+        log_info "Download from: ${SERVER_URL}/api/agent/download/linux"
+    fi
+
+    return 1  # No scan needed
+}
+
+update_systemd_timer() {
+    # Update the systemd timer with new interval
+    cat > "$SYSTEMD_TIMER" << EOF
+[Unit]
+Description=Run SentriKat Agent periodically
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=${INTERVAL_HOURS}h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload 2>/dev/null || true
+    log_info "Updated systemd timer to ${INTERVAL_HOURS}h interval"
+}
+
 # ============================================================================
 # Installation Functions
 # ============================================================================
@@ -465,7 +537,7 @@ install_agent() {
     cp "$0" "$script_dest"
     chmod 755 "$script_dest"
 
-    # Create systemd service
+    # Create systemd service for full inventory scan
     cat > "$SYSTEMD_SERVICE" << EOF
 [Unit]
 Description=SentriKat Software Inventory Agent
@@ -483,7 +555,7 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-    # Create systemd timer
+    # Create systemd timer for full inventory scan
     cat > "$SYSTEMD_TIMER" << EOF
 [Unit]
 Description=Run SentriKat Agent periodically
@@ -497,13 +569,49 @@ RandomizedDelaySec=10min
 WantedBy=timers.target
 EOF
 
-    # Enable and start timer
+    # Create systemd service for heartbeat/command polling
+    cat > "$HEARTBEAT_SERVICE" << EOF
+[Unit]
+Description=SentriKat Agent Heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sentrikat-agent --heartbeat
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Create systemd timer for heartbeat (every 5 minutes)
+    cat > "$HEARTBEAT_TIMER" << EOF
+[Unit]
+Description=SentriKat Agent Heartbeat Timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=${HEARTBEAT_MINUTES}min
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # Enable and start timers
     systemctl daemon-reload
     systemctl enable --now sentrikat-agent.timer
+    systemctl enable --now sentrikat-heartbeat.timer
 
     log_info "Agent installed successfully"
-    echo "SentriKat Agent installed and scheduled to run every ${INTERVAL_HOURS} hours"
-    echo "Run 'systemctl status sentrikat-agent.timer' to check status"
+    echo "SentriKat Agent installed:"
+    echo "  - Full scan: every ${INTERVAL_HOURS} hours"
+    echo "  - Heartbeat: every ${HEARTBEAT_MINUTES} minutes (checks for commands)"
+    echo "Run 'systemctl status sentrikat-agent.timer' to check scan status"
+    echo "Run 'systemctl status sentrikat-heartbeat.timer' to check heartbeat status"
 }
 
 uninstall_agent() {
@@ -514,12 +622,17 @@ uninstall_agent() {
         exit 1
     fi
 
-    # Stop and disable timer
+    # Stop and disable scan timer
     systemctl stop sentrikat-agent.timer 2>/dev/null || true
     systemctl disable sentrikat-agent.timer 2>/dev/null || true
 
+    # Stop and disable heartbeat timer
+    systemctl stop sentrikat-heartbeat.timer 2>/dev/null || true
+    systemctl disable sentrikat-heartbeat.timer 2>/dev/null || true
+
     # Remove systemd files
     rm -f "$SYSTEMD_SERVICE" "$SYSTEMD_TIMER"
+    rm -f "$HEARTBEAT_SERVICE" "$HEARTBEAT_TIMER"
     systemctl daemon-reload
 
     # Remove script
@@ -530,6 +643,27 @@ uninstall_agent() {
 
     log_info "Agent uninstalled"
     echo "SentriKat Agent uninstalled"
+}
+
+heartbeat_mode() {
+    # Heartbeat mode: check for commands and trigger scan if requested
+    log_info "Running heartbeat check..."
+
+    load_config
+
+    if [[ -z "$SERVER_URL" || -z "$API_KEY" ]]; then
+        log_error "SERVER_URL and API_KEY are required"
+        exit 1
+    fi
+
+    # Check for commands from server
+    if check_commands; then
+        # scan_now command received - run full inventory
+        log_info "Executing requested scan..."
+        main
+    else
+        log_info "Heartbeat complete - no scan requested"
+    fi
 }
 
 # ============================================================================
@@ -546,9 +680,10 @@ Options:
   --server-url URL     SentriKat server URL (required)
   --api-key KEY        Agent API key (required)
   --interval HOURS     Scan interval in hours (default: 4)
-  --install            Install as systemd service
+  --install            Install as systemd service (includes heartbeat timer)
   --uninstall          Uninstall agent
   --run-once           Run inventory collection once and exit
+  --heartbeat          Run heartbeat check (polls for commands)
   --verbose            Enable verbose output
   --help               Show this help message
 
@@ -556,8 +691,11 @@ Examples:
   # Run once for testing
   $0 --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx" --verbose
 
-  # Install as service
+  # Install as service (includes heartbeat every 5 min)
   sudo $0 --install --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
+
+  # Check for commands (used by heartbeat timer)
+  $0 --heartbeat
 
   # Uninstall
   sudo $0 --uninstall
@@ -606,6 +744,7 @@ main() {
 INSTALL=false
 UNINSTALL=false
 RUN_ONCE=false
+HEARTBEAT=false
 VERBOSE=false
 
 while [[ $# -gt 0 ]]; do
@@ -634,6 +773,10 @@ while [[ $# -gt 0 ]]; do
             RUN_ONCE=true
             shift
             ;;
+        --heartbeat)
+            HEARTBEAT=true
+            shift
+            ;;
         --verbose|-v)
             VERBOSE=true
             shift
@@ -659,6 +802,11 @@ fi
 
 if [[ "$UNINSTALL" == "true" ]]; then
     uninstall_agent
+    exit 0
+fi
+
+if [[ "$HEARTBEAT" == "true" ]]; then
+    heartbeat_mode
     exit 0
 fi
 

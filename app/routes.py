@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Application version
 APP_VERSION = "1.0.0"
+API_VERSION = "v1"  # API version for future versioned endpoints (/api/v1/...)
 APP_NAME = "SentriKat"
 
 bp = Blueprint('main', __name__)
@@ -91,9 +92,12 @@ def get_version():
     return jsonify({
         'name': APP_NAME,
         'version': APP_VERSION,
+        'api_version': API_VERSION,
         'edition': license_info.edition if license_info else 'community',
         'python': '3.11+',
-        'database': 'PostgreSQL'
+        'database': 'PostgreSQL',
+        'api_base': '/api',
+        'api_docs': '/docs/API.md'
     })
 
 
@@ -1417,6 +1421,50 @@ def get_vulnerabilities_grouped():
         # Get all matches
         matches = get_filtered_vulnerabilities(filters)
 
+        # Pre-fetch affected assets data in batch to avoid N+1 queries
+        from app.models import ProductInstallation, Asset
+        from sqlalchemy import func
+
+        # Collect all unique product_ids
+        product_ids = set()
+        for match in matches:
+            product_ids.add(match.product.id)
+
+        # Batch fetch asset counts for all products
+        asset_counts = {}
+        if product_ids:
+            count_results = db.session.query(
+                ProductInstallation.product_id,
+                func.count(ProductInstallation.id).label('count')
+            ).filter(
+                ProductInstallation.product_id.in_(product_ids)
+            ).group_by(ProductInstallation.product_id).all()
+            asset_counts = {r.product_id: r.count for r in count_results}
+
+        # Batch fetch sample assets (up to 10 per product) using window function
+        # We'll get all assets and limit per product in Python for simplicity
+        product_assets = defaultdict(list)
+        if product_ids:
+            asset_results = db.session.query(
+                ProductInstallation.product_id,
+                Asset.hostname,
+                Asset.ip_address,
+                Asset.asset_type
+            ).join(
+                Asset, Asset.id == ProductInstallation.asset_id
+            ).filter(
+                ProductInstallation.product_id.in_(product_ids),
+                Asset.active == True
+            ).all()
+            # Group by product_id, limit to 10 per product
+            for r in asset_results:
+                if len(product_assets[r.product_id]) < 10:
+                    product_assets[r.product_id].append({
+                        'hostname': r.hostname,
+                        'ip': r.ip_address,
+                        'type': r.asset_type
+                    })
+
         # Group by CVE ID
         cve_groups = defaultdict(lambda: {
             'vulnerability': None,
@@ -1438,6 +1486,10 @@ def get_vulnerabilities_grouped():
             if not match.acknowledged:
                 group['unacknowledged_count'] += 1
 
+            # Get pre-fetched asset data for this product
+            asset_list = product_assets.get(match.product.id, [])
+            asset_count = asset_counts.get(match.product.id, 0)
+
             group['affected_products'].append({
                 'match_id': match.id,
                 'product_id': match.product.id,
@@ -1447,7 +1499,9 @@ def get_vulnerabilities_grouped():
                 'effective_priority': effective_priority,
                 'acknowledged': match.acknowledged,
                 'match_method': match.match_method,
-                'match_confidence': match.match_confidence
+                'match_confidence': match.match_confidence,
+                'affected_assets': asset_list,
+                'affected_assets_count': asset_count
             })
 
         # Build results list
@@ -1460,17 +1514,37 @@ def get_vulnerabilities_grouped():
             max_priority_level = max(priority_order.get(p, 2) for p in group['priorities'])
             highest_priority = level_names.get(max_priority_level, 'medium')
 
+            # Calculate total affected assets across all products
+            total_affected_assets = sum(p.get('affected_assets_count', 0) for p in group['affected_products'])
+
             results.append({
                 'cve_id': cve_id,
                 'vulnerability': group['vulnerability'],
                 'highest_priority': highest_priority,
                 'affected_products': group['affected_products'],
                 'product_count': len(group['affected_products']),
-                'unacknowledged_count': group['unacknowledged_count']
+                'unacknowledged_count': group['unacknowledged_count'],
+                'total_affected_assets': total_affected_assets
             })
 
-        # Sort by highest priority (critical first), then by unacknowledged count
-        results.sort(key=lambda x: (-priority_order.get(x['highest_priority'], 2), -x['unacknowledged_count']))
+        # Sort by: 1) highest priority (critical first), 2) newest date_added, 3) unacknowledged count
+        def sort_key(x):
+            priority = -priority_order.get(x['highest_priority'], 2)
+            # Parse date_added for sorting (newest first = descending)
+            date_added = x['vulnerability'].get('date_added', '1970-01-01')
+            if isinstance(date_added, str):
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.fromisoformat(date_added.replace('Z', '+00:00'))
+                    date_sort = -date_obj.timestamp()
+                except:
+                    date_sort = 0
+            else:
+                date_sort = 0
+            unack = -x['unacknowledged_count']
+            return (priority, date_sort, unack)
+
+        results.sort(key=sort_key)
 
         # Apply search filter if provided
         search = request.args.get('search', '').lower()
@@ -1484,6 +1558,67 @@ def get_vulnerabilities_grouped():
         priority_filter = request.args.get('priority')
         if priority_filter:
             results = [r for r in results if r['highest_priority'] == priority_filter.lower()]
+
+        # Filter by CVE severity (CVSS-based)
+        severity_filter = request.args.get('severity')
+        if severity_filter:
+            results = [r for r in results if r['vulnerability'].get('severity') == severity_filter]
+
+        # Filter by CISA urgency (due date)
+        urgency_filter = request.args.get('urgency')
+        if urgency_filter:
+            from datetime import datetime, timedelta
+            today = datetime.utcnow().date()
+
+            def matches_urgency(r):
+                due_date_str = r['vulnerability'].get('due_date')
+                is_ransomware = r['vulnerability'].get('known_ransomware', False)
+
+                if not due_date_str:
+                    return False  # No due date means no urgency
+
+                try:
+                    due_date = datetime.fromisoformat(due_date_str.replace('Z', '+00:00')).date()
+                    days_until_due = (due_date - today).days
+                except:
+                    return False
+
+                if urgency_filter == 'critical':
+                    # Due within 7 days OR ransomware
+                    return days_until_due <= 7 or is_ransomware
+                elif urgency_filter == 'high':
+                    # Due within 30 days
+                    return days_until_due <= 30
+                elif urgency_filter == 'has_due_date':
+                    return True  # Has any due date
+                return True
+
+            results = [r for r in results if matches_urgency(r)]
+
+        # Filter by age (days since added)
+        age_filter = request.args.get('age')
+        if age_filter:
+            try:
+                max_days = int(age_filter)
+                results = [r for r in results if (r['vulnerability'].get('days_old') or 0) <= max_days]
+            except ValueError:
+                pass
+
+        # Filter by vendor
+        vendor_filter = request.args.get('vendor', '').lower()
+        if vendor_filter:
+            results = [r for r in results if any(
+                vendor_filter in (p.get('vendor', '') or '').lower()
+                for p in r['affected_products']
+            )]
+
+        # Filter by product name
+        product_filter = request.args.get('product', '').lower()
+        if product_filter:
+            results = [r for r in results if any(
+                product_filter in (p.get('product_name', '') or '').lower()
+                for p in r['affected_products']
+            )]
 
         # Pagination
         page = max(int(request.args.get('page', 1)), 1)
@@ -1995,6 +2130,65 @@ def sync_history():
     limit = request.args.get('limit', 10, type=int)
     syncs = SyncLog.query.order_by(SyncLog.sync_date.desc()).limit(limit).all()
     return jsonify([s.to_dict() for s in syncs])
+
+
+@bp.route('/api/sync/epss', methods=['POST'])
+@admin_required
+@limiter.limit("5/minute")
+def sync_epss():
+    """
+    Manually trigger EPSS (Exploit Prediction Scoring System) sync.
+
+    Fetches exploit probability scores from FIRST.org for all vulnerabilities.
+
+    Query Parameters:
+        force: If 'true', refresh all scores regardless of age
+
+    Permissions:
+        - Admin only
+    """
+    from app.epss_sync import sync_epss_scores
+
+    force = request.args.get('force', '').lower() == 'true'
+
+    try:
+        updated, errors, message = sync_epss_scores(force=force)
+        return jsonify({
+            'success': True,
+            'updated': updated,
+            'errors': errors,
+            'message': message
+        })
+    except Exception as e:
+        logger.exception("EPSS sync failed")
+        return jsonify({
+            'success': False,
+            'error': f'EPSS sync failed: {str(e)}'
+        }), 500
+
+
+@bp.route('/api/sync/epss/status', methods=['GET'])
+@login_required
+def epss_status():
+    """Get EPSS sync status - how many CVEs have scores, when last updated."""
+    from app.models import Vulnerability
+    from sqlalchemy import func
+
+    total_vulns = Vulnerability.query.count()
+    with_epss = Vulnerability.query.filter(Vulnerability.epss_score.isnot(None)).count()
+    last_fetch = db.session.query(func.max(Vulnerability.epss_fetched_at)).scalar()
+
+    # Get score distribution
+    high_risk = Vulnerability.query.filter(Vulnerability.epss_percentile >= 0.85).count()
+
+    return jsonify({
+        'total_vulnerabilities': total_vulns,
+        'with_epss_scores': with_epss,
+        'without_epss_scores': total_vulns - with_epss,
+        'high_risk_count': high_risk,  # EPSS percentile >= 85%
+        'last_sync': last_fetch.isoformat() if last_fetch else None,
+        'coverage_percent': round((with_epss / total_vulns * 100), 1) if total_vulns > 0 else 0
+    })
 
 
 @bp.route('/api/sync/test-connection', methods=['POST'])

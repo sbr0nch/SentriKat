@@ -98,7 +98,7 @@ CPE_MAPPINGS = [
     ('regex', r'^jetbrains\s*phpstorm', 'jetbrains', 'phpstorm'),
     ('regex', r'^eclipse', 'eclipse', 'eclipse_ide'),
     ('regex', r'^sublime\s*text', 'sublimehq', 'sublime_text'),
-    ('regex', r'^notepad\+\+', 'notepad-plus-plus', 'notepad\\+\\+'),
+    ('regex', r'^notepad\+\+', 'notepad-plus-plus', 'notepad++'),
     ('regex', r'^atom\s*(editor)?', 'atom', 'atom'),
     ('regex', r'^postman', 'postman', 'postman'),
     ('regex', r'^docker\s*desktop', 'docker', 'desktop'),

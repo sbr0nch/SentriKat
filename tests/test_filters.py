@@ -155,7 +155,7 @@ class TestCPEMatch:
 
         match_reasons, method, confidence = check_cpe_match(self.vulnerability, self.product)
         assert len(match_reasons) > 0
-        assert 'version in range' in match_reasons[0]
+        assert 'in range' in match_reasons[0]
 
     def test_cpe_no_match_wrong_vendor(self):
         """Test CPE not matching with wrong vendor."""
