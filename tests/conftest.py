@@ -25,6 +25,7 @@ class TestConfig:
     SQLALCHEMY_ENGINE_OPTIONS = {}  # No PostgreSQL-specific options
     TESTING = True
     WTF_CSRF_ENABLED = False
+    RATELIMIT_ENABLED = False  # Disable rate limiting in tests
     SENTRIKAT_URL = 'http://localhost:5000'
     CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
     SYNC_HOUR = 2
@@ -74,7 +75,7 @@ def db_session(app):
 def test_org(db_session):
     """Create a test organization."""
     from app.models import Organization
-    org = Organization(name='Test Organization', is_active=True)
+    org = Organization(name='Test Organization', display_name='Test Organization', active=True)
     db_session.add(org)
     db_session.commit()
     return org
@@ -88,10 +89,12 @@ def test_user(db_session, test_org):
 
     user = User(
         username='testuser',
+        email='testuser@test.local',
         password_hash=generate_password_hash('testpass123'),
         role='user',
         organization_id=test_org.id,
-        is_active=True
+        is_active=True,
+        auth_type='local'
     )
     db_session.add(user)
     db_session.commit()
@@ -106,10 +109,13 @@ def admin_user(db_session, test_org):
 
     user = User(
         username='adminuser',
+        email='adminuser@test.local',
         password_hash=generate_password_hash('adminpass123'),
         role='super_admin',
+        is_admin=True,
         organization_id=test_org.id,
-        is_active=True
+        is_active=True,
+        auth_type='local'
     )
     db_session.add(user)
     db_session.commit()
