@@ -8106,7 +8106,17 @@ function renderJiraCustomFields(fields, savedValues, container, requiredCount, n
         <tbody>`;
 
     fields.forEach(field => {
-        const savedValue = savedValues[field.key] || '';
+        // Handle both old format (plain string) and new format ({value, type})
+        let savedValue = '';
+        const savedData = savedValues[field.key];
+        if (savedData) {
+            if (typeof savedData === 'object' && savedData.value !== undefined) {
+                savedValue = savedData.value;
+            } else if (typeof savedData === 'string') {
+                savedValue = savedData;
+            }
+        }
+
         const requiredBadge = field.required ? '<span class="badge bg-danger ms-1">Required</span>' : '';
 
         html += `<tr>
@@ -8121,7 +8131,7 @@ function renderJiraCustomFields(fields, savedValues, container, requiredCount, n
             html += `<select class="form-select form-select-sm jira-custom-field" data-field-key="${field.key}" data-field-type="${field.type}">
                 <option value="">-- Select --</option>`;
             field.allowedValues.forEach(av => {
-                const selected = savedValue === av.id ? 'selected' : '';
+                const selected = savedValue === av.id || savedValue === String(av.id) ? 'selected' : '';
                 html += `<option value="${av.id}" ${selected}>${av.name}</option>`;
             });
             html += `</select>`;
@@ -8169,8 +8179,13 @@ function updateJiraCustomFieldsJson() {
     container.querySelectorAll('.jira-custom-field').forEach(input => {
         const key = input.dataset.fieldKey;
         const value = input.value;
+        const fieldType = input.dataset.fieldType || 'text';
         if (key && value) {
-            customFields[key] = value;
+            // Store both value and type so backend knows how to format it
+            customFields[key] = {
+                value: value,
+                type: fieldType
+            };
         }
     });
 

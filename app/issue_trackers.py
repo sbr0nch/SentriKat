@@ -433,24 +433,56 @@ class JiraTracker(IssueTrackerBase):
 
             # Add custom fields if provided
             if custom_fields:
-                for field_key, field_value in custom_fields.items():
-                    if field_value is not None and field_value != '':
-                        # Handle different field value formats
-                        if isinstance(field_value, dict):
-                            # Already formatted (e.g., {'id': '123'} or {'value': 'xyz'})
-                            issue_data['fields'][field_key] = field_value
-                        elif isinstance(field_value, list):
-                            # Multi-select: list of IDs or values
-                            issue_data['fields'][field_key] = [
-                                {'id': v} if isinstance(v, str) and not v.startswith('{') else v
-                                for v in field_value
-                            ]
-                        elif field_key.startswith('customfield_'):
-                            # Custom fields often need ID wrapper for select types
-                            # Try to detect if it's a select field by value format
+                for field_key, field_info in custom_fields.items():
+                    if field_info is None:
+                        continue
+
+                    # Handle new format: {value: X, type: Y}
+                    if isinstance(field_info, dict) and 'value' in field_info:
+                        field_value = field_info.get('value')
+                        field_type = field_info.get('type', 'text')
+
+                        if not field_value:
+                            continue
+
+                        # Format based on field type
+                        if field_type in ('multi-select', 'array'):
+                            # Multi-select fields need array format: [{'id': 'value'}]
+                            issue_data['fields'][field_key] = [{'id': str(field_value)}]
+                        elif field_type in ('select', 'option'):
+                            # Single select: {'id': 'value'}
                             issue_data['fields'][field_key] = {'id': str(field_value)}
+                        elif field_type == 'date':
+                            # Date fields: plain string in YYYY-MM-DD format
+                            issue_data['fields'][field_key] = str(field_value)
+                        elif field_type == 'datetime':
+                            # Datetime fields: ISO format string
+                            issue_data['fields'][field_key] = str(field_value)
+                        elif field_type == 'number':
+                            # Number fields: numeric value
+                            try:
+                                issue_data['fields'][field_key] = float(field_value)
+                            except (ValueError, TypeError):
+                                issue_data['fields'][field_key] = str(field_value)
                         else:
-                            issue_data['fields'][field_key] = field_value
+                            # Text and other fields: plain value or ID wrapper for custom fields
+                            if field_key.startswith('customfield_'):
+                                issue_data['fields'][field_key] = {'id': str(field_value)}
+                            else:
+                                issue_data['fields'][field_key] = str(field_value)
+
+                    # Handle old format: plain value (backward compatibility)
+                    elif isinstance(field_info, str) and field_info:
+                        if field_key.startswith('customfield_'):
+                            issue_data['fields'][field_key] = {'id': str(field_info)}
+                        else:
+                            issue_data['fields'][field_key] = field_info
+
+                    # Handle already formatted values
+                    elif isinstance(field_info, list):
+                        issue_data['fields'][field_key] = [
+                            {'id': v} if isinstance(v, str) else v for v in field_info
+                        ]
 
             response = requests.post(
                 self._api_url('issue'),
