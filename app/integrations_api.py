@@ -1560,9 +1560,10 @@ def test_issue_tracker():
             url = data.get('url', '').strip()
             email = data.get('email', '').strip()
             api_token = data.get('api_token', '').strip()
+            use_pat = data.get('use_pat', False)  # Use Personal Access Token (Bearer auth)
             if not all([url, email, api_token]):
                 return jsonify({'success': False, 'error': 'URL, email, and API token required'}), 400
-            tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl)
+            tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
 
         elif tracker_type == 'youtrack':
             url = data.get('url', '').strip()

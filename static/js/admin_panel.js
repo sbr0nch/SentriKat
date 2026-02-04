@@ -7838,6 +7838,12 @@ function showTrackerConfig(trackerType) {
             jiraUrlInput.addEventListener('input', updateJiraLabels);
             jiraUrlInput.setAttribute('data-listener-added', 'true');
         }
+        // Setup PAT checkbox listener
+        const patCheckbox = SK.DOM.get('jiraUsePat');
+        if (patCheckbox && !patCheckbox.hasAttribute('data-listener-added')) {
+            patCheckbox.addEventListener('change', updateJiraLabels);
+            patCheckbox.setAttribute('data-listener-added', 'true');
+        }
         updateJiraLabels();
     }
 }
@@ -7854,6 +7860,8 @@ function updateJiraLabels() {
     const tokenHelpServer = SK.DOM.get('jiraTokenHelpServer');
     const emailInput = SK.DOM.get('jiraEmail');
     const tokenInput = SK.DOM.get('jiraApiToken');
+    const patRow = SK.DOM.get('jiraPatRow');
+    const patCheckbox = SK.DOM.get('jiraUsePat');
 
     if (isCloud) {
         // Jira Cloud - use email and API token
@@ -7864,15 +7872,26 @@ function updateJiraLabels() {
         if (tokenHelpServer) tokenHelpServer.style.display = 'none';
         if (emailInput) emailInput.placeholder = 'user@example.com';
         if (tokenInput) tokenInput.placeholder = 'API token';
+        // Hide PAT option for Cloud (not needed)
+        if (patRow) patRow.style.display = 'none';
+        if (patCheckbox) patCheckbox.checked = false;
     } else if (jiraUrl) {
-        // Jira Server - use username and password
+        // Jira Server - use username and password/PAT
         if (emailLabel) emailLabel.textContent = 'Username';
-        if (tokenLabel) tokenLabel.textContent = 'Password';
         if (emailHelp) emailHelp.textContent = 'Your Jira Server account username';
         if (tokenHelpCloud) tokenHelpCloud.style.display = 'none';
         if (tokenHelpServer) tokenHelpServer.style.display = 'inline';
         if (emailInput) emailInput.placeholder = 'jira_username';
-        if (tokenInput) tokenInput.placeholder = 'Password';
+        // Show PAT option for Server
+        if (patRow) patRow.style.display = 'block';
+        // Update label based on PAT checkbox
+        if (patCheckbox && patCheckbox.checked) {
+            if (tokenLabel) tokenLabel.textContent = 'Personal Access Token';
+            if (tokenInput) tokenInput.placeholder = 'Personal Access Token';
+        } else {
+            if (tokenLabel) tokenLabel.textContent = 'Password';
+            if (tokenInput) tokenInput.placeholder = 'Password';
+        }
     } else {
         // No URL yet - show combined labels
         if (emailLabel) emailLabel.textContent = 'Email (Cloud) or Username (Server)';
@@ -7882,6 +7901,7 @@ function updateJiraLabels() {
         if (tokenHelpServer) tokenHelpServer.style.display = 'none';
         if (emailInput) emailInput.placeholder = 'user@example.com';
         if (tokenInput) tokenInput.placeholder = 'API token or password';
+        if (patRow) patRow.style.display = 'none';
     }
 }
 
@@ -7902,6 +7922,9 @@ async function loadIssueTrackerSettings() {
             SK.DOM.setValue('jiraEmail', config.email || '');
             SK.DOM.setValue('jiraProjectKey', config.project_key || '');
             SK.DOM.setValue('jiraIssueType', config.issue_type || 'Task');
+            // Set PAT checkbox
+            const patCheckbox = SK.DOM.get('jiraUsePat');
+            if (patCheckbox) patCheckbox.checked = config.use_pat === true;
             // Update labels based on Cloud vs Server after URL is set
             updateJiraLabels();
         } else if (config.type === 'youtrack') {
@@ -7937,6 +7960,9 @@ async function saveIssueTrackerSettings() {
         settings.jira_email = SK.DOM.getValue('jiraEmail');
         settings.jira_project_key = SK.DOM.getValue('jiraProjectKey');
         settings.jira_issue_type = SK.DOM.getValue('jiraIssueType');
+        // Save PAT checkbox
+        const patCheckbox = SK.DOM.get('jiraUsePat');
+        settings.jira_use_pat = patCheckbox && patCheckbox.checked ? 'true' : 'false';
         const token = SK.DOM.getValue('jiraApiToken');
         if (token) {
             settings.jira_api_token = token;
@@ -8026,10 +8052,13 @@ async function testIssueTrackerConnection() {
         testData.url = SK.DOM.getValue('jiraUrl');
         testData.email = SK.DOM.getValue('jiraEmail');
         testData.api_token = SK.DOM.getValue('jiraApiToken');
+        // Include PAT checkbox for Jira Server
+        const patCheckbox = SK.DOM.get('jiraUsePat');
+        testData.use_pat = patCheckbox && patCheckbox.checked;
         if (!testData.url || !testData.email || !testData.api_token) {
             resultDiv.style.display = 'block';
             alertDiv.className = 'alert alert-warning';
-            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL, email, and API token.';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL, username, and token/password.';
             return;
         }
     } else if (trackerType === 'youtrack') {

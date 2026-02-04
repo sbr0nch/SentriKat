@@ -58,15 +58,22 @@ class IssueTrackerBase(ABC):
 class JiraTracker(IssueTrackerBase):
     """Jira Cloud and Server integration."""
 
-    def __init__(self, url: str, email: str, api_token: str, verify_ssl: bool = True):
+    def __init__(self, url: str, email: str, api_token: str, verify_ssl: bool = True, use_pat: bool = False):
         self.base_url = url.rstrip('/')
         self.email = email.strip()
         self.api_token = api_token.strip()  # Strip whitespace to avoid auth failures
         self.is_cloud = 'atlassian.net' in url.lower()
         self.verify_ssl = verify_ssl
+        self.use_pat = use_pat  # Use Bearer token auth for Personal Access Tokens
 
-        auth_str = f"{self.email}:{self.api_token}"
-        self.auth_header = f"Basic {base64.b64encode(auth_str.encode()).decode()}"
+        if use_pat and not self.is_cloud:
+            # Jira Server with PAT uses Bearer token authentication
+            self.auth_header = f"Bearer {self.api_token}"
+        else:
+            # Jira Cloud or Server with password uses Basic auth
+            auth_str = f"{self.email}:{self.api_token}"
+            self.auth_header = f"Basic {base64.b64encode(auth_str.encode()).decode()}"
+
         self.api_version = '3' if self.is_cloud else '2'
 
     def get_tracker_name(self) -> str:
@@ -550,9 +557,11 @@ def get_issue_tracker() -> Optional[IssueTrackerBase]:
             email = get_setting('jira_email', '')
             # get_setting() returns decrypted value for encrypted settings
             token = get_setting('jira_api_token', '')
+            # Check if using Personal Access Token (Bearer auth) for Jira Server
+            use_pat = get_setting('jira_use_pat', 'false') == 'true'
             if not all([url, email, token]):
                 return None
-            return JiraTracker(url, email, token, verify_ssl=verify_ssl)
+            return JiraTracker(url, email, token, verify_ssl=verify_ssl, use_pat=use_pat)
 
         elif tracker_type == 'youtrack':
             url = get_setting('youtrack_url', '')
@@ -612,7 +621,8 @@ def get_issue_tracker_config() -> Dict[str, Any]:
             'url': get_setting('jira_url', ''),
             'email': get_setting('jira_email', ''),
             'project_key': get_setting('jira_project_key', ''),
-            'issue_type': get_setting('jira_issue_type', 'Task')
+            'issue_type': get_setting('jira_issue_type', 'Task'),
+            'use_pat': get_setting('jira_use_pat', 'false') == 'true'
         })
     elif tracker_type == 'youtrack':
         config.update({
