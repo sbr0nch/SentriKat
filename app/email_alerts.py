@@ -404,10 +404,17 @@ class EmailAlertManager:
             days_until_due = (vuln.due_date - date.today()).days if vuln.due_date else None
 
             # Urgency indicator
-            if days_until_due is not None and days_until_due <= 7:
-                urgency_html = f'<span style="background: #fef2f2; color: #991b1b; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">Due in {days_until_due} days</span>'
-            elif days_until_due is not None:
-                urgency_html = f'<span style="color: #6b7280; font-size: 11px;">Due: {vuln.due_date}</span>'
+            if days_until_due is not None:
+                if days_until_due < 0:
+                    # OVERDUE - past due date
+                    overdue_days = abs(days_until_due)
+                    urgency_html = f'<span style="background: #7f1d1d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">⚠️ OVERDUE by {overdue_days} days</span>'
+                elif days_until_due == 0:
+                    urgency_html = '<span style="background: #dc2626; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">⚠️ DUE TODAY</span>'
+                elif days_until_due <= 7:
+                    urgency_html = f'<span style="background: #fef2f2; color: #991b1b; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">Due in {days_until_due} days</span>'
+                else:
+                    urgency_html = f'<span style="color: #6b7280; font-size: 11px;">Due: {vuln.due_date}</span>'
             else:
                 urgency_html = ''
 
