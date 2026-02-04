@@ -212,6 +212,11 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
     """
     from app.integrations_models import ImportQueue
 
+    # Skip irrelevant software before queuing (don't flood import queue with junk)
+    if _should_skip_software(vendor, product_name):
+        logger.debug(f"Skipping irrelevant software from import queue: {vendor} {product_name}")
+        return False
+
     try:
         # Check if already in queue (avoid duplicates)
         existing = ImportQueue.query.filter_by(
@@ -1175,6 +1180,16 @@ def report_inventory():
             version = product_data.get('version')
 
             if not vendor or not product_name:
+                continue
+
+            # Skip irrelevant software (documentation, debug symbols, fonts, etc.)
+            if _should_skip_software(vendor, product_name):
+                continue
+
+            # Skip products that have been explicitly excluded by admin
+            from app.models import ProductExclusion
+            if ProductExclusion.is_excluded(organization.id, vendor, product_name, version):
+                logger.debug(f"Skipping excluded product: {vendor} {product_name}")
                 continue
 
             # Find or create product

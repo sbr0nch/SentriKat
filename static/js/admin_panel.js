@@ -8088,6 +8088,12 @@ async function fetchJiraCustomFields() {
 function renderJiraCustomFields(fields, savedValues, container, requiredCount, note) {
     if (!container) return;
 
+    // Helper to escape HTML attribute values (handles quotes)
+    const escapeAttr = (str) => {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    };
+
     if (!fields || fields.length === 0) {
         container.innerHTML = `<div class="alert alert-warning py-2 mb-0">
             <i class="bi bi-exclamation-triangle me-1"></i>
@@ -8098,8 +8104,8 @@ function renderJiraCustomFields(fields, savedValues, container, requiredCount, n
 
     let html = `<div class="alert alert-info py-2 mb-2">
         <i class="bi bi-info-circle me-1"></i>
-        Found ${fields.length} fields (${requiredCount} marked as required).
-        ${note ? '<br><small>' + note + '</small>' : ''}
+        Found ${escapeHtml(String(fields.length))} fields (${escapeHtml(String(requiredCount))} marked as required).
+        ${note ? '<br><small>' + escapeHtml(note) + '</small>' : ''}
     </div>`;
 
     html += `<div class="table-responsive"><table class="table table-sm table-borderless mb-0">
@@ -8121,36 +8127,36 @@ function renderJiraCustomFields(fields, savedValues, container, requiredCount, n
 
         html += `<tr>
             <td class="fw-semibold" style="width: 35%; vertical-align: middle;">
-                ${field.name}${requiredBadge}
-                <br><small class="text-muted">${field.key}</small>
+                ${escapeHtml(field.name)}${requiredBadge}
+                <br><small class="text-muted">${escapeHtml(field.key)}</small>
             </td>
             <td>`;
 
         if (field.allowedValues && field.allowedValues.length > 0) {
             // Dropdown for fields with allowed values
-            html += `<select class="form-select form-select-sm jira-custom-field" data-field-key="${field.key}" data-field-type="${field.type}">
+            html += `<select class="form-select form-select-sm jira-custom-field" data-field-key="${escapeAttr(field.key)}" data-field-type="${escapeAttr(field.type)}">
                 <option value="">-- Select --</option>`;
             field.allowedValues.forEach(av => {
                 const selected = savedValue === av.id || savedValue === String(av.id) ? 'selected' : '';
-                html += `<option value="${av.id}" ${selected}>${av.name}</option>`;
+                html += `<option value="${escapeAttr(av.id)}" ${selected}>${escapeHtml(av.name)}</option>`;
             });
             html += `</select>`;
         } else if (field.type === 'date') {
             // Date picker
             html += `<input type="date" class="form-control form-control-sm jira-custom-field"
-                data-field-key="${field.key}" data-field-type="date" value="${savedValue}">`;
+                data-field-key="${escapeAttr(field.key)}" data-field-type="date" value="${escapeAttr(savedValue)}">`;
         } else if (field.type === 'datetime') {
             // Datetime picker
             html += `<input type="datetime-local" class="form-control form-control-sm jira-custom-field"
-                data-field-key="${field.key}" data-field-type="datetime" value="${savedValue}">`;
+                data-field-key="${escapeAttr(field.key)}" data-field-type="datetime" value="${escapeAttr(savedValue)}">`;
         } else if (field.type === 'number') {
             // Number input
             html += `<input type="number" class="form-control form-control-sm jira-custom-field"
-                data-field-key="${field.key}" data-field-type="number" value="${savedValue}">`;
+                data-field-key="${escapeAttr(field.key)}" data-field-type="number" value="${escapeAttr(savedValue)}">`;
         } else {
             // Text input (default)
             html += `<input type="text" class="form-control form-control-sm jira-custom-field"
-                data-field-key="${field.key}" data-field-type="text" value="${savedValue}"
+                data-field-key="${escapeAttr(field.key)}" data-field-type="text" value="${escapeAttr(savedValue)}"
                 placeholder="Enter value...">`;
         }
 

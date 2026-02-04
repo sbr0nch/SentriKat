@@ -1421,6 +1421,50 @@ def get_vulnerabilities_grouped():
         # Get all matches
         matches = get_filtered_vulnerabilities(filters)
 
+        # Pre-fetch affected assets data in batch to avoid N+1 queries
+        from app.models import ProductInstallation, Asset
+        from sqlalchemy import func
+
+        # Collect all unique product_ids
+        product_ids = set()
+        for match in matches:
+            product_ids.add(match.product.id)
+
+        # Batch fetch asset counts for all products
+        asset_counts = {}
+        if product_ids:
+            count_results = db.session.query(
+                ProductInstallation.product_id,
+                func.count(ProductInstallation.id).label('count')
+            ).filter(
+                ProductInstallation.product_id.in_(product_ids)
+            ).group_by(ProductInstallation.product_id).all()
+            asset_counts = {r.product_id: r.count for r in count_results}
+
+        # Batch fetch sample assets (up to 10 per product) using window function
+        # We'll get all assets and limit per product in Python for simplicity
+        product_assets = defaultdict(list)
+        if product_ids:
+            asset_results = db.session.query(
+                ProductInstallation.product_id,
+                Asset.hostname,
+                Asset.ip_address,
+                Asset.asset_type
+            ).join(
+                Asset, Asset.id == ProductInstallation.asset_id
+            ).filter(
+                ProductInstallation.product_id.in_(product_ids),
+                Asset.active == True
+            ).all()
+            # Group by product_id, limit to 10 per product
+            for r in asset_results:
+                if len(product_assets[r.product_id]) < 10:
+                    product_assets[r.product_id].append({
+                        'hostname': r.hostname,
+                        'ip': r.ip_address,
+                        'type': r.asset_type
+                    })
+
         # Group by CVE ID
         cve_groups = defaultdict(lambda: {
             'vulnerability': None,
@@ -1442,16 +1486,9 @@ def get_vulnerabilities_grouped():
             if not match.acknowledged:
                 group['unacknowledged_count'] += 1
 
-            # Get affected assets for this product
-            from app.models import ProductInstallation, Asset
-            affected_assets = db.session.query(Asset.hostname, Asset.ip_address, Asset.asset_type)\
-                .join(ProductInstallation, Asset.id == ProductInstallation.asset_id)\
-                .filter(ProductInstallation.product_id == match.product.id)\
-                .filter(Asset.active == True)\
-                .limit(10).all()
-
-            asset_list = [{'hostname': a.hostname, 'ip': a.ip_address, 'type': a.asset_type} for a in affected_assets]
-            asset_count = ProductInstallation.query.filter_by(product_id=match.product.id).count()
+            # Get pre-fetched asset data for this product
+            asset_list = product_assets.get(match.product.id, [])
+            asset_count = asset_counts.get(match.product.id, 0)
 
             group['affected_products'].append({
                 'match_id': match.id,
