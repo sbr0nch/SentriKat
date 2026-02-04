@@ -1544,12 +1544,16 @@ def test_issue_tracker():
     from app.issue_trackers import (
         JiraTracker, YouTrackTracker, GitHubTracker, GitLabTracker, WebhookTracker
     )
+    from app.settings_api import get_setting
 
     data = request.get_json()
     tracker_type = data.get('type', 'disabled')
 
     if tracker_type == 'disabled':
         return jsonify({'success': False, 'error': 'No tracker type specified'}), 400
+
+    # Get SSL verification setting
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
 
     try:
         if tracker_type == 'jira':
@@ -1558,7 +1562,7 @@ def test_issue_tracker():
             api_token = data.get('api_token', '').strip()
             if not all([url, email, api_token]):
                 return jsonify({'success': False, 'error': 'URL, email, and API token required'}), 400
-            tracker = JiraTracker(url, email, api_token)
+            tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl)
 
         elif tracker_type == 'youtrack':
             url = data.get('url', '').strip()

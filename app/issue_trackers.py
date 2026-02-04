@@ -58,11 +58,12 @@ class IssueTrackerBase(ABC):
 class JiraTracker(IssueTrackerBase):
     """Jira Cloud and Server integration."""
 
-    def __init__(self, url: str, email: str, api_token: str):
+    def __init__(self, url: str, email: str, api_token: str, verify_ssl: bool = True):
         self.base_url = url.rstrip('/')
         self.email = email
         self.api_token = api_token
         self.is_cloud = 'atlassian.net' in url.lower()
+        self.verify_ssl = verify_ssl
 
         auth_str = f"{email}:{api_token}"
         self.auth_header = f"Basic {base64.b64encode(auth_str.encode()).decode()}"
@@ -86,7 +87,8 @@ class JiraTracker(IssueTrackerBase):
             response = requests.get(
                 self._api_url('myself'),
                 headers=self._get_headers(),
-                timeout=10
+                timeout=10,
+                verify=self.verify_ssl
             )
             if response.status_code == 200:
                 user = response.json()
@@ -96,6 +98,8 @@ class JiraTracker(IssueTrackerBase):
                 return False, "Authentication failed - check email and API token"
             else:
                 return False, f"Connection failed: HTTP {response.status_code}"
+        except requests.exceptions.SSLError as e:
+            return False, f"SSL certificate error: {str(e)}. Try disabling SSL verification in General Settings."
         except requests.RequestException as e:
             return False, f"Connection error: {str(e)}"
 
@@ -138,7 +142,8 @@ class JiraTracker(IssueTrackerBase):
                 self._api_url('issue'),
                 headers=self._get_headers(),
                 json=issue_data,
-                timeout=15
+                timeout=15,
+                verify=self.verify_ssl
             )
 
             if response.status_code in (200, 201):
@@ -536,6 +541,9 @@ def get_issue_tracker() -> Optional[IssueTrackerBase]:
     if tracker_type == 'disabled':
         return None
 
+    # Get SSL verification setting (used by trackers that support it)
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+
     try:
         if tracker_type == 'jira':
             url = get_setting('jira_url', '')
@@ -544,7 +552,7 @@ def get_issue_tracker() -> Optional[IssueTrackerBase]:
             token = get_setting('jira_api_token', '')
             if not all([url, email, token]):
                 return None
-            return JiraTracker(url, email, token)
+            return JiraTracker(url, email, token, verify_ssl=verify_ssl)
 
         elif tracker_type == 'youtrack':
             url = get_setting('youtrack_url', '')
