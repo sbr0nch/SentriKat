@@ -101,7 +101,7 @@ SOFTWARE_TO_CPE_MAPPINGS: Dict[str, Tuple[str, str, float]] = {
     'datagrip': ('jetbrains', 'datagrip', 0.95),
     'rubymine': ('jetbrains', 'rubymine', 0.95),
     'clion': ('jetbrains', 'clion', 0.95),
-    'notepad++': ('notepad-plus-plus', 'notepad\\+\\+', 0.95),
+    'notepad++': ('notepad-plus-plus', 'notepad++', 0.95),
     'sublime text': ('sublimetext', 'sublime_text', 0.95),
     'atom': ('atom', 'atom', 0.85),
     'vim': ('vim', 'vim', 0.90),

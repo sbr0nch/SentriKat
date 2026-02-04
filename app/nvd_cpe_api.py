@@ -24,12 +24,12 @@ from app.nvd_rate_limiter import get_rate_limiter
 logger = logging.getLogger(__name__)
 
 
-# In-memory cache for CPE searches (15-minute TTL)
+# In-memory cache for CPE searches (24-hour TTL - CPE database changes infrequently)
 _cpe_cache: Dict[str, Tuple[List[Dict], datetime]] = {}
 _cache_lock = Lock()
 
-# Cache TTL (15 minutes)
-CACHE_TTL_MINUTES = 15
+# Cache TTL (24 hours - CPE dictionary rarely changes)
+CACHE_TTL_MINUTES = 1440
 
 
 def _get_api_key() -> Optional[str]:

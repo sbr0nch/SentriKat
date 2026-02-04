@@ -786,3 +786,168 @@ def user_mapping_stats():
 
     stats = get_user_mapping_stats()
     return jsonify(stats)
+
+
+@bp.route('/coverage', methods=['GET'])
+@manager_required
+def cpe_coverage_dashboard():
+    """
+    Get CPE coverage statistics for the organization.
+
+    Returns comprehensive stats about:
+    - Overall CPE coverage percentage
+    - Products without CPE
+    - Top unmapped vendors
+    - Mapping source breakdown
+
+    Query params:
+        org_id: Organization ID filter (optional)
+    """
+    from sqlalchemy import func
+    from app.models import Organization
+    from app.cpe_mapping import get_cpe_coverage_stats, suggest_cpe_for_products
+    from app.cpe_mappings import get_user_mapping_stats
+
+    org_id = request.args.get('org_id', type=int)
+
+    # Base query
+    query = Product.query
+    if org_id:
+        query = query.filter(Product.organization_id == org_id)
+
+    # Overall stats
+    total_products = query.count() or 0
+    with_cpe = query.filter(
+        Product.cpe_vendor.isnot(None),
+        Product.cpe_vendor != '',
+        Product.cpe_product.isnot(None),
+        Product.cpe_product != ''
+    ).count() or 0
+    without_cpe = total_products - with_cpe
+
+    coverage_percent = round((with_cpe / total_products * 100) if total_products > 0 else 0, 1)
+
+    # Match type breakdown
+    match_type_stats = {}
+    for match_type in ['auto', 'cpe', 'keyword', 'both', None]:
+        if match_type is None:
+            count = query.filter(Product.match_type.is_(None)).count()
+            match_type_stats['unset'] = count
+        else:
+            count = query.filter(Product.match_type == match_type).count()
+            match_type_stats[match_type] = count
+
+    # Top unmapped vendors (products without CPE grouped by vendor)
+    unmapped_by_vendor = db.session.query(
+        Product.vendor,
+        func.count(Product.id).label('count')
+    ).filter(
+        db.or_(
+            Product.cpe_vendor.is_(None),
+            Product.cpe_vendor == ''
+        )
+    )
+    if org_id:
+        unmapped_by_vendor = unmapped_by_vendor.filter(Product.organization_id == org_id)
+
+    unmapped_by_vendor = unmapped_by_vendor.group_by(
+        Product.vendor
+    ).order_by(
+        func.count(Product.id).desc()
+    ).limit(20).all()
+
+    top_unmapped_vendors = [
+        {'vendor': v or 'Unknown', 'count': c}
+        for v, c in unmapped_by_vendor
+    ]
+
+    # Products with possible CPE suggestions
+    suggestions = suggest_cpe_for_products(limit=10)
+
+    # User mapping stats
+    user_stats = get_user_mapping_stats()
+
+    # Curated mapping count
+    from app.cpe_mappings import SOFTWARE_TO_CPE_MAPPINGS
+    from app.cpe_mapping import CPE_MAPPINGS
+    curated_count = len(SOFTWARE_TO_CPE_MAPPINGS)
+    regex_count = len(CPE_MAPPINGS)
+
+    # Coverage by organization (if super admin viewing all)
+    org_coverage = []
+    if not org_id:
+        orgs = Organization.query.all()
+        for org in orgs:
+            org_total = Product.query.filter(Product.organization_id == org.id).count() or 0
+            org_with_cpe = Product.query.filter(
+                Product.organization_id == org.id,
+                Product.cpe_vendor.isnot(None),
+                Product.cpe_vendor != ''
+            ).count() or 0
+            if org_total > 0:
+                org_coverage.append({
+                    'org_id': org.id,
+                    'org_name': org.name,
+                    'total': org_total,
+                    'with_cpe': org_with_cpe,
+                    'coverage_percent': round(org_with_cpe / org_total * 100, 1)
+                })
+
+    return jsonify({
+        'overall': {
+            'total_products': total_products,
+            'with_cpe': with_cpe,
+            'without_cpe': without_cpe,
+            'coverage_percent': coverage_percent
+        },
+        'match_type_breakdown': match_type_stats,
+        'top_unmapped_vendors': top_unmapped_vendors,
+        'suggestions': suggestions,
+        'mapping_sources': {
+            'curated_mappings': curated_count,
+            'regex_patterns': regex_count,
+            'user_mappings': user_stats.get('total_mappings', 0)
+        },
+        'organization_coverage': org_coverage if org_coverage else None
+    })
+
+
+@bp.route('/apply-suggestions', methods=['POST'])
+@admin_required
+def apply_cpe_suggestions():
+    """
+    Apply CPE mapping suggestions to products.
+
+    Request body:
+        product_ids: List of product IDs to apply suggestions to
+        apply_all: If true, apply to all products without CPE (ignores product_ids)
+    """
+    from app.cpe_mapping import batch_apply_cpe_mappings, apply_cpe_to_product
+
+    data = request.get_json() or {}
+    apply_all = data.get('apply_all', False)
+    product_ids = data.get('product_ids', [])
+
+    if apply_all:
+        updated, total = batch_apply_cpe_mappings(commit=True)
+        return jsonify({
+            'success': True,
+            'updated': updated,
+            'total_without_cpe': total,
+            'message': f'Applied CPE mappings to {updated} of {total} products'
+        })
+    elif product_ids:
+        updated = 0
+        for pid in product_ids[:100]:  # Limit to 100 at a time
+            product = Product.query.get(pid)
+            if product and apply_cpe_to_product(product):
+                updated += 1
+        if updated > 0:
+            db.session.commit()
+        return jsonify({
+            'success': True,
+            'updated': updated,
+            'message': f'Applied CPE mappings to {updated} products'
+        })
+    else:
+        return jsonify({'error': 'Provide product_ids or set apply_all=true'}), 400
