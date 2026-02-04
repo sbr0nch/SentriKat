@@ -215,6 +215,8 @@ class JiraTracker(IssueTrackerBase):
                     'expand': 'projects.issuetypes.fields'
                 }
 
+                logger.info(f"Fetching createmeta from: {url} with params: {params}")
+
                 response = requests.get(
                     url,
                     headers=self._get_headers(),
@@ -223,21 +225,30 @@ class JiraTracker(IssueTrackerBase):
                     verify=self.verify_ssl
                 )
 
+                logger.info(f"Createmeta response status: {response.status_code}")
+
                 if response.status_code != 200:
-                    logger.error(f"Createmeta request failed: {response.status_code}")
+                    logger.error(f"Createmeta request failed: {response.status_code}, body: {response.text[:500]}")
                     return []
 
                 data = response.json()
                 projects = data.get('projects', [])
 
+                logger.info(f"Createmeta returned {len(projects)} projects")
+
                 if not projects:
+                    logger.warning(f"No projects found in createmeta response for project key: {project_key}")
                     return []
 
                 issue_types = projects[0].get('issuetypes', [])
+                logger.info(f"Found {len(issue_types)} issue types for project {project_key}")
+
                 if not issue_types:
+                    logger.warning(f"No issue types found for project {project_key}")
                     return []
 
                 fields_data = issue_types[0].get('fields', {})
+                logger.info(f"Found {len(fields_data) if isinstance(fields_data, dict) else 'N/A'} fields in createmeta")
 
             # Parse fields into a clean format
             result = []

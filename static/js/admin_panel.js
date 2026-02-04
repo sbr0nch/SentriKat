@@ -8068,8 +8068,11 @@ async function fetchJiraCustomFields() {
             } catch (e) {}
         }
 
-        // Render fields
-        renderJiraCustomFields(data.required_fields || [], savedValues, container);
+        // Render ALL fields (required + optional) since Jira might enforce fields not marked as required
+        const allFields = data.fields || [];
+        const requiredCount = data.required_count || 0;
+
+        renderJiraCustomFields(allFields, savedValues, container, requiredCount, data.note);
 
     } catch (error) {
         if (fetchBtn) {
@@ -8082,18 +8085,24 @@ async function fetchJiraCustomFields() {
     }
 }
 
-function renderJiraCustomFields(fields, savedValues, container) {
+function renderJiraCustomFields(fields, savedValues, container, requiredCount, note) {
     if (!container) return;
 
     if (!fields || fields.length === 0) {
-        container.innerHTML = `<div class="alert alert-success py-2 mb-0">
-            <i class="bi bi-check-circle me-1"></i>
-            No required custom fields for this project/issue type.
+        container.innerHTML = `<div class="alert alert-warning py-2 mb-0">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            No custom fields found. Check the server logs for details. The createmeta API may have returned empty results.
         </div>`;
         return;
     }
 
-    let html = `<div class="table-responsive"><table class="table table-sm table-borderless mb-0">
+    let html = `<div class="alert alert-info py-2 mb-2">
+        <i class="bi bi-info-circle me-1"></i>
+        Found ${fields.length} fields (${requiredCount} marked as required).
+        ${note ? '<br><small>' + note + '</small>' : ''}
+    </div>`;
+
+    html += `<div class="table-responsive"><table class="table table-sm table-borderless mb-0">
         <tbody>`;
 
     fields.forEach(field => {

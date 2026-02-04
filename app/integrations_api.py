@@ -1655,6 +1655,8 @@ def fetch_jira_create_fields():
     """Fetch required and optional fields for creating an issue in Jira."""
     from app.issue_trackers import JiraTracker
     from app.settings_api import get_setting
+    import logging
+    logger = logging.getLogger(__name__)
 
     data = request.get_json()
     url = data.get('url', '').strip()
@@ -1664,29 +1666,60 @@ def fetch_jira_create_fields():
     issue_type = data.get('issue_type', '').strip()
     use_pat = data.get('use_pat', False)
 
+    # Fall back to saved credentials if not provided in request
+    if not url:
+        url = get_setting('jira_url', '')
+    if not email:
+        email = get_setting('jira_email', '')
+    if not api_token:
+        api_token = get_setting('jira_api_token', '')
+    if not project_key:
+        project_key = get_setting('jira_project_key', '')
+    if not issue_type:
+        issue_type = get_setting('jira_issue_type', 'Task')
+    if not use_pat:
+        use_pat = get_setting('jira_use_pat', 'false') == 'true'
+
     if not all([url, email, api_token, project_key, issue_type]):
-        return jsonify({'error': 'URL, email, token, project key, and issue type required'}), 400
+        missing = []
+        if not url: missing.append('URL')
+        if not email: missing.append('email/username')
+        if not api_token: missing.append('token/password')
+        if not project_key: missing.append('project key')
+        if not issue_type: missing.append('issue type')
+        return jsonify({'error': f'Missing: {", ".join(missing)}. Save settings first or enter credentials.'}), 400
 
     # Get SSL verification setting
     verify_ssl = get_setting('verify_ssl', 'true') == 'true'
 
     try:
+        logger.info(f"Fetching Jira fields for project={project_key}, issue_type={issue_type}")
         tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
         fields = tracker.get_create_fields(project_key, issue_type)
 
+        logger.info(f"Got {len(fields)} fields from Jira createmeta")
+
         # Separate required and optional fields
+        # Note: Some fields might not be marked as required in createmeta but are enforced by Jira
         required_fields = [f for f in fields if f.get('required')]
         optional_fields = [f for f in fields if not f.get('required')]
+
+        # Log field names for debugging
+        if fields:
+            field_names = [f"{f['name']} ({f['key']}, req={f['required']})" for f in fields[:10]]
+            logger.info(f"Sample fields: {field_names}")
 
         return jsonify({
             'fields': fields,
             'required_fields': required_fields,
             'optional_fields': optional_fields,
             'total': len(fields),
-            'required_count': len(required_fields)
+            'required_count': len(required_fields),
+            'note': 'Some fields may be required by Jira workflows even if not marked as required here.'
         })
 
     except Exception as e:
+        logger.error(f"Error fetching Jira fields: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
