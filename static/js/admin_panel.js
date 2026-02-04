@@ -7830,6 +7830,59 @@ function showTrackerConfig(trackerType) {
             configEl.style.display = 'block';
         }
     }
+
+    // Setup Jira URL change listener for Cloud/Server detection
+    if (trackerType === 'jira') {
+        const jiraUrlInput = SK.DOM.get('jiraUrl');
+        if (jiraUrlInput && !jiraUrlInput.hasAttribute('data-listener-added')) {
+            jiraUrlInput.addEventListener('input', updateJiraLabels);
+            jiraUrlInput.setAttribute('data-listener-added', 'true');
+        }
+        updateJiraLabels();
+    }
+}
+
+// Detect Jira Cloud vs Server based on URL and update labels
+function updateJiraLabels() {
+    const jiraUrl = (SK.DOM.getValue('jiraUrl') || '').toLowerCase();
+    const isCloud = jiraUrl.includes('atlassian.net');
+
+    const emailLabel = SK.DOM.get('jiraEmailLabel');
+    const tokenLabel = SK.DOM.get('jiraTokenLabel');
+    const emailHelp = SK.DOM.get('jiraEmailHelp');
+    const tokenHelpCloud = SK.DOM.get('jiraTokenHelpCloud');
+    const tokenHelpServer = SK.DOM.get('jiraTokenHelpServer');
+    const emailInput = SK.DOM.get('jiraEmail');
+    const tokenInput = SK.DOM.get('jiraApiToken');
+
+    if (isCloud) {
+        // Jira Cloud - use email and API token
+        if (emailLabel) emailLabel.textContent = 'Email';
+        if (tokenLabel) tokenLabel.textContent = 'API Token';
+        if (emailHelp) emailHelp.textContent = 'Your Atlassian account email';
+        if (tokenHelpCloud) tokenHelpCloud.style.display = 'inline';
+        if (tokenHelpServer) tokenHelpServer.style.display = 'none';
+        if (emailInput) emailInput.placeholder = 'user@example.com';
+        if (tokenInput) tokenInput.placeholder = 'API token';
+    } else if (jiraUrl) {
+        // Jira Server - use username and password
+        if (emailLabel) emailLabel.textContent = 'Username';
+        if (tokenLabel) tokenLabel.textContent = 'Password';
+        if (emailHelp) emailHelp.textContent = 'Your Jira Server account username';
+        if (tokenHelpCloud) tokenHelpCloud.style.display = 'none';
+        if (tokenHelpServer) tokenHelpServer.style.display = 'inline';
+        if (emailInput) emailInput.placeholder = 'jira_username';
+        if (tokenInput) tokenInput.placeholder = 'Password';
+    } else {
+        // No URL yet - show combined labels
+        if (emailLabel) emailLabel.textContent = 'Email (Cloud) or Username (Server)';
+        if (tokenLabel) tokenLabel.textContent = 'API Token (Cloud) or Password (Server)';
+        if (emailHelp) emailHelp.textContent = 'For Jira Cloud use your email; for Jira Server use your username';
+        if (tokenHelpCloud) tokenHelpCloud.style.display = 'inline';
+        if (tokenHelpServer) tokenHelpServer.style.display = 'none';
+        if (emailInput) emailInput.placeholder = 'user@example.com';
+        if (tokenInput) tokenInput.placeholder = 'API token or password';
+    }
 }
 
 async function loadIssueTrackerSettings() {
@@ -7849,6 +7902,8 @@ async function loadIssueTrackerSettings() {
             SK.DOM.setValue('jiraEmail', config.email || '');
             SK.DOM.setValue('jiraProjectKey', config.project_key || '');
             SK.DOM.setValue('jiraIssueType', config.issue_type || 'Task');
+            // Update labels based on Cloud vs Server after URL is set
+            updateJiraLabels();
         } else if (config.type === 'youtrack') {
             SK.DOM.setValue('youtrackUrl', config.url || '');
             SK.DOM.setValue('youtrackProjectId', config.project_id || '');

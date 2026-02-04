@@ -221,10 +221,33 @@ class JiraClient:
                 logger.info(f"Created Jira issue: {issue_key}")
                 return True, f"Created issue {issue_key}", issue_key
             else:
-                error_msg = response.json().get('errorMessages', [response.text])
+                # Try to parse JSON error response, fall back to text
+                try:
+                    error_data = response.json()
+                    error_msgs = error_data.get('errorMessages', [])
+                    errors = error_data.get('errors', {})
+                    if errors:
+                        # Jira Server often returns errors in a dict
+                        error_msgs.extend([f"{k}: {v}" for k, v in errors.items()])
+                    error_msg = '; '.join(error_msgs) if error_msgs else f"HTTP {response.status_code}"
+                except (ValueError, AttributeError):
+                    # Response is not JSON (e.g., HTML error page)
+                    error_msg = f"HTTP {response.status_code}"
+                    if response.status_code == 404:
+                        error_msg = "Issue type or project not found. Check that your Jira project key and issue type exist."
+                    elif response.status_code == 401:
+                        error_msg = "Authentication failed. Check your credentials."
+                    elif response.status_code == 403:
+                        error_msg = "Permission denied. Check that your account has permission to create issues."
+                    elif response.status_code >= 500:
+                        error_msg = "Jira server error. Please try again later."
+
                 logger.error(f"Failed to create Jira issue: {error_msg}")
                 return False, f"Failed to create issue: {error_msg}", None
 
+        except requests.RequestException as e:
+            logger.exception("Jira issue creation failed - network error")
+            return False, f"Network error: {str(e)}", None
         except Exception as e:
             logger.exception("Jira issue creation failed")
             return False, f"Error creating issue: {str(e)}", None

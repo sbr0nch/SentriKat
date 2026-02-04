@@ -882,14 +882,16 @@
                                         <small class="form-text text-muted">Cloud or Server URL</small>
                                     </div>
                                     <div class="col-md-6">
-                                        <label class="form-label fw-semibold">Email / Username</label>
+                                        <label class="form-label fw-semibold" id="jiraEmailLabel">Email (Cloud) or Username (Server)</label>
                                         <input type="text" class="form-control" id="jiraEmail" placeholder="user@example.com">
+                                        <small class="form-text text-muted" id="jiraEmailHelp">For Jira Cloud use your email; for Jira Server use your username</small>
                                     </div>
                                     <div class="col-md-6">
-                                        <label class="form-label fw-semibold">API Token</label>
-                                        <input type="password" class="form-control" id="jiraApiToken" placeholder="API token">
-                                        <small class="form-text text-muted">
-                                            <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">Generate token</a>
+                                        <label class="form-label fw-semibold" id="jiraTokenLabel">API Token (Cloud) or Password (Server)</label>
+                                        <input type="password" class="form-control" id="jiraApiToken" placeholder="API token or password">
+                                        <small class="form-text text-muted" id="jiraTokenHelp">
+                                            <span id="jiraTokenHelpCloud"><a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">Generate API token</a> (Cloud)</span>
+                                            <span id="jiraTokenHelpServer" style="display: none;">Use your Jira account password (Server)</span>
                                         </small>
                                     </div>
                                     <div class="col-md-6">
