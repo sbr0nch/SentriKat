@@ -472,10 +472,25 @@ class JiraTracker(IssueTrackerBase):
                             issue_data['fields'][field_key] = {'id': str(field_value)}
                         elif field_type == 'date':
                             # Date fields: plain string in YYYY-MM-DD format
-                            issue_data['fields'][field_key] = str(field_value)
+                            date_val = str(field_value)
+                            # Ensure it's just the date part
+                            if 'T' in date_val:
+                                date_val = date_val.split('T')[0]
+                            issue_data['fields'][field_key] = date_val
                         elif field_type == 'datetime':
-                            # Datetime fields: ISO format string
-                            issue_data['fields'][field_key] = str(field_value)
+                            # Datetime fields: Jira needs full ISO format with timezone
+                            # Input might be: "2026-02-05T10:24" or "2026-02-05"
+                            dt_val = str(field_value)
+                            if 'T' not in dt_val:
+                                # Only date provided, add default time (09:00)
+                                dt_val = f"{dt_val}T09:00"
+                            # Add seconds if missing
+                            if dt_val.count(':') == 1:
+                                dt_val = f"{dt_val}:00"
+                            # Add milliseconds and timezone if missing
+                            if '+' not in dt_val and 'Z' not in dt_val:
+                                dt_val = f"{dt_val}.000+0000"
+                            issue_data['fields'][field_key] = dt_val
                         elif field_type == 'number':
                             # Number fields: numeric value
                             try:
