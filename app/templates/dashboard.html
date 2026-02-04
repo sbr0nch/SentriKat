@@ -1315,7 +1315,8 @@
         const epssBadge = vuln.epss_score != null ?
             `<span class="badge ${getEpssBadgeClass(vuln.epss_percentile)}" title="EPSS: ${(vuln.epss_score * 100).toFixed(1)}% probability of exploitation in next 30 days (Top ${((1 - vuln.epss_percentile) * 100).toFixed(0)}%)">
                 <i class="bi bi-lightning-charge"></i> EPSS: ${(vuln.epss_score * 100).toFixed(1)}%
-            </span>` : '';
+            </span>` :
+            (vuln.epss_fetched_at ? '<span class="badge bg-secondary" title="EPSS data not available for this CVE"><i class="bi bi-lightning-charge"></i> No EPSS</span>' : '');
 
         return `
             <div class="card vuln-card mb-3" id="match-${match.id}" style="border-left: 4px solid ${getPriorityColor(priority)};">
@@ -2218,7 +2219,8 @@
         const epssBadge = vuln.epss_score != null ?
             `<span class="badge ${getEpssBadgeClass(vuln.epss_percentile)}" title="EPSS: ${(vuln.epss_score * 100).toFixed(1)}% probability of exploitation (Top ${((1 - vuln.epss_percentile) * 100).toFixed(0)}%)">
                 <i class="bi bi-lightning-charge"></i> EPSS: ${(vuln.epss_score * 100).toFixed(1)}%
-            </span>` : '';
+            </span>` :
+            (vuln.epss_fetched_at ? '<span class="badge bg-secondary" title="EPSS data not available for this CVE"><i class="bi bi-lightning-charge"></i> No EPSS</span>' : '');
 
         // Build affected products list
         const productsHtml = group.affected_products.map(prod => {
