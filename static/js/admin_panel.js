@@ -7814,41 +7814,112 @@ async function loadIntegrations() {
 }
 
 // ============================================================================
-// JIRA INTEGRATION SETTINGS
+// ISSUE TRACKER INTEGRATION SETTINGS (Multi-tracker support)
 // ============================================================================
 
-async function loadJiraSettings() {
-    try {
-        const response = await fetch('/api/settings?category=jira');
-        if (!response.ok) return;
+function showTrackerConfig(trackerType) {
+    // Hide all config sections
+    document.querySelectorAll('.tracker-config').forEach(el => {
+        el.style.display = 'none';
+    });
 
-        const settings = await response.json();
-
-        SK.DOM.setChecked('jiraEnabled', settings.jira_enabled === 'true');
-        SK.DOM.setValue('jiraUrl', settings.jira_url || '');
-        SK.DOM.setValue('jiraEmail', settings.jira_email || '');
-        SK.DOM.setValue('jiraProjectKey', settings.jira_project_key || '');
-        SK.DOM.setValue('jiraIssueType', settings.jira_issue_type || 'Task');
-
-        // Don't populate API token for security
-    } catch (error) {
-        console.error('Error loading Jira settings:', error);
+    // Show selected config
+    if (trackerType && trackerType !== 'disabled') {
+        const configEl = SK.DOM.get(`trackerConfig-${trackerType}`);
+        if (configEl) {
+            configEl.style.display = 'block';
+        }
     }
 }
 
-async function saveJiraSettings() {
+async function loadIssueTrackerSettings() {
+    try {
+        const response = await fetch('/api/integrations/issue-tracker/config');
+        if (!response.ok) return;
+
+        const config = await response.json();
+
+        // Set tracker type
+        SK.DOM.setValue('issueTrackerType', config.type || 'disabled');
+        showTrackerConfig(config.type);
+
+        // Load type-specific settings
+        if (config.type === 'jira') {
+            SK.DOM.setValue('jiraUrl', config.url || '');
+            SK.DOM.setValue('jiraEmail', config.email || '');
+            SK.DOM.setValue('jiraProjectKey', config.project_key || '');
+            SK.DOM.setValue('jiraIssueType', config.issue_type || 'Task');
+        } else if (config.type === 'youtrack') {
+            SK.DOM.setValue('youtrackUrl', config.url || '');
+            SK.DOM.setValue('youtrackProjectId', config.project_id || '');
+        } else if (config.type === 'github') {
+            SK.DOM.setValue('githubOwner', config.owner || '');
+            SK.DOM.setValue('githubRepo', config.repo || '');
+        } else if (config.type === 'gitlab') {
+            SK.DOM.setValue('gitlabUrl', config.url || 'https://gitlab.com');
+            SK.DOM.setValue('gitlabProjectId', config.project_id || '');
+        } else if (config.type === 'webhook') {
+            SK.DOM.setValue('webhookUrl', config.url || '');
+            SK.DOM.setValue('webhookMethod', config.method || 'POST');
+        }
+
+    } catch (error) {
+        console.error('Error loading issue tracker settings:', error);
+    }
+}
+
+async function saveIssueTrackerSettings() {
+    const trackerType = SK.DOM.getValue('issueTrackerType');
+
     const settings = {
-        jira_enabled: SK.DOM.getChecked('jiraEnabled') ? 'true' : 'false',
-        jira_url: SK.DOM.getValue('jiraUrl'),
-        jira_email: SK.DOM.getValue('jiraEmail'),
-        jira_project_key: SK.DOM.getValue('jiraProjectKey'),
-        jira_issue_type: SK.DOM.getValue('jiraIssueType')
+        issue_tracker_type: trackerType
     };
 
-    // Only include API token if changed
-    const apiToken = SK.DOM.getValue('jiraApiToken');
-    if (apiToken && apiToken !== '********') {
-        settings.jira_api_token = apiToken;
+    const encryptKeys = [];
+
+    if (trackerType === 'jira') {
+        settings.jira_url = SK.DOM.getValue('jiraUrl');
+        settings.jira_email = SK.DOM.getValue('jiraEmail');
+        settings.jira_project_key = SK.DOM.getValue('jiraProjectKey');
+        settings.jira_issue_type = SK.DOM.getValue('jiraIssueType');
+        const token = SK.DOM.getValue('jiraApiToken');
+        if (token) {
+            settings.jira_api_token = token;
+            encryptKeys.push('jira_api_token');
+        }
+    } else if (trackerType === 'youtrack') {
+        settings.youtrack_url = SK.DOM.getValue('youtrackUrl');
+        settings.youtrack_project_id = SK.DOM.getValue('youtrackProjectId');
+        const token = SK.DOM.getValue('youtrackToken');
+        if (token) {
+            settings.youtrack_token = token;
+            encryptKeys.push('youtrack_token');
+        }
+    } else if (trackerType === 'github') {
+        settings.github_owner = SK.DOM.getValue('githubOwner');
+        settings.github_repo = SK.DOM.getValue('githubRepo');
+        const token = SK.DOM.getValue('githubToken');
+        if (token) {
+            settings.github_token = token;
+            encryptKeys.push('github_token');
+        }
+    } else if (trackerType === 'gitlab') {
+        settings.gitlab_url = SK.DOM.getValue('gitlabUrl');
+        settings.gitlab_project_id = SK.DOM.getValue('gitlabProjectId');
+        const token = SK.DOM.getValue('gitlabToken');
+        if (token) {
+            settings.gitlab_token = token;
+            encryptKeys.push('gitlab_token');
+        }
+    } else if (trackerType === 'webhook') {
+        settings.webhook_url = SK.DOM.getValue('webhookUrl');
+        settings.webhook_method = SK.DOM.getValue('webhookMethod');
+        settings.webhook_auth_type = SK.DOM.getValue('webhookAuthType');
+        const authValue = SK.DOM.getValue('webhookAuthValue');
+        if (authValue) {
+            settings.webhook_auth_value = authValue;
+            encryptKeys.push('webhook_auth_value');
+        }
     }
 
     try {
@@ -7856,39 +7927,96 @@ async function saveJiraSettings() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                category: 'jira',
+                category: 'issue_tracker',
                 settings: settings,
-                encrypt_keys: ['jira_api_token']
+                encrypt_keys: encryptKeys
             })
         });
 
         if (response.ok) {
-            showToast('Jira settings saved successfully', 'success');
-            // Clear the password field
+            showToast('Issue tracker settings saved successfully', 'success');
+            // Clear sensitive fields
             SK.DOM.setValue('jiraApiToken', '');
+            SK.DOM.setValue('youtrackToken', '');
+            SK.DOM.setValue('githubToken', '');
+            SK.DOM.setValue('gitlabToken', '');
+            SK.DOM.setValue('webhookAuthValue', '');
         } else {
             const error = await response.json();
-            showToast(`Error saving Jira settings: ${error.error}`, 'danger');
+            showToast(`Error saving settings: ${error.error}`, 'danger');
         }
     } catch (error) {
-        showToast(`Error saving Jira settings: ${error.message}`, 'danger');
+        showToast(`Error saving settings: ${error.message}`, 'danger');
     }
 }
 
-async function testJiraConnection() {
-    const resultDiv = SK.DOM.get('jiraTestResult');
-    const alertDiv = SK.DOM.get('jiraTestAlert');
-    const messageSpan = SK.DOM.get('jiraTestMessage');
+async function testIssueTrackerConnection() {
+    const resultDiv = SK.DOM.get('trackerTestResult');
+    const alertDiv = SK.DOM.get('trackerTestAlert');
+    const messageSpan = SK.DOM.get('trackerTestMessage');
 
-    const url = SK.DOM.getValue('jiraUrl');
-    const email = SK.DOM.getValue('jiraEmail');
-    const apiToken = SK.DOM.getValue('jiraApiToken');
+    const trackerType = SK.DOM.getValue('issueTrackerType');
 
-    if (!url || !email || !apiToken) {
+    if (trackerType === 'disabled') {
         resultDiv.style.display = 'block';
         alertDiv.className = 'alert alert-warning';
-        messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL, email, and API token to test connection.';
+        messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please select an issue tracker first.';
         return;
+    }
+
+    // Build test data based on tracker type
+    const testData = { type: trackerType };
+
+    if (trackerType === 'jira') {
+        testData.url = SK.DOM.getValue('jiraUrl');
+        testData.email = SK.DOM.getValue('jiraEmail');
+        testData.api_token = SK.DOM.getValue('jiraApiToken');
+        if (!testData.url || !testData.email || !testData.api_token) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL, email, and API token.';
+            return;
+        }
+    } else if (trackerType === 'youtrack') {
+        testData.url = SK.DOM.getValue('youtrackUrl');
+        testData.token = SK.DOM.getValue('youtrackToken');
+        if (!testData.url || !testData.token) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL and token.';
+            return;
+        }
+    } else if (trackerType === 'github') {
+        testData.token = SK.DOM.getValue('githubToken');
+        testData.owner = SK.DOM.getValue('githubOwner');
+        testData.repo = SK.DOM.getValue('githubRepo');
+        if (!testData.token || !testData.owner || !testData.repo) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in token, owner, and repo.';
+            return;
+        }
+    } else if (trackerType === 'gitlab') {
+        testData.url = SK.DOM.getValue('gitlabUrl');
+        testData.token = SK.DOM.getValue('gitlabToken');
+        testData.project_id = SK.DOM.getValue('gitlabProjectId');
+        if (!testData.token || !testData.project_id) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in token and project ID.';
+            return;
+        }
+    } else if (trackerType === 'webhook') {
+        testData.url = SK.DOM.getValue('webhookUrl');
+        testData.method = SK.DOM.getValue('webhookMethod');
+        testData.auth_type = SK.DOM.getValue('webhookAuthType');
+        testData.auth_value = SK.DOM.getValue('webhookAuthValue');
+        if (!testData.url) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-warning';
+            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in webhook URL.';
+            return;
+        }
     }
 
     resultDiv.style.display = 'block';
@@ -7896,17 +8024,17 @@ async function testJiraConnection() {
     messageSpan.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Testing connection...';
 
     try {
-        const response = await fetch('/api/integrations/jira/test', {
+        const response = await fetch('/api/integrations/issue-tracker/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, email, api_token: apiToken })
+            body: JSON.stringify(testData)
         });
 
         const result = await response.json();
 
         if (result.success) {
             alertDiv.className = 'alert alert-success';
-            messageSpan.innerHTML = `<i class="bi bi-check-circle me-2"></i>${result.message}`;
+            messageSpan.innerHTML = `<i class="bi bi-check-circle me-2"></i>${result.message} (${result.tracker_name})`;
         } else {
             alertDiv.className = 'alert alert-danger';
             messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>${result.error || result.message}`;
@@ -7917,16 +8045,23 @@ async function testJiraConnection() {
     }
 }
 
+// Legacy function aliases for backwards compatibility
+async function loadJiraSettings() {
+    await loadIssueTrackerSettings();
+}
+
+async function saveJiraSettings() {
+    await saveIssueTrackerSettings();
+}
+
+async function testJiraConnection() {
+    await testIssueTrackerConnection();
+}
+
 function toggleJiraTokenVisibility() {
     const input = SK.DOM.get('jiraApiToken');
-    const icon = SK.DOM.get('jiraTokenIcon');
-
-    if (input.type === 'password') {
-        input.type = 'text';
-        icon.className = 'bi bi-eye-slash';
-    } else {
-        input.type = 'password';
-        icon.className = 'bi bi-eye';
+    if (input) {
+        input.type = input.type === 'password' ? 'text' : 'password';
     }
 }
 

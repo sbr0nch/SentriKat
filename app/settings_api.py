@@ -185,9 +185,19 @@ ALLOWED_SETTING_KEYS = {
     'audit_log_retention_days', 'audit_retention_days',
     'sync_history_retention_days', 'sync_log_retention_days',
     'session_log_retention_days', 'auto_acknowledge_removed_software',
-    # Jira integration settings
+    # Issue Tracker integration settings (multi-tracker support)
+    'issue_tracker_type',  # 'disabled', 'jira', 'youtrack', 'github', 'gitlab', 'webhook'
+    # Jira settings
     'jira_enabled', 'jira_url', 'jira_email', 'jira_api_token',
     'jira_project_key', 'jira_issue_type',
+    # YouTrack settings
+    'youtrack_url', 'youtrack_token', 'youtrack_project_id',
+    # GitHub Issues settings
+    'github_token', 'github_owner', 'github_repo',
+    # GitLab Issues settings
+    'gitlab_url', 'gitlab_token', 'gitlab_project_id',
+    # Generic Webhook settings
+    'webhook_url', 'webhook_method', 'webhook_auth_type', 'webhook_auth_value',
 }
 
 

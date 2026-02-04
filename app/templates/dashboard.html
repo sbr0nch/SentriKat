@@ -1788,31 +1788,45 @@
         setInterval(loadStats, 300000);
     });
 
-    // Initialize Jira enabled state
-    window.jiraEnabled = false;
+    // Initialize issue tracker state (supports Jira, YouTrack, GitHub, GitLab, Webhook)
+    window.jiraEnabled = false;  // Legacy - kept for button visibility
+    window.issueTrackerType = 'disabled';
+    window.issueTrackerName = '';
 
     async function loadJiraEnabled() {
         try {
-            const response = await fetch('/api/settings?keys=jira_enabled');
+            const response = await fetch('/api/integrations/issue-tracker/config');
             if (response.ok) {
-                const settings = await response.json();
-                window.jiraEnabled = settings.jira_enabled === 'true';
+                const config = await response.json();
+                window.issueTrackerType = config.type || 'disabled';
+                window.jiraEnabled = config.enabled;  // For button visibility
+
+                // Set friendly name for display
+                const names = {
+                    'jira': 'Jira',
+                    'youtrack': 'YouTrack',
+                    'github': 'GitHub',
+                    'gitlab': 'GitLab',
+                    'webhook': 'Issue'
+                };
+                window.issueTrackerName = names[config.type] || 'Issue';
             }
         } catch (error) {
-            console.warn('Could not load Jira settings:', error);
+            console.warn('Could not load issue tracker settings:', error);
         }
     }
 
-    // Create Jira issue from vulnerability
+    // Create issue from vulnerability (supports all configured trackers)
     async function createJiraIssue(vulnId, productId, cveId, vulnName) {
-        if (!window.jiraEnabled) {
-            showToast('Jira integration is not enabled. Configure it in Admin Panel > Integrations.', 'warning');
+        if (!window.jiraEnabled || window.issueTrackerType === 'disabled') {
+            showToast('Issue tracker not configured. Go to Admin Panel > Integrations > Issue Trackers.', 'warning');
             return;
         }
 
+        const trackerName = window.issueTrackerName || 'Issue';
         const confirmed = await showConfirm(
-            `Create a Jira issue for ${cveId}?\n\n"${vulnName}"`,
-            'Create Jira Issue',
+            `Create a ${trackerName} issue for ${cveId}?\n\n"${vulnName}"`,
+            `Create ${trackerName} Issue`,
             'Create Issue',
             'btn-primary'
         );
@@ -1821,7 +1835,7 @@
 
         try {
             showLoading();
-            const response = await fetch('/api/integrations/jira/create-issue', {
+            const response = await fetch('/api/integrations/issue-tracker/create-issue', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1833,16 +1847,17 @@
             const result = await response.json();
 
             if (response.ok && result.success) {
-                showToast(`Jira issue created: ${result.issue_key}`, 'success');
-                // Optionally open the issue in a new tab
+                const issueId = result.issue_key || 'Issue';
+                showToast(`${trackerName} issue created: ${issueId}`, 'success');
+                // Open the issue in a new tab if URL provided
                 if (result.issue_url) {
                     window.open(result.issue_url, '_blank');
                 }
             } else {
-                showToast(`Failed to create Jira issue: ${result.error || result.message}`, 'danger');
+                showToast(`Failed to create issue: ${result.error || result.message}`, 'danger');
             }
         } catch (error) {
-            showToast(`Error creating Jira issue: ${error.message}`, 'danger');
+            showToast(`Error creating issue: ${error.message}`, 'danger');
         } finally {
             hideLoading();
         }

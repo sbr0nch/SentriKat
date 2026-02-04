@@ -1521,3 +1521,149 @@ def create_jira_issue():
             'success': False,
             'error': message
         }), 400
+
+
+# ============================================================================
+# Generic Issue Tracker Endpoints (Multi-tracker support)
+# ============================================================================
+
+@bp.route('/api/integrations/issue-tracker/config', methods=['GET'])
+@login_required
+def get_issue_tracker_config():
+    """Get current issue tracker configuration."""
+    from app.issue_trackers import get_issue_tracker_config
+    config = get_issue_tracker_config()
+    return jsonify(config)
+
+
+@bp.route('/api/integrations/issue-tracker/test', methods=['POST'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def test_issue_tracker():
+    """Test connection to configured issue tracker."""
+    from app.issue_trackers import (
+        JiraTracker, YouTrackTracker, GitHubTracker, GitLabTracker, WebhookTracker
+    )
+
+    data = request.get_json()
+    tracker_type = data.get('type', 'disabled')
+
+    if tracker_type == 'disabled':
+        return jsonify({'success': False, 'error': 'No tracker type specified'}), 400
+
+    try:
+        if tracker_type == 'jira':
+            url = data.get('url', '').strip()
+            email = data.get('email', '').strip()
+            api_token = data.get('api_token', '').strip()
+            if not all([url, email, api_token]):
+                return jsonify({'success': False, 'error': 'URL, email, and API token required'}), 400
+            tracker = JiraTracker(url, email, api_token)
+
+        elif tracker_type == 'youtrack':
+            url = data.get('url', '').strip()
+            token = data.get('token', '').strip()
+            if not all([url, token]):
+                return jsonify({'success': False, 'error': 'URL and token required'}), 400
+            tracker = YouTrackTracker(url, token)
+
+        elif tracker_type == 'github':
+            token = data.get('token', '').strip()
+            owner = data.get('owner', '').strip()
+            repo = data.get('repo', '').strip()
+            if not all([token, owner, repo]):
+                return jsonify({'success': False, 'error': 'Token, owner, and repo required'}), 400
+            tracker = GitHubTracker(token, owner, repo)
+
+        elif tracker_type == 'gitlab':
+            url = data.get('url', 'https://gitlab.com').strip()
+            token = data.get('token', '').strip()
+            project_id = data.get('project_id', '').strip()
+            if not all([token, project_id]):
+                return jsonify({'success': False, 'error': 'Token and project ID required'}), 400
+            tracker = GitLabTracker(url, token, project_id)
+
+        elif tracker_type == 'webhook':
+            url = data.get('url', '').strip()
+            if not url:
+                return jsonify({'success': False, 'error': 'Webhook URL required'}), 400
+            method = data.get('method', 'POST')
+            auth_type = data.get('auth_type', 'none')
+            auth_value = data.get('auth_value', '')
+            tracker = WebhookTracker(url, method, auth_type=auth_type, auth_value=auth_value)
+
+        else:
+            return jsonify({'success': False, 'error': f'Unknown tracker type: {tracker_type}'}), 400
+
+        success, message = tracker.test_connection()
+        return jsonify({
+            'success': success,
+            'message': message,
+            'tracker_name': tracker.get_tracker_name()
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/integrations/issue-tracker/create-issue', methods=['POST'])
+@login_required
+@requires_professional('Issue Tracker Integration')
+def create_issue_generic():
+    """Create an issue using the configured tracker."""
+    from app.issue_trackers import create_vulnerability_issue
+
+    data = request.get_json()
+
+    vulnerability_id = data.get('vulnerability_id')
+    product_id = data.get('product_id')
+    custom_summary = data.get('summary')
+    custom_description = data.get('description')
+
+    if not vulnerability_id:
+        return jsonify({'error': 'vulnerability_id is required'}), 400
+
+    success, message, issue_key, issue_url = create_vulnerability_issue(
+        vulnerability_id=vulnerability_id,
+        product_id=product_id,
+        custom_summary=custom_summary,
+        custom_description=custom_description
+    )
+
+    if success:
+        return jsonify({
+            'success': True,
+            'message': message,
+            'issue_key': issue_key,
+            'issue_url': issue_url
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': message
+        }), 400
+
+
+@bp.route('/api/integrations/youtrack/projects', methods=['GET'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def get_youtrack_projects():
+    """Get available YouTrack projects."""
+    from app.issue_trackers import YouTrackTracker
+    from app.settings_api import get_setting
+    from app.encryption import decrypt_value
+
+    url = get_setting('youtrack_url', '')
+    token_enc = get_setting('youtrack_token', '')
+
+    if not all([url, token_enc]):
+        return jsonify({'error': 'YouTrack not configured'}), 400
+
+    try:
+        token = decrypt_value(token_enc)
+    except Exception:
+        token = token_enc
+
+    tracker = YouTrackTracker(url, token)
+    projects = tracker.get_projects()
+    return jsonify({'projects': projects})
