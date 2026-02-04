@@ -207,48 +207,96 @@ class JiraTracker(IssueTrackerBase):
                 fields_data = fields_response.json().get('values', [])
 
             else:
-                # Jira Server/Data Center uses createmeta with expand
-                url = self._api_url('issue/createmeta')
-                params = {
-                    'projectKeys': project_key,
-                    'issuetypeNames': issue_type_name,
-                    'expand': 'projects.issuetypes.fields'
-                }
+                # Jira Server/Data Center - try new endpoint format first (8.4+), fall back to old
+                fields_data = None
 
-                logger.info(f"Fetching createmeta from: {url} with params: {params}")
+                # Try new endpoint format (Jira Server 8.4+ / Data Center)
+                # First get issue types to find the ID
+                new_url = f"{self.base_url}/rest/api/2/issue/createmeta/{project_key}/issuetypes"
+                logger.info(f"Trying new createmeta endpoint: {new_url}")
 
                 response = requests.get(
-                    url,
+                    new_url,
                     headers=self._get_headers(),
-                    params=params,
                     timeout=15,
                     verify=self.verify_ssl
                 )
 
-                logger.info(f"Createmeta response status: {response.status_code}")
+                if response.status_code == 200:
+                    # New endpoint works - find issue type ID and get fields
+                    issue_types_data = response.json()
+                    values = issue_types_data.get('values', issue_types_data.get('issueTypes', []))
+                    logger.info(f"New endpoint returned {len(values)} issue types")
 
-                if response.status_code != 200:
-                    logger.error(f"Createmeta request failed: {response.status_code}, body: {response.text[:500]}")
+                    issue_type_id = None
+                    for it in values:
+                        if it.get('name', '').lower() == issue_type_name.lower():
+                            issue_type_id = it.get('id')
+                            break
+
+                    if issue_type_id:
+                        # Get fields for this issue type
+                        fields_url = f"{self.base_url}/rest/api/2/issue/createmeta/{project_key}/issuetypes/{issue_type_id}"
+                        logger.info(f"Fetching fields from: {fields_url}")
+
+                        fields_response = requests.get(
+                            fields_url,
+                            headers=self._get_headers(),
+                            timeout=15,
+                            verify=self.verify_ssl
+                        )
+
+                        if fields_response.status_code == 200:
+                            fields_json = fields_response.json()
+                            fields_data = fields_json.get('values', fields_json.get('fields', {}))
+                            logger.info(f"Got fields from new endpoint: {len(fields_data) if fields_data else 0}")
+                        else:
+                            logger.warning(f"Fields endpoint failed: {fields_response.status_code}")
+                    else:
+                        logger.warning(f"Issue type '{issue_type_name}' not found in new endpoint response")
+                else:
+                    logger.info(f"New endpoint returned {response.status_code}, trying old endpoint...")
+
+                # Fall back to old endpoint format if new one didn't work
+                if fields_data is None:
+                    old_url = self._api_url('issue/createmeta')
+                    params = {
+                        'projectKeys': project_key,
+                        'issuetypeNames': issue_type_name,
+                        'expand': 'projects.issuetypes.fields'
+                    }
+
+                    logger.info(f"Trying old createmeta endpoint: {old_url} with params: {params}")
+
+                    response = requests.get(
+                        old_url,
+                        headers=self._get_headers(),
+                        params=params,
+                        timeout=15,
+                        verify=self.verify_ssl
+                    )
+
+                    logger.info(f"Old endpoint response status: {response.status_code}")
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        projects = data.get('projects', [])
+
+                        logger.info(f"Old endpoint returned {len(projects)} projects")
+
+                        if projects:
+                            issue_types = projects[0].get('issuetypes', [])
+                            logger.info(f"Found {len(issue_types)} issue types")
+
+                            if issue_types:
+                                fields_data = issue_types[0].get('fields', {})
+                                logger.info(f"Found {len(fields_data) if isinstance(fields_data, dict) else 'N/A'} fields")
+                    else:
+                        logger.error(f"Old endpoint also failed: {response.status_code}, body: {response.text[:500]}")
+
+                if not fields_data:
+                    logger.warning(f"Could not get fields from either endpoint for {project_key}/{issue_type_name}")
                     return []
-
-                data = response.json()
-                projects = data.get('projects', [])
-
-                logger.info(f"Createmeta returned {len(projects)} projects")
-
-                if not projects:
-                    logger.warning(f"No projects found in createmeta response for project key: {project_key}")
-                    return []
-
-                issue_types = projects[0].get('issuetypes', [])
-                logger.info(f"Found {len(issue_types)} issue types for project {project_key}")
-
-                if not issue_types:
-                    logger.warning(f"No issue types found for project {project_key}")
-                    return []
-
-                fields_data = issue_types[0].get('fields', {})
-                logger.info(f"Found {len(fields_data) if isinstance(fields_data, dict) else 'N/A'} fields in createmeta")
 
             # Parse fields into a clean format
             result = []
