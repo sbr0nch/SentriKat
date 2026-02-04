@@ -110,6 +110,48 @@ class JiraTracker(IssueTrackerBase):
         except requests.RequestException as e:
             return False, f"Connection error: {str(e)}"
 
+    def get_projects(self) -> List[Dict[str, str]]:
+        """Get list of accessible Jira projects."""
+        try:
+            response = requests.get(
+                self._api_url('project'),
+                headers=self._get_headers(),
+                timeout=15,
+                verify=self.verify_ssl
+            )
+            if response.status_code == 200:
+                projects = response.json()
+                return [{'key': p['key'], 'name': p['name']} for p in projects]
+            return []
+        except Exception as e:
+            logger.error(f"Failed to fetch Jira projects: {e}")
+            return []
+
+    def get_issue_types(self, project_key: str) -> List[Dict[str, str]]:
+        """Get available issue types for a specific project."""
+        try:
+            response = requests.get(
+                self._api_url(f'project/{project_key}'),
+                headers=self._get_headers(),
+                timeout=10,
+                verify=self.verify_ssl
+            )
+            if response.status_code == 200:
+                project = response.json()
+                issue_types = project.get('issueTypes', [])
+                # Filter out subtasks and return name/id
+                return [
+                    {'id': it['id'], 'name': it['name']}
+                    for it in issue_types
+                    if not it.get('subtask', False)
+                ]
+            elif response.status_code == 404:
+                logger.warning(f"Jira project not found: {project_key}")
+            return []
+        except Exception as e:
+            logger.error(f"Failed to fetch issue types for {project_key}: {e}")
+            return []
+
     def create_issue(
         self,
         summary: str,

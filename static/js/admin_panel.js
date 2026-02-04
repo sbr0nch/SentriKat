@@ -7905,6 +7905,97 @@ function updateJiraLabels() {
     }
 }
 
+async function fetchJiraIssueTypes() {
+    const url = SK.DOM.getValue('jiraUrl');
+    const email = SK.DOM.getValue('jiraEmail');
+    const apiToken = SK.DOM.getValue('jiraApiToken');
+    const projectKey = SK.DOM.getValue('jiraProjectKey');
+    const patCheckbox = SK.DOM.get('jiraUsePat');
+    const usePat = patCheckbox && patCheckbox.checked;
+    const selectEl = SK.DOM.get('jiraIssueType');
+    const helpEl = SK.DOM.get('jiraIssueTypeHelp');
+
+    if (!url || !email || !apiToken || !projectKey) {
+        if (helpEl) {
+            helpEl.textContent = 'Please fill in URL, username, token, and project key first';
+            helpEl.className = 'form-text text-warning';
+        }
+        return;
+    }
+
+    // Show loading state
+    if (selectEl) {
+        selectEl.innerHTML = '<option value="">Loading...</option>';
+        selectEl.disabled = true;
+    }
+    if (helpEl) {
+        helpEl.textContent = 'Fetching issue types from Jira...';
+        helpEl.className = 'form-text text-muted';
+    }
+
+    try {
+        const response = await fetch('/api/integrations/jira/issue-types', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: url,
+                email: email,
+                api_token: apiToken,
+                project_key: projectKey,
+                use_pat: usePat
+            })
+        });
+
+        const data = await response.json();
+
+        if (selectEl) {
+            selectEl.disabled = false;
+            selectEl.innerHTML = '';
+
+            if (data.error) {
+                selectEl.innerHTML = '<option value="">Error fetching issue types</option>';
+                if (helpEl) {
+                    helpEl.textContent = data.error;
+                    helpEl.className = 'form-text text-danger';
+                }
+                return;
+            }
+
+            if (data.issue_types && data.issue_types.length > 0) {
+                data.issue_types.forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type.name;
+                    option.textContent = type.name;
+                    selectEl.appendChild(option);
+                });
+                // Re-select the saved issue type if we have one
+                if (window._savedJiraIssueType) {
+                    selectEl.value = window._savedJiraIssueType;
+                }
+                if (helpEl) {
+                    helpEl.textContent = `Found ${data.issue_types.length} issue type(s)`;
+                    helpEl.className = 'form-text text-success';
+                }
+            } else {
+                selectEl.innerHTML = '<option value="">No issue types found</option>';
+                if (helpEl) {
+                    helpEl.textContent = data.warning || 'No issue types found for this project';
+                    helpEl.className = 'form-text text-warning';
+                }
+            }
+        }
+    } catch (error) {
+        if (selectEl) {
+            selectEl.disabled = false;
+            selectEl.innerHTML = '<option value="">Error fetching issue types</option>';
+        }
+        if (helpEl) {
+            helpEl.textContent = 'Network error fetching issue types';
+            helpEl.className = 'form-text text-danger';
+        }
+    }
+}
+
 async function loadIssueTrackerSettings() {
     try {
         const response = await fetch('/api/integrations/issue-tracker/config');
@@ -7921,12 +8012,20 @@ async function loadIssueTrackerSettings() {
             SK.DOM.setValue('jiraUrl', config.url || '');
             SK.DOM.setValue('jiraEmail', config.email || '');
             SK.DOM.setValue('jiraProjectKey', config.project_key || '');
-            SK.DOM.setValue('jiraIssueType', config.issue_type || 'Task');
-            // Set PAT checkbox
+            // Set PAT checkbox first (before fetching issue types)
             const patCheckbox = SK.DOM.get('jiraUsePat');
             if (patCheckbox) patCheckbox.checked = config.use_pat === true;
             // Update labels based on Cloud vs Server after URL is set
             updateJiraLabels();
+
+            // If we have saved settings, show the saved issue type and try to fetch the list
+            const selectEl = SK.DOM.get('jiraIssueType');
+            if (selectEl && config.issue_type) {
+                // Add the saved issue type as an option so it's selected even if fetch fails
+                selectEl.innerHTML = `<option value="${config.issue_type}">${config.issue_type}</option>`;
+            }
+            // Store the saved issue type to re-select after fetch
+            window._savedJiraIssueType = config.issue_type || '';
         } else if (config.type === 'youtrack') {
             SK.DOM.setValue('youtrackUrl', config.url || '');
             SK.DOM.setValue('youtrackProjectId', config.project_id || '');

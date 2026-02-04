@@ -1611,6 +1611,79 @@ def test_issue_tracker():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@bp.route('/api/integrations/jira/issue-types', methods=['POST'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def get_jira_issue_types():
+    """Fetch available issue types from Jira for a specific project."""
+    from app.issue_trackers import JiraTracker
+    from app.settings_api import get_setting
+
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    email = data.get('email', '').strip()
+    api_token = data.get('api_token', '').strip()
+    project_key = data.get('project_key', '').strip()
+    use_pat = data.get('use_pat', False)
+
+    if not all([url, email, api_token, project_key]):
+        return jsonify({'error': 'URL, email, token, and project key required'}), 400
+
+    # Get SSL verification setting
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+
+    try:
+        tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
+        issue_types = tracker.get_issue_types(project_key)
+
+        if not issue_types:
+            return jsonify({
+                'issue_types': [],
+                'warning': f'No issue types found for project {project_key}. Check the project key exists.'
+            })
+
+        return jsonify({'issue_types': issue_types})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/integrations/jira/projects', methods=['POST'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def get_jira_projects():
+    """Fetch available projects from Jira."""
+    from app.issue_trackers import JiraTracker
+    from app.settings_api import get_setting
+
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    email = data.get('email', '').strip()
+    api_token = data.get('api_token', '').strip()
+    use_pat = data.get('use_pat', False)
+
+    if not all([url, email, api_token]):
+        return jsonify({'error': 'URL, email, and token required'}), 400
+
+    # Get SSL verification setting
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+
+    try:
+        tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
+        projects = tracker.get_projects()
+
+        if not projects:
+            return jsonify({
+                'projects': [],
+                'warning': 'No projects found. Check your credentials and permissions.'
+            })
+
+        return jsonify({'projects': projects})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @bp.route('/api/integrations/issue-tracker/create-issue', methods=['POST'])
 @login_required
 @requires_professional('Issue Tracker Integration')

@@ -905,15 +905,19 @@
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label fw-semibold">Project Key</label>
-                                        <input type="text" class="form-control" id="jiraProjectKey" placeholder="SEC">
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="jiraProjectKey" placeholder="SEC">
+                                            <button class="btn btn-outline-secondary" type="button" onclick="fetchJiraIssueTypes()" title="Fetch issue types for this project">
+                                                <i class="bi bi-arrow-clockwise"></i>
+                                            </button>
+                                        </div>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label fw-semibold">Issue Type</label>
                                         <select class="form-select" id="jiraIssueType">
-                                            <option value="Task">Task</option>
-                                            <option value="Bug">Bug</option>
-                                            <option value="Vulnerability">Vulnerability</option>
+                                            <option value="">-- Enter project key and click refresh --</option>
                                         </select>
+                                        <small class="form-text text-muted" id="jiraIssueTypeHelp">Click the refresh button after entering credentials and project key</small>
                                     </div>
                                 </div>
                             </div>
