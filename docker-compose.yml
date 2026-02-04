@@ -42,6 +42,9 @@ services:
       # Force Python requests to use system CA bundle (includes custom certs)
       - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
       - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      # License persistence: Set a fixed installation ID to keep license across rebuilds
+      # Generate once with: echo "SK-INST-$(openssl rand -hex 16 | tr '[:lower:]' '[:upper:]')"
+      - SENTRIKAT_INSTALLATION_ID=${SENTRIKAT_INSTALLATION_ID:-}
     volumes:
       - sentrikat_data:/app/data
       # Custom CA certificates for trusting internal/corporate PKI
