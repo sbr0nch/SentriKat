@@ -251,6 +251,71 @@ def set_setting(key, value, category, description=None, is_encrypted=False, skip
     return setting
 
 # ============================================================================
+# Batch Settings Endpoint
+# ============================================================================
+
+@settings_bp.route('/batch', methods=['POST'])
+@admin_required
+def save_batch_settings():
+    """
+    Save multiple settings at once.
+
+    Request body:
+    {
+        "category": "issue_tracker",
+        "settings": {
+            "jira_url": "https://...",
+            "jira_email": "...",
+            ...
+        },
+        "encrypt_keys": ["jira_api_token"]  // Keys to encrypt
+    }
+    """
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    category = data.get('category', 'general')
+    settings = data.get('settings', {})
+    encrypt_keys = data.get('encrypt_keys', [])
+
+    if not settings:
+        return jsonify({'error': 'No settings provided'}), 400
+
+    try:
+        saved_count = 0
+        for key, value in settings.items():
+            # Check if key is allowed
+            if key not in ALLOWED_SETTING_KEYS:
+                logger.warning(f"Skipping disallowed setting key: {key}")
+                continue
+
+            # Determine if this key should be encrypted
+            should_encrypt = key in encrypt_keys
+
+            # Only save non-empty values (or explicitly set to clear)
+            if value is not None and value != '':
+                set_setting(key, str(value), category, is_encrypted=should_encrypt)
+                saved_count += 1
+
+        db.session.commit()
+        logger.info(f"Saved {saved_count} settings in category '{category}'")
+
+        return jsonify({
+            'success': True,
+            'message': f'Saved {saved_count} settings',
+            'saved_count': saved_count
+        })
+
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.exception(f"Error saving batch settings: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to save settings'}), 500
+
+# ============================================================================
 # LDAP Settings
 # ============================================================================
 
