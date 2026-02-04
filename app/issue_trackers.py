@@ -343,13 +343,35 @@ class JiraTracker(IssueTrackerBase):
 
             # Determine field type
             field_type = schema.get('type', 'string')
+
+            # Log schema for debugging required fields
+            if required:
+                logger.info(f"Required field {field_key} ({name}): type={field_type}, schema={schema}")
             custom_type = schema.get('custom', '')
+            items_schema = schema.get('items', '')
+
+            # items can be a string like 'option' or a dict like {'type': 'option'}
+            if isinstance(items_schema, dict):
+                items_type = items_schema.get('type', '')
+            else:
+                items_type = items_schema
 
             # Map to simple types for UI
             ui_type = 'text'  # default
-            if field_type == 'array':
-                items_type = schema.get('items', '')
-                if items_type == 'option':
+
+            # Check custom type first - it's more reliable for Jira Server
+            custom_lower = custom_type.lower()
+            if 'multiselect' in custom_lower or 'multicheckboxes' in custom_lower:
+                ui_type = 'multi-select'
+            elif 'select' in custom_lower or 'radiobuttons' in custom_lower:
+                ui_type = 'select'
+            elif 'datepicker' in custom_lower:
+                ui_type = 'date'
+            elif 'datetime' in custom_lower:
+                ui_type = 'datetime'
+            # Fall back to schema type
+            elif field_type == 'array':
+                if items_type == 'option' or items_type == 'string':
                     ui_type = 'multi-select'
                 else:
                     ui_type = 'array'
@@ -363,12 +385,8 @@ class JiraTracker(IssueTrackerBase):
                 ui_type = 'number'
             elif field_type == 'user':
                 ui_type = 'user'
-            elif 'select' in custom_type.lower() or 'option' in custom_type.lower():
-                ui_type = 'select'
-            elif 'multiselect' in custom_type.lower():
-                ui_type = 'multi-select'
-            elif 'datepicker' in custom_type.lower():
-                ui_type = 'date'
+
+            logger.info(f"Field {field_key}: detected ui_type={ui_type} (schema_type={field_type}, custom={custom_type})")
 
             result = {
                 'key': field_key,
