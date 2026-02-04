@@ -47,6 +47,9 @@ param(
     [switch]$RunOnce,
 
     [Parameter(Mandatory=$false)]
+    [switch]$Heartbeat,
+
+    [Parameter(Mandatory=$false)]
     [int]$IntervalMinutes = 240,  # 4 hours default
 
     [Parameter(Mandatory=$false)]
@@ -54,8 +57,9 @@ param(
 )
 
 $ErrorActionPreference = "SilentlyContinue"
-$AgentVersion = "1.0.0"
+$AgentVersion = "1.1.0"
 $LogFile = "$env:ProgramData\SentriKat\agent.log"
+$HeartbeatIntervalMinutes = 5
 
 # ============================================================================
 # Logging Functions
@@ -385,6 +389,59 @@ function Send-Heartbeat {
     }
 }
 
+function Check-Commands {
+    param($Config, $SystemInfo)
+
+    # Poll the server for pending commands
+    $endpoint = "$($Config.ServerUrl)/api/agent/commands?agent_id=$($SystemInfo.agent.id)&hostname=$($SystemInfo.hostname)&version=$AgentVersion&platform=windows"
+
+    Write-Log "Checking for commands from server..."
+
+    $headers = @{
+        "X-Agent-Key" = $Config.ApiKey
+        "Content-Type" = "application/json"
+        "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
+    }
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $response = Invoke-RestMethod -Uri $endpoint -Method Get -Headers $headers -TimeoutSec 30
+
+        $scanRequested = $false
+
+        foreach ($cmd in $response.commands) {
+            switch ($cmd.command) {
+                "scan_now" {
+                    Write-Log "Received scan_now command - triggering immediate inventory scan"
+                    $scanRequested = $true
+                }
+                "update_config" {
+                    Write-Log "Received config update command"
+                    if ($cmd.config.scan_interval_minutes) {
+                        $newInterval = $cmd.config.scan_interval_minutes
+                        if ($newInterval -ge 15 -and $newInterval -ne $Config.IntervalMinutes) {
+                            Write-Log "Updating scan interval from $($Config.IntervalMinutes) to $newInterval minutes"
+                            $Config.IntervalMinutes = $newInterval
+                            Save-AgentConfig $Config
+                            # Note: Would need to reinstall scheduled task to apply new interval
+                        }
+                    }
+                }
+                "update_available" {
+                    Write-Log "Agent update available: $($cmd.current_version) -> $($cmd.latest_version)" -Level "WARN"
+                    Write-Log "Download from: $($Config.ServerUrl)/api/agent/download/windows"
+                }
+            }
+        }
+
+        return $scanRequested
+    }
+    catch {
+        Write-Log "Failed to check commands: $_" -Level "WARN"
+        return $false
+    }
+}
+
 # ============================================================================
 # Installation Functions
 # ============================================================================
@@ -392,7 +449,7 @@ function Send-Heartbeat {
 function Install-ScheduledTask {
     param($Config)
 
-    Write-Log "Installing scheduled task..."
+    Write-Log "Installing scheduled tasks..."
 
     # Save config
     Save-AgentConfig $Config
@@ -403,6 +460,7 @@ function Install-ScheduledTask {
         Copy-Item $PSCommandPath $scriptPath -Force
     }
 
+    # Main inventory scan task
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -RunOnce"
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $Config.IntervalMinutes)
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -411,15 +469,25 @@ function Install-ScheduledTask {
     Unregister-ScheduledTask -TaskName "SentriKat Agent" -Confirm:$false -ErrorAction SilentlyContinue
     Register-ScheduledTask -TaskName "SentriKat Agent" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "SentriKat Software Inventory Agent"
 
-    Write-Log "Scheduled task installed successfully"
-    Write-Host "SentriKat Agent installed as scheduled task (runs every $($Config.IntervalMinutes) minutes)"
+    # Heartbeat task (every 5 minutes)
+    $heartbeatAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -Heartbeat"
+    $heartbeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $HeartbeatIntervalMinutes)
+
+    Unregister-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Confirm:$false -ErrorAction SilentlyContinue
+    Register-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Action $heartbeatAction -Trigger $heartbeatTrigger -Principal $principal -Settings $settings -Description "SentriKat Agent Heartbeat - Checks for commands"
+
+    Write-Log "Scheduled tasks installed successfully"
+    Write-Host "SentriKat Agent installed:"
+    Write-Host "  - Full scan: every $($Config.IntervalMinutes) minutes"
+    Write-Host "  - Heartbeat: every $HeartbeatIntervalMinutes minutes (checks for commands)"
 }
 
 function Uninstall-Agent {
     Write-Log "Uninstalling agent..."
 
-    # Remove scheduled task
+    # Remove scheduled tasks
     Unregister-ScheduledTask -TaskName "SentriKat Agent" -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Confirm:$false -ErrorAction SilentlyContinue
 
     # Remove config and logs (optional)
     # Remove-Item "$env:ProgramData\SentriKat" -Recurse -Force -ErrorAction SilentlyContinue
@@ -454,6 +522,21 @@ function Main {
     if ($Uninstall) {
         Uninstall-Agent
         return
+    }
+
+    # Handle heartbeat mode
+    if ($Heartbeat) {
+        Write-Log "Running heartbeat check..."
+        $systemInfo = Get-SystemInfo
+        $scanRequested = Check-Commands $config $systemInfo
+
+        if ($scanRequested) {
+            Write-Log "Executing requested scan..."
+            # Continue to run full inventory below
+        } else {
+            Write-Log "Heartbeat complete - no scan requested"
+            return
+        }
     }
 
     # Collect and send inventory

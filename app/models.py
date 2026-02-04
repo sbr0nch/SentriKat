@@ -1246,6 +1246,12 @@ class Asset(db.Model):
     tags = db.Column(db.Text, nullable=True)  # JSON array of tags
     metadata_json = db.Column(db.Text, nullable=True)  # JSON for custom fields
 
+    # Agent Command & Control (server-side management)
+    pending_scan = db.Column(db.Boolean, default=False)  # True = agent should scan immediately
+    scan_interval_override = db.Column(db.Integer, nullable=True)  # Override interval in minutes (null = use agent default)
+    pending_scan_requested_at = db.Column(db.DateTime, nullable=True)  # When scan was requested
+    pending_scan_requested_by = db.Column(db.String(100), nullable=True)  # Who requested the scan
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1331,7 +1337,11 @@ class Asset(db.Model):
             'metadata': self.get_metadata(),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'product_count': self.product_installations.count()
+            'product_count': self.product_installations.count(),
+            # Agent Command & Control
+            'pending_scan': self.pending_scan or False,
+            'scan_interval_override': self.scan_interval_override,
+            'pending_scan_requested_at': self.pending_scan_requested_at.isoformat() if self.pending_scan_requested_at else None
         }
 
         if include_products:
