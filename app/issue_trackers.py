@@ -521,7 +521,7 @@ class JiraTracker(IssueTrackerBase):
                 self._api_url('issue'),
                 headers=self._get_headers(),
                 json=issue_data,
-                timeout=15,
+                timeout=60,  # Longer timeout for issue creation (can be slow with workflows/webhooks)
                 verify=self.verify_ssl
             )
 
