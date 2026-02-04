@@ -1648,6 +1648,48 @@ def fetch_jira_issue_types_post():
         return jsonify({'error': str(e)}), 500
 
 
+@bp.route('/api/integrations/jira/fields', methods=['POST'])
+@admin_required
+@requires_professional('Issue Tracker Integration')
+def fetch_jira_create_fields():
+    """Fetch required and optional fields for creating an issue in Jira."""
+    from app.issue_trackers import JiraTracker
+    from app.settings_api import get_setting
+
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    email = data.get('email', '').strip()
+    api_token = data.get('api_token', '').strip()
+    project_key = data.get('project_key', '').strip()
+    issue_type = data.get('issue_type', '').strip()
+    use_pat = data.get('use_pat', False)
+
+    if not all([url, email, api_token, project_key, issue_type]):
+        return jsonify({'error': 'URL, email, token, project key, and issue type required'}), 400
+
+    # Get SSL verification setting
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+
+    try:
+        tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
+        fields = tracker.get_create_fields(project_key, issue_type)
+
+        # Separate required and optional fields
+        required_fields = [f for f in fields if f.get('required')]
+        optional_fields = [f for f in fields if not f.get('required')]
+
+        return jsonify({
+            'fields': fields,
+            'required_fields': required_fields,
+            'optional_fields': optional_fields,
+            'total': len(fields),
+            'required_count': len(required_fields)
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @bp.route('/api/integrations/jira/projects', methods=['POST'])
 @admin_required
 @requires_professional('Issue Tracker Integration')

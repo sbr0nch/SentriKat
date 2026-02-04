@@ -152,6 +152,190 @@ class JiraTracker(IssueTrackerBase):
             logger.error(f"Failed to fetch issue types for {project_key}: {e}")
             return []
 
+    def get_create_fields(self, project_key: str, issue_type_name: str) -> List[Dict[str, Any]]:
+        """
+        Get required and optional fields for creating an issue.
+
+        Returns list of field definitions with:
+        - key: field ID (e.g., 'customfield_11601')
+        - name: display name (e.g., 'Planned End')
+        - required: bool
+        - schema: field type info
+        - allowedValues: list of allowed values (if applicable)
+        """
+        try:
+            # Use createmeta endpoint to get field definitions
+            # For Jira Cloud API v3, the endpoint changed
+            if self.is_cloud:
+                # Jira Cloud uses a different approach - get project, then issue type fields
+                url = f"{self.base_url}/rest/api/3/issue/createmeta/{project_key}/issuetypes"
+                response = requests.get(
+                    url,
+                    headers=self._get_headers(),
+                    timeout=15,
+                    verify=self.verify_ssl
+                )
+
+                if response.status_code != 200:
+                    logger.error(f"Failed to get issue types for createmeta: {response.status_code}")
+                    return []
+
+                issue_types = response.json().get('values', response.json().get('issueTypes', []))
+                issue_type_id = None
+                for it in issue_types:
+                    if it.get('name', '').lower() == issue_type_name.lower():
+                        issue_type_id = it.get('id')
+                        break
+
+                if not issue_type_id:
+                    logger.warning(f"Issue type '{issue_type_name}' not found in project {project_key}")
+                    return []
+
+                # Get fields for this issue type
+                fields_url = f"{self.base_url}/rest/api/3/issue/createmeta/{project_key}/issuetypes/{issue_type_id}"
+                fields_response = requests.get(
+                    fields_url,
+                    headers=self._get_headers(),
+                    timeout=15,
+                    verify=self.verify_ssl
+                )
+
+                if fields_response.status_code != 200:
+                    logger.error(f"Failed to get fields: {fields_response.status_code}")
+                    return []
+
+                fields_data = fields_response.json().get('values', [])
+
+            else:
+                # Jira Server/Data Center uses createmeta with expand
+                url = self._api_url('issue/createmeta')
+                params = {
+                    'projectKeys': project_key,
+                    'issuetypeNames': issue_type_name,
+                    'expand': 'projects.issuetypes.fields'
+                }
+
+                response = requests.get(
+                    url,
+                    headers=self._get_headers(),
+                    params=params,
+                    timeout=15,
+                    verify=self.verify_ssl
+                )
+
+                if response.status_code != 200:
+                    logger.error(f"Createmeta request failed: {response.status_code}")
+                    return []
+
+                data = response.json()
+                projects = data.get('projects', [])
+
+                if not projects:
+                    return []
+
+                issue_types = projects[0].get('issuetypes', [])
+                if not issue_types:
+                    return []
+
+                fields_data = issue_types[0].get('fields', {})
+
+            # Parse fields into a clean format
+            result = []
+
+            # Skip these standard fields - we handle them separately
+            skip_fields = {'project', 'issuetype', 'summary', 'description', 'priority', 'labels',
+                          'reporter', 'assignee', 'attachment', 'issuelinks', 'parent'}
+
+            if isinstance(fields_data, dict):
+                # Jira Server format: fields is a dict
+                for field_key, field_info in fields_data.items():
+                    if field_key in skip_fields:
+                        continue
+
+                    field_def = self._parse_field_info(field_key, field_info)
+                    if field_def:
+                        result.append(field_def)
+            else:
+                # Jira Cloud format: fields is a list
+                for field_info in fields_data:
+                    field_key = field_info.get('fieldId', field_info.get('key', ''))
+                    if field_key in skip_fields:
+                        continue
+
+                    field_def = self._parse_field_info(field_key, field_info)
+                    if field_def:
+                        result.append(field_def)
+
+            # Sort: required fields first, then by name
+            result.sort(key=lambda x: (not x['required'], x['name'].lower()))
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get create fields for {project_key}/{issue_type_name}: {e}")
+            return []
+
+    def _parse_field_info(self, field_key: str, field_info: Dict) -> Optional[Dict[str, Any]]:
+        """Parse field metadata into a clean format."""
+        try:
+            name = field_info.get('name', field_key)
+            required = field_info.get('required', False)
+            schema = field_info.get('schema', {})
+
+            # Determine field type
+            field_type = schema.get('type', 'string')
+            custom_type = schema.get('custom', '')
+
+            # Map to simple types for UI
+            ui_type = 'text'  # default
+            if field_type == 'array':
+                items_type = schema.get('items', '')
+                if items_type == 'option':
+                    ui_type = 'multi-select'
+                else:
+                    ui_type = 'array'
+            elif field_type == 'option':
+                ui_type = 'select'
+            elif field_type == 'date':
+                ui_type = 'date'
+            elif field_type == 'datetime':
+                ui_type = 'datetime'
+            elif field_type == 'number':
+                ui_type = 'number'
+            elif field_type == 'user':
+                ui_type = 'user'
+            elif 'select' in custom_type.lower() or 'option' in custom_type.lower():
+                ui_type = 'select'
+            elif 'multiselect' in custom_type.lower():
+                ui_type = 'multi-select'
+            elif 'datepicker' in custom_type.lower():
+                ui_type = 'date'
+
+            result = {
+                'key': field_key,
+                'name': name,
+                'required': required,
+                'type': ui_type,
+                'schema': schema
+            }
+
+            # Include allowed values if present
+            allowed_values = field_info.get('allowedValues', [])
+            if allowed_values:
+                result['allowedValues'] = [
+                    {
+                        'id': av.get('id', av.get('value', '')),
+                        'name': av.get('name', av.get('value', str(av.get('id', ''))))
+                    }
+                    for av in allowed_values
+                ]
+
+            return result
+
+        except Exception as e:
+            logger.warning(f"Failed to parse field {field_key}: {e}")
+            return None
+
     def create_issue(
         self,
         summary: str,
@@ -160,6 +344,7 @@ class JiraTracker(IssueTrackerBase):
         labels: Optional[List[str]] = None,
         project_key: str = '',
         issue_type: str = 'Task',
+        custom_fields: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> Tuple[bool, str, Optional[str], Optional[str]]:
         try:
@@ -186,6 +371,27 @@ class JiraTracker(IssueTrackerBase):
                 issue_data['fields']['priority'] = {'name': priority}
             if labels:
                 issue_data['fields']['labels'] = labels
+
+            # Add custom fields if provided
+            if custom_fields:
+                for field_key, field_value in custom_fields.items():
+                    if field_value is not None and field_value != '':
+                        # Handle different field value formats
+                        if isinstance(field_value, dict):
+                            # Already formatted (e.g., {'id': '123'} or {'value': 'xyz'})
+                            issue_data['fields'][field_key] = field_value
+                        elif isinstance(field_value, list):
+                            # Multi-select: list of IDs or values
+                            issue_data['fields'][field_key] = [
+                                {'id': v} if isinstance(v, str) and not v.startswith('{') else v
+                                for v in field_value
+                            ]
+                        elif field_key.startswith('customfield_'):
+                            # Custom fields often need ID wrapper for select types
+                            # Try to detect if it's a select field by value format
+                            issue_data['fields'][field_key] = {'id': str(field_value)}
+                        else:
+                            issue_data['fields'][field_key] = field_value
 
             response = requests.post(
                 self._api_url('issue'),
@@ -664,7 +870,8 @@ def get_issue_tracker_config() -> Dict[str, Any]:
             'email': get_setting('jira_email', ''),
             'project_key': get_setting('jira_project_key', ''),
             'issue_type': get_setting('jira_issue_type', 'Task'),
-            'use_pat': get_setting('jira_use_pat', 'false') == 'true'
+            'use_pat': get_setting('jira_use_pat', 'false') == 'true',
+            'custom_fields': get_setting('jira_custom_fields', '')
         })
     elif tracker_type == 'youtrack':
         config.update({
@@ -783,6 +990,15 @@ def create_vulnerability_issue(
     if tracker_type == 'jira':
         extra_params['project_key'] = get_setting('jira_project_key', '')
         extra_params['issue_type'] = get_setting('jira_issue_type', 'Task')
+
+        # Load custom fields from settings
+        custom_fields_json = get_setting('jira_custom_fields', '')
+        if custom_fields_json:
+            try:
+                extra_params['custom_fields'] = json.loads(custom_fields_json)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Failed to parse jira_custom_fields setting")
+
     elif tracker_type == 'youtrack':
         extra_params['project_id'] = get_setting('youtrack_project_id', '')
     # GitHub and GitLab don't need extra params

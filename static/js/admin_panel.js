@@ -7996,6 +7996,178 @@ async function fetchJiraIssueTypes() {
     }
 }
 
+// Store the field definitions globally so we can use them when saving
+window._jiraFieldDefinitions = [];
+
+async function fetchJiraCustomFields() {
+    const url = SK.DOM.getValue('jiraUrl');
+    const email = SK.DOM.getValue('jiraEmail');
+    const apiToken = SK.DOM.getValue('jiraApiToken');
+    const projectKey = SK.DOM.getValue('jiraProjectKey');
+    const issueType = SK.DOM.getValue('jiraIssueType');
+    const patCheckbox = SK.DOM.get('jiraUsePat');
+    const usePat = patCheckbox && patCheckbox.checked;
+    const container = SK.DOM.get('jiraCustomFieldsContainer');
+    const fetchBtn = SK.DOM.get('fetchFieldsBtn');
+
+    if (!url || !email || !projectKey || !issueType) {
+        showToast('Please fill in URL, username, project key, and issue type first', 'warning');
+        return;
+    }
+
+    // Check if we have a token (either from input or saved)
+    // Token might be empty if already saved - that's ok, the backend will use saved token
+    const hasToken = apiToken || true; // Always try - backend might use saved token
+
+    // Show loading state
+    if (fetchBtn) {
+        fetchBtn.disabled = true;
+        fetchBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
+    }
+    if (container) {
+        container.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Fetching fields from Jira...</div>';
+    }
+
+    try {
+        const response = await fetch('/api/integrations/jira/fields', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: url,
+                email: email,
+                api_token: apiToken,
+                project_key: projectKey,
+                issue_type: issueType,
+                use_pat: usePat
+            })
+        });
+
+        const data = await response.json();
+
+        if (fetchBtn) {
+            fetchBtn.disabled = false;
+            fetchBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Fetch Required Fields';
+        }
+
+        if (data.error) {
+            if (container) {
+                container.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>${data.error}</div>`;
+            }
+            return;
+        }
+
+        // Store field definitions
+        window._jiraFieldDefinitions = data.fields || [];
+
+        // Load saved custom field values
+        let savedValues = {};
+        const savedJson = SK.DOM.getValue('jiraCustomFields');
+        if (savedJson) {
+            try {
+                savedValues = JSON.parse(savedJson);
+            } catch (e) {}
+        }
+
+        // Render fields
+        renderJiraCustomFields(data.required_fields || [], savedValues, container);
+
+    } catch (error) {
+        if (fetchBtn) {
+            fetchBtn.disabled = false;
+            fetchBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Fetch Required Fields';
+        }
+        if (container) {
+            container.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Network error: ${error.message}</div>`;
+        }
+    }
+}
+
+function renderJiraCustomFields(fields, savedValues, container) {
+    if (!container) return;
+
+    if (!fields || fields.length === 0) {
+        container.innerHTML = `<div class="alert alert-success py-2 mb-0">
+            <i class="bi bi-check-circle me-1"></i>
+            No required custom fields for this project/issue type.
+        </div>`;
+        return;
+    }
+
+    let html = `<div class="table-responsive"><table class="table table-sm table-borderless mb-0">
+        <tbody>`;
+
+    fields.forEach(field => {
+        const savedValue = savedValues[field.key] || '';
+        const requiredBadge = field.required ? '<span class="badge bg-danger ms-1">Required</span>' : '';
+
+        html += `<tr>
+            <td class="fw-semibold" style="width: 35%; vertical-align: middle;">
+                ${field.name}${requiredBadge}
+                <br><small class="text-muted">${field.key}</small>
+            </td>
+            <td>`;
+
+        if (field.allowedValues && field.allowedValues.length > 0) {
+            // Dropdown for fields with allowed values
+            html += `<select class="form-select form-select-sm jira-custom-field" data-field-key="${field.key}" data-field-type="${field.type}">
+                <option value="">-- Select --</option>`;
+            field.allowedValues.forEach(av => {
+                const selected = savedValue === av.id ? 'selected' : '';
+                html += `<option value="${av.id}" ${selected}>${av.name}</option>`;
+            });
+            html += `</select>`;
+        } else if (field.type === 'date') {
+            // Date picker
+            html += `<input type="date" class="form-control form-control-sm jira-custom-field"
+                data-field-key="${field.key}" data-field-type="date" value="${savedValue}">`;
+        } else if (field.type === 'datetime') {
+            // Datetime picker
+            html += `<input type="datetime-local" class="form-control form-control-sm jira-custom-field"
+                data-field-key="${field.key}" data-field-type="datetime" value="${savedValue}">`;
+        } else if (field.type === 'number') {
+            // Number input
+            html += `<input type="number" class="form-control form-control-sm jira-custom-field"
+                data-field-key="${field.key}" data-field-type="number" value="${savedValue}">`;
+        } else {
+            // Text input (default)
+            html += `<input type="text" class="form-control form-control-sm jira-custom-field"
+                data-field-key="${field.key}" data-field-type="text" value="${savedValue}"
+                placeholder="Enter value...">`;
+        }
+
+        html += `</td></tr>`;
+    });
+
+    html += `</tbody></table></div>
+        <small class="text-muted mt-2 d-block">
+            <i class="bi bi-info-circle me-1"></i>These fields will be included when creating Jira issues.
+        </small>`;
+
+    container.innerHTML = html;
+
+    // Add change listeners to update the hidden JSON field
+    container.querySelectorAll('.jira-custom-field').forEach(input => {
+        input.addEventListener('change', updateJiraCustomFieldsJson);
+    });
+}
+
+function updateJiraCustomFieldsJson() {
+    const container = SK.DOM.get('jiraCustomFieldsContainer');
+    const hiddenInput = SK.DOM.get('jiraCustomFields');
+    if (!container || !hiddenInput) return;
+
+    const customFields = {};
+    container.querySelectorAll('.jira-custom-field').forEach(input => {
+        const key = input.dataset.fieldKey;
+        const value = input.value;
+        if (key && value) {
+            customFields[key] = value;
+        }
+    });
+
+    hiddenInput.value = JSON.stringify(customFields);
+}
+
 async function loadIssueTrackerSettings() {
     try {
         const response = await fetch('/api/integrations/issue-tracker/config');
@@ -8026,6 +8198,11 @@ async function loadIssueTrackerSettings() {
             }
             // Store the saved issue type to re-select after fetch
             window._savedJiraIssueType = config.issue_type || '';
+
+            // Load saved custom fields
+            if (config.custom_fields) {
+                SK.DOM.setValue('jiraCustomFields', config.custom_fields);
+            }
         } else if (config.type === 'youtrack') {
             SK.DOM.setValue('youtrackUrl', config.url || '');
             SK.DOM.setValue('youtrackProjectId', config.project_id || '');
@@ -8066,6 +8243,11 @@ async function saveIssueTrackerSettings() {
         if (token) {
             settings.jira_api_token = token;
             encryptKeys.push('jira_api_token');
+        }
+        // Save custom fields
+        const customFields = SK.DOM.getValue('jiraCustomFields');
+        if (customFields) {
+            settings.jira_custom_fields = customFields;
         }
     } else if (trackerType === 'youtrack') {
         settings.youtrack_url = SK.DOM.getValue('youtrackUrl');

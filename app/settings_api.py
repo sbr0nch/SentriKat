@@ -189,7 +189,7 @@ ALLOWED_SETTING_KEYS = {
     'issue_tracker_type',  # 'disabled', 'jira', 'youtrack', 'github', 'gitlab', 'webhook'
     # Jira settings
     'jira_enabled', 'jira_url', 'jira_email', 'jira_api_token',
-    'jira_project_key', 'jira_issue_type', 'jira_use_pat',
+    'jira_project_key', 'jira_issue_type', 'jira_use_pat', 'jira_custom_fields',
     # YouTrack settings
     'youtrack_url', 'youtrack_token', 'youtrack_project_id',
     # GitHub Issues settings
