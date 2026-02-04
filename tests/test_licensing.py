@@ -18,8 +18,8 @@ class TestLicenseValidation:
             license_info = get_license()
             limits = license_info.get_effective_limits()
 
-            # Community edition should have limited agents
-            assert limits['max_agents'] == 25
+            # Community edition has no agents (push agents require Professional)
+            assert limits['max_agents'] == 0
             assert limits['max_organizations'] == 1
             assert license_info.edition == 'community'
 

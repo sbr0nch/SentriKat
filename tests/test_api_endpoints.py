@@ -310,9 +310,9 @@ class TestMatchEndpoints:
         match = VulnerabilityMatch(
             product_id=product.id,
             vulnerability_id=vuln.id,
-            match_type='cpe',
-            confidence='high',
-            is_acknowledged=False
+            match_method='cpe',
+            match_confidence='high',
+            acknowledged=False
         )
         db_session.add(match)
         db_session.commit()
@@ -354,21 +354,26 @@ class TestAgentEndpoints:
     def setup_api_key(self, db_session):
         """Set up an API key for agent registration."""
         from app.models import Organization, AgentApiKey
+        import hashlib
 
-        org = Organization(name='test', display_name='Test', active=True)
+        org = Organization(name='test', display_name='Test', is_active=True)
         db_session.add(org)
         db_session.flush()
 
+        raw_key = 'test-agent-api-key-1234567890'
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+
         api_key = AgentApiKey(
-            key='test-agent-api-key-1234567890',
             name='Test Agent Key',
             organization_id=org.id,
-            is_active=True
+            key_hash=key_hash,
+            key_prefix=raw_key[:8],
+            active=True
         )
         db_session.add(api_key)
         db_session.commit()
 
-        return {'org': org, 'api_key': api_key}
+        return {'org': org, 'api_key': api_key, 'raw_key': raw_key}
 
     def test_agent_register(self, app, client, db_session):
         """Test agent registration."""
