@@ -1473,8 +1473,24 @@ def get_vulnerabilities_grouped():
                 'unacknowledged_count': group['unacknowledged_count']
             })
 
-        # Sort by highest priority (critical first), then by unacknowledged count
-        results.sort(key=lambda x: (-priority_order.get(x['highest_priority'], 2), -x['unacknowledged_count']))
+        # Sort by: 1) highest priority (critical first), 2) newest date_added, 3) unacknowledged count
+        def sort_key(x):
+            priority = -priority_order.get(x['highest_priority'], 2)
+            # Parse date_added for sorting (newest first = descending)
+            date_added = x['vulnerability'].get('date_added', '1970-01-01')
+            if isinstance(date_added, str):
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.fromisoformat(date_added.replace('Z', '+00:00'))
+                    date_sort = -date_obj.timestamp()
+                except:
+                    date_sort = 0
+            else:
+                date_sort = 0
+            unack = -x['unacknowledged_count']
+            return (priority, date_sort, unack)
+
+        results.sort(key=sort_key)
 
         # Apply search filter if provided
         search = request.args.get('search', '').lower()
@@ -1488,6 +1504,67 @@ def get_vulnerabilities_grouped():
         priority_filter = request.args.get('priority')
         if priority_filter:
             results = [r for r in results if r['highest_priority'] == priority_filter.lower()]
+
+        # Filter by CVE severity (CVSS-based)
+        severity_filter = request.args.get('severity')
+        if severity_filter:
+            results = [r for r in results if r['vulnerability'].get('severity') == severity_filter]
+
+        # Filter by CISA urgency (due date)
+        urgency_filter = request.args.get('urgency')
+        if urgency_filter:
+            from datetime import datetime, timedelta
+            today = datetime.utcnow().date()
+
+            def matches_urgency(r):
+                due_date_str = r['vulnerability'].get('due_date')
+                is_ransomware = r['vulnerability'].get('known_ransomware', False)
+
+                if not due_date_str:
+                    return False  # No due date means no urgency
+
+                try:
+                    due_date = datetime.fromisoformat(due_date_str.replace('Z', '+00:00')).date()
+                    days_until_due = (due_date - today).days
+                except:
+                    return False
+
+                if urgency_filter == 'critical':
+                    # Due within 7 days OR ransomware
+                    return days_until_due <= 7 or is_ransomware
+                elif urgency_filter == 'high':
+                    # Due within 30 days
+                    return days_until_due <= 30
+                elif urgency_filter == 'has_due_date':
+                    return True  # Has any due date
+                return True
+
+            results = [r for r in results if matches_urgency(r)]
+
+        # Filter by age (days since added)
+        age_filter = request.args.get('age')
+        if age_filter:
+            try:
+                max_days = int(age_filter)
+                results = [r for r in results if (r['vulnerability'].get('days_old') or 0) <= max_days]
+            except ValueError:
+                pass
+
+        # Filter by vendor
+        vendor_filter = request.args.get('vendor', '').lower()
+        if vendor_filter:
+            results = [r for r in results if any(
+                vendor_filter in (p.get('vendor', '') or '').lower()
+                for p in r['affected_products']
+            )]
+
+        # Filter by product name
+        product_filter = request.args.get('product', '').lower()
+        if product_filter:
+            results = [r for r in results if any(
+                product_filter in (p.get('product_name', '') or '').lower()
+                for p in r['affected_products']
+            )]
 
         # Pagination
         page = max(int(request.args.get('page', 1)), 1)

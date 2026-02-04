@@ -32,6 +32,11 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerabilities', 'epss_score', 'REAL', 'DOUBLE PRECISION'),
         ('vulnerabilities', 'epss_percentile', 'REAL', 'DOUBLE PRECISION'),
         ('vulnerabilities', 'epss_fetched_at', 'DATETIME', 'TIMESTAMP'),
+        # Agent Command & Control columns
+        ('assets', 'pending_scan', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('assets', 'scan_interval_override', 'INTEGER', 'INTEGER'),
+        ('assets', 'pending_scan_requested_at', 'DATETIME', 'TIMESTAMP'),
+        ('assets', 'pending_scan_requested_by', 'VARCHAR(100)', 'VARCHAR(100)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
