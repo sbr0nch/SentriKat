@@ -359,7 +359,7 @@
                             <input class="form-check-input" type="checkbox" id="filterUnack">
                             <label class="form-check-label" for="filterUnack">Unacknowledged</label>
                         </div>
-                        <button type="button" class="btn btn-sm btn-primary" onclick="loadGroupedVulnerabilities()">
+                        <button type="button" class="btn btn-sm btn-primary" onclick="resetAndLoadVulnerabilities()">
                             <i class="bi bi-search"></i> Apply
                         </button>
                     </div>
@@ -1711,7 +1711,8 @@
         document.getElementById('filterRansomware').checked = false;
         document.getElementById('filterUnack').checked = false;
         document.getElementById('sortBy').value = 'priority';
-        loadVulnerabilities();
+        currentPage = 1;  // Reset pagination
+        loadGroupedVulnerabilities();
     }
 
     function exportData(format) {
@@ -1864,26 +1865,32 @@
         }
     }
 
-    // Handle Enter key in filter inputs - trigger reload on Enter
+    // Handle Enter key in filter inputs - trigger reload on Enter (reset to page 1)
     document.querySelectorAll('#filterCVE, #filterVendor, #filterProduct').forEach(input => {
-        input.addEventListener('change', loadGroupedVulnerabilities);  // Also trigger on blur/change
+        input.addEventListener('change', resetAndLoadVulnerabilities);  // Also trigger on blur/change
         input.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                loadGroupedVulnerabilities();
+                resetAndLoadVulnerabilities();
             }
         });
     });
 
-    // Handle filter changes - use grouped view
-    document.getElementById('filterPriority').addEventListener('change', loadGroupedVulnerabilities);
-    document.getElementById('filterSeverity').addEventListener('change', loadGroupedVulnerabilities);
-    document.getElementById('filterUrgency').addEventListener('change', loadGroupedVulnerabilities);
-    document.getElementById('filterAge').addEventListener('change', loadGroupedVulnerabilities);
+    // Reset pagination and load - used when filters change
+    function resetAndLoadVulnerabilities() {
+        currentPage = 1;
+        loadGroupedVulnerabilities();
+    }
 
-    // Handle sort change
+    // Handle filter changes - use grouped view (reset to page 1)
+    document.getElementById('filterPriority').addEventListener('change', resetAndLoadVulnerabilities);
+    document.getElementById('filterSeverity').addEventListener('change', resetAndLoadVulnerabilities);
+    document.getElementById('filterUrgency').addEventListener('change', resetAndLoadVulnerabilities);
+    document.getElementById('filterAge').addEventListener('change', resetAndLoadVulnerabilities);
+
+    // Handle sort change (reset to page 1)
     document.getElementById('sortBy').addEventListener('change', function() {
         if (currentGroupedVulnerabilities.length > 0) {
-            loadGroupedVulnerabilities();
+            resetAndLoadVulnerabilities();
         }
     });
 

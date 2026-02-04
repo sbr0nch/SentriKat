@@ -105,20 +105,20 @@
                 </div>
                 {% if current_user and current_user.is_super_admin() %}
                 <div class="col-md-2">
-                    <select class="form-select form-select-sm" id="filterOrg" onchange="loadProducts()">
+                    <select class="form-select form-select-sm" id="filterOrg" onchange="resetAndLoadProducts()">
                         <option value="">All Organizations</option>
                     </select>
                 </div>
                 {% endif %}
                 <div class="col-md-2">
-                    <select class="form-select form-select-sm" id="filterStatus" onchange="loadProducts()">
+                    <select class="form-select form-select-sm" id="filterStatus" onchange="resetAndLoadProducts()">
                         <option value="">All Statuses</option>
                         <option value="active">Active</option>
                         <option value="inactive">Inactive</option>
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <select class="form-select form-select-sm" id="filterCpe" onchange="loadProducts()">
+                    <select class="form-select form-select-sm" id="filterCpe" onchange="resetAndLoadProducts()">
                         <option value="">All CPE</option>
                         <option value="with_cpe">With CPE</option>
                         <option value="without_cpe">Without CPE ⚠️</option>
@@ -164,7 +164,7 @@
         <div class="card-footer d-flex justify-content-between align-items-center" id="paginationContainer" style="display: none;">
             <div class="d-flex align-items-center gap-2">
                 <label class="form-label mb-0 small text-muted">Per page:</label>
-                <select class="form-select form-select-sm" style="width: auto;" id="perPage" onchange="loadProducts()">
+                <select class="form-select form-select-sm" style="width: auto;" id="perPage" onchange="resetAndLoadProducts()">
                     <option value="25">25</option>
                     <option value="50">50</option>
                     <option value="100">100</option>
@@ -559,6 +559,12 @@
 
     function clearSearch() {
         document.getElementById('productSearch').value = '';
+        currentPage = 1;
+        loadProducts();
+    }
+
+    // Reset pagination and load - used when filters change
+    function resetAndLoadProducts() {
         currentPage = 1;
         loadProducts();
     }
