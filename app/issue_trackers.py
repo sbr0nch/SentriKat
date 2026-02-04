@@ -528,7 +528,8 @@ def get_issue_tracker() -> Optional[IssueTrackerBase]:
         IssueTracker instance or None if disabled/not configured
     """
     from app.settings_api import get_setting
-    from app.encryption import decrypt_value
+    # Note: get_setting() already handles decryption for encrypted settings,
+    # so we don't need to call decrypt_value() again here.
 
     tracker_type = get_setting('issue_tracker_type', 'disabled')
 
@@ -539,59 +540,44 @@ def get_issue_tracker() -> Optional[IssueTrackerBase]:
         if tracker_type == 'jira':
             url = get_setting('jira_url', '')
             email = get_setting('jira_email', '')
-            token_enc = get_setting('jira_api_token', '')
-            if not all([url, email, token_enc]):
+            # get_setting() returns decrypted value for encrypted settings
+            token = get_setting('jira_api_token', '')
+            if not all([url, email, token]):
                 return None
-            try:
-                token = decrypt_value(token_enc)
-            except Exception:
-                token = token_enc
             return JiraTracker(url, email, token)
 
         elif tracker_type == 'youtrack':
             url = get_setting('youtrack_url', '')
-            token_enc = get_setting('youtrack_token', '')
-            if not all([url, token_enc]):
+            # get_setting() returns decrypted value for encrypted settings
+            token = get_setting('youtrack_token', '')
+            if not all([url, token]):
                 return None
-            try:
-                token = decrypt_value(token_enc)
-            except Exception:
-                token = token_enc
             return YouTrackTracker(url, token)
 
         elif tracker_type == 'github':
-            token_enc = get_setting('github_token', '')
+            # get_setting() returns decrypted value for encrypted settings
+            token = get_setting('github_token', '')
             owner = get_setting('github_owner', '')
             repo = get_setting('github_repo', '')
-            if not all([token_enc, owner, repo]):
+            if not all([token, owner, repo]):
                 return None
-            try:
-                token = decrypt_value(token_enc)
-            except Exception:
-                token = token_enc
             return GitHubTracker(token, owner, repo)
 
         elif tracker_type == 'gitlab':
             url = get_setting('gitlab_url', 'https://gitlab.com')
-            token_enc = get_setting('gitlab_token', '')
+            # get_setting() returns decrypted value for encrypted settings
+            token = get_setting('gitlab_token', '')
             project_id = get_setting('gitlab_project_id', '')
-            if not all([token_enc, project_id]):
+            if not all([token, project_id]):
                 return None
-            try:
-                token = decrypt_value(token_enc)
-            except Exception:
-                token = token_enc
             return GitLabTracker(url, token, project_id)
 
         elif tracker_type == 'webhook':
             url = get_setting('webhook_url', '')
             method = get_setting('webhook_method', 'POST')
             auth_type = get_setting('webhook_auth_type', 'none')
-            auth_value_enc = get_setting('webhook_auth_value', '')
-            try:
-                auth_value = decrypt_value(auth_value_enc) if auth_value_enc else ''
-            except Exception:
-                auth_value = auth_value_enc
+            # get_setting() returns decrypted value for encrypted settings
+            auth_value = get_setting('webhook_auth_value', '')
             if not url:
                 return None
             return WebhookTracker(url, method, auth_type=auth_type, auth_value=auth_value)

@@ -1651,18 +1651,14 @@ def get_youtrack_projects():
     """Get available YouTrack projects."""
     from app.issue_trackers import YouTrackTracker
     from app.settings_api import get_setting
-    from app.encryption import decrypt_value
+    # Note: get_setting() already handles decryption for encrypted settings
 
     url = get_setting('youtrack_url', '')
-    token_enc = get_setting('youtrack_token', '')
+    # get_setting() returns decrypted value for encrypted settings
+    token = get_setting('youtrack_token', '')
 
-    if not all([url, token_enc]):
+    if not all([url, token]):
         return jsonify({'error': 'YouTrack not configured'}), 400
-
-    try:
-        token = decrypt_value(token_enc)
-    except Exception:
-        token = token_enc
 
     tracker = YouTrackTracker(url, token)
     projects = tracker.get_projects()

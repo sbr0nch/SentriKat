@@ -275,7 +275,8 @@ def get_jira_client() -> Optional[JiraClient]:
         JiraClient instance or None if not configured/disabled
     """
     from app.settings_api import get_setting
-    from app.encryption import decrypt_value
+    # Note: get_setting() already handles decryption for encrypted settings,
+    # so we don't need to call decrypt_value() again here.
 
     # Check if enabled
     if get_setting('jira_enabled', 'false') != 'true':
@@ -283,17 +284,12 @@ def get_jira_client() -> Optional[JiraClient]:
 
     url = get_setting('jira_url', '')
     email = get_setting('jira_email', '')
-    api_token_encrypted = get_setting('jira_api_token', '')
+    # get_setting() returns decrypted value for encrypted settings
+    api_token = get_setting('jira_api_token', '')
 
-    if not all([url, email, api_token_encrypted]):
+    if not all([url, email, api_token]):
         logger.warning("Jira integration enabled but not fully configured")
         return None
-
-    # Decrypt API token
-    try:
-        api_token = decrypt_value(api_token_encrypted)
-    except Exception:
-        api_token = api_token_encrypted
 
     # Detect Cloud vs Server based on URL
     is_cloud = 'atlassian.net' in url.lower()
