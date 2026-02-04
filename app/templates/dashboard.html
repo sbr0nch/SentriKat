@@ -477,12 +477,19 @@
             </div>
         </div>
         <div class="card-body p-0">
-            <div id="vulnerabilitiesContainer" class="p-3"></div>
-            <!-- Pagination Controls -->
-            <div id="paginationControls" class="d-flex justify-content-between align-items-center p-3 border-top" style="display: none !important;">
-                <div class="text-muted small" id="paginationInfo">Showing 1-50 of 0</div>
+            <!-- Top Pagination Controls -->
+            <div id="paginationControlsTop" class="d-flex justify-content-between align-items-center p-3 border-bottom" style="display: none;">
+                <div class="text-muted small paginationInfo">Showing 1-50 of 0</div>
                 <nav>
-                    <ul class="pagination pagination-sm mb-0" id="paginationNav"></ul>
+                    <ul class="pagination pagination-sm mb-0 paginationNav"></ul>
+                </nav>
+            </div>
+            <div id="vulnerabilitiesContainer" class="p-3"></div>
+            <!-- Bottom Pagination Controls -->
+            <div id="paginationControlsBottom" class="d-flex justify-content-between align-items-center p-3 border-top" style="display: none;">
+                <div class="text-muted small paginationInfo">Showing 1-50 of 0</div>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0 paginationNav"></ul>
                 </nav>
             </div>
         </div>
@@ -824,7 +831,11 @@
                     </div>
                 `;
             }
-            document.getElementById('paginationControls').style.display = 'none';
+            // Hide both pagination controls
+            ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
             return;
         }
 
@@ -849,51 +860,59 @@
             container.appendChild(fragment);
         });
 
-        // Update pagination info and controls
-        const paginationControls = document.getElementById('paginationControls');
-        const paginationInfo = document.getElementById('paginationInfo');
-        const paginationNav = document.getElementById('paginationNav');
+        // Update pagination info and controls (both top and bottom)
+        updatePaginationControls(totalPages, total, startIdx, endIdx, 'goToPage');
+    }
+
+    // Shared function to update both top and bottom pagination controls
+    function updatePaginationControls(totalPages, total, startIdx, endIdx, goToFn) {
+        const paginationTop = document.getElementById('paginationControlsTop');
+        const paginationBottom = document.getElementById('paginationControlsBottom');
 
         if (totalPages > 1) {
-            paginationControls.style.display = 'flex';
-            paginationInfo.textContent = `Showing ${startIdx + 1}-${endIdx} of ${total}`;
+            const infoText = `Showing ${startIdx + 1}-${endIdx} of ${total}`;
 
-            // Build pagination nav
+            // Build pagination nav HTML
             let navHtml = '';
-
-            // Previous button
             navHtml += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="goToPage(${currentPage - 1}); return false;">&laquo;</a>
+                <a class="page-link" href="#" onclick="${goToFn}(${currentPage - 1}); return false;">&laquo;</a>
             </li>`;
 
-            // Page numbers (show max 5 pages around current)
             const startPage = Math.max(1, currentPage - 2);
             const endPage = Math.min(totalPages, currentPage + 2);
 
             if (startPage > 1) {
-                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(1); return false;">1</a></li>`;
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="${goToFn}(1); return false;">1</a></li>`;
                 if (startPage > 2) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
             }
 
             for (let i = startPage; i <= endPage; i++) {
                 navHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}">
-                    <a class="page-link" href="#" onclick="goToPage(${i}); return false;">${i}</a>
+                    <a class="page-link" href="#" onclick="${goToFn}(${i}); return false;">${i}</a>
                 </li>`;
             }
 
             if (endPage < totalPages) {
                 if (endPage < totalPages - 1) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(${totalPages}); return false;">${totalPages}</a></li>`;
+                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="${goToFn}(${totalPages}); return false;">${totalPages}</a></li>`;
             }
 
-            // Next button
             navHtml += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="goToPage(${currentPage + 1}); return false;">&raquo;</a>
+                <a class="page-link" href="#" onclick="${goToFn}(${currentPage + 1}); return false;">&raquo;</a>
             </li>`;
 
-            paginationNav.innerHTML = navHtml;
+            // Update both top and bottom
+            [paginationTop, paginationBottom].forEach(el => {
+                if (el) {
+                    el.style.display = 'flex';
+                    el.querySelector('.paginationInfo').textContent = infoText;
+                    el.querySelector('.paginationNav').innerHTML = navHtml;
+                }
+            });
         } else {
-            paginationControls.style.display = 'none';
+            [paginationTop, paginationBottom].forEach(el => {
+                if (el) el.style.display = 'none';
+            });
         }
     }
 
@@ -2195,55 +2214,21 @@
                     <p class="text-muted">No matches found with the current filter criteria.</p>
                 </div>
             `;
-            document.getElementById('paginationControls').style.display = 'none';
+            // Hide both pagination controls
+            ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
             return;
         }
 
         container.innerHTML = data.items.map(group => createGroupedCVECard(group)).join('');
 
-        // Update pagination
-        const paginationControls = document.getElementById('paginationControls');
-        const paginationInfo = document.getElementById('paginationInfo');
-        const paginationNav = document.getElementById('paginationNav');
-
-        if (data.pages > 1) {
-            paginationControls.style.display = 'flex';
-            const start = (data.page - 1) * data.per_page + 1;
-            const end = Math.min(data.page * data.per_page, data.total);
-            paginationInfo.textContent = `Showing ${start}-${end} of ${data.total} CVEs`;
-
-            let navHtml = '';
-            navHtml += `<li class="page-item ${data.page === 1 ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="goToGroupedPage(${data.page - 1}); return false;">&laquo;</a>
-            </li>`;
-
-            const startPage = Math.max(1, data.page - 2);
-            const endPage = Math.min(data.pages, data.page + 2);
-
-            if (startPage > 1) {
-                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToGroupedPage(1); return false;">1</a></li>`;
-                if (startPage > 2) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            }
-
-            for (let i = startPage; i <= endPage; i++) {
-                navHtml += `<li class="page-item ${i === data.page ? 'active' : ''}">
-                    <a class="page-link" href="#" onclick="goToGroupedPage(${i}); return false;">${i}</a>
-                </li>`;
-            }
-
-            if (endPage < data.pages) {
-                if (endPage < data.pages - 1) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToGroupedPage(${data.pages}); return false;">${data.pages}</a></li>`;
-            }
-
-            navHtml += `<li class="page-item ${data.page === data.pages ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="goToGroupedPage(${data.page + 1}); return false;">&raquo;</a>
-            </li>`;
-
-            paginationNav.innerHTML = navHtml;
-        } else {
-            paginationControls.style.display = 'none';
-        }
+        // Update pagination (use shared function with grouped page function)
+        const start = (data.page - 1) * data.per_page + 1;
+        const end = Math.min(data.page * data.per_page, data.total);
+        currentPage = data.page;  // Sync currentPage for the shared function
+        updatePaginationControls(data.pages, data.total, start - 1, end, 'goToGroupedPage');
     }
 
     function goToGroupedPage(page) {
