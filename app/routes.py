@@ -1442,6 +1442,17 @@ def get_vulnerabilities_grouped():
             if not match.acknowledged:
                 group['unacknowledged_count'] += 1
 
+            # Get affected assets for this product
+            from app.models import ProductInstallation, Asset
+            affected_assets = db.session.query(Asset.hostname, Asset.ip_address, Asset.asset_type)\
+                .join(ProductInstallation, Asset.id == ProductInstallation.asset_id)\
+                .filter(ProductInstallation.product_id == match.product.id)\
+                .filter(Asset.active == True)\
+                .limit(10).all()
+
+            asset_list = [{'hostname': a.hostname, 'ip': a.ip_address, 'type': a.asset_type} for a in affected_assets]
+            asset_count = ProductInstallation.query.filter_by(product_id=match.product.id).count()
+
             group['affected_products'].append({
                 'match_id': match.id,
                 'product_id': match.product.id,
@@ -1451,7 +1462,9 @@ def get_vulnerabilities_grouped():
                 'effective_priority': effective_priority,
                 'acknowledged': match.acknowledged,
                 'match_method': match.match_method,
-                'match_confidence': match.match_confidence
+                'match_confidence': match.match_confidence,
+                'affected_assets': asset_list,
+                'affected_assets_count': asset_count
             })
 
         # Build results list
@@ -1464,13 +1477,17 @@ def get_vulnerabilities_grouped():
             max_priority_level = max(priority_order.get(p, 2) for p in group['priorities'])
             highest_priority = level_names.get(max_priority_level, 'medium')
 
+            # Calculate total affected assets across all products
+            total_affected_assets = sum(p.get('affected_assets_count', 0) for p in group['affected_products'])
+
             results.append({
                 'cve_id': cve_id,
                 'vulnerability': group['vulnerability'],
                 'highest_priority': highest_priority,
                 'affected_products': group['affected_products'],
                 'product_count': len(group['affected_products']),
-                'unacknowledged_count': group['unacknowledged_count']
+                'unacknowledged_count': group['unacknowledged_count'],
+                'total_affected_assets': total_affected_assets
             })
 
         # Sort by: 1) highest priority (critical first), 2) newest date_added, 3) unacknowledged count
