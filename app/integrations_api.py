@@ -1614,7 +1614,7 @@ def test_issue_tracker():
 @bp.route('/api/integrations/jira/issue-types', methods=['POST'])
 @admin_required
 @requires_professional('Issue Tracker Integration')
-def get_jira_issue_types():
+def fetch_jira_issue_types_post():
     """Fetch available issue types from Jira for a specific project."""
     from app.issue_trackers import JiraTracker
     from app.settings_api import get_setting
@@ -1651,7 +1651,7 @@ def get_jira_issue_types():
 @bp.route('/api/integrations/jira/projects', methods=['POST'])
 @admin_required
 @requires_professional('Issue Tracker Integration')
-def get_jira_projects():
+def fetch_jira_projects_post():
     """Fetch available projects from Jira."""
     from app.issue_trackers import JiraTracker
     from app.settings_api import get_setting
