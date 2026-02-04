@@ -2,7 +2,7 @@
 API endpoints for scheduled reports management.
 """
 
-from flask import Blueprint, request, jsonify, session, send_file
+from flask import Blueprint, request, jsonify, session, send_file, Response
 from app.models import ScheduledReport, Organization, User
 from app import db
 from datetime import datetime
@@ -701,5 +701,66 @@ def generate_compliance_report():
             logger.exception("Error generating compliance PDF")
             return jsonify({'error': f'PDF generation failed: {str(e)}'}), 500
 
+    # Generate CSV
+    elif output_format == 'csv':
+        import csv
+        from io import StringIO
+
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+
+        # Header info
+        writer.writerow(['CISA BOD 22-01 Compliance Report'])
+        writer.writerow(['Generated', report['generated_at']])
+        writer.writerow(['Status', report['compliance_status']])
+        writer.writerow([])
+
+        # Summary
+        writer.writerow(['Summary'])
+        writer.writerow(['Total KEV Matches', report['summary']['total_kev_matches']])
+        writer.writerow(['Remediated', report['summary']['remediated']])
+        writer.writerow(['Pending', report['summary']['pending_remediation']])
+        writer.writerow(['Compliance %', report['summary']['compliance_percentage']])
+        writer.writerow(['Overdue', report['summary']['overdue_count']])
+        writer.writerow(['Due Within 7 Days', report['summary']['due_within_7_days']])
+        writer.writerow(['Ransomware Exposure', report['summary']['ransomware_exposure']])
+        writer.writerow([])
+
+        # Overdue vulnerabilities
+        if report['overdue_vulnerabilities']:
+            writer.writerow(['Overdue Vulnerabilities'])
+            writer.writerow(['CVE ID', 'Product', 'Severity', 'Days Overdue', 'Due Date'])
+            for item in report['overdue_vulnerabilities']:
+                writer.writerow([
+                    item['cve_id'],
+                    item['product'],
+                    item['severity'] or 'N/A',
+                    item['days_overdue'],
+                    item['due_date']
+                ])
+            writer.writerow([])
+
+        # Due soon
+        if report['due_soon']:
+            writer.writerow(['Due Within 7 Days'])
+            writer.writerow(['CVE ID', 'Product', 'Severity', 'Days Remaining', 'Due Date'])
+            for item in report['due_soon']:
+                writer.writerow([
+                    item['cve_id'],
+                    item['product'],
+                    item['severity'] or 'N/A',
+                    item['days_remaining'],
+                    item['due_date']
+                ])
+
+        buffer.seek(0)
+        filename = f"bod_22_01_compliance_{today.strftime('%Y%m%d')}.csv"
+
+        return Response(
+            buffer.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+
     else:
-        return jsonify({'error': 'Invalid format. Use json or pdf'}), 400
+        return jsonify({'error': 'Invalid format. Use json, csv, or pdf'}), 400
