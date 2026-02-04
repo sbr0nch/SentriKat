@@ -147,9 +147,29 @@ class JiraTracker(IssueTrackerBase):
                 issue_url = f"{self.base_url}/browse/{issue_key}"
                 return True, f"Created issue {issue_key}", issue_key, issue_url
             else:
-                error_msg = response.json().get('errorMessages', [response.text])
+                # Try to parse JSON error response, fall back to text
+                try:
+                    error_data = response.json()
+                    error_msgs = error_data.get('errorMessages', [])
+                    errors = error_data.get('errors', {})
+                    if errors:
+                        error_msgs.extend([f"{k}: {v}" for k, v in errors.items()])
+                    error_msg = '; '.join(error_msgs) if error_msgs else f"HTTP {response.status_code}"
+                except (ValueError, AttributeError):
+                    # Response is not JSON (e.g., HTML error page)
+                    error_msg = f"HTTP {response.status_code}"
+                    if response.status_code == 404:
+                        error_msg = "Issue type or project not found. Check your Jira project key and issue type."
+                    elif response.status_code == 401:
+                        error_msg = "Authentication failed. Check your credentials."
+                    elif response.status_code == 403:
+                        error_msg = "Permission denied. Check that your account can create issues."
+                    elif response.status_code >= 500:
+                        error_msg = "Jira server error. Please try again later."
                 return False, f"Failed: {error_msg}", None, None
 
+        except requests.RequestException as e:
+            return False, f"Network error: {str(e)}", None, None
         except Exception as e:
             return False, f"Error: {str(e)}", None, None
 
@@ -320,9 +340,14 @@ class GitHubTracker(IssueTrackerBase):
                 issue_url = result.get('html_url')
                 return True, f"Created issue #{issue_number}", f"#{issue_number}", issue_url
             else:
-                error = response.json().get('message', response.text)
+                try:
+                    error = response.json().get('message', response.text)
+                except (ValueError, AttributeError):
+                    error = f"HTTP {response.status_code}"
                 return False, f"Failed: {error}", None, None
 
+        except requests.RequestException as e:
+            return False, f"Network error: {str(e)}", None, None
         except Exception as e:
             return False, f"Error: {str(e)}", None, None
 
@@ -393,9 +418,14 @@ class GitLabTracker(IssueTrackerBase):
                 issue_url = result.get('web_url')
                 return True, f"Created issue #{issue_iid}", f"#{issue_iid}", issue_url
             else:
-                error = response.json().get('message', response.text)
+                try:
+                    error = response.json().get('message', response.text)
+                except (ValueError, AttributeError):
+                    error = f"HTTP {response.status_code}"
                 return False, f"Failed: {error}", None, None
 
+        except requests.RequestException as e:
+            return False, f"Network error: {str(e)}", None, None
         except Exception as e:
             return False, f"Error: {str(e)}", None, None
 
