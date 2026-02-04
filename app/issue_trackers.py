@@ -60,12 +60,12 @@ class JiraTracker(IssueTrackerBase):
 
     def __init__(self, url: str, email: str, api_token: str, verify_ssl: bool = True):
         self.base_url = url.rstrip('/')
-        self.email = email
-        self.api_token = api_token
+        self.email = email.strip()
+        self.api_token = api_token.strip()  # Strip whitespace to avoid auth failures
         self.is_cloud = 'atlassian.net' in url.lower()
         self.verify_ssl = verify_ssl
 
-        auth_str = f"{email}:{api_token}"
+        auth_str = f"{self.email}:{self.api_token}"
         self.auth_header = f"Basic {base64.b64encode(auth_str.encode()).decode()}"
         self.api_version = '3' if self.is_cloud else '2'
 
