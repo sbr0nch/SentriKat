@@ -2,6 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from app.cisa_sync import sync_cisa_kev
+from app import db
 from config import Config
 import logging
 import os
@@ -112,7 +113,6 @@ def start_scheduler(app):
 
 def reschedule_critical_email():
     """Reschedule critical email job when settings change"""
-    global _scheduler, _app
     if not _scheduler or not _app:
         return
 
