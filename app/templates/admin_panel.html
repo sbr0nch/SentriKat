@@ -849,7 +849,6 @@
                         <div class="card-header">
                             <i class="bi bi-kanban me-2"></i>Issue Tracker Integration
                             <span class="badge bg-primary ms-2">Pro</span>
-                            <span class="badge bg-warning text-dark ms-1">Some integrations in Beta</span>
                         </div>
                         <div class="card-body">
                             <div class="alert alert-info mb-4">
@@ -864,12 +863,12 @@
                                 <select class="form-select" id="issueTrackerType" onchange="showTrackerConfig(this.value)">
                                     <option value="disabled">Disabled</option>
                                     <option value="jira">Jira (Cloud & Server)</option>
-                                    <option value="youtrack">YouTrack (JetBrains) - Beta</option>
-                                    <option value="github">GitHub Issues - Beta</option>
-                                    <option value="gitlab">GitLab Issues - Beta</option>
-                                    <option value="webhook">Custom Webhook - Beta</option>
+                                    <option value="youtrack">YouTrack (JetBrains)</option>
+                                    <option value="github">GitHub Issues</option>
+                                    <option value="gitlab">GitLab Issues</option>
+                                    <option value="webhook">Custom Webhook</option>
                                 </select>
-                                <small class="form-text text-muted">Jira is fully tested. Other integrations are in beta - please report issues.</small>
+                                <small class="form-text text-muted">Create tickets automatically when new vulnerabilities are detected.</small>
                             </div>
 
                             <!-- Jira Configuration -->
@@ -947,7 +946,7 @@
 
                             <!-- YouTrack Configuration -->
                             <div id="trackerConfig-youtrack" class="tracker-config" style="display: none;">
-                                <h6 class="text-muted mb-3"><i class="bi bi-journal-code me-2"></i>YouTrack Configuration <span class="badge bg-warning text-dark">Beta</span></h6>
+                                <h6 class="text-muted mb-3"><i class="bi bi-journal-code me-2"></i>YouTrack Configuration </h6>
                                 <div class="row g-3">
                                     <div class="col-md-12">
                                         <label class="form-label fw-semibold">YouTrack URL</label>
@@ -968,7 +967,7 @@
 
                             <!-- GitHub Configuration -->
                             <div id="trackerConfig-github" class="tracker-config" style="display: none;">
-                                <h6 class="text-muted mb-3"><i class="bi bi-github me-2"></i>GitHub Issues Configuration <span class="badge bg-warning text-dark">Beta</span></h6>
+                                <h6 class="text-muted mb-3"><i class="bi bi-github me-2"></i>GitHub Issues Configuration </h6>
                                 <div class="row g-3">
                                     <div class="col-md-12">
                                         <label class="form-label fw-semibold">Personal Access Token</label>
@@ -990,7 +989,7 @@
 
                             <!-- GitLab Configuration -->
                             <div id="trackerConfig-gitlab" class="tracker-config" style="display: none;">
-                                <h6 class="text-muted mb-3"><i class="bi bi-gitlab me-2"></i>GitLab Issues Configuration <span class="badge bg-warning text-dark">Beta</span></h6>
+                                <h6 class="text-muted mb-3"><i class="bi bi-gitlab me-2"></i>GitLab Issues Configuration </h6>
                                 <div class="row g-3">
                                     <div class="col-md-12">
                                         <label class="form-label fw-semibold">GitLab URL</label>
@@ -1012,7 +1011,7 @@
 
                             <!-- Webhook Configuration -->
                             <div id="trackerConfig-webhook" class="tracker-config" style="display: none;">
-                                <h6 class="text-muted mb-3"><i class="bi bi-broadcast me-2"></i>Custom Webhook Configuration <span class="badge bg-warning text-dark">Beta</span></h6>
+                                <h6 class="text-muted mb-3"><i class="bi bi-broadcast me-2"></i>Custom Webhook Configuration </h6>
                                 <div class="alert alert-warning mb-3">
                                     <i class="bi bi-lightbulb me-2"></i>
                                     <strong>Tip:</strong> Use webhooks to integrate with Linear, Asana, Monday.com, or any system that accepts HTTP requests.
