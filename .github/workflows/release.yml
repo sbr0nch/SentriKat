@@ -1,0 +1,367 @@
+# ============================================================
+# SentriKat Core - Release Pipeline
+# ============================================================
+# Triggered when you push a version tag (e.g., v1.0.0).
+#
+# What it does:
+#   1. Runs all tests
+#   2. Builds Docker image
+#   3. Pushes image to GitHub Container Registry (GHCR) - FREE
+#   4. Creates deployment package (tar.gz) for customers
+#   5. Creates a GitHub Release with the package attached
+#   6. (Optional) Notifies the portal about the new release
+#
+# HOW TO TRIGGER:
+#   git tag v1.0.0 -m "First release"
+#   git push origin v1.0.0
+# ============================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*" # Triggers on v1.0.0, v2.1.3, etc.
+
+# Required for pushing to GHCR
+permissions:
+  contents: write # For creating GitHub Releases
+  packages: write # For pushing to GHCR
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }} # sbr0nch/sentrikat
+
+jobs:
+  # ── Step 1: Run tests first ─────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentrikat
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: sentrikat_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install -r requirements.txt && pip install pytest
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://sentrikat:testpass@localhost:5432/sentrikat_test
+          FLASK_ENV: testing
+        run: pytest tests/ -v --tb=short
+
+  # ── Step 2: Build & Push Docker Image ───────────────────────
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Extract version from tag (v1.0.0 -> 1.0.0)
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
+      # Login to GitHub Container Registry
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # Auto-provided, no setup needed!
+
+      # Build and push the image
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Print image info
+        run: |
+          echo "Package pushed to: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+          echo "Digest: ${{ steps.build.outputs.digest }}"
+
+  # ── Step 3: Create Deployment Package & GitHub Release ──────
+  release:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      # Create the deployment package that customers download
+      - name: Create deployment package
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          PKG_DIR="sentrikat-${VERSION}"
+          mkdir -p "${PKG_DIR}/scripts"
+
+          # ── docker-compose.yml (customer version) ──
+          cat > "${PKG_DIR}/docker-compose.yml" << 'COMPOSE'
+          # SentriKat - Docker Compose Deployment
+          # Documentation: https://docs.sentrikat.com
+
+          services:
+            sentrikat:
+              image: ghcr.io/sbr0nch/sentrikat:VERSION_PLACEHOLDER
+              restart: unless-stopped
+              ports:
+                - "${SENTRIKAT_PORT:-8443}:8443"
+              environment:
+                - SENTRIKAT_LICENSE=${SENTRIKAT_LICENSE}
+                - SENTRIKAT_INSTALLATION_ID=${SENTRIKAT_INSTALLATION_ID}
+                - DATABASE_URL=postgresql://${DB_USER:-sentrikat}:${DB_PASSWORD}@db:5432/${DB_NAME:-sentrikat}
+                - SECRET_KEY=${SECRET_KEY}
+                - FLASK_ENV=production
+              volumes:
+                - sentrikat-data:/app/data
+                - sentrikat-logs:/app/logs
+              depends_on:
+                db:
+                  condition: service_healthy
+              networks:
+                - sentrikat-net
+
+            db:
+              image: postgres:16-alpine
+              restart: unless-stopped
+              environment:
+                - POSTGRES_USER=${DB_USER:-sentrikat}
+                - POSTGRES_PASSWORD=${DB_PASSWORD}
+                - POSTGRES_DB=${DB_NAME:-sentrikat}
+              volumes:
+                - postgres-data:/var/lib/postgresql/data
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-sentrikat}"]
+                interval: 10s
+                timeout: 5s
+                retries: 5
+              networks:
+                - sentrikat-net
+
+          volumes:
+            sentrikat-data:
+            sentrikat-logs:
+            postgres-data:
+
+          networks:
+            sentrikat-net:
+              driver: bridge
+          COMPOSE
+
+          # Replace version placeholder
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" "${PKG_DIR}/docker-compose.yml"
+
+          # ── .env.example ──
+          cat > "${PKG_DIR}/.env.example" << 'ENVFILE'
+          # ============================================
+          # SentriKat Configuration
+          # ============================================
+          # Copy this file to .env and fill in the values
+          # cp .env.example .env
+          # ============================================
+
+          # License key (get from portal.sentrikat.com after purchase)
+          # Leave empty for Demo mode (limited features)
+          SENTRIKAT_LICENSE=
+
+          # Installation ID (IMPORTANT for Docker!)
+          # Generate once and keep forever: python3 -c "import uuid; print(f'SK-INST-{uuid.uuid4().hex[:32].upper()}')"
+          # This ensures your license survives container rebuilds
+          SENTRIKAT_INSTALLATION_ID=
+
+          # Database
+          DB_USER=sentrikat
+          DB_PASSWORD=CHANGE_ME_TO_A_STRONG_PASSWORD
+          DB_NAME=sentrikat
+
+          # App
+          SECRET_KEY=CHANGE_ME_GENERATE_WITH_python3_-c_"import secrets; print(secrets.token_hex(32))"
+          SENTRIKAT_PORT=8443
+          ENVFILE
+
+          # ── README.md ──
+          cat > "${PKG_DIR}/README.md" << 'README'
+          # SentriKat - Quick Start
+
+          ## Prerequisites
+          - Docker Engine 24+ and Docker Compose v2
+
+          ## Installation
+
+          1. Copy and edit the configuration:
+             ```bash
+             cp .env.example .env
+             nano .env
+             ```
+
+          2. Generate required values:
+             ```bash
+             # Generate SECRET_KEY
+             python3 -c "import secrets; print(secrets.token_hex(32))"
+
+             # Generate INSTALLATION_ID (keep this forever!)
+             python3 -c "import uuid; print(f'SK-INST-{uuid.uuid4().hex[:32].upper()}')"
+             ```
+
+          3. Start SentriKat:
+             ```bash
+             docker compose up -d
+             ```
+
+          4. Access the dashboard:
+             ```
+             https://localhost:8443
+             ```
+
+          5. Complete the setup wizard and optionally activate your license.
+
+          ## Demo vs Professional
+
+          Without a license key, SentriKat runs in **Demo mode**:
+          - 1 user, 1 organization, 50 products, 5 agents
+          - No LDAP/SSO, email alerts, or integrations
+
+          Purchase a Professional license at https://sentrikat.com/pricing
+
+          ## Updating
+          ```bash
+          docker compose pull
+          docker compose up -d
+          ```
+
+          ## Support
+          - Portal: https://portal.sentrikat.com
+          - Docs: https://docs.sentrikat.com
+          README
+
+          # ── install.sh helper ──
+          cat > "${PKG_DIR}/scripts/install.sh" << 'INSTALL'
+          #!/bin/bash
+          set -e
+          echo "SentriKat Installer"
+          echo "==================="
+
+          # Check prerequisites
+          if ! command -v docker &> /dev/null; then
+              echo "ERROR: Docker is not installed. Please install Docker first."
+              echo "   https://docs.docker.com/engine/install/"
+              exit 1
+          fi
+
+          if ! docker compose version &> /dev/null; then
+              echo "ERROR: Docker Compose v2 is required."
+              exit 1
+          fi
+
+          # Setup .env if not exists
+          if [ ! -f .env ]; then
+              cp .env.example .env
+              # Generate a random secret key
+              SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || openssl rand -hex 32)
+              sed -i "s/CHANGE_ME_GENERATE_WITH.*/$SECRET_KEY/" .env
+              # Generate installation ID
+              INSTALL_ID=$(python3 -c "import uuid; print(f'SK-INST-{uuid.uuid4().hex[:32].upper()}')" 2>/dev/null)
+              if [ -n "$INSTALL_ID" ]; then
+                  sed -i "s/^SENTRIKAT_INSTALLATION_ID=$/SENTRIKAT_INSTALLATION_ID=$INSTALL_ID/" .env
+              fi
+              echo "Created .env file with generated values."
+              echo "Please set a strong DB_PASSWORD before starting."
+              echo "   nano .env"
+          else
+              echo ".env file already exists"
+          fi
+
+          echo ""
+          echo "Next steps:"
+          echo "  1. Edit .env and set DB_PASSWORD"
+          echo "  2. Run: docker compose up -d"
+          echo "  3. Open: https://localhost:8443"
+          echo "  4. Complete setup wizard"
+          echo "  5. (Optional) Add license key in Admin Panel > License"
+          INSTALL
+          chmod +x "${PKG_DIR}/scripts/install.sh"
+
+          # ── Create the tar.gz ──
+          tar -czf "sentrikat-${VERSION}.tar.gz" "${PKG_DIR}/"
+          echo "Created sentrikat-${VERSION}.tar.gz"
+          ls -lh "sentrikat-${VERSION}.tar.gz"
+
+      # Create the GitHub Release with the package attached
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "SentriKat v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## SentriKat v${{ steps.version.outputs.VERSION }}
+
+            ### Docker Image
+            ```bash
+            docker pull ghcr.io/sbr0nch/sentrikat:${{ steps.version.outputs.VERSION }}
+            ```
+
+            ### Quick Start
+            1. Download `sentrikat-${{ steps.version.outputs.VERSION }}.tar.gz` below
+            2. Extract: `tar xzf sentrikat-${{ steps.version.outputs.VERSION }}.tar.gz`
+            3. Configure: `cp .env.example .env && nano .env`
+            4. Start: `docker compose up -d`
+            5. Open: https://localhost:8443
+
+            ### Demo vs Professional
+            - **Demo** (no license): 1 user, 50 products, 5 agents
+            - **Professional**: Unlimited + all features
+
+            ### What's Changed
+            See [CHANGELOG](https://github.com/sbr0nch/SentriKat/blob/main/CHANGELOG.md)
+          files: |
+            sentrikat-${{ steps.version.outputs.VERSION }}.tar.gz
+          draft: false
+          prerelease: false
+
+      # ── (Optional) Notify the portal about the new release ──
+      - name: Notify Portal
+        if: ${{ vars.PORTAL_API_URL != '' }}
+        continue-on-error: true # Don't fail release if portal is down
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          curl -sf -X POST "${{ vars.PORTAL_API_URL }}/api/releases" \
+            -H "Authorization: Bearer ${{ secrets.PORTAL_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"version\": \"${VERSION}\",
+              \"image\": \"ghcr.io/sbr0nch/sentrikat:${VERSION}\",
+              \"download_url\": \"https://github.com/sbr0nch/SentriKat/releases/download/v${VERSION}/sentrikat-${VERSION}.tar.gz\",
+              \"released_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+            }" && echo "Portal notified" || echo "Portal notification failed (non-critical)"
