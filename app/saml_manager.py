@@ -33,9 +33,12 @@ Configuration stored in SystemSettings:
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, TYPE_CHECKING
 from datetime import datetime
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from app.models import User
 
 logger = logging.getLogger(__name__)
 
