@@ -2,11 +2,13 @@
 SentriKat Licensing System
 
 Two tiers:
-- Community (free): 1 user, 1 org, 50 products, no LDAP/alerts/API
-- Professional (paid): Unlimited, all features
+- Demo (free): 1 user, 1 org, 50 products, 5 agents, no LDAP/SSO/alerts
+- Professional (paid): Unlimited users/orgs/products, 10+ agents, all features
 
 License keys are RSA-signed JSON payloads that are hardware-locked.
 Each license is tied to a specific installation ID and cannot be used elsewhere.
+
+Agent packs can be purchased to increase agent limits beyond the base 10.
 """
 
 import json
@@ -64,20 +66,26 @@ def get_license_public_key():
     return _DEFAULT_PUBLIC_KEY
 
 # License tiers and their limits
+# Note: Internal key is 'community' for backwards compatibility, but displayed as 'Demo'
 LICENSE_TIERS = {
     'community': {
-        'name': 'Community',
+        'name': 'Demo',  # Changed from 'Demo' - this is a trial/demo version
+        'display_name': 'Demo Version',
         'max_users': 1,
         'max_organizations': 1,
         'max_products': 50,
+        'max_agents': 5,  # Demo includes 5 agents
         'features': [],
-        'powered_by_required': True
+        'powered_by_required': True,
+        'is_demo': True
     },
     'professional': {
         'name': 'Professional',
+        'display_name': 'Professional License',
         'max_users': -1,  # Unlimited
         'max_organizations': -1,
         'max_products': -1,
+        'max_agents': 10,  # Base PRO includes 10 agents (more via agent packs)
         'features': [
             'ldap',
             'email_alerts',
@@ -87,7 +95,8 @@ LICENSE_TIERS = {
             'audit_export',
             'multi_org'
         ],
-        'powered_by_required': False
+        'powered_by_required': False,
+        'is_demo': False
     }
 }
 
@@ -311,7 +320,7 @@ class LicenseInfo:
         self.max_organizations = 1
         self.max_products = 50
         # Agent limits (from signed license - tamper-proof)
-        self.max_agents = 0  # Community = 0 agents (requires Professional)
+        self.max_agents = 5  # Demo = 5 agents (PRO has 10+ with agent packs)
         self.max_agent_api_keys = 0
         self.features = []
         self.is_valid = False
@@ -339,8 +348,8 @@ class LicenseInfo:
                 'max_users': LICENSE_TIERS['community']['max_users'],
                 'max_organizations': LICENSE_TIERS['community']['max_organizations'],
                 'max_products': LICENSE_TIERS['community']['max_products'],
-                'max_agents': 0,  # Community: No agents
-                'max_agent_api_keys': 0
+                'max_agents': LICENSE_TIERS['community']['max_agents'],  # Demo: 5 agents
+                'max_agent_api_keys': 5  # Demo: 5 API keys
             }
         return {
             'max_users': self.max_users,
@@ -383,9 +392,9 @@ class LicenseInfo:
             edition = self.get_effective_edition()
             if edition == 'community':
                 if limit_type in ['agents', 'agent_api_keys']:
-                    return False, limit, f'Push Agents require a Professional license. Upgrade to deploy agents.'
-                return False, limit, f'Community limit: {limit} {limit_type} maximum. Upgrade to Professional for unlimited.'
-            return False, limit, f'License limit: {limit} {limit_type} maximum.'
+                    return False, limit, f'Demo version limit: {limit} agents. Upgrade to Professional for more agents.'
+                return False, limit, f'Demo version limit: {limit} {limit_type}. Upgrade to Professional for unlimited.'
+            return False, limit, f'License limit reached: {limit} {limit_type}. Purchase an agent pack to increase.'
 
         return True, limit, None
 
@@ -394,7 +403,7 @@ class LicenseInfo:
         if self.error:
             return f'License error: {self.error}'
         if not self.is_valid:
-            return 'No valid license - Community edition'
+            return 'Demo Version - Upgrade to Professional for full features'
         if not self.is_hardware_match:
             return 'License not valid for this installation'
         if self.is_expired:
@@ -403,18 +412,21 @@ class LicenseInfo:
             return f'License expires in {self.days_until_expiry} days'
         if self.is_professional():
             return f'Professional license for {self.customer}'
-        return 'Community edition'
+        return 'Demo Version'
 
     def to_dict(self):
         """Convert to dictionary for API responses"""
         effective_limits = self.get_effective_limits()
         effective_edition = self.get_effective_edition()
         current_installation_id = get_installation_id()
+        tier = LICENSE_TIERS.get(effective_edition, LICENSE_TIERS['community'])
 
         return {
             'edition': self.edition,
             'effective_edition': effective_edition,
-            'edition_name': LICENSE_TIERS.get(effective_edition, {}).get('name', 'Unknown'),
+            'edition_name': tier.get('name', 'Demo'),
+            'edition_display_name': tier.get('display_name', 'Demo Version'),
+            'is_demo': tier.get('is_demo', True),
             'customer': self.customer,
             'license_id': self.license_id,
             'is_valid': self.is_valid and self.is_hardware_match,
@@ -682,7 +694,7 @@ def save_license(license_key):
 
 
 def remove_license():
-    """Remove license and revert to Community."""
+    """Remove license and revert to Demo version."""
     from app.models import SystemSettings
     from app import db
 
@@ -692,7 +704,7 @@ def remove_license():
         db.session.commit()
 
     reload_license()
-    return True, 'License removed. Reverted to Community edition.'
+    return True, 'License removed. Reverted to Demo version.'
 
 
 # ============================================================================
@@ -900,7 +912,7 @@ def activate_license():
 
 @license_bp.route('/api/license', methods=['DELETE'])
 def deactivate_license():
-    """Remove license and revert to Community"""
+    """Remove license and revert to Demo"""
     from app.auth import get_current_user
     from app.logging_config import log_audit_event
 

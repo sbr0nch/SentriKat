@@ -256,7 +256,7 @@ def process_saml_response(request) -> Tuple[bool, Optional[Dict], Optional[str]]
         return False, None, str(e)
 
 
-def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional['User'], bool]:
+def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
     """
     Get or create a user from SAML data.
 
