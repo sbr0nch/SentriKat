@@ -227,7 +227,7 @@ async function loadCurrentUserInfo() {
         const response = await fetch('/api/current-user');
         if (response.ok) {
             window.currentUserInfo = await response.json();
-            console.log('Loaded current user info:', window.currentUserInfo?.username, 'role:', window.currentUserInfo?.role);
+            // User info loaded successfully
         }
     } catch (error) {
         console.error('Error loading current user info:', error);
@@ -702,7 +702,7 @@ async function bulkDeleteMappings() {
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('Admin Panel: DOMContentLoaded fired');
+    // Admin Panel: DOMContentLoaded
 
     // Check if Bootstrap is loaded - retry a few times as it might still be loading
     let bootstrapReady = false;
@@ -710,7 +710,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (typeof bootstrap !== 'undefined') {
             bootstrapReady = true;
         } else {
-            console.log(`Waiting for Bootstrap... attempt ${i + 1}`);
+            // Waiting for Bootstrap...
             await sleep(200);
         }
     }
@@ -810,7 +810,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         loadSyncStatus();
 
         window.adminPanelInitialized = true;
-        console.log('Admin Panel: Initialization complete');
+        // Admin Panel: Initialization complete
     } catch (error) {
         console.error('Error during admin panel initialization:', error);
         showToast('Some components failed to load. Try refreshing the page.', 'warning');
@@ -1794,7 +1794,7 @@ async function loadOrganizationsDropdown() {
 
 function showCreateOrgModal() {
     try {
-        console.log('showCreateOrgModal called');
+        // Show create org modal
         currentOrgId = null;
         SK.DOM.setHtml('orgModalTitle', '<i class="bi bi-building me-2"></i>Create Organization');
 
@@ -1823,7 +1823,7 @@ function showCreateOrgModal() {
         }
 
         const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
-        console.log('Modal created, showing...');
+        // Modal created, showing
         modal.show();
     } catch (error) {
         console.error('Error in showCreateOrgModal:', error);
@@ -2950,7 +2950,7 @@ async function loadSamlSettings() {
                 showToast('SAML library not installed. Run: pip install python3-saml', 'warning');
             }
         } else if (response.status === 403) {
-            console.log('SAML settings require Professional license');
+            // SAML settings require Professional license
         }
     } catch (error) {
         console.error('Error loading SAML settings:', error);
@@ -3653,11 +3653,11 @@ async function loadAuditLogs() {
 async function loadAllSettings() {
     // Only super admins can access most settings
     if (!window.currentUserInfo || window.currentUserInfo.role !== 'super_admin') {
-        console.log('Skipping settings load - not a super admin');
+        // Skipping settings load - not a super admin
         return;
     }
 
-    console.log('Loading all settings...');
+    // Loading all settings
 
     // Load settings in parallel with retry support
     const loadPromises = [];
@@ -3703,7 +3703,7 @@ async function loadAllSettings() {
                     }
 
                     loadLastScheduledSync();
-                    console.log('LDAP settings loaded');
+                    // LDAP settings loaded
                 }
             })
             .catch(err => console.error('Failed to load LDAP settings:', err))
@@ -3730,7 +3730,7 @@ async function loadAllSettings() {
                     if (globalSmtpFromName) globalSmtpFromName.value = smtp.smtp_from_name || 'SentriKat Alerts';
                     if (globalSmtpUseTLS) globalSmtpUseTLS.checked = smtp.smtp_use_tls !== false;
                     if (globalSmtpUseSSL) globalSmtpUseSSL.checked = smtp.smtp_use_ssl === true;
-                    console.log('SMTP settings loaded');
+                    // SMTP settings loaded
                 }
             })
             .catch(err => console.error('Failed to load SMTP settings:', err))
@@ -3756,7 +3756,7 @@ async function loadAllSettings() {
                     nvdKeyConfigured = sync.nvd_api_key_configured || false;
                     updateNvdKeyUI();
 
-                    console.log('Sync settings loaded');
+                    // Sync settings loaded
                 }
             })
             .catch(err => console.error('Failed to load sync settings:', err))
@@ -3788,7 +3788,7 @@ async function loadAllSettings() {
                     if (httpProxy) httpProxy.value = general.http_proxy || '';
                     if (httpsProxy) httpsProxy.value = general.https_proxy || '';
                     if (noProxy) noProxy.value = general.no_proxy || '';
-                    console.log('General settings loaded');
+                    // General settings loaded
                 }
             })
             .catch(err => console.error('Failed to load general settings:', err))
@@ -3807,7 +3807,7 @@ async function loadAllSettings() {
     loadNotificationSettings();
     loadRetentionSettings();
 
-    console.log('All settings loading complete');
+    // All settings loading complete
 }
 
 // ============================================================================
@@ -6047,14 +6047,7 @@ function applyLicenseRestrictions() {
         }
     }
 
-    console.log('License restrictions applied:', {
-        isProfessional,
-        features,
-        ldapEnabled: hasFeature('ldap'),
-        backupEnabled: hasFeature('backup_restore'),
-        emailAlertsEnabled: hasFeature('email_alerts'),
-        whiteLabelEnabled: hasFeature('white_label')
-    });
+    // License restrictions applied
 }
 
 /**
@@ -8935,7 +8928,7 @@ function copyViewedApiKey() {
             return;
         }
     } catch (e) {
-        console.log('execCommand copy failed, trying clipboard API');
+        // execCommand copy failed, trying clipboard API
     }
 
     // Try clipboard API
@@ -9405,7 +9398,7 @@ function handleUrlHash() {
     const tabName = hash || getSavedAdminTab();
     if (!tabName) return;
 
-    console.log('Switching to tab:', tabName, hash ? '(from URL)' : '(from localStorage)');
+    // Switching to tab
 
     // Use manual tab switching to avoid Bootstrap Tab issues with hidden buttons
     const tabPaneId = tabName; // Tab pane IDs match the tab names
