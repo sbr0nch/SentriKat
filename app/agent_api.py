@@ -639,8 +639,6 @@ def stop_background_worker():
 
 def ensure_worker_running():
     """Ensure the background worker is running (call from request context)."""
-    global _worker_thread
-
     if _worker_thread is None or not _worker_thread.is_alive():
         try:
             start_background_worker(current_app._get_current_object())
@@ -2191,8 +2189,6 @@ def get_worker_status():
     if not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
-    global _worker_thread
-
     # Worker status
     worker_alive = _worker_thread is not None and _worker_thread.is_alive()
 
@@ -2783,13 +2779,14 @@ def trigger_asset_scan(asset_id):
     db.session.commit()
 
     # Log event
-    _log_agent_event(
+    AgentEvent.log_event(
         organization_id=asset.organization_id,
         asset_id=asset.id,
         event_type='scan_requested',
-        message=f'Immediate scan requested by {user.username}',
+        details={'message': f'Immediate scan requested by {user.username}'},
         source_ip=request.remote_addr
     )
+    db.session.commit()
 
     return jsonify({
         'status': 'success',
@@ -2842,13 +2839,14 @@ def manage_asset_config(asset_id):
     db.session.commit()
 
     # Log event
-    _log_agent_event(
+    AgentEvent.log_event(
         organization_id=asset.organization_id,
         asset_id=asset.id,
         event_type='config_updated',
-        message=f'Agent configuration updated by {user.username}',
+        details={'message': f'Agent configuration updated by {user.username}'},
         source_ip=request.remote_addr
     )
+    db.session.commit()
 
     return jsonify({
         'status': 'success',

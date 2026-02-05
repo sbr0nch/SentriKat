@@ -783,7 +783,6 @@ def _version_in_range(
 
 def clear_cache():
     """Clear all cached CPE data."""
-    global _cpe_cache
     with _cache_lock:
         _cpe_cache.clear()
 

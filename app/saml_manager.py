@@ -30,6 +30,8 @@ Configuration stored in SystemSettings:
 - saml_default_org_id: Default org for new SAML users
 - saml_user_mapping: JSON mapping of SAML attributes to user fields
 """
+from __future__ import annotations
+
 import logging
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
@@ -256,7 +258,7 @@ def process_saml_response(request) -> Tuple[bool, Optional[Dict], Optional[str]]
         return False, None, str(e)
 
 
-def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional['User'], bool]:
+def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[User], bool]:
     """
     Get or create a user from SAML data.
 
