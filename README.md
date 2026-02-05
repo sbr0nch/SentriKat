@@ -96,7 +96,7 @@ Unlike traditional vulnerability scanners that overwhelm you with thousands of C
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/SentriKat.git
+git clone https://github.com/sbr0nch/SentriKat.git
 cd SentriKat
 
 # 2. Create environment file
@@ -109,9 +109,13 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 # Generate ENCRYPTION_KEY:
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
+# Generate INSTALLATION_ID (for licensing - keep this forever!):
+python3 -c "import uuid; print(f'SK-INST-{uuid.uuid4().hex[:32].upper()}')"
+
 # 4. Edit .env and set:
 #    - SECRET_KEY (from step 3)
 #    - ENCRYPTION_KEY (from step 3)
+#    - SENTRIKAT_INSTALLATION_ID (from step 3 - keep forever!)
 #    - DB_PASSWORD (choose a strong password)
 #    - DATABASE_URL (update password to match DB_PASSWORD)
 #    - SERVER_NAME (your domain)
@@ -305,14 +309,14 @@ curl -X POST https://your-sentrikat/api/agent/inventory \
 
 ## Editions
 
-### Community Edition (Free)
+### Demo Edition (Free)
 
 | Limit | Value |
 |-------|-------|
 | Users | 1 |
 | Organizations | 1 |
 | Products | 50 |
-| Push Agents | Not available |
+| Push Agents | 5 |
 
 **Included Features:**
 - CISA KEV sync
@@ -320,6 +324,7 @@ curl -X POST https://your-sentrikat/api/agent/inventory \
 - Vulnerability matching
 - Basic dashboard
 - CSV import
+- Push agents (limited)
 
 ### Professional Edition
 
@@ -470,8 +475,10 @@ curl -k https://localhost/api/health
 
 SentriKat is **commercial software**.
 
-- **Community Edition**: Free for personal and small business use
-- **Professional Edition**: Commercial license required
+- **Demo Edition**: Free for evaluation and small deployments
+- **Professional Edition**: Commercial license required for enterprise features
+
+Purchase licenses at [sentrikat.com/pricing](https://sentrikat.com/pricing)
 
 See [LICENSE.md](LICENSE.md) for full terms.
 
@@ -480,5 +487,5 @@ See [LICENSE.md](LICENSE.md) for full terms.
 <p align="center">
   <sub>Built with care for security teams everywhere.</sub>
   <br>
-  <sub>© 2024-2025 Denis Sota. All Rights Reserved.</sub>
+  <sub>© 2025-2026 Denis Sota. All Rights Reserved.</sub>
 </p>
