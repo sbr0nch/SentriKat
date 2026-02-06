@@ -1390,9 +1390,9 @@
         if (fixVersions.length > 0) {
             const fixItems = fixVersions.slice(0, 3).map(fv => {
                 const fixLabel = fv.fix_type === 'excluding'
-                    ? `<strong>${fv.fix_version}</strong>`
-                    : `> <strong>${fv.fix_version}</strong>`;
-                return `<span class="badge bg-success me-1"><i class="bi bi-arrow-up-circle me-1"></i>${fv.vendor} ${fv.product}: ${fixLabel}</span>`;
+                    ? `<strong>${escapeHtml(fv.fix_version)}</strong>`
+                    : `> <strong>${escapeHtml(fv.fix_version)}</strong>`;
+                return `<span class="badge bg-success me-1"><i class="bi bi-arrow-up-circle me-1"></i>${escapeHtml(fv.vendor)} ${escapeHtml(fv.product)}: ${fixLabel}</span>`;
             }).join('');
             fixVersionHtml = `
                             <div class="mb-3">
@@ -2201,7 +2201,7 @@
                 showToast('No additional CPE mappings could be auto-detected. These products may need manual mapping.', 'info');
             }
         } catch (error) {
-            showToast(`Error: ${error.message}`, 'danger');
+            showToast(`Error: ${escapeHtml(error.message)}`, 'danger');
         } finally {
             if (btn) {
                 btn.disabled = false;
@@ -2410,8 +2410,8 @@
         let fixVersionHtml = '';
         if (fixVersions.length > 0) {
             const fixBadges = fixVersions.slice(0, 4).map(fv => {
-                const fixLabel = fv.fix_type === 'excluding' ? fv.fix_version : `> ${fv.fix_version}`;
-                return `<span class="badge bg-success me-1 mb-1" title="${fv.vendor} ${fv.product}: upgrade to ${fv.fix_version}"><i class="bi bi-arrow-up-circle me-1"></i>${fv.product} ${fixLabel}</span>`;
+                const fixLabel = fv.fix_type === 'excluding' ? escapeHtml(fv.fix_version) : `> ${escapeHtml(fv.fix_version)}`;
+                return `<span class="badge bg-success me-1 mb-1" title="${escapeHtml(fv.vendor)} ${escapeHtml(fv.product)}: upgrade to ${escapeHtml(fv.fix_version)}"><i class="bi bi-arrow-up-circle me-1"></i>${escapeHtml(fv.product)} ${fixLabel}</span>`;
             }).join('');
             const moreCount = fixVersions.length > 4 ? `<span class="badge bg-secondary mb-1">+${fixVersions.length - 4} more</span>` : '';
             fixVersionHtml = `

@@ -172,7 +172,7 @@ async function loadWithRetry(elementId, loadFn, errorMessage = 'Failed to load')
         if (element) {
             // Check if still showing "Loading..."
             if (element.textContent?.includes('Loading') || element.innerHTML?.includes('Loading')) {
-                element.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${errorMessage}</span>`;
+                element.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(errorMessage)}</span>`;
             }
         }
     }
@@ -990,7 +990,7 @@ async function loadUsers() {
         tbody.innerHTML = `
             <tr>
                 <td colspan="9" class="text-center text-danger py-4">
-                    <i class="bi bi-exclamation-triangle text-danger"></i> Error loading users: ${error.message}
+                    <i class="bi bi-exclamation-triangle text-danger"></i> Error loading users: ${escapeHtml(error.message)}
                 </td>
             </tr>
         `;
@@ -1260,7 +1260,7 @@ async function loadUserOrgMemberships(userId) {
             </tr>
         `).join('');
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">Error: ${error.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">Error: ${escapeHtml(error.message)}</td></tr>`;
     }
 }
 
@@ -1788,7 +1788,7 @@ async function loadOrganizationsDropdown() {
         }
     } catch (error) {
         console.error('Error loading organizations dropdown:', error);
-        select.innerHTML = `<option value="">Error: ${error.message}</option>`;
+        select.innerHTML = `<option value="">Error: ${escapeHtml(error.message)}</option>`;
     }
 }
 
@@ -2099,6 +2099,8 @@ function showToast(message, type = 'info') {
     if (message.length > 300) {
         displayMessage = message.substring(0, 300) + '...';
     }
+    // Escape HTML to prevent XSS via injected messages
+    displayMessage = escapeHtml(displayMessage);
 
     // Create toast element with proper styling for long messages
     const toastId = `toast-${Date.now()}`;
@@ -8116,7 +8118,7 @@ async function fetchJiraCustomFields() {
 
         if (data.error) {
             if (container) {
-                container.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>${data.error}</div>`;
+                container.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(data.error)}</div>`;
             }
             return;
         }
@@ -8145,7 +8147,7 @@ async function fetchJiraCustomFields() {
             fetchBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Fetch Required Fields';
         }
         if (container) {
-            container.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Network error: ${error.message}</div>`;
+            container.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Network error: ${escapeHtml(error.message)}</div>`;
         }
     }
 }
@@ -8494,14 +8496,14 @@ async function testIssueTrackerConnection() {
 
         if (result.success) {
             alertDiv.className = 'alert alert-success';
-            messageSpan.innerHTML = `<i class="bi bi-check-circle me-2"></i>${result.message} (${result.tracker_name})`;
+            messageSpan.innerHTML = `<i class="bi bi-check-circle me-2"></i>${escapeHtml(result.message)} (${escapeHtml(result.tracker_name)})`;
         } else {
             alertDiv.className = 'alert alert-danger';
-            messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>${result.error || result.message}`;
+            messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>${escapeHtml(result.error || result.message)}`;
         }
     } catch (error) {
         alertDiv.className = 'alert alert-danger';
-        messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>Connection test failed: ${error.message}`;
+        messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>Connection test failed: ${escapeHtml(error.message)}`;
     }
 }
 

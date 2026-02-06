@@ -3214,7 +3214,7 @@
                 };
 
                 tbody.innerHTML = assets.map(asset => {
-                    const statusBadge = statusBadges[asset.status] || `<span class="badge bg-secondary">${asset.status || 'Unknown'}</span>`;
+                    const statusBadge = statusBadges[asset.status] || `<span class="badge bg-secondary">${escapeHtml(asset.status || 'Unknown')}</span>`;
                     const vulnCount = asset.total_vulnerabilities || 0;
                     const vulnBadge = vulnCount > 0 ? `<span class="badge bg-danger ms-1" title="${vulnCount} vulnerabilities">${vulnCount} CVEs</span>` : '';
                     const lastSeen = asset.last_checkin || asset.last_inventory_at;
@@ -3229,7 +3229,7 @@
                         <td>${statusBadge}</td>
                         <td>${lastSeenDisplay}</td>
                         <td>
-                            <button class="btn btn-outline-danger btn-sm" onclick="deleteEndpoint(${asset.id}, '${escapeHtml(asset.hostname)}')" title="Delete endpoint">
+                            <button class="btn btn-outline-danger btn-sm" onclick="deleteEndpoint(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Delete endpoint">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
@@ -3267,7 +3267,7 @@
         } catch (error) {
             console.error('Error loading endpoints:', error);
             tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-danger">
-                <i class="bi bi-exclamation-triangle me-2"></i>Error loading endpoints: ${error.message}
+                <i class="bi bi-exclamation-triangle me-2"></i>Error loading endpoints: ${escapeHtml(error.message)}
             </td></tr>`;
         }
     }
@@ -3280,7 +3280,7 @@
             showToast(`Endpoint "${hostname}" deleted`, 'success');
             loadEndpoints(endpointsPage);
         } catch (error) {
-            showToast(`Failed to delete endpoint: ${error.message}`, 'danger');
+            showToast(`Failed to delete endpoint: ${escapeHtml(error.message)}`, 'danger');
         }
     }
 

@@ -13,6 +13,7 @@ Configuration via System Settings:
 - issue_tracker_*: Type-specific settings
 """
 
+import re
 import requests
 import logging
 import json
@@ -1080,13 +1081,18 @@ def create_vulnerability_issue(
         if fix_versions:
             lines.extend(["", "## Fix Version"])
             for fv in fix_versions:
+                # Sanitize CPE data to prevent markdown injection
+                vendor = re.sub(r'[\[\]()!<>]', '', str(fv.get('vendor', '')))
+                product = re.sub(r'[\[\]()!<>]', '', str(fv.get('product', '')))
+                fix_ver = re.sub(r'[\[\]()!<>]', '', str(fv.get('fix_version', '')))
                 if fv.get('fix_type') == 'excluding':
-                    lines.append(f"- **{fv['vendor']} {fv['product']}**: Upgrade to **{fv['fix_version']}** or later")
+                    lines.append(f"- **{vendor} {product}**: Upgrade to **{fix_ver}** or later")
                 else:
-                    lines.append(f"- **{fv['vendor']} {fv['product']}**: Upgrade past **{fv['fix_version']}**")
+                    lines.append(f"- **{vendor} {product}**: Upgrade past **{fix_ver}**")
                 if fv.get('version_start'):
+                    ver_start = re.sub(r'[\[\]()!<>]', '', str(fv['version_start']))
                     start_op = '>' if fv.get('version_start_type') == 'excluding' else '>='
-                    lines.append(f"  - Affected range: {start_op} {fv['version_start']}")
+                    lines.append(f"  - Affected range: {start_op} {ver_start}")
         else:
             lines.extend(["", "## Fix Version", "No specific fix version available from NVD. Check vendor advisory for patch information."])
 
