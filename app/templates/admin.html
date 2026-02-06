@@ -15,15 +15,14 @@
             </h1>
             <p class="text-muted mb-0">Manage your software products and connected endpoints</p>
         </div>
-        {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
-        <div class="col-auto">
+        <!-- Products-specific actions (hidden on Endpoints/Software Overview tabs) -->
+        <div id="productsHeaderActions" class="col-auto d-flex gap-2">
+            {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#productModal" onclick="showAddProduct()">
                 <i class="bi bi-plus-circle me-2"></i>Add Product
             </button>
-        </div>
-        {% endif %}
-        {% if current_user and current_user.is_super_admin() %}
-        <div class="col-auto">
+            {% endif %}
+            {% if current_user and current_user.is_super_admin() %}
             <div class="dropdown">
                 <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                     <i class="bi bi-tools me-1"></i>Admin Tools
@@ -50,8 +49,8 @@
                     </li>
                 </ul>
             </div>
+            {% endif %}
         </div>
-        {% endif %}
     </div>
 
     <!-- Inventory Tabs: Products | Endpoints -->
@@ -3367,14 +3366,54 @@
         if (!endpointsLoaded) loadEndpoints();
     });
 
-    // Handle hash-based tab navigation (e.g., /admin#endpoints)
-    if (window.location.hash === '#endpoints') {
-        const endpointsTab = document.getElementById('endpoints-tab');
-        if (endpointsTab) {
-            const tab = new bootstrap.Tab(endpointsTab);
-            tab.show();
+    // Sync sidebar active state, URL hash, and header visibility when tabs change
+    document.querySelectorAll('#inventoryTabs button[data-bs-toggle="tab"]').forEach(btn => {
+        btn.addEventListener('shown.bs.tab', function(e) {
+            const hashMap = {
+                'products-tab': '',
+                'endpoints-tab': '#endpoints',
+                'software-overview-tab': '#software-overview'
+            };
+            const hash = hashMap[e.target.id] || '';
+            history.replaceState(null, '', '/admin' + hash);
+            // Update sidebar sub-links
+            document.querySelectorAll('.sidebar-submenu .sidebar-sublink').forEach(link => {
+                const href = link.getAttribute('href') || '';
+                const isMatch = hash ? href.endsWith(hash) : href === '/admin';
+                link.classList.toggle('active', isMatch);
+            });
+            // Show/hide Products-specific header actions
+            const headerActions = document.getElementById('productsHeaderActions');
+            if (headerActions) {
+                headerActions.style.display = (e.target.id === 'products-tab') ? '' : 'none';
+            }
+        });
+    });
+
+    // Unified hash-based tab navigation
+    function activateTabFromHash() {
+        const hash = window.location.hash;
+        const tabMap = {
+            '#endpoints': 'endpoints-tab',
+            '#software-overview': 'software-overview-tab'
+        };
+        const tabId = tabMap[hash];
+        if (tabId) {
+            const tabEl = document.getElementById(tabId);
+            if (tabEl) {
+                const tab = new bootstrap.Tab(tabEl);
+                tab.show();
+                window.scrollTo(0, 0);
+            }
+            // Hide Products-specific header actions on non-products tabs
+            const headerActions = document.getElementById('productsHeaderActions');
+            if (headerActions) headerActions.style.display = 'none';
         }
     }
+    // Activate on page load
+    activateTabFromHash();
+    // Also activate on hash change (e.g., sidebar link clicked while already on page)
+    window.addEventListener('hashchange', activateTabFromHash);
 
     // =========================================================================
     // SOFTWARE OVERVIEW TAB
@@ -3411,7 +3450,8 @@
                     has_vulnerable_version: p.has_vulnerable_version || false,
                     criticality: p.criticality || 'medium',
                     source: p.source || 'manual',
-                    organization_names: p.organization_names || []
+                    organization_names: p.organization_names || [],
+                    endpoint_hostnames: p.endpoint_hostnames || []
                 };
             });
 
@@ -3514,6 +3554,17 @@
                 ? '<span class="badge bg-info text-dark"><i class="bi bi-robot"></i> Agent</span>'
                 : '<span class="badge bg-light text-dark border"><i class="bi bi-person"></i> Manual</span>';
 
+            // Build endpoint hostnames display
+            const endpoints = p.endpoint_hostnames || [];
+            let endpointHtml = '';
+            if (endpoints.length > 0) {
+                const shown = endpoints.slice(0, 5).map(h => `<span class="badge bg-light text-dark border me-1"><i class="bi bi-pc-display me-1"></i>${escapeHtml(h)}</span>`).join('');
+                const more = endpoints.length > 5 ? `<span class="badge bg-secondary">+${endpoints.length - 5} more</span>` : '';
+                endpointHtml = `<div class="mt-1 d-flex flex-wrap align-items-center gap-1">
+                    <small class="text-muted me-1">Found on:</small>${shown}${more}
+                </div>`;
+            }
+
             return `
             <div class="d-flex align-items-start gap-3 p-3 border-bottom software-overview-row" style="cursor: default;">
                 <div class="text-center" style="min-width: 50px;">
@@ -3530,6 +3581,7 @@
                     <div class="mt-1 d-flex flex-wrap align-items-center gap-1">
                         ${versionBadges}${moreVersions}
                     </div>
+                    ${endpointHtml}
                     <div class="mt-1 d-flex align-items-center gap-3 text-muted small">
                         ${platformHtml ? `<span>Platforms: ${platformHtml}</span>` : ''}
                         ${sourceBadge}
@@ -3550,13 +3602,6 @@
         if (!softwareOverviewLoaded) loadSoftwareOverview();
     });
 
-    // Handle hash-based tab navigation for software overview
-    if (window.location.hash === '#software-overview') {
-        const soTab = document.getElementById('software-overview-tab');
-        if (soTab) {
-            const tab = new bootstrap.Tab(soTab);
-            tab.show();
-        }
-    }
+    // Hash-based navigation for software-overview is handled by activateTabFromHash() above
 </script>
 {% endblock %}

@@ -440,10 +440,28 @@ def get_products():
                 product_platform_counts[product_id][pname] = product_platform_counts[product_id].get(pname, 0) + count
                 product_install_counts[product_id] += count
 
-            # Assign platforms and installation counts to groups
+            # Get endpoint hostnames per product (for Software Overview)
+            endpoint_rows = db.session.query(
+                ProductInstallation.product_id,
+                Asset.hostname,
+                Asset.ip_address
+            ).join(Asset, ProductInstallation.asset_id == Asset.id).filter(
+                ProductInstallation.product_id.in_(all_product_ids),
+                Asset.active == True
+            ).all()
+
+            # Build product_id -> set of hostnames
+            product_endpoints = {}
+            for product_id, hostname, ip_address in endpoint_rows:
+                if product_id not in product_endpoints:
+                    product_endpoints[product_id] = set()
+                product_endpoints[product_id].add(hostname or ip_address or 'Unknown')
+
+            # Assign platforms, installation counts, and endpoints to groups
             for key, group in grouped_products.items():
                 group['platform_counts'] = {}
                 group['total_installations'] = 0
+                group_endpoints = set()
                 for v in group['versions']:
                     pid = v['id']
                     if pid in product_platform_counts:
@@ -452,6 +470,9 @@ def get_products():
                         group['platforms'].update(product_platform_counts[pid].keys())
                     if pid in product_install_counts:
                         group['total_installations'] += product_install_counts[pid]
+                    if pid in product_endpoints:
+                        group_endpoints.update(product_endpoints[pid])
+                group['endpoint_hostnames'] = sorted(list(group_endpoints))[:20]  # Limit to first 20
 
         # Convert to list and clean up sets
         result = []

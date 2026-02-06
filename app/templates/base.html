@@ -2691,18 +2691,25 @@
                 <!-- Assets & Inventory Section -->
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Inventory</div>
-                    <a href="/admin" class="sidebar-link {{ 'active' if request.endpoint == 'main.admin' else '' }}" data-tooltip="Products">
+                    <a href="#" class="sidebar-link {{ 'active expanded' if request.endpoint == 'main.admin' else '' }}" onclick="toggleSubmenu(this, event)" data-tooltip="Products">
                         <i class="bi bi-box-seam-fill"></i>
                         <span class="link-text">Products</span>
+                        <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
-                    <a href="/admin#endpoints" class="sidebar-link" data-tooltip="Endpoints">
-                        <i class="bi bi-pc-display"></i>
-                        <span class="link-text">Endpoints</span>
-                    </a>
-                    <a href="/admin#software-overview" class="sidebar-link" data-tooltip="Software Overview">
-                        <i class="bi bi-layers"></i>
-                        <span class="link-text">Software Overview</span>
-                    </a>
+                    <div class="sidebar-submenu {{ 'open' if request.endpoint == 'main.admin' else '' }}">
+                        <a href="/admin" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.admin' and not request.args.get('tab') else '' }}" onclick="navigateInventoryTab('products', event)" data-tooltip="Products">
+                            <i class="bi bi-box-seam"></i>
+                            Products
+                        </a>
+                        <a href="/admin#endpoints" class="sidebar-sublink" onclick="navigateInventoryTab('endpoints', event)" data-tooltip="Endpoints">
+                            <i class="bi bi-pc-display"></i>
+                            Endpoints
+                        </a>
+                        <a href="/admin#software-overview" class="sidebar-sublink" onclick="navigateInventoryTab('software-overview', event)" data-tooltip="Software Overview">
+                            <i class="bi bi-layers"></i>
+                            Software Overview
+                        </a>
+                    </div>
                 </div>
 
                 <!-- User Management Section (visible for admins) -->
@@ -3524,6 +3531,41 @@
                 submenuStates[submenuId] = !isOpen;
                 localStorage.setItem('submenuStates', JSON.stringify(submenuStates));
             }
+        }
+
+        // Navigate to an inventory tab (Products/Endpoints/Software Overview)
+        // If already on /admin, switch tabs in-place; otherwise navigate via href
+        function navigateInventoryTab(tabName, event) {
+            const isOnAdmin = window.location.pathname === '/admin';
+            if (isOnAdmin) {
+                event.preventDefault();
+                event.stopPropagation();
+                const tabMap = {
+                    'products': 'products-tab',
+                    'endpoints': 'endpoints-tab',
+                    'software-overview': 'software-overview-tab'
+                };
+                const tabId = tabMap[tabName];
+                const tabEl = document.getElementById(tabId);
+                if (tabEl) {
+                    const tab = new bootstrap.Tab(tabEl);
+                    tab.show();
+                    // Update URL hash without reload
+                    if (tabName === 'products') {
+                        history.replaceState(null, '', '/admin');
+                    } else {
+                        history.replaceState(null, '', '/admin#' + tabName);
+                    }
+                    // Update active state on sidebar sub-links
+                    document.querySelectorAll('.sidebar-submenu .sidebar-sublink').forEach(link => {
+                        link.classList.remove('active');
+                    });
+                    event.currentTarget.classList.add('active');
+                    // Scroll to top of content
+                    window.scrollTo(0, 0);
+                }
+            }
+            // If not on /admin, let the default href navigation happen
         }
 
         function initSidebar() {
