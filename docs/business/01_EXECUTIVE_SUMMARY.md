@@ -15,20 +15,20 @@
 ### The Problem
 
 Organizations face a critical cybersecurity challenge:
-- **800,000+ CVEs** exist in the NVD database
-- **CISA mandates** remediation of exploited vulnerabilities within 14-30 days
+- **40,009 CVEs** published in 2024 alone, 38% increase YoY ([CyberPress](https://cyberpress.org/over-40000-cves-published-in-2024/))
+- **1,484 actively exploited vulnerabilities** tracked by CISA KEV ([SecurityWeek](https://www.securityweek.com/cisa-kev-catalog-expanded-20-in-2025-topping-1480-entries/))
+- **CISA mandates** remediation of exploited vulnerabilities within 14-30 days ([CISA BOD 22-01](https://www.cisa.gov/news-events/directives/bod-22-01-reducing-significant-risk-known-exploited-vulnerabilities))
 - **Most companies** don't know what software they have installed
 - **Manual tracking** is error-prone and time-consuming
 - **Non-compliance** leads to breaches, fines, and reputation damage
 
 ### Market Size
 
-| Segment | Size (2025) | Growth |
-|---------|-------------|--------|
-| Vulnerability Management | $15.5B | 9.2% CAGR |
-| IT Asset Management | $3.2B | 12% CAGR |
-| Compliance Management | $4.8B | 15% CAGR |
-| **Total Addressable Market** | **$23.5B** | |
+| Segment | Size (2024) | Growth | Source |
+|---------|-------------|--------|--------|
+| Security & Vulnerability Management | $16.5B | 6.5% CAGR | [Grand View Research](https://www.grandviewresearch.com/industry-analysis/security-and-vulnerability-management-svm-market) |
+| Projected 2030 | $24.5B | - | [MarketsandMarkets](https://www.marketsandmarkets.com/Market-Reports/security-vulnerability-management-market-204180861.html) |
+| Risk-Based VM (fastest growing) | - | 7.1% CAGR | [Mordor Intelligence](https://www.mordorintelligence.com/industry-reports/vulnerability-management-solutions-market) |
 
 ---
 
@@ -188,11 +188,15 @@ SentriKat is an **automated vulnerability management platform** that:
 | IT Management | ServiceNow, Ivanti | Compliance capabilities |
 | PE Roll-ups | Vista, Thoma Bravo | Cybersecurity consolidation |
 
-### Comparable Exits
+### Comparable Exits & Valuations
 
-- Kenna Security → Cisco ($TBD, 2021)
-- Snyk → $8.5B valuation (2021)
-- Rapid7 IPO → $1.3B (2015)
+| Company | Event | Value | Year | Source |
+|---------|-------|-------|------|--------|
+| Kenna Security | Cisco Acquisition | ~$320M (last valuation) | 2021 | [TechCrunch](https://techcrunch.com/2021/05/14/cisco-strikes-again-grabbing-threat-assessment-tool-kenna-security-as-third-acquisition-this-week/) |
+| Snyk | Series F Valuation | $8.5B | 2021 | [Snyk](https://snyk.io/blog/snyk-raises-530m/) |
+| Rapid7 | IPO Market Cap | $885M (IPO day) | 2015 | [Reuters](https://www.reuters.com/article/us-rapid7-ipo-idUSKCN0PP29V20150717/) |
+| Wiz | Series E Valuation | $12B | 2024 | [TechCrunch](https://techcrunch.com/2024/05/07/wiz-reaches-12b-valuation/) |
+| Tenable | Current Market Cap | ~$5B | 2024 | [NASDAQ: TENB](https://www.nasdaq.com/market-activity/stocks/tenb) |
 
 ---
 

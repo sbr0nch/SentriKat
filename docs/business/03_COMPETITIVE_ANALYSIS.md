@@ -7,14 +7,15 @@
 
 ### Vulnerability Management Market
 
-- **2024 Market Size**: $15.5 Billion
-- **2029 Projected**: $24.2 Billion
-- **CAGR**: 9.2%
+- **2024 Market Size**: $16.5 Billion ([Grand View Research](https://www.grandviewresearch.com/industry-analysis/security-and-vulnerability-management-svm-market))
+- **2030 Projected**: $24.5 Billion ([MarketsandMarkets](https://www.marketsandmarkets.com/Market-Reports/security-vulnerability-management-market-204180861.html))
+- **CAGR**: 6.5-9.6% depending on segment ([Precedence Research](https://www.precedenceresearch.com/security-and-vulnerability-management-market))
 - **Key Drivers**:
-  - Increasing cyber attacks
-  - Regulatory compliance (CISA BOD 22-01, NIS2)
+  - Increasing cyber attacks (30% YoY increase in Q2 2024)
+  - Regulatory compliance (CISA BOD 22-01, NIS2, DORA)
   - Remote work expansion
   - Cloud migration
+  - 40,009 CVEs published in 2024 alone ([CyberPress](https://cyberpress.org/over-40000-cves-published-in-2024/))
 
 ### Market Segments
 
@@ -78,10 +79,11 @@
 - Agent-heavy architecture
 - Overkill for SMB
 
-**Pricing**
-- Nessus Professional: $3,590/year (single scanner)
-- Tenable.io: $2,380/year per 65 assets
-- Enterprise: $50K-500K+/year
+**Pricing** ([Tenable Official](https://www.tenable.com/buy))
+- Nessus Professional: $3,590/year (single scanner, unlimited IPs)
+- Nessus Expert: $5,890/year (includes external attack surface)
+- Tenable.io: ~$2,900/year for 128 assets ([Underdefense](https://underdefense.com/industry-pricings/tenable-pricing-2025-ultimate-guide-for-security-products/))
+- Enterprise (Tenable One): $50K-75K+/year
 
 **SentriKat Advantage**
 - 10x cheaper for SMB
