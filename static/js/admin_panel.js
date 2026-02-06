@@ -5941,18 +5941,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const integrationsTab = SK.DOM.get('integrations-tab');
     if (integrationsTab) {
         integrationsTab.addEventListener('shown.bs.tab', function() {
-            loadIntegrationsSummary();
+            loadAgentKeys();
+            loadAgentScriptOrganizations();
             loadImportQueueCount();
         });
     }
 
-    // Integrations sub-tab handlers (new unified structure)
-    const overviewSubTab = SK.DOM.get('integrations-overview-tab');
-    if (overviewSubTab) {
-        overviewSubTab.addEventListener('shown.bs.tab', function() {
-            loadIntegrationsSummary();
-        });
-    }
+    // Integrations sub-tab handlers
+    // Note: Overview tab removed - stats now loaded when integrations main tab shows
 
     const importQueueSubTab = SK.DOM.get('import-queue-tab');
     if (importQueueSubTab) {
@@ -5973,7 +5969,7 @@ document.addEventListener('DOMContentLoaded', function() {
         pushAgentsSubTab.addEventListener('shown.bs.tab', function() {
             loadAgentKeys();
             loadAgentScriptOrganizations();
-            loadAssets();
+            // Connected Endpoints now in Inventory > Endpoints tab
         });
     }
 

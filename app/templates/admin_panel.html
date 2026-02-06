@@ -482,29 +482,17 @@
                 <h2 class="h4 fw-bold mb-1"><i class="bi bi-plug-fill me-2"></i>Integrations</h2>
                 <p class="text-muted mb-0 small">Agent management, API keys, and data imports</p>
             </div>
-            <!-- Integrations Sub-Tabs -->
+            <!-- Integrations Sub-Tabs (Simplified) -->
             <ul class="nav nav-pills mb-4" id="integrationsTabs" role="tablist">
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="integrations-overview-tab" data-bs-toggle="pill" data-bs-target="#integrationsOverview" type="button">
-                        <i class="bi bi-diagram-3 me-2"></i>Overview
+                    <button class="nav-link active" id="push-agents-tab" data-bs-toggle="pill" data-bs-target="#pushAgents" type="button">
+                        <i class="bi bi-key-fill me-2"></i>Agent Keys
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="import-queue-tab" data-bs-toggle="pill" data-bs-target="#importQueue" type="button">
                         <i class="bi bi-inbox me-2"></i>Import Queue
                         <span class="badge bg-primary ms-1" id="importQueueCount">0</span>
-                    </button>
-                </li>
-                <!-- Pull Sources - Coming Soon (hidden for now)
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link disabled" id="pull-sources-tab" data-bs-toggle="pill" data-bs-target="#pullSources" type="button" disabled>
-                        <i class="bi bi-cloud-download me-2"></i>Pull Sources <span class="badge bg-secondary ms-1">Soon</span>
-                    </button>
-                </li>
-                -->
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="push-agents-tab" data-bs-toggle="pill" data-bs-target="#pushAgents" type="button">
-                        <i class="bi bi-cloud-upload me-2"></i>Push Agents
                     </button>
                 </li>
                 {% if license and license.is_professional() %}
@@ -517,8 +505,8 @@
             </ul>
 
             <div class="tab-content" id="integrationsTabContent">
-                <!-- Overview Sub-Tab (NEW) -->
-                <div class="tab-pane fade show active" id="integrationsOverview" role="tabpanel">
+                <!-- Overview section removed - simplified layout -->
+                <div class="d-none" id="integrationsOverview">
                     <div class="row mb-4">
                         <div class="col-12">
                             <div class="card border-0 bg-light">
@@ -750,7 +738,7 @@
                 </div>
 
                 <!-- Push Agents Sub-Tab (Unified: API Keys + Scripts + Assets) -->
-                <div class="tab-pane fade" id="pushAgents" role="tabpanel">
+                <div class="tab-pane fade show active" id="pushAgents" role="tabpanel">
 
                     <!-- API Keys & Agent Downloads -->
                     <div class="card mb-4">
@@ -793,52 +781,10 @@
                         </div>
                     </div>
 
-                    <!-- Connected Endpoints -->
-                    <div class="card">
-                        <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-pc-display me-2"></i>Connected Endpoints</span>
-                            <div class="d-flex gap-2">
-                                <input type="text" class="form-control form-control-sm" id="assetSearchInput" placeholder="Search endpoints..." style="width: 200px;" onkeyup="if(event.key==='Enter') loadAssets()">
-                                <button class="btn btn-outline-secondary btn-sm" onclick="loadAssets()" title="Refresh">
-                                    <i class="bi bi-arrow-clockwise"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="card-body p-0">
-                            <div class="table-responsive">
-                                <table class="table table-hover mb-0" id="assetsTable">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th data-sort="hostname" onclick="sortAssets('hostname')" style="cursor:pointer;">Hostname <i class="bi bi-arrow-down-up text-muted"></i></th>
-                                            <th data-sort="ip_address" onclick="sortAssets('ip_address')" style="cursor:pointer;">IP Address <i class="bi bi-arrow-down-up text-muted"></i></th>
-                                            <th data-sort="os_name" onclick="sortAssets('os_name')" style="cursor:pointer;">OS <i class="bi bi-arrow-down-up text-muted"></i></th>
-                                            <th>Organization</th>
-                                            <th>Products</th>
-                                            <th data-sort="status" onclick="sortAssets('status')" style="cursor:pointer;">Status <i class="bi bi-arrow-down-up text-muted"></i></th>
-                                            <th data-sort="last_checkin" onclick="sortAssets('last_checkin')" style="cursor:pointer;">Last Seen <i class="bi bi-arrow-down-up text-muted"></i></th>
-                                            <th style="width: 100px;">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="assetsTableBody">
-                                        <tr>
-                                            <td colspan="8" class="text-center py-4">
-                                                <div class="spinner-border spinner-border-sm text-primary"></div>
-                                                <span class="ms-2">Loading endpoints...</span>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="card-footer">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <small class="text-muted" id="assetsCount">Loading...</small>
-                                <nav aria-label="Assets pagination">
-                                    <ul class="pagination pagination-sm mb-0" id="assetsPagination">
-                                    </ul>
-                                </nav>
-                            </div>
-                        </div>
+                    <!-- Connected Endpoints moved to Inventory > Endpoints tab -->
+                    <div class="alert alert-light border mt-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Connected endpoints are now managed under <a href="/admin#endpoints" class="alert-link">Inventory &gt; Endpoints</a>.
                     </div>
                 </div>
 
