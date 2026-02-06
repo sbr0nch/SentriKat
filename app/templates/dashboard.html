@@ -2042,21 +2042,22 @@
         loadGroupedVulnerabilities();
     }
 
-    // Filter by severity when clicking priority alert cards
+    // Filter by effective priority when clicking priority alert cards
     function filterBySeverity(severity) {
-        const filterSelect = document.getElementById('filterSeverity');
-        // Toggle: if already filtering by this severity, clear it
-        if (filterSelect.value === severity) {
-            filterSelect.value = '';
+        const priorityFilter = document.getElementById('filterPriority');
+        const priorityValue = severity.toLowerCase();  // API expects lowercase
+        // Toggle: if already filtering by this priority, clear it
+        if (priorityFilter.value === priorityValue) {
+            priorityFilter.value = '';
         } else {
-            filterSelect.value = severity;
+            priorityFilter.value = priorityValue;
         }
-        // Clear priority filter to avoid conflict
-        document.getElementById('filterPriority').value = '';
+        // Clear severity filter to avoid conflict
+        document.getElementById('filterSeverity').value = '';
         // Highlight active card
         document.querySelectorAll('.alert-card').forEach(card => card.classList.remove('active-filter'));
-        if (filterSelect.value) {
-            const cardClass = 'alert-card-' + severity.toLowerCase();
+        if (priorityFilter.value) {
+            const cardClass = 'alert-card-' + priorityValue;
             const activeCard = document.querySelector('.' + cardClass);
             if (activeCard) activeCard.classList.add('active-filter');
         }
