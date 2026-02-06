@@ -10,16 +10,16 @@ class TestLicenseValidation:
     """Tests for license validation."""
 
     def test_community_license_limits(self, app):
-        """Test community license has correct limits."""
+        """Test demo license has correct limits."""
         from app.licensing import get_license
 
         with app.app_context():
-            # Get license info (community when no license installed)
+            # Get license info (demo when no license installed)
             license_info = get_license()
             limits = license_info.get_effective_limits()
 
-            # Community edition has no agents (push agents require Professional)
-            assert limits['max_agents'] == 0
+            # Demo edition includes 5 agents
+            assert limits['max_agents'] == 5
             assert limits['max_organizations'] == 1
             assert license_info.edition == 'community'
 
