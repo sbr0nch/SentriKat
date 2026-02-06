@@ -22,6 +22,12 @@
     .alert-card:hover {
         transform: translateY(-1px);
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        cursor: pointer;
+    }
+
+    .alert-card.active-filter {
+        box-shadow: 0 0 0 2px rgba(0,0,0,0.3);
+        transform: translateY(-1px);
     }
 
     .alert-card-critical {
@@ -152,6 +158,21 @@
         </div>
     </div>
 
+    <!-- Unmapped Products Warning (top-level, right under title) -->
+    <div id="unmappedWarning" class="alert alert-warning d-none mb-3" role="alert">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
+                These cannot be checked for vulnerabilities.
+                <a href="/admin#products" class="alert-link">Review manually</a>
+            </div>
+            <button class="btn btn-warning btn-sm ms-3" onclick="autoFixCpe()" id="autoFixCpeBtn">
+                <i class="bi bi-magic me-1"></i>Auto-Detect CPE
+            </button>
+        </div>
+    </div>
+
     <!-- Dashboard Top: Two-Column Widget Layout -->
     <div class="row g-3 mb-3">
         <!-- Left Column: Priority + Stats -->
@@ -159,7 +180,7 @@
             <!-- Priority Alert Cards (compact 2x2 grid) -->
             <div class="row g-2 mb-2" id="priorityAlerts">
                 <div class="col-6">
-                    <div class="alert-card alert-card-critical">
+                    <div class="alert-card alert-card-critical" onclick="filterBySeverity('CRITICAL')" title="Click to filter by Critical">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
                                 <div class="alert-card-label">Critical</div>
@@ -170,7 +191,7 @@
                     </div>
                 </div>
                 <div class="col-6">
-                    <div class="alert-card alert-card-high">
+                    <div class="alert-card alert-card-high" onclick="filterBySeverity('HIGH')" title="Click to filter by High">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
                                 <div class="alert-card-label">High</div>
@@ -181,7 +202,7 @@
                     </div>
                 </div>
                 <div class="col-6">
-                    <div class="alert-card alert-card-medium">
+                    <div class="alert-card alert-card-medium" onclick="filterBySeverity('MEDIUM')" title="Click to filter by Medium">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
                                 <div class="alert-card-label">Medium</div>
@@ -192,7 +213,7 @@
                     </div>
                 </div>
                 <div class="col-6">
-                    <div class="alert-card alert-card-low">
+                    <div class="alert-card alert-card-low" onclick="filterBySeverity('LOW')" title="Click to filter by Low">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
                                 <div class="alert-card-label">Low</div>
@@ -256,21 +277,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Unmapped Products Warning -->
-    <div id="unmappedWarning" class="alert alert-warning d-none mb-3" role="alert">
-        <div class="d-flex justify-content-between align-items-center">
-            <div>
-                <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
-                These cannot be checked for vulnerabilities.
-                <a href="/admin#products" class="alert-link">Review manually</a>
-            </div>
-            <button class="btn btn-warning btn-sm ms-3" onclick="autoFixCpe()" id="autoFixCpeBtn">
-                <i class="bi bi-magic me-1"></i>Auto-Detect CPE
-            </button>
         </div>
     </div>
 
@@ -1991,6 +1997,29 @@
         loadGroupedVulnerabilities();
     }
 
+    // Filter by severity when clicking priority alert cards
+    function filterBySeverity(severity) {
+        const filterSelect = document.getElementById('filterSeverity');
+        // Toggle: if already filtering by this severity, clear it
+        if (filterSelect.value === severity) {
+            filterSelect.value = '';
+        } else {
+            filterSelect.value = severity;
+        }
+        // Clear priority filter to avoid conflict
+        document.getElementById('filterPriority').value = '';
+        // Highlight active card
+        document.querySelectorAll('.alert-card').forEach(card => card.classList.remove('active-filter'));
+        if (filterSelect.value) {
+            const cardClass = 'alert-card-' + severity.toLowerCase();
+            const activeCard = document.querySelector('.' + cardClass);
+            if (activeCard) activeCard.classList.add('active-filter');
+        }
+        // Scroll to vulnerability list
+        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        resetAndLoadVulnerabilities();
+    }
+
     // Handle filter changes - use grouped view (reset to page 1)
     document.getElementById('filterPriority').addEventListener('change', resetAndLoadVulnerabilities);
     document.getElementById('filterSeverity').addEventListener('change', resetAndLoadVulnerabilities);
@@ -2394,7 +2423,7 @@
                 <div class="mb-2">
                     <small class="text-muted fw-semibold me-2">FIX:</small>
                     <span class="badge bg-secondary"><i class="bi bi-info-circle me-1"></i>Check vendor advisory</span>
-                    <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank" class="badge bg-outline-secondary text-decoration-none border ms-1"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>
+                    <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank" class="badge bg-light text-dark text-decoration-none border ms-1"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>
                 </div>`;
         }
 
