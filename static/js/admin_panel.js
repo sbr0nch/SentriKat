@@ -5839,22 +5839,103 @@ function exportAuditLogs(format, days) {
     showToast(`Downloading audit logs (${format.toUpperCase()}, last ${days} days)...`, 'info');
 }
 
-// Load audit logs when the tab is shown
+// ============================================================================
+// SETTINGS GROUP MANAGEMENT (Consolidated Tabs)
+// ============================================================================
+
+// Settings group definitions: maps group name to tab-pane IDs
+const SETTINGS_GROUPS = {
+    auth:       ['ldapSettings', 'samlSettings'],
+    email:      ['smtpSettings', 'notificationsSettings'],
+    system:     ['syncSettings', 'proxySettings', 'securitySettings', 'retentionSettings'],
+    compliance: ['auditLogs', 'complianceReports'],
+    appearance: ['brandingSettings'],
+    license:    ['licenseSettings']
+};
+
+// All settings pane IDs (flattened)
+const ALL_SETTINGS_PANES = Object.values(SETTINGS_GROUPS).flat();
+
+// Track which groups have been loaded (for lazy loading)
+const settingsGroupsLoaded = {};
+
+/**
+ * Show a group of settings panes and hide the rest.
+ * Called by consolidated tab buttons.
+ */
+function showSettingsGroup(groupName, btn) {
+    // Hide all settings panes
+    ALL_SETTINGS_PANES.forEach(id => {
+        const pane = SK.DOM.get(id);
+        if (pane) {
+            pane.classList.remove('show', 'active');
+            pane.style.display = 'none';
+        }
+    });
+
+    // Show panes in this group
+    const groupPanes = SETTINGS_GROUPS[groupName] || [];
+    groupPanes.forEach((id, index) => {
+        const pane = SK.DOM.get(id);
+        if (pane) {
+            pane.style.display = '';
+            pane.classList.add('show', 'active');
+            // Add spacing between stacked panes
+            if (index > 0) {
+                pane.style.marginTop = '1.5rem';
+            } else {
+                pane.style.marginTop = '';
+            }
+        }
+    });
+
+    // Update active button state
+    document.querySelectorAll('#settingsTabs .nav-link').forEach(link => {
+        link.classList.remove('active');
+    });
+    if (btn) btn.classList.add('active');
+
+    // Lazy-load data for specific groups on first visit
+    if (!settingsGroupsLoaded[groupName]) {
+        settingsGroupsLoaded[groupName] = true;
+        if (groupName === 'compliance') {
+            if (typeof loadAuditLogs === 'function') loadAuditLogs(1);
+            if (typeof loadComplianceData === 'function') loadComplianceData();
+        } else if (groupName === 'license') {
+            if (typeof loadLicenseInfo === 'function') loadLicenseInfo();
+        }
+    }
+}
+
+// Initialize settings groups when Settings main tab is shown
+function initSettingsGroups() {
+    const activeBtn = document.querySelector('#settingsTabs .nav-link.active');
+    if (activeBtn) {
+        const match = activeBtn.getAttribute('onclick')?.match(/showSettingsGroup\('(\w+)'/);
+        if (match) {
+            showSettingsGroup(match[1], activeBtn);
+        }
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    const auditLogsTab = SK.DOM.get('audit-logs-tab');
-    if (auditLogsTab) {
-        auditLogsTab.addEventListener('shown.bs.tab', function() {
-            loadAuditLogs(1);
+    // When Settings main tab becomes visible, initialize the groups
+    const settingsMainTab = SK.DOM.get('settings-tab');
+    if (settingsMainTab) {
+        settingsMainTab.addEventListener('shown.bs.tab', function() {
+            initSettingsGroups();
         });
     }
 
-    // Load license info when tab is shown
-    const licenseTab = SK.DOM.get('license-tab');
-    if (licenseTab) {
-        licenseTab.addEventListener('shown.bs.tab', function() {
-            loadLicenseInfo();
-        });
+    // Also initialize if Settings is already visible on page load
+    const settingsPane = SK.DOM.get('settings');
+    if (settingsPane && settingsPane.classList.contains('active')) {
+        setTimeout(initSettingsGroups, 50);
     }
+});
+
+// Tab shown handlers (for tabs that lazy-load data)
+document.addEventListener('DOMContentLoaded', function() {
 
     // Load integrations data when main tab is shown
     const integrationsTab = SK.DOM.get('integrations-tab');
@@ -5904,13 +5985,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Compliance Reports tab handler
-    const complianceReportsTab = SK.DOM.get('compliance-reports-tab');
-    if (complianceReportsTab) {
-        complianceReportsTab.addEventListener('shown.bs.tab', function() {
-            loadComplianceData();
-        });
-    }
+    // Note: Compliance, Audit Logs, and License tab lazy-loading is now
+    // handled by showSettingsGroup() in the consolidated settings tabs.
 });
 
 // ============================================================================
