@@ -83,3 +83,10 @@ coverage.xml
 
 # Static file uploads (user-generated)
 static/uploads/
+
+# Confidential Business Documents (NOT FOR PUBLIC)
+ARCHITECTURE_CONFIDENTIAL.md
+*_CONFIDENTIAL.md
+*_CONFIDENTIAL.pdf
+INVESTOR_*.md
+BUSINESS_*.md
