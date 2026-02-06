@@ -105,6 +105,11 @@
             color: var(--text-color);
         }
 
+        [data-theme="dark"] .app-footer {
+            background-color: var(--surface-color) !important;
+            border-top-color: var(--border-color) !important;
+        }
+
         [data-theme="dark"] .card-header {
             background-color: var(--gray-100);
             border-color: var(--border-color);
@@ -678,6 +683,11 @@
         /* Page title text */
         [data-theme="dark"] .text-dark {
             color: var(--text-color) !important;
+        }
+
+        /* Sticky table headers need explicit background in dark mode */
+        [data-theme="dark"] thead.sticky-top {
+            background-color: var(--gray-100) !important;
         }
 
         /* ========== END COMPREHENSIVE DARK MODE OVERRIDES ========== */
@@ -1985,7 +1995,7 @@
 
         /* Footer */
         .app-footer {
-            background: white;
+            background-color: white;
             padding: 1.5rem 0;
             margin-top: auto; /* Push to bottom */
             border-top: 1px solid var(--gray-200);
