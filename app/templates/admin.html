@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 
-{% block title %}Products - SentriKat{% endblock %}
+{% block title %}Inventory - SentriKat{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item active" aria-current="page">Products</li>
+<li class="breadcrumb-item active" aria-current="page">Inventory</li>
 {% endblock %}
 
 {% block content %}
 <div class="fade-in">
-    <div class="row mb-4">
+    <div class="row mb-3">
         <div class="col">
             <h1 class="display-6 fw-bold text-dark mb-2">
-                <i class="bi bi-gear me-2"></i>Product Management
+                <i class="bi bi-boxes me-2"></i>Inventory
             </h1>
-            <p class="text-muted">Manage your software inventory for vulnerability tracking</p>
+            <p class="text-muted mb-0">Manage your software products and connected endpoints</p>
         </div>
         {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
         <div class="col-auto">
@@ -53,6 +53,24 @@
         </div>
         {% endif %}
     </div>
+
+    <!-- Inventory Tabs: Products | Endpoints -->
+    <ul class="nav nav-tabs mb-3" id="inventoryTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="products-tab" data-bs-toggle="tab" data-bs-target="#productsPane" type="button">
+                <i class="bi bi-box-seam me-1"></i>Products
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="endpoints-tab" data-bs-toggle="tab" data-bs-target="#endpointsPane" type="button">
+                <i class="bi bi-pc-display me-1"></i>Endpoints
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="inventoryTabContent">
+    <!-- Products Tab -->
+    <div class="tab-pane fade show active" id="productsPane" role="tabpanel">
 
     {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
     <!-- Bulk Actions Toolbar (hidden by default) -->
@@ -177,6 +195,58 @@
         </div>
     </div>
 </div>
+    </div><!-- /productsPane -->
+
+    <!-- Endpoints Tab -->
+    <div class="tab-pane fade" id="endpointsPane" role="tabpanel">
+        <div class="card">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-pc-display me-2"></i>Connected Endpoints</span>
+                <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" id="endpointSearchInput" placeholder="Search endpoints..." style="width: 200px;" onkeyup="if(event.key==='Enter') loadEndpoints()">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="loadEndpoints()" title="Refresh">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="endpointsTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th data-sort="hostname" onclick="sortEndpoints('hostname')" style="cursor:pointer;">Hostname <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th data-sort="ip_address" onclick="sortEndpoints('ip_address')" style="cursor:pointer;">IP Address <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th data-sort="os_name" onclick="sortEndpoints('os_name')" style="cursor:pointer;">OS <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th>Organization</th>
+                                <th>Products</th>
+                                <th data-sort="status" onclick="sortEndpoints('status')" style="cursor:pointer;">Status <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th data-sort="last_checkin" onclick="sortEndpoints('last_checkin')" style="cursor:pointer;">Last Seen <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th style="width: 100px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="endpointsTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center py-4 text-muted">
+                                    <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
+                                    <p class="mt-2 mb-0">Click the Endpoints tab to load data</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer">
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted" id="endpointsCount"></small>
+                    <nav aria-label="Endpoints pagination">
+                        <ul class="pagination pagination-sm mb-0" id="endpointsPagination">
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div><!-- /endpointsPane -->
+    </div><!-- /inventoryTabContent -->
 
 <!-- Product Modal - Redesigned with cleaner UX -->
 <div class="modal fade" id="productModal" tabindex="-1">
@@ -3061,5 +3131,171 @@
             });
         }
     });
+
+    // ========================================================================
+    // ENDPOINTS TAB - Connected Endpoints Management
+    // ========================================================================
+    let endpointsLoaded = false;
+    let endpointsPage = 1;
+    const endpointsPerPage = 20;
+    let endpointsSortColumn = 'hostname';
+    let endpointsSortDirection = 'asc';
+
+    function sortEndpoints(column) {
+        if (endpointsSortColumn === column) {
+            endpointsSortDirection = endpointsSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            endpointsSortColumn = column;
+            endpointsSortDirection = 'asc';
+        }
+        loadEndpoints(1);
+    }
+
+    function formatRelativeTime(dateStr) {
+        if (!dateStr) return 'Never';
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 30) return `${diffDays}d ago`;
+        return date.toLocaleDateString();
+    }
+
+    async function loadEndpoints(page = 1) {
+        endpointsPage = page;
+        const tbody = document.getElementById('endpointsTableBody');
+        const countEl = document.getElementById('endpointsCount');
+        const paginationEl = document.getElementById('endpointsPagination');
+        if (!tbody) return;
+
+        const search = document.getElementById('endpointSearchInput')?.value || '';
+
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <span class="ms-2">Loading endpoints...</span>
+        </td></tr>`;
+
+        try {
+            const params = new URLSearchParams({
+                page: page,
+                per_page: endpointsPerPage,
+                order: endpointsSortColumn,
+                direction: endpointsSortDirection
+            });
+            if (search) params.set('search', search);
+
+            const response = await fetch(`/api/assets?${params}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const assets = data.assets || [];
+            const total = data.total || 0;
+            const pages = Math.ceil(total / endpointsPerPage);
+
+            if (countEl) countEl.textContent = `Showing ${assets.length} of ${total} endpoints`;
+
+            if (assets.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-muted">
+                    <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0">No endpoints discovered</p>
+                    <p class="small">Endpoints appear when agents report their inventory</p>
+                </td></tr>`;
+                if (paginationEl) paginationEl.innerHTML = '';
+            } else {
+                const statusBadges = {
+                    'online': '<span class="badge bg-success"><i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>Online</span>',
+                    'offline': '<span class="badge bg-secondary"><i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>Offline</span>',
+                    'stale': '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>Stale</span>',
+                    'decommissioned': '<span class="badge bg-dark"><i class="bi bi-x-circle me-1"></i>Decommissioned</span>'
+                };
+
+                tbody.innerHTML = assets.map(asset => {
+                    const statusBadge = statusBadges[asset.status] || `<span class="badge bg-secondary">${asset.status || 'Unknown'}</span>`;
+                    const vulnCount = asset.total_vulnerabilities || 0;
+                    const vulnBadge = vulnCount > 0 ? `<span class="badge bg-danger ms-1" title="${vulnCount} vulnerabilities">${vulnCount} CVEs</span>` : '';
+                    const lastSeen = asset.last_checkin || asset.last_inventory_at;
+                    const lastSeenDisplay = lastSeen ? formatRelativeTime(lastSeen) : '<span class="text-muted">Never</span>';
+
+                    return `<tr>
+                        <td><strong>${escapeHtml(asset.hostname)}</strong></td>
+                        <td><code>${escapeHtml(asset.ip_address || '-')}</code></td>
+                        <td>${escapeHtml(asset.os_name || '-')} ${escapeHtml(asset.os_version || '')}</td>
+                        <td>${escapeHtml(asset.organization_name || 'Unknown')}</td>
+                        <td><span class="badge bg-primary">${asset.product_count || 0}</span>${vulnBadge}</td>
+                        <td>${statusBadge}</td>
+                        <td>${lastSeenDisplay}</td>
+                        <td>
+                            <button class="btn btn-outline-danger btn-sm" onclick="deleteEndpoint(${asset.id}, '${escapeHtml(asset.hostname)}')" title="Delete endpoint">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>`;
+                }).join('');
+
+                // Build pagination
+                if (paginationEl && pages > 1) {
+                    let html = `<li class="page-item ${page === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="loadEndpoints(${page - 1}); return false;">&laquo;</a></li>`;
+                    for (let i = 1; i <= pages; i++) {
+                        if (i === 1 || i === pages || (i >= page - 2 && i <= page + 2)) {
+                            html += `<li class="page-item ${i === page ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="loadEndpoints(${i}); return false;">${i}</a></li>`;
+                        } else if (i === page - 3 || i === page + 3) {
+                            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                        }
+                    }
+                    html += `<li class="page-item ${page === pages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="loadEndpoints(${page + 1}); return false;">&raquo;</a></li>`;
+                    paginationEl.innerHTML = html;
+                } else if (paginationEl) {
+                    paginationEl.innerHTML = '';
+                }
+            }
+            endpointsLoaded = true;
+
+            // Update sort indicators
+            document.querySelectorAll('#endpointsTable th[data-sort]').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === endpointsSortColumn) {
+                    th.classList.add(endpointsSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        } catch (error) {
+            console.error('Error loading endpoints:', error);
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>Error loading endpoints: ${error.message}
+            </td></tr>`;
+        }
+    }
+
+    async function deleteEndpoint(assetId, hostname) {
+        if (!confirm(`Delete endpoint "${hostname}"? This will remove the asset and its inventory data.`)) return;
+        try {
+            const response = await fetch(`/api/assets/${assetId}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            showToast(`Endpoint "${hostname}" deleted`, 'success');
+            loadEndpoints(endpointsPage);
+        } catch (error) {
+            showToast(`Failed to delete endpoint: ${error.message}`, 'danger');
+        }
+    }
+
+    // Load endpoints when tab is shown (lazy load)
+    document.getElementById('endpoints-tab')?.addEventListener('shown.bs.tab', function() {
+        if (!endpointsLoaded) loadEndpoints();
+    });
+
+    // Handle hash-based tab navigation (e.g., /admin#endpoints)
+    if (window.location.hash === '#endpoints') {
+        const endpointsTab = document.getElementById('endpoints-tab');
+        if (endpointsTab) {
+            const tab = new bootstrap.Tab(endpointsTab);
+            tab.show();
+        }
+    }
 </script>
 {% endblock %}
