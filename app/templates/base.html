@@ -2992,37 +2992,37 @@
             <div class="main-content">
                 {% block content %}{% endblock %}
             </div>
+
+            <!-- Footer (inside app-main so it respects sidebar width) -->
+            <footer class="app-footer">
+                <div class="container-fluid px-4">
+                    <div class="text-center">
+                        <p class="mb-1">
+                            <strong>{{ branding.app_name }}</strong> - Enterprise Vulnerability Management Platform
+                        </p>
+                        <p class="copyright-notice mb-1">
+                            Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
+                            {% if branding.support_email %}
+                            | <a href="mailto:{{ branding.support_email }}">Support</a>
+                            {% endif %}
+                        </p>
+                        <!-- CVE Service Status Indicator -->
+                        {% if branding.show_version %}
+                        <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
+                            <span class="status-led status-led-yellow" id="cveStatusLed"></span>
+                            <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
+                        </div>
+                        {% endif %}
+                        {% if branding.show_powered_by | default(true) %}
+                        <p class="text-muted mt-1 mb-0" style="font-size: 0.7rem; opacity: 0.7;">
+                            Powered by <a href="https://github.com/sbr0nch/SentriKat" target="_blank" class="text-muted text-decoration-none">SentriKat</a>
+                        </p>
+                        {% endif %}
+                    </div>
+                </div>
+            </footer>
         </div>
     </div>
-
-    <!-- Footer -->
-    <footer class="app-footer">
-        <div class="container-fluid px-4">
-            <div class="text-center">
-                <p class="mb-1">
-                    <strong>{{ branding.app_name }}</strong> - Enterprise Vulnerability Management Platform
-                </p>
-                <p class="copyright-notice mb-1">
-                    Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
-                    {% if branding.support_email %}
-                    | <a href="mailto:{{ branding.support_email }}">Support</a>
-                    {% endif %}
-                </p>
-                <!-- CVE Service Status Indicator -->
-                {% if branding.show_version %}
-                <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
-                    <span class="status-led status-led-yellow" id="cveStatusLed"></span>
-                    <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
-                </div>
-                {% endif %}
-                {% if branding.show_powered_by | default(true) %}
-                <p class="text-muted mt-1 mb-0" style="font-size: 0.7rem; opacity: 0.7;">
-                    Powered by <a href="https://github.com/sbr0nch/SentriKat" target="_blank" class="text-muted text-decoration-none">SentriKat</a>
-                </p>
-                {% endif %}
-            </div>
-        </div>
-    </footer>
 
     <!-- Toast Container -->
     <div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
