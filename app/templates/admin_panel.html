@@ -802,18 +802,34 @@
                                 Supports Jira, YouTrack, GitHub Issues, GitLab Issues, and custom webhooks.
                             </div>
 
-                            <!-- Tracker Type Selector -->
+                            <!-- Tracker Type Selector (multi-select via checkboxes) -->
                             <div class="mb-4">
-                                <label for="issueTrackerType" class="form-label fw-semibold">Issue Tracker</label>
-                                <select class="form-select" id="issueTrackerType" onchange="showTrackerConfig(this.value)">
-                                    <option value="disabled">Disabled</option>
-                                    <option value="jira">Jira (Cloud & Server)</option>
-                                    <option value="youtrack">YouTrack (JetBrains)</option>
-                                    <option value="github">GitHub Issues</option>
-                                    <option value="gitlab">GitLab Issues</option>
-                                    <option value="webhook">Custom Webhook</option>
-                                </select>
-                                <small class="form-text text-muted">Create tickets automatically when new vulnerabilities are detected.</small>
+                                <label class="form-label fw-semibold">Enabled Issue Trackers</label>
+                                <div class="d-flex flex-wrap gap-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input tracker-type-check" type="checkbox" value="jira" id="trackerCheck-jira" onchange="toggleTrackerConfig()">
+                                        <label class="form-check-label" for="trackerCheck-jira"><i class="bi bi-kanban me-1"></i>Jira</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input tracker-type-check" type="checkbox" value="youtrack" id="trackerCheck-youtrack" onchange="toggleTrackerConfig()">
+                                        <label class="form-check-label" for="trackerCheck-youtrack"><i class="bi bi-bug me-1"></i>YouTrack</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input tracker-type-check" type="checkbox" value="github" id="trackerCheck-github" onchange="toggleTrackerConfig()">
+                                        <label class="form-check-label" for="trackerCheck-github"><i class="bi bi-github me-1"></i>GitHub Issues</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input tracker-type-check" type="checkbox" value="gitlab" id="trackerCheck-gitlab" onchange="toggleTrackerConfig()">
+                                        <label class="form-check-label" for="trackerCheck-gitlab"><i class="bi bi-gitlab me-1"></i>GitLab Issues</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input tracker-type-check" type="checkbox" value="webhook" id="trackerCheck-webhook" onchange="toggleTrackerConfig()">
+                                        <label class="form-check-label" for="trackerCheck-webhook"><i class="bi bi-globe me-1"></i>Custom Webhook</label>
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">Enable one or more trackers. A "Create Issue" button will appear for each on the dashboard.</small>
+                                <!-- Hidden select kept for backward compat with existing JS -->
+                                <select class="form-select d-none" id="issueTrackerType"></select>
                             </div>
 
                             <!-- Jira Configuration -->

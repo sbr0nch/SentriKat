@@ -1489,10 +1489,7 @@
                                 <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
                                     <i class="bi bi-share"></i> Share
                                 </button>
-                                ${window.jiraEnabled ? `
-                                <button class="btn btn-sm btn-outline-secondary" onclick="createJiraIssue(${vuln.id}, ${product.id}, '${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')" title="Create Jira Issue">
-                                    <i class="bi bi-kanban"></i> Jira
-                                </button>` : ''}
+                                ${getTrackerButtonsHtml(vuln.id, product.id, vuln.cve_id, vuln.vulnerability_name)}
                             </div>
                         </div>
                     </div>
@@ -1906,10 +1903,11 @@
         setInterval(loadStats, 300000);
     });
 
-    // Initialize issue tracker state (supports Jira, YouTrack, GitHub, GitLab, Webhook)
-    window.jiraEnabled = false;  // Legacy - kept for button visibility
+    // Initialize issue tracker state (supports multiple simultaneous trackers)
+    window.jiraEnabled = false;  // Legacy - kept for backward compat
     window.issueTrackerType = 'disabled';
     window.issueTrackerName = '';
+    window.enabledTrackers = [];  // Array of {type, name, icon}
 
     async function loadJiraEnabled() {
         try {
@@ -1917,31 +1915,39 @@
             if (response.ok) {
                 const config = await response.json();
                 window.issueTrackerType = config.type || 'disabled';
-                window.jiraEnabled = config.enabled;  // For button visibility
+                window.jiraEnabled = config.enabled;
 
-                // Set friendly name for display
-                const names = {
-                    'jira': 'Jira',
-                    'youtrack': 'YouTrack',
-                    'github': 'GitHub',
-                    'gitlab': 'GitLab',
-                    'webhook': 'Issue'
-                };
-                window.issueTrackerName = names[config.type] || 'Issue';
+                // Multi-tracker: store all enabled trackers
+                window.enabledTrackers = config.trackers || [];
+
+                // Legacy single-tracker name (first enabled)
+                if (window.enabledTrackers.length > 0) {
+                    window.issueTrackerName = window.enabledTrackers[0].name;
+                }
             }
         } catch (error) {
             console.warn('Could not load issue tracker settings:', error);
         }
     }
 
-    // Create issue from vulnerability (supports all configured trackers)
-    async function createJiraIssue(vulnId, productId, cveId, vulnName) {
-        if (!window.jiraEnabled || window.issueTrackerType === 'disabled') {
-            showToast('Issue tracker not configured. Go to Admin Panel > Integrations > Issue Trackers.', 'warning');
-            return;
-        }
+    // Build issue tracker buttons HTML for a vulnerability
+    function getTrackerButtonsHtml(vulnId, productId, cveId, vulnName) {
+        if (!window.enabledTrackers || window.enabledTrackers.length === 0) return '';
+        return window.enabledTrackers.map(tracker => {
+            const safeName = escapeHtml(vulnName);
+            const safeType = escapeHtml(tracker.type);
+            const safeCveId = escapeHtml(cveId);
+            return `<button class="btn btn-sm btn-outline-secondary" onclick="createTrackerIssue(${parseInt(vulnId)}, ${productId ? parseInt(productId) : 'null'}, '${safeCveId}', '${safeName.replace(/'/g, "\\'")}', '${safeType}')" title="Create ${escapeHtml(tracker.name)} Issue">
+                <i class="bi ${escapeHtml(tracker.icon)}"></i> ${escapeHtml(tracker.name)}
+            </button>`;
+        }).join('\n');
+    }
 
-        const trackerName = window.issueTrackerName || 'Issue';
+    // Create issue on a specific tracker
+    async function createTrackerIssue(vulnId, productId, cveId, vulnName, trackerType) {
+        const tracker = window.enabledTrackers.find(t => t.type === trackerType);
+        const trackerName = tracker ? tracker.name : 'Issue';
+
         const confirmed = await showConfirm(
             `Create a ${trackerName} issue for ${cveId}?\n\n"${vulnName}"`,
             `Create ${trackerName} Issue`,
@@ -1958,7 +1964,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     vulnerability_id: vulnId,
-                    product_id: productId
+                    product_id: productId,
+                    tracker_type: trackerType
                 })
             });
 
@@ -1966,19 +1973,29 @@
 
             if (response.ok && result.success) {
                 const issueId = result.issue_key || 'Issue';
-                showToast(`${trackerName} issue created: ${issueId}`, 'success');
-                // Open the issue in a new tab if URL provided
+                showToast(`${escapeHtml(trackerName)} issue created: ${escapeHtml(issueId)}`, 'success');
                 if (result.issue_url) {
                     window.open(result.issue_url, '_blank');
                 }
             } else {
-                showToast(`Failed to create issue: ${result.error || result.message}`, 'danger');
+                showToast(`Failed to create issue: ${escapeHtml(result.error || result.message)}`, 'danger');
             }
         } catch (error) {
-            showToast(`Error creating issue: ${error.message}`, 'danger');
+            showToast(`Error creating issue: ${escapeHtml(error.message)}`, 'danger');
         } finally {
             hideLoading();
         }
+    }
+
+    // Legacy wrapper for backward compatibility
+    function createJiraIssue(vulnId, productId, cveId, vulnName) {
+        if (!window.jiraEnabled) {
+            showToast('Issue tracker not configured. Go to Admin Panel > Integrations > Issue Trackers.', 'warning');
+            return;
+        }
+        // Use first enabled tracker if no specific type
+        const trackerType = window.enabledTrackers.length > 0 ? window.enabledTrackers[0].type : null;
+        createTrackerIssue(vulnId, productId, cveId, vulnName, trackerType);
     }
 
     // Handle Enter key in filter inputs - trigger reload on Enter (reset to page 1)
@@ -2490,12 +2507,8 @@
         const matchIds = group.affected_products.map(p => p.match_id);
         const matchIdsJson = JSON.stringify(matchIds);
 
-        // Issue tracker button
-        const trackerName = window.issueTrackerName || 'Issue';
-        const trackerBtn = window.jiraEnabled ? `
-            <button class="btn btn-sm btn-outline-secondary" onclick="createJiraIssue(${vuln.id}, null, '${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')" title="Create ${trackerName}">
-                <i class="bi bi-kanban"></i> ${trackerName}
-            </button>` : '';
+        // Issue tracker buttons (one per enabled tracker)
+        const trackerBtn = getTrackerButtonsHtml(vuln.id, null, vuln.cve_id, vuln.vulnerability_name);
 
         return `
             <div class="card vuln-card-v2 mb-4 shadow-sm overflow-hidden" data-match-ids='${matchIdsJson}'>

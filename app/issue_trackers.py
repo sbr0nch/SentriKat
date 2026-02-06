@@ -905,32 +905,44 @@ class WebhookTracker(IssueTrackerBase):
 # Factory and Helper Functions
 # =============================================================================
 
-def get_issue_tracker() -> Optional[IssueTrackerBase]:
-    """
-    Get configured issue tracker from system settings.
+TRACKER_NAMES = {
+    'jira': 'Jira',
+    'youtrack': 'YouTrack',
+    'github': 'GitHub',
+    'gitlab': 'GitLab',
+    'webhook': 'Webhook'
+}
 
-    Returns:
-        IssueTracker instance or None if disabled/not configured
+TRACKER_ICONS = {
+    'jira': 'bi-kanban',
+    'youtrack': 'bi-bug',
+    'github': 'bi-github',
+    'gitlab': 'bi-gitlab',
+    'webhook': 'bi-globe'
+}
+
+VALID_TRACKER_TYPES = set(TRACKER_NAMES.keys())
+
+
+def _parse_enabled_types(setting_value: str) -> List[str]:
+    """Parse issue_tracker_type setting into list of enabled types.
+    Supports both legacy single-value ('jira') and multi-value ('jira,github') format.
     """
+    if not setting_value or setting_value == 'disabled':
+        return []
+    return [t.strip() for t in setting_value.split(',') if t.strip() in VALID_TRACKER_TYPES]
+
+
+def _build_tracker(tracker_type: str) -> Optional[IssueTrackerBase]:
+    """Instantiate a tracker of the given type from stored settings."""
     from app.settings_api import get_setting
-    # Note: get_setting() already handles decryption for encrypted settings,
-    # so we don't need to call decrypt_value() again here.
-
-    tracker_type = get_setting('issue_tracker_type', 'disabled')
-
-    if tracker_type == 'disabled':
-        return None
-
-    # Get SSL verification setting (used by trackers that support it)
     verify_ssl = get_setting('verify_ssl', 'true') == 'true'
 
     try:
         if tracker_type == 'jira':
             url = get_setting('jira_url', '')
             email = get_setting('jira_email', '')
-            # get_setting() returns decrypted value for encrypted settings
             token = get_setting('jira_api_token', '')
-            # Check if using Personal Access Token (Bearer auth) for Jira Server
             use_pat = get_setting('jira_use_pat', 'false') == 'true'
             if not all([url, email, token]):
                 return None
@@ -938,14 +950,12 @@ def get_issue_tracker() -> Optional[IssueTrackerBase]:
 
         elif tracker_type == 'youtrack':
             url = get_setting('youtrack_url', '')
-            # get_setting() returns decrypted value for encrypted settings
             token = get_setting('youtrack_token', '')
             if not all([url, token]):
                 return None
             return YouTrackTracker(url, token)
 
         elif tracker_type == 'github':
-            # get_setting() returns decrypted value for encrypted settings
             token = get_setting('github_token', '')
             owner = get_setting('github_owner', '')
             repo = get_setting('github_repo', '')
@@ -955,7 +965,6 @@ def get_issue_tracker() -> Optional[IssueTrackerBase]:
 
         elif tracker_type == 'gitlab':
             url = get_setting('gitlab_url', 'https://gitlab.com')
-            # get_setting() returns decrypted value for encrypted settings
             token = get_setting('gitlab_token', '')
             project_id = get_setting('gitlab_project_id', '')
             if not all([token, project_id]):
@@ -966,58 +975,124 @@ def get_issue_tracker() -> Optional[IssueTrackerBase]:
             url = get_setting('webhook_url', '')
             method = get_setting('webhook_method', 'POST')
             auth_type = get_setting('webhook_auth_type', 'none')
-            # get_setting() returns decrypted value for encrypted settings
             auth_value = get_setting('webhook_auth_value', '')
             if not url:
                 return None
             return WebhookTracker(url, method, auth_type=auth_type, auth_value=auth_value)
 
     except Exception as e:
-        logger.error(f"Failed to initialize issue tracker: {e}")
+        logger.error(f"Failed to initialize {tracker_type} tracker: {e}")
 
     return None
 
 
-def get_issue_tracker_config() -> Dict[str, Any]:
-    """Get current issue tracker configuration (for UI)."""
+def get_issue_tracker(tracker_type: Optional[str] = None) -> Optional[IssueTrackerBase]:
+    """
+    Get configured issue tracker instance.
+
+    Args:
+        tracker_type: Specific tracker type to get. If None, returns the first enabled tracker
+                      (backward-compatible with legacy single-tracker behavior).
+
+    Returns:
+        IssueTracker instance or None if disabled/not configured
+    """
     from app.settings_api import get_setting
 
-    tracker_type = get_setting('issue_tracker_type', 'disabled')
+    if tracker_type:
+        # Explicit type requested - verify it's enabled
+        enabled = _parse_enabled_types(get_setting('issue_tracker_type', 'disabled'))
+        if tracker_type not in enabled:
+            return None
+        return _build_tracker(tracker_type)
+
+    # Legacy: return first enabled tracker
+    enabled = _parse_enabled_types(get_setting('issue_tracker_type', 'disabled'))
+    for t in enabled:
+        tracker = _build_tracker(t)
+        if tracker:
+            return tracker
+    return None
+
+
+def get_enabled_trackers() -> List[Dict[str, str]]:
+    """
+    Get list of all enabled tracker types with their display names and icons.
+    Used by the dashboard to render one button per enabled tracker.
+
+    Returns:
+        List of dicts with keys: type, name, icon
+    """
+    from app.settings_api import get_setting
+    enabled = _parse_enabled_types(get_setting('issue_tracker_type', 'disabled'))
+    result = []
+    for t in enabled:
+        # Only include trackers that can actually be instantiated
+        tracker = _build_tracker(t)
+        if tracker:
+            result.append({
+                'type': t,
+                'name': TRACKER_NAMES.get(t, t.title()),
+                'icon': TRACKER_ICONS.get(t, 'bi-kanban')
+            })
+    return result
+
+
+def get_issue_tracker_config() -> Dict[str, Any]:
+    """Get current issue tracker configuration (for UI).
+    Supports multiple enabled trackers."""
+    from app.settings_api import get_setting
+
+    raw_type = get_setting('issue_tracker_type', 'disabled')
+    enabled = _parse_enabled_types(raw_type)
 
     config = {
-        'type': tracker_type,
-        'enabled': tracker_type != 'disabled'
+        'type': raw_type,  # Raw stored value (backward compat)
+        'enabled': len(enabled) > 0,
+        'enabled_types': enabled,  # List of enabled type strings
+        'trackers': []  # Detailed config per enabled tracker
     }
 
-    if tracker_type == 'jira':
-        config.update({
+    # Always include settings for all tracker types so the admin UI can populate fields
+    tracker_settings = {
+        'jira': {
             'url': get_setting('jira_url', ''),
             'email': get_setting('jira_email', ''),
             'project_key': get_setting('jira_project_key', ''),
             'issue_type': get_setting('jira_issue_type', 'Task'),
             'use_pat': get_setting('jira_use_pat', 'false') == 'true',
             'custom_fields': get_setting('jira_custom_fields', '')
-        })
-    elif tracker_type == 'youtrack':
-        config.update({
+        },
+        'youtrack': {
             'url': get_setting('youtrack_url', ''),
             'project_id': get_setting('youtrack_project_id', '')
-        })
-    elif tracker_type == 'github':
-        config.update({
+        },
+        'github': {
             'owner': get_setting('github_owner', ''),
             'repo': get_setting('github_repo', '')
-        })
-    elif tracker_type == 'gitlab':
-        config.update({
+        },
+        'gitlab': {
             'url': get_setting('gitlab_url', 'https://gitlab.com'),
             'project_id': get_setting('gitlab_project_id', '')
-        })
-    elif tracker_type == 'webhook':
-        config.update({
+        },
+        'webhook': {
             'url': get_setting('webhook_url', ''),
             'method': get_setting('webhook_method', 'POST')
-        })
+        }
+    }
+
+    # Build per-tracker config for enabled ones
+    for t in enabled:
+        entry = {
+            'type': t,
+            'name': TRACKER_NAMES.get(t, t.title()),
+            'icon': TRACKER_ICONS.get(t, 'bi-kanban')
+        }
+        entry.update(tracker_settings.get(t, {}))
+        config['trackers'].append(entry)
+
+    # Include all settings for admin UI form population
+    config['settings'] = tracker_settings
 
     return config
 
@@ -1026,7 +1101,8 @@ def create_vulnerability_issue(
     vulnerability_id: int,
     product_id: Optional[int] = None,
     custom_summary: Optional[str] = None,
-    custom_description: Optional[str] = None
+    custom_description: Optional[str] = None,
+    tracker_type: Optional[str] = None
 ) -> Tuple[bool, str, Optional[str], Optional[str]]:
     """
     Create an issue for a vulnerability using the configured tracker.
@@ -1036,6 +1112,8 @@ def create_vulnerability_issue(
         product_id: Optional product ID for context
         custom_summary: Override default summary
         custom_description: Override default description
+        tracker_type: Specific tracker type to use (e.g., 'jira', 'github').
+                      If None, uses the first enabled tracker.
 
     Returns:
         Tuple of (success, message, issue_key/id, issue_url)
@@ -1043,7 +1121,7 @@ def create_vulnerability_issue(
     from app.models import Vulnerability, Product
     from app.settings_api import get_setting
 
-    tracker = get_issue_tracker()
+    tracker = get_issue_tracker(tracker_type)
     if not tracker:
         return False, "Issue tracker not configured or disabled", None, None
 
@@ -1129,10 +1207,11 @@ def create_vulnerability_issue(
         labels.append('ransomware')
 
     # Tracker-specific parameters
-    tracker_type = get_setting('issue_tracker_type', 'disabled')
+    effective_type = tracker_type or _parse_enabled_types(get_setting('issue_tracker_type', 'disabled'))[:1]
+    effective_type = effective_type[0] if isinstance(effective_type, list) and effective_type else effective_type
     extra_params = {}
 
-    if tracker_type == 'jira':
+    if effective_type == 'jira':
         extra_params['project_key'] = get_setting('jira_project_key', '')
         extra_params['issue_type'] = get_setting('jira_issue_type', 'Task')
 
@@ -1144,7 +1223,7 @@ def create_vulnerability_issue(
             except (json.JSONDecodeError, TypeError):
                 logger.warning("Failed to parse jira_custom_fields setting")
 
-    elif tracker_type == 'youtrack':
+    elif effective_type == 'youtrack':
         extra_params['project_id'] = get_setting('youtrack_project_id', '')
     # GitHub and GitLab don't need extra params
     # Webhook includes everything in the payload

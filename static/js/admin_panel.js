@@ -7885,33 +7885,50 @@ async function loadIntegrations() {
 // ============================================================================
 
 function showTrackerConfig(trackerType) {
-    // Hide all config sections
+    // Legacy single-tracker: hide all, show one
+    toggleTrackerConfig();
+}
+
+function getEnabledTrackerTypes() {
+    // Get list of checked tracker types from checkboxes
+    const checks = document.querySelectorAll('.tracker-type-check:checked');
+    return Array.from(checks).map(c => c.value);
+}
+
+function toggleTrackerConfig() {
+    // Show/hide config sections based on checked tracker type checkboxes
+    const enabledTypes = getEnabledTrackerTypes();
+
     document.querySelectorAll('.tracker-config').forEach(el => {
         el.style.display = 'none';
     });
 
-    // Show selected config
-    if (trackerType && trackerType !== 'disabled') {
+    enabledTypes.forEach(trackerType => {
         const configEl = SK.DOM.get(`trackerConfig-${trackerType}`);
         if (configEl) {
             configEl.style.display = 'block';
         }
-    }
 
-    // Setup Jira URL change listener for Cloud/Server detection
-    if (trackerType === 'jira') {
-        const jiraUrlInput = SK.DOM.get('jiraUrl');
-        if (jiraUrlInput && !jiraUrlInput.hasAttribute('data-listener-added')) {
-            jiraUrlInput.addEventListener('input', updateJiraLabels);
-            jiraUrlInput.setAttribute('data-listener-added', 'true');
+        // Setup Jira-specific listeners
+        if (trackerType === 'jira') {
+            const jiraUrlInput = SK.DOM.get('jiraUrl');
+            if (jiraUrlInput && !jiraUrlInput.hasAttribute('data-listener-added')) {
+                jiraUrlInput.addEventListener('input', updateJiraLabels);
+                jiraUrlInput.setAttribute('data-listener-added', 'true');
+            }
+            const patCheckbox = SK.DOM.get('jiraUsePat');
+            if (patCheckbox && !patCheckbox.hasAttribute('data-listener-added')) {
+                patCheckbox.addEventListener('change', updateJiraLabels);
+                patCheckbox.setAttribute('data-listener-added', 'true');
+            }
+            updateJiraLabels();
         }
-        // Setup PAT checkbox listener
-        const patCheckbox = SK.DOM.get('jiraUsePat');
-        if (patCheckbox && !patCheckbox.hasAttribute('data-listener-added')) {
-            patCheckbox.addEventListener('change', updateJiraLabels);
-            patCheckbox.setAttribute('data-listener-added', 'true');
-        }
-        updateJiraLabels();
+    });
+
+    // Sync hidden select for backward compat
+    const hiddenSelect = SK.DOM.get('issueTrackerType');
+    if (hiddenSelect) {
+        hiddenSelect.value = enabledTypes.length > 0 ? enabledTypes.join(',') : 'disabled';
     }
 }
 
@@ -8271,48 +8288,46 @@ async function loadIssueTrackerSettings() {
         if (!response.ok) return;
 
         const config = await response.json();
+        const enabledTypes = config.enabled_types || [];
+        const settings = config.settings || {};
 
-        // Set tracker type
-        SK.DOM.setValue('issueTrackerType', config.type || 'disabled');
-        showTrackerConfig(config.type);
+        // Check the appropriate checkboxes
+        document.querySelectorAll('.tracker-type-check').forEach(cb => {
+            cb.checked = enabledTypes.includes(cb.value);
+        });
 
-        // Load type-specific settings
-        if (config.type === 'jira') {
-            SK.DOM.setValue('jiraUrl', config.url || '');
-            SK.DOM.setValue('jiraEmail', config.email || '');
-            SK.DOM.setValue('jiraProjectKey', config.project_key || '');
-            // Set PAT checkbox first (before fetching issue types)
-            const patCheckbox = SK.DOM.get('jiraUsePat');
-            if (patCheckbox) patCheckbox.checked = config.use_pat === true;
-            // Update labels based on Cloud vs Server after URL is set
-            updateJiraLabels();
-
-            // If we have saved settings, show the saved issue type and try to fetch the list
-            const selectEl = SK.DOM.get('jiraIssueType');
-            if (selectEl && config.issue_type) {
-                // Add the saved issue type as an option so it's selected even if fetch fails
-                selectEl.innerHTML = `<option value="${config.issue_type}">${config.issue_type}</option>`;
-            }
-            // Store the saved issue type to re-select after fetch
-            window._savedJiraIssueType = config.issue_type || '';
-
-            // Load saved custom fields
-            if (config.custom_fields) {
-                SK.DOM.setValue('jiraCustomFields', config.custom_fields);
-            }
-        } else if (config.type === 'youtrack') {
-            SK.DOM.setValue('youtrackUrl', config.url || '');
-            SK.DOM.setValue('youtrackProjectId', config.project_id || '');
-        } else if (config.type === 'github') {
-            SK.DOM.setValue('githubOwner', config.owner || '');
-            SK.DOM.setValue('githubRepo', config.repo || '');
-        } else if (config.type === 'gitlab') {
-            SK.DOM.setValue('gitlabUrl', config.url || 'https://gitlab.com');
-            SK.DOM.setValue('gitlabProjectId', config.project_id || '');
-        } else if (config.type === 'webhook') {
-            SK.DOM.setValue('webhookUrl', config.url || '');
-            SK.DOM.setValue('webhookMethod', config.method || 'POST');
+        // Populate all tracker config fields from settings (regardless of enabled state)
+        const jira = settings.jira || {};
+        SK.DOM.setValue('jiraUrl', jira.url || '');
+        SK.DOM.setValue('jiraEmail', jira.email || '');
+        SK.DOM.setValue('jiraProjectKey', jira.project_key || '');
+        const patCheckbox = SK.DOM.get('jiraUsePat');
+        if (patCheckbox) patCheckbox.checked = jira.use_pat === true;
+        const selectEl = SK.DOM.get('jiraIssueType');
+        if (selectEl && jira.issue_type) {
+            selectEl.innerHTML = `<option value="${escapeHtml(jira.issue_type)}">${escapeHtml(jira.issue_type)}</option>`;
         }
+        window._savedJiraIssueType = jira.issue_type || '';
+        if (jira.custom_fields) SK.DOM.setValue('jiraCustomFields', jira.custom_fields);
+
+        const yt = settings.youtrack || {};
+        SK.DOM.setValue('youtrackUrl', yt.url || '');
+        SK.DOM.setValue('youtrackProjectId', yt.project_id || '');
+
+        const gh = settings.github || {};
+        SK.DOM.setValue('githubOwner', gh.owner || '');
+        SK.DOM.setValue('githubRepo', gh.repo || '');
+
+        const gl = settings.gitlab || {};
+        SK.DOM.setValue('gitlabUrl', gl.url || 'https://gitlab.com');
+        SK.DOM.setValue('gitlabProjectId', gl.project_id || '');
+
+        const wh = settings.webhook || {};
+        SK.DOM.setValue('webhookUrl', wh.url || '');
+        SK.DOM.setValue('webhookMethod', wh.method || 'POST');
+
+        // Show config sections for enabled trackers
+        toggleTrackerConfig();
 
     } catch (error) {
         console.error('Error loading issue tracker settings:', error);
@@ -8320,20 +8335,21 @@ async function loadIssueTrackerSettings() {
 }
 
 async function saveIssueTrackerSettings() {
-    const trackerType = SK.DOM.getValue('issueTrackerType');
+    const enabledTypes = getEnabledTrackerTypes();
+    const trackerTypeValue = enabledTypes.length > 0 ? enabledTypes.join(',') : 'disabled';
 
     const settings = {
-        issue_tracker_type: trackerType
+        issue_tracker_type: trackerTypeValue
     };
 
     const encryptKeys = [];
 
-    if (trackerType === 'jira') {
+    // Always save settings for all enabled trackers
+    if (enabledTypes.includes('jira')) {
         settings.jira_url = SK.DOM.getValue('jiraUrl');
         settings.jira_email = SK.DOM.getValue('jiraEmail');
         settings.jira_project_key = SK.DOM.getValue('jiraProjectKey');
         settings.jira_issue_type = SK.DOM.getValue('jiraIssueType');
-        // Save PAT checkbox
         const patCheckbox = SK.DOM.get('jiraUsePat');
         settings.jira_use_pat = patCheckbox && patCheckbox.checked ? 'true' : 'false';
         const token = SK.DOM.getValue('jiraApiToken');
@@ -8341,12 +8357,12 @@ async function saveIssueTrackerSettings() {
             settings.jira_api_token = token;
             encryptKeys.push('jira_api_token');
         }
-        // Save custom fields
         const customFields = SK.DOM.getValue('jiraCustomFields');
         if (customFields) {
             settings.jira_custom_fields = customFields;
         }
-    } else if (trackerType === 'youtrack') {
+    }
+    if (enabledTypes.includes('youtrack')) {
         settings.youtrack_url = SK.DOM.getValue('youtrackUrl');
         settings.youtrack_project_id = SK.DOM.getValue('youtrackProjectId');
         const token = SK.DOM.getValue('youtrackToken');
@@ -8354,7 +8370,8 @@ async function saveIssueTrackerSettings() {
             settings.youtrack_token = token;
             encryptKeys.push('youtrack_token');
         }
-    } else if (trackerType === 'github') {
+    }
+    if (enabledTypes.includes('github')) {
         settings.github_owner = SK.DOM.getValue('githubOwner');
         settings.github_repo = SK.DOM.getValue('githubRepo');
         const token = SK.DOM.getValue('githubToken');
@@ -8362,7 +8379,8 @@ async function saveIssueTrackerSettings() {
             settings.github_token = token;
             encryptKeys.push('github_token');
         }
-    } else if (trackerType === 'gitlab') {
+    }
+    if (enabledTypes.includes('gitlab')) {
         settings.gitlab_url = SK.DOM.getValue('gitlabUrl');
         settings.gitlab_project_id = SK.DOM.getValue('gitlabProjectId');
         const token = SK.DOM.getValue('gitlabToken');
@@ -8370,7 +8388,8 @@ async function saveIssueTrackerSettings() {
             settings.gitlab_token = token;
             encryptKeys.push('gitlab_token');
         }
-    } else if (trackerType === 'webhook') {
+    }
+    if (enabledTypes.includes('webhook')) {
         settings.webhook_url = SK.DOM.getValue('webhookUrl');
         settings.webhook_method = SK.DOM.getValue('webhookMethod');
         settings.webhook_auth_type = SK.DOM.getValue('webhookAuthType');
@@ -8393,7 +8412,8 @@ async function saveIssueTrackerSettings() {
         });
 
         if (response.ok) {
-            showToast('Issue tracker settings saved successfully', 'success');
+            const count = enabledTypes.length;
+            showToast(`Issue tracker settings saved (${count} tracker${count !== 1 ? 's' : ''} enabled)`, 'success');
             // Clear sensitive fields
             SK.DOM.setValue('jiraApiToken', '');
             SK.DOM.setValue('youtrackToken', '');
@@ -8402,10 +8422,10 @@ async function saveIssueTrackerSettings() {
             SK.DOM.setValue('webhookAuthValue', '');
         } else {
             const error = await response.json();
-            showToast(`Error saving settings: ${error.error}`, 'danger');
+            showToast(`Error saving settings: ${escapeHtml(error.error)}`, 'danger');
         }
     } catch (error) {
-        showToast(`Error saving settings: ${error.message}`, 'danger');
+        showToast(`Error saving settings: ${escapeHtml(error.message)}`, 'danger');
     }
 }
 
@@ -8414,97 +8434,98 @@ async function testIssueTrackerConnection() {
     const alertDiv = SK.DOM.get('trackerTestAlert');
     const messageSpan = SK.DOM.get('trackerTestMessage');
 
-    const trackerType = SK.DOM.getValue('issueTrackerType');
+    const enabledTypes = getEnabledTrackerTypes();
 
-    if (trackerType === 'disabled') {
+    if (enabledTypes.length === 0) {
         resultDiv.style.display = 'block';
         alertDiv.className = 'alert alert-warning';
-        messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please select an issue tracker first.';
+        messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please enable at least one issue tracker first.';
         return;
-    }
-
-    // Build test data based on tracker type
-    const testData = { type: trackerType };
-
-    if (trackerType === 'jira') {
-        testData.url = SK.DOM.getValue('jiraUrl');
-        testData.email = SK.DOM.getValue('jiraEmail');
-        testData.api_token = SK.DOM.getValue('jiraApiToken');
-        // Include PAT checkbox for Jira Server
-        const patCheckbox = SK.DOM.get('jiraUsePat');
-        testData.use_pat = patCheckbox && patCheckbox.checked;
-        if (!testData.url || !testData.email || !testData.api_token) {
-            resultDiv.style.display = 'block';
-            alertDiv.className = 'alert alert-warning';
-            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL, username, and token/password.';
-            return;
-        }
-    } else if (trackerType === 'youtrack') {
-        testData.url = SK.DOM.getValue('youtrackUrl');
-        testData.token = SK.DOM.getValue('youtrackToken');
-        if (!testData.url || !testData.token) {
-            resultDiv.style.display = 'block';
-            alertDiv.className = 'alert alert-warning';
-            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in URL and token.';
-            return;
-        }
-    } else if (trackerType === 'github') {
-        testData.token = SK.DOM.getValue('githubToken');
-        testData.owner = SK.DOM.getValue('githubOwner');
-        testData.repo = SK.DOM.getValue('githubRepo');
-        if (!testData.token || !testData.owner || !testData.repo) {
-            resultDiv.style.display = 'block';
-            alertDiv.className = 'alert alert-warning';
-            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in token, owner, and repo.';
-            return;
-        }
-    } else if (trackerType === 'gitlab') {
-        testData.url = SK.DOM.getValue('gitlabUrl');
-        testData.token = SK.DOM.getValue('gitlabToken');
-        testData.project_id = SK.DOM.getValue('gitlabProjectId');
-        if (!testData.token || !testData.project_id) {
-            resultDiv.style.display = 'block';
-            alertDiv.className = 'alert alert-warning';
-            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in token and project ID.';
-            return;
-        }
-    } else if (trackerType === 'webhook') {
-        testData.url = SK.DOM.getValue('webhookUrl');
-        testData.method = SK.DOM.getValue('webhookMethod');
-        testData.auth_type = SK.DOM.getValue('webhookAuthType');
-        testData.auth_value = SK.DOM.getValue('webhookAuthValue');
-        if (!testData.url) {
-            resultDiv.style.display = 'block';
-            alertDiv.className = 'alert alert-warning';
-            messageSpan.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Please fill in webhook URL.';
-            return;
-        }
     }
 
     resultDiv.style.display = 'block';
     alertDiv.className = 'alert alert-info';
-    messageSpan.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Testing connection...';
+    messageSpan.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Testing ${enabledTypes.length} tracker${enabledTypes.length > 1 ? 's' : ''}...`;
 
-    try {
-        const response = await fetch('/api/integrations/issue-tracker/test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(testData)
-        });
+    const results = [];
 
-        const result = await response.json();
+    for (const trackerType of enabledTypes) {
+        const testData = { type: trackerType };
 
-        if (result.success) {
-            alertDiv.className = 'alert alert-success';
-            messageSpan.innerHTML = `<i class="bi bi-check-circle me-2"></i>${escapeHtml(result.message)} (${escapeHtml(result.tracker_name)})`;
-        } else {
-            alertDiv.className = 'alert alert-danger';
-            messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>${escapeHtml(result.error || result.message)}`;
+        if (trackerType === 'jira') {
+            testData.url = SK.DOM.getValue('jiraUrl');
+            testData.email = SK.DOM.getValue('jiraEmail');
+            testData.api_token = SK.DOM.getValue('jiraApiToken');
+            const patCheckbox = SK.DOM.get('jiraUsePat');
+            testData.use_pat = patCheckbox && patCheckbox.checked;
+            if (!testData.url || !testData.email || !testData.api_token) {
+                results.push({ type: 'jira', success: false, message: 'Missing URL, username, or token' });
+                continue;
+            }
+        } else if (trackerType === 'youtrack') {
+            testData.url = SK.DOM.getValue('youtrackUrl');
+            testData.token = SK.DOM.getValue('youtrackToken');
+            if (!testData.url || !testData.token) {
+                results.push({ type: 'youtrack', success: false, message: 'Missing URL or token' });
+                continue;
+            }
+        } else if (trackerType === 'github') {
+            testData.token = SK.DOM.getValue('githubToken');
+            testData.owner = SK.DOM.getValue('githubOwner');
+            testData.repo = SK.DOM.getValue('githubRepo');
+            if (!testData.token || !testData.owner || !testData.repo) {
+                results.push({ type: 'github', success: false, message: 'Missing token, owner, or repo' });
+                continue;
+            }
+        } else if (trackerType === 'gitlab') {
+            testData.url = SK.DOM.getValue('gitlabUrl');
+            testData.token = SK.DOM.getValue('gitlabToken');
+            testData.project_id = SK.DOM.getValue('gitlabProjectId');
+            if (!testData.token || !testData.project_id) {
+                results.push({ type: 'gitlab', success: false, message: 'Missing token or project ID' });
+                continue;
+            }
+        } else if (trackerType === 'webhook') {
+            testData.url = SK.DOM.getValue('webhookUrl');
+            testData.method = SK.DOM.getValue('webhookMethod');
+            testData.auth_type = SK.DOM.getValue('webhookAuthType');
+            testData.auth_value = SK.DOM.getValue('webhookAuthValue');
+            if (!testData.url) {
+                results.push({ type: 'webhook', success: false, message: 'Missing webhook URL' });
+                continue;
+            }
         }
-    } catch (error) {
-        alertDiv.className = 'alert alert-danger';
-        messageSpan.innerHTML = `<i class="bi bi-x-circle me-2"></i>Connection test failed: ${escapeHtml(error.message)}`;
+
+        try {
+            const response = await fetch('/api/integrations/issue-tracker/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(testData)
+            });
+            const result = await response.json();
+            results.push({
+                type: trackerType,
+                success: result.success,
+                message: result.success ? result.message : (result.error || result.message),
+                name: result.tracker_name || trackerType
+            });
+        } catch (error) {
+            results.push({ type: trackerType, success: false, message: error.message });
+        }
     }
+
+    // Display combined results
+    const allSuccess = results.every(r => r.success);
+    const anySuccess = results.some(r => r.success);
+
+    alertDiv.className = allSuccess ? 'alert alert-success' : anySuccess ? 'alert alert-warning' : 'alert alert-danger';
+
+    const names = { jira: 'Jira', youtrack: 'YouTrack', github: 'GitHub', gitlab: 'GitLab', webhook: 'Webhook' };
+    const lines = results.map(r => {
+        const icon = r.success ? '<i class="bi bi-check-circle text-success me-1"></i>' : '<i class="bi bi-x-circle text-danger me-1"></i>';
+        return `${icon}<strong>${escapeHtml(names[r.type] || r.type)}:</strong> ${escapeHtml(r.message)}`;
+    });
+    messageSpan.innerHTML = lines.join('<br>');
 }
 
 // Legacy function aliases for backwards compatibility
