@@ -1010,6 +1010,19 @@
                 return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             });
 
+            // Compute smart Y-axis formatting
+            function formatAxisValue(value) {
+                if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+                if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
+                return value;
+            }
+
+            // Check if severity data is dwarfed by unacknowledged (>5x difference)
+            const allSeverity = [...(trends.critical || []), ...(trends.high || []), ...(trends.medium || [])];
+            const maxSeverity = Math.max(0, ...allSeverity);
+            const maxUnack = Math.max(0, ...(trends.unacknowledged || []));
+            const needsDualAxis = maxUnack > maxSeverity * 5 && maxSeverity > 0;
+
             trendChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -1023,7 +1036,9 @@
                             fill: true,
                             tension: 0.3,
                             pointRadius: 2,
-                            pointHoverRadius: 5
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
+                            yAxisID: 'y'
                         },
                         {
                             label: 'High',
@@ -1033,7 +1048,9 @@
                             fill: true,
                             tension: 0.3,
                             pointRadius: 2,
-                            pointHoverRadius: 5
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
+                            yAxisID: 'y'
                         },
                         {
                             label: 'Medium',
@@ -1043,7 +1060,9 @@
                             fill: true,
                             tension: 0.3,
                             pointRadius: 2,
-                            pointHoverRadius: 5
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
+                            yAxisID: 'y'
                         },
                         {
                             label: 'Unacknowledged',
@@ -1053,7 +1072,9 @@
                             fill: false,
                             tension: 0.3,
                             pointRadius: 2,
-                            pointHoverRadius: 5
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
+                            yAxisID: needsDualAxis ? 'y1' : 'y'
                         }
                     ]
                 },
@@ -1082,6 +1103,9 @@
                                 title: function(context) {
                                     const idx = context[0].dataIndex;
                                     return trends.dates[idx];
+                                },
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + formatAxisValue(context.parsed.y);
                                 }
                             }
                         }
@@ -1092,18 +1116,42 @@
                             ticks: { font: { size: 10 } }
                         },
                         y: {
+                            type: 'linear',
+                            position: 'left',
                             beginAtZero: true,
+                            title: {
+                                display: needsDualAxis,
+                                text: 'By Severity',
+                                font: { size: 10, weight: 'bold' },
+                                color: '#6b7280'
+                            },
                             grid: { color: 'rgba(0, 0, 0, 0.05)' },
                             ticks: {
                                 font: { size: 10 },
                                 precision: 0,
-                                callback: function(value) {
-                                    if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
-                                    if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
-                                    return value;
+                                callback: formatAxisValue
+                            }
+                        },
+                        ...(needsDualAxis ? {
+                            y1: {
+                                type: 'linear',
+                                position: 'right',
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Unacknowledged',
+                                    font: { size: 10, weight: 'bold' },
+                                    color: '#6b7280'
+                                },
+                                grid: { drawOnChartArea: false },
+                                ticks: {
+                                    font: { size: 10 },
+                                    precision: 0,
+                                    color: '#6b7280',
+                                    callback: formatAxisValue
                                 }
                             }
-                        }
+                        } : {})
                     }
                 }
             });
