@@ -1495,6 +1495,7 @@ def get_vulnerabilities_grouped():
                 'product_id': match.product.id,
                 'product_name': match.product.product_name,
                 'vendor': match.product.vendor,
+                'version': match.product.version,
                 'criticality': match.product.criticality,
                 'effective_priority': effective_priority,
                 'acknowledged': match.acknowledged,

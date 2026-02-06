@@ -1171,14 +1171,22 @@
     // Toggle selection for a group of products
     function toggleGroupSelect(versionIds, checkbox) {
         const ids = versionIds.split(',').filter(id => id);
-        ids.forEach(id => {
+        ids.forEach(idStr => {
+            const id = parseInt(idStr);
             if (checkbox.checked) {
-                selectedProducts.add(parseInt(id));
+                // Get product info from the row
+                const row = checkbox.closest('tr');
+                const statusBadge = row ? row.querySelector('.badge-status-active, .badge-status-inactive') : null;
+                const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+                const vendorCell = row ? row.querySelector('td[data-column="vendor"]') : null;
+                const productCell = row ? row.querySelector('td[data-column="product"]') : null;
+                const name = `${vendorCell?.textContent || ''} ${productCell?.textContent || ''}`.trim();
+                selectedProducts.set(id, { id: id, active: isActive, name: name });
             } else {
-                selectedProducts.delete(parseInt(id));
+                selectedProducts.delete(id);
             }
         });
-        updateBulkActionButtons();
+        updateBulkToolbar();
     }
 
     // Show modal with all versions of a product
@@ -1752,12 +1760,12 @@
         updateBulkToolbar();
     }
 
-    function toggleProductRow(productId, event) {
+    function toggleProductRow(productIds, event) {
         if (event) event.stopPropagation();
-        const checkbox = document.querySelector(`.product-checkbox[data-product-id="${productId}"]`);
+        const checkbox = document.querySelector(`.product-checkbox[data-product-ids="${productIds}"]`);
         if (checkbox) {
             checkbox.checked = !checkbox.checked;
-            toggleProductSelect(productId, checkbox);
+            toggleGroupSelect(productIds, checkbox);
         }
     }
 
@@ -1779,23 +1787,27 @@
 
         checkboxes.forEach(checkbox => {
             checkbox.checked = isChecked;
-            const productId = parseInt(checkbox.dataset.productId);
+            // data-product-ids contains comma-separated IDs for grouped products
+            const productIdsStr = checkbox.dataset.productIds || '';
+            const productIds = productIdsStr.split(',').filter(id => id).map(id => parseInt(id));
 
-            if (!isNaN(productId)) {
-                if (isChecked) {
-                    // Get product info from the row
-                    const row = checkbox.closest('tr');
-                    const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
-                    const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
-                    const vendorCell = row.querySelector('td[data-column="vendor"]');
-                    const productCell = row.querySelector('td[data-column="product"]');
-                    const name = `${vendorCell?.textContent || ''} ${productCell?.textContent || ''}`.trim();
+            productIds.forEach(productId => {
+                if (!isNaN(productId)) {
+                    if (isChecked) {
+                        // Get product info from the row
+                        const row = checkbox.closest('tr');
+                        const statusBadge = row ? row.querySelector('.badge-status-active, .badge-status-inactive') : null;
+                        const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+                        const vendorCell = row ? row.querySelector('td[data-column="vendor"]') : null;
+                        const productCell = row ? row.querySelector('td[data-column="product"]') : null;
+                        const name = `${vendorCell?.textContent || ''} ${productCell?.textContent || ''}`.trim();
 
-                    selectedProducts.set(productId, { id: productId, active: isActive, name: name });
-                } else {
-                    selectedProducts.delete(productId);
+                        selectedProducts.set(productId, { id: productId, active: isActive, name: name });
+                    } else {
+                        selectedProducts.delete(productId);
+                    }
                 }
-            }
+            });
         });
 
         updateBulkToolbar();

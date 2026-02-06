@@ -1096,8 +1096,12 @@
                             grid: { color: 'rgba(0, 0, 0, 0.05)' },
                             ticks: {
                                 font: { size: 10 },
-                                stepSize: 1,
-                                precision: 0
+                                precision: 0,
+                                callback: function(value) {
+                                    if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+                                    if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
+                                    return value;
+                                }
                             }
                         }
                     }
@@ -1337,6 +1341,23 @@
             </span>` :
             (vuln.epss_fetched_at ? '<span class="badge bg-secondary" title="EPSS data not available for this CVE"><i class="bi bi-lightning-charge"></i> No EPSS</span>' : '');
 
+        // Fix version info from CVE CPE data
+        const fixVersions = vuln.fix_versions || [];
+        let fixVersionHtml = '';
+        if (fixVersions.length > 0) {
+            const fixItems = fixVersions.slice(0, 3).map(fv => {
+                const fixLabel = fv.fix_type === 'excluding'
+                    ? `<strong>${fv.fix_version}</strong>`
+                    : `> <strong>${fv.fix_version}</strong>`;
+                return `<span class="badge bg-success me-1"><i class="bi bi-arrow-up-circle me-1"></i>${fv.vendor} ${fv.product}: ${fixLabel}</span>`;
+            }).join('');
+            fixVersionHtml = `
+                            <div class="mb-3">
+                                <small class="text-muted fw-semibold">FIX VERSION</small>
+                                <div>${fixItems}</div>
+                            </div>`;
+        }
+
         return `
             <div class="card vuln-card mb-3" id="match-${match.id}" style="border-left: 4px solid ${getPriorityColor(priority)};">
                 <div class="card-body">
@@ -1391,6 +1412,8 @@
                                 <small class="text-muted fw-semibold">REQUIRED ACTION</small>
                                 <p class="mb-0 fw-medium text-danger">${vuln.required_action}</p>
                             </div>
+
+                            ${fixVersionHtml}
 
                             <div class="mb-3">
                                 <small class="text-muted fw-semibold">MATCH REASON</small>
@@ -2290,12 +2313,55 @@
         const epssRank = epssPercentile ? Math.round((1 - epssPercentile) * 100) : null;
         const epssColor = epssPercentile >= 0.95 ? '#dc2626' : epssPercentile >= 0.85 ? '#ea580c' : epssPercentile >= 0.70 ? '#3b82f6' : '#22c55e';
 
+        // Build fix version info from CVE CPE data
+        const fixVersions = vuln.fix_versions || [];
+        let fixVersionHtml = '';
+        if (fixVersions.length > 0) {
+            const fixItems = fixVersions.map(fv => {
+                const rangeStart = fv.version_start ? `${fv.version_start_type === 'excluding' ? '>' : '>='} ${fv.version_start}` : '';
+                const fixLabel = fv.fix_type === 'excluding'
+                    ? `Upgrade to <strong>${fv.fix_version}</strong>`
+                    : `Upgrade past <strong>${fv.fix_version}</strong>`;
+                const affected = rangeStart ? `<small class="text-muted ms-2">(affected: ${rangeStart})</small>` : '';
+                return `<div class="d-flex align-items-center mb-1">
+                    <i class="bi bi-arrow-up-circle-fill text-success me-2"></i>
+                    <span>${fv.vendor} ${fv.product}: ${fixLabel}${affected}</span>
+                </div>`;
+            }).join('');
+            fixVersionHtml = `
+                <div class="mb-3 p-3 bg-light border-start border-4 border-primary rounded-end">
+                    <div class="d-flex align-items-center mb-1">
+                        <i class="bi bi-box-arrow-up text-primary me-1"></i>
+                        <small class="fw-bold text-uppercase text-primary">Fix Version</small>
+                    </div>
+                    ${fixItems}
+                </div>`;
+        }
+
         // Build affected products list with assets
         const productsHtml = group.affected_products.map(prod => {
             const ackIcon = prod.acknowledged ?
                 '<i class="bi bi-check-circle-fill text-success"></i>' :
                 '<i class="bi bi-exclamation-circle-fill text-warning"></i>';
             const statusText = prod.acknowledged ? 'Resolved' : 'Needs Review';
+
+            // Show product version
+            const versionBadge = prod.version ? `<span class="badge bg-secondary ms-1">v${prod.version}</span>` : '';
+
+            // Find matching fix version for this product
+            let fixBadge = '';
+            if (fixVersions.length > 0) {
+                const matchingFix = fixVersions.find(fv =>
+                    fv.vendor.toLowerCase() === (prod.vendor || '').toLowerCase() &&
+                    fv.product.toLowerCase() === (prod.product_name || '').toLowerCase()
+                ) || fixVersions[0];  // fallback to first fix version
+                if (matchingFix) {
+                    const fixLabel = matchingFix.fix_type === 'excluding'
+                        ? matchingFix.fix_version
+                        : `> ${matchingFix.fix_version}`;
+                    fixBadge = `<span class="badge bg-success ms-1" title="Fix version"><i class="bi bi-arrow-up-circle me-1"></i>${fixLabel}</span>`;
+                }
+            }
 
             // Build assets list for this product
             const assetsCount = prod.affected_assets_count || 0;
@@ -2310,7 +2376,7 @@
                         <div class="d-flex align-items-center">
                             ${ackIcon}
                             <div class="ms-2">
-                                <div class="fw-semibold">${prod.vendor} ${prod.product_name}</div>
+                                <div class="fw-semibold">${prod.vendor} ${prod.product_name} ${versionBadge} ${fixBadge}</div>
                                 <small class="text-muted">${statusText}</small>
                             </div>
                         </div>
@@ -2443,6 +2509,9 @@
                         </div>
                         <p class="mb-0 fw-medium">${vuln.required_action}</p>
                     </div>
+
+                    <!-- Fix Version Section (from NVD CPE data) -->
+                    ${fixVersionHtml}
 
                     <!-- Affected Products (Collapsible) -->
                     <div class="mb-3">
