@@ -66,6 +66,11 @@
                 <i class="bi bi-pc-display me-1"></i>Endpoints
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="software-overview-tab" data-bs-toggle="tab" data-bs-target="#softwareOverviewPane" type="button">
+                <i class="bi bi-layers me-1"></i>Software Overview
+            </button>
+        </li>
     </ul>
 
     <div class="tab-content" id="inventoryTabContent">
@@ -246,6 +251,30 @@
             </div>
         </div>
     </div><!-- /endpointsPane -->
+
+    <!-- Software Overview Tab -->
+    <div class="tab-pane fade" id="softwareOverviewPane" role="tabpanel">
+        <div class="card">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-layers me-2"></i>Software Overview <small class="text-muted ms-2">Cross-endpoint software distribution</small></span>
+                <div class="d-flex gap-2 align-items-center">
+                    <input type="text" class="form-control form-control-sm" id="softwareOverviewSearch" placeholder="Search software..." style="width: 200px;" oninput="filterSoftwareOverview()">
+                    <select class="form-select form-select-sm" id="softwareOverviewSort" style="width: 160px;" onchange="loadSoftwareOverview()">
+                        <option value="endpoints">Most Endpoints</option>
+                        <option value="versions">Most Versions</option>
+                        <option value="name">Name A-Z</option>
+                    </select>
+                    <span class="text-muted small text-nowrap" id="softwareOverviewCount">-</span>
+                </div>
+            </div>
+            <div class="card-body p-0" id="softwareOverviewBody">
+                <div class="text-center py-5 text-muted">
+                    <div class="spinner-border spinner-border-sm me-2"></div> Loading software overview...
+                </div>
+            </div>
+        </div>
+    </div><!-- /softwareOverviewPane -->
+
     </div><!-- /inventoryTabContent -->
 
 <!-- Product Modal - Redesigned with cleaner UX -->
@@ -3294,6 +3323,189 @@
         const endpointsTab = document.getElementById('endpoints-tab');
         if (endpointsTab) {
             const tab = new bootstrap.Tab(endpointsTab);
+            tab.show();
+        }
+    }
+
+    // =========================================================================
+    // SOFTWARE OVERVIEW TAB
+    // =========================================================================
+    let softwareOverviewLoaded = false;
+    let softwareOverviewData = [];
+
+    async function loadSoftwareOverview() {
+        const body = document.getElementById('softwareOverviewBody');
+        if (!body) return;
+
+        try {
+            const response = await fetch('/api/products?grouped=true&per_page=500&status=active');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const products = data.products || [];
+
+            // Map to normalized structure
+            softwareOverviewData = products.map(p => {
+                const versions = (p.versions || []).map(v => v.version || 'Any');
+                const uniqueVersions = [...new Set(versions)];
+                return {
+                    vendor: p.vendor || 'Unknown',
+                    product_name: p.product_name || 'Unknown',
+                    versions: uniqueVersions,
+                    version_count: uniqueVersions.length,
+                    has_cpe: p.has_cpe || false,
+                    cpe_vendor: p.cpe_vendor || '',
+                    cpe_product: p.cpe_product || '',
+                    platform_counts: p.platform_counts || {},
+                    platforms_list: p.platforms || [],
+                    total_installations: p.total_installations || 0,
+                    total_vulnerabilities: p.total_vulnerabilities || 0,
+                    has_vulnerable_version: p.has_vulnerable_version || false,
+                    criticality: p.criticality || 'medium',
+                    source: p.source || 'manual',
+                    organization_names: p.organization_names || []
+                };
+            });
+
+            renderSoftwareOverview();
+            softwareOverviewLoaded = true;
+        } catch (error) {
+            console.error('Error loading software overview:', error);
+            body.innerHTML = `<div class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>Error loading software overview: ${escapeHtml(error.message)}
+            </div>`;
+        }
+    }
+
+    function filterSoftwareOverview() {
+        renderSoftwareOverview();
+    }
+
+    function renderSoftwareOverview() {
+        const body = document.getElementById('softwareOverviewBody');
+        const countEl = document.getElementById('softwareOverviewCount');
+        const searchTerm = (document.getElementById('softwareOverviewSearch')?.value || '').toLowerCase();
+        const sortBy = document.getElementById('softwareOverviewSort')?.value || 'endpoints';
+
+        let filtered = softwareOverviewData;
+
+        // Apply search filter
+        if (searchTerm) {
+            filtered = filtered.filter(p =>
+                p.vendor.toLowerCase().includes(searchTerm) ||
+                p.product_name.toLowerCase().includes(searchTerm) ||
+                (p.cpe_vendor || '').toLowerCase().includes(searchTerm) ||
+                (p.cpe_product || '').toLowerCase().includes(searchTerm)
+            );
+        }
+
+        // Sort
+        if (sortBy === 'endpoints') {
+            filtered.sort((a, b) => b.total_installations - a.total_installations);
+        } else if (sortBy === 'versions') {
+            filtered.sort((a, b) => b.version_count - a.version_count);
+        } else {
+            filtered.sort((a, b) => `${a.vendor} ${a.product_name}`.localeCompare(`${b.vendor} ${b.product_name}`));
+        }
+
+        if (countEl) countEl.textContent = `${filtered.length} products`;
+
+        if (filtered.length === 0) {
+            body.innerHTML = `<div class="text-center py-5 text-muted">
+                <i class="bi bi-layers" style="font-size: 2rem;"></i>
+                <p class="mt-2 mb-0">${searchTerm ? 'No matching software found' : 'No software data available'}</p>
+            </div>`;
+            return;
+        }
+
+        // Calculate stats
+        const multiVersionCount = filtered.filter(p => p.version_count > 1).length;
+        const agentSourceCount = filtered.filter(p => p.source === 'agent').length;
+        const noCpeCount = filtered.filter(p => !p.has_cpe).length;
+
+        // Build stats bar
+        const statsBar = `
+            <div class="d-flex gap-3 p-3 bg-light border-bottom">
+                <span class="badge bg-primary rounded-pill">${filtered.length} Products</span>
+                ${multiVersionCount > 0 ? `<span class="badge bg-warning text-dark rounded-pill" title="Products with multiple versions across endpoints"><i class="bi bi-exclamation-triangle me-1"></i>${multiVersionCount} Version Sprawl</span>` : ''}
+                ${agentSourceCount > 0 ? `<span class="badge bg-info text-dark rounded-pill"><i class="bi bi-robot me-1"></i>${agentSourceCount} Agent-Reported</span>` : ''}
+                ${noCpeCount > 0 ? `<span class="badge bg-secondary rounded-pill"><i class="bi bi-shield-x me-1"></i>${noCpeCount} No CPE</span>` : ''}
+            </div>`;
+
+        // Build cards
+        const cards = filtered.slice(0, 100).map(p => {
+            const platformIcons = {
+                linux: '<i class="bi bi-ubuntu text-warning" title="Linux"></i>',
+                windows: '<i class="bi bi-windows text-info" title="Windows"></i>',
+                macos: '<i class="bi bi-apple text-secondary" title="macOS"></i>',
+                other: '<i class="bi bi-question-circle text-muted" title="Other"></i>'
+            };
+            const platformHtml = Object.entries(p.platform_counts || {})
+                .filter(([, count]) => count > 0)
+                .map(([platform, count]) => `${platformIcons[platform] || platformIcons.other} <small>${count}</small>`)
+                .join(' ');
+
+            const versionBadges = (p.versions || []).slice(0, 5).map(v =>
+                `<span class="badge bg-light text-dark border me-1 mb-1">${escapeHtml(v)}</span>`
+            ).join('');
+            const moreVersions = p.version_count > 5 ? `<span class="badge bg-secondary mb-1">+${p.version_count - 5} more</span>` : '';
+
+            const versionSprawl = p.version_count > 1
+                ? `<span class="badge bg-warning text-dark ms-1" title="${p.version_count} different versions found"><i class="bi bi-exclamation-triangle"></i> ${p.version_count} versions</span>`
+                : '';
+
+            const vulnBadge = p.total_vulnerabilities > 0
+                ? `<span class="badge bg-danger ms-1">${p.total_vulnerabilities} CVEs</span>`
+                : '';
+
+            const cpeBadge = p.has_cpe
+                ? `<span class="badge bg-success ms-1" title="${escapeHtml(p.cpe_vendor)}:${escapeHtml(p.cpe_product)}"><i class="bi bi-shield-check"></i> CPE</span>`
+                : `<span class="badge bg-secondary ms-1"><i class="bi bi-shield-x"></i> No CPE</span>`;
+
+            const sourceBadge = p.source === 'agent'
+                ? '<span class="badge bg-info text-dark"><i class="bi bi-robot"></i> Agent</span>'
+                : '<span class="badge bg-light text-dark border"><i class="bi bi-person"></i> Manual</span>';
+
+            return `
+            <div class="d-flex align-items-start gap-3 p-3 border-bottom software-overview-row" style="cursor: default;">
+                <div class="text-center" style="min-width: 50px;">
+                    <div class="fs-4 fw-bold text-primary">${p.total_installations}</div>
+                    <small class="text-muted">endpoint${p.total_installations !== 1 ? 's' : ''}</small>
+                </div>
+                <div class="flex-grow-1">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <strong>${escapeHtml(p.vendor)}</strong>
+                        <span class="text-muted">/</span>
+                        <strong>${escapeHtml(p.product_name)}</strong>
+                        ${versionSprawl}${vulnBadge}${cpeBadge}
+                    </div>
+                    <div class="mt-1 d-flex flex-wrap align-items-center gap-1">
+                        ${versionBadges}${moreVersions}
+                    </div>
+                    <div class="mt-1 d-flex align-items-center gap-3 text-muted small">
+                        ${platformHtml ? `<span>Platforms: ${platformHtml}</span>` : ''}
+                        ${sourceBadge}
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        const moreMessage = filtered.length > 100
+            ? `<div class="text-center py-3 text-muted small">Showing 100 of ${filtered.length} products. Use search to narrow results.</div>`
+            : '';
+
+        body.innerHTML = statsBar + cards + moreMessage;
+    }
+
+    // Lazy load software overview on tab show
+    document.getElementById('software-overview-tab')?.addEventListener('shown.bs.tab', function() {
+        if (!softwareOverviewLoaded) loadSoftwareOverview();
+    });
+
+    // Handle hash-based tab navigation for software overview
+    if (window.location.hash === '#software-overview') {
+        const soTab = document.getElementById('software-overview-tab');
+        if (soTab) {
+            const tab = new bootstrap.Tab(soTab);
             tab.show();
         }
     }

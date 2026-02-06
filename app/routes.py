@@ -377,10 +377,14 @@ def get_products():
                     'has_cpe': bool(p.cpe_vendor and p.cpe_product),
                     'keywords': p.keywords,
                     'active': p.active,
+                    'source': getattr(p, 'source', 'manual'),
+                    'criticality': getattr(p, 'criticality', 'medium'),
                     'versions': [],
                     'organization_ids': set(),
                     'organization_names': set(),
                     'platforms': set(),  # Track platforms from installations
+                    'platform_counts': {},  # Platform -> installation count
+                    'total_installations': 0,
                     'total_vulnerabilities': 0,
                     'has_vulnerable_version': False
                 }
@@ -409,30 +413,45 @@ def get_products():
                 grouped_products[key]['has_vulnerable_version'] = True
             grouped_products[key]['total_vulnerabilities'] += version_entry['vulnerability_count']
 
-        # Batch query platforms for all products at once for efficiency
+        # Batch query platforms and installation counts for all products
         all_product_ids = [v['id'] for group in grouped_products.values() for v in group['versions']]
         if all_product_ids:
-            platform_data = db.session.query(
+            from sqlalchemy import func as sa_func
+            # Get platform + count per product
+            platform_counts = db.session.query(
+                ProductInstallation.product_id,
+                ProductInstallation.detected_on_os,
+                sa_func.count(ProductInstallation.id)
+            ).filter(
+                ProductInstallation.product_id.in_(all_product_ids)
+            ).group_by(
                 ProductInstallation.product_id,
                 ProductInstallation.detected_on_os
-            ).filter(
-                ProductInstallation.product_id.in_(all_product_ids),
-                ProductInstallation.detected_on_os.isnot(None),
-                ProductInstallation.detected_on_os != ''
-            ).distinct().all()
+            ).all()
 
-            # Build product_id -> platforms mapping
-            product_platforms = {}
-            for product_id, platform in platform_data:
-                if product_id not in product_platforms:
-                    product_platforms[product_id] = set()
-                product_platforms[product_id].add(platform)
+            # Build product_id -> {platform: count} mapping
+            product_platform_counts = {}
+            product_install_counts = {}
+            for product_id, platform, count in platform_counts:
+                if product_id not in product_platform_counts:
+                    product_platform_counts[product_id] = {}
+                    product_install_counts[product_id] = 0
+                pname = platform or 'other'
+                product_platform_counts[product_id][pname] = product_platform_counts[product_id].get(pname, 0) + count
+                product_install_counts[product_id] += count
 
-            # Assign platforms to groups
+            # Assign platforms and installation counts to groups
             for key, group in grouped_products.items():
+                group['platform_counts'] = {}
+                group['total_installations'] = 0
                 for v in group['versions']:
-                    if v['id'] in product_platforms:
-                        group['platforms'].update(product_platforms[v['id']])
+                    pid = v['id']
+                    if pid in product_platform_counts:
+                        for pname, cnt in product_platform_counts[pid].items():
+                            group['platform_counts'][pname] = group['platform_counts'].get(pname, 0) + cnt
+                        group['platforms'].update(product_platform_counts[pid].keys())
+                    if pid in product_install_counts:
+                        group['total_installations'] += product_install_counts[pid]
 
         # Convert to list and clean up sets
         result = []
