@@ -143,146 +143,135 @@
 </style>
 <div class="fade-in">
     <!-- Page Header -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <h1 class="display-6 fw-bold text-dark mb-2">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h4 fw-bold text-dark mb-0">
                 <i class="bi bi-speedometer2 me-2"></i>Vulnerability Dashboard
             </h1>
-            <p class="text-muted mb-0">Real-time monitoring of known exploited vulnerabilities affecting your infrastructure</p>
+            <small class="text-muted">Real-time monitoring of known exploited vulnerabilities</small>
         </div>
     </div>
 
-    <!-- Priority Alert Cards -->
-    <div class="row g-2 mb-3" id="priorityAlerts">
-        <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-critical">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="alert-card-label">Critical</div>
-                        <div class="alert-card-value"><span id="criticalCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="criticalCount">-</span>)</small></div>
-                        <small class="text-muted">CVEs (matches)</small>
+    <!-- Dashboard Top: Two-Column Widget Layout -->
+    <div class="row g-3 mb-3">
+        <!-- Left Column: Priority + Stats -->
+        <div class="col-lg-5 col-xl-4">
+            <!-- Priority Alert Cards (compact 2x2 grid) -->
+            <div class="row g-2 mb-2" id="priorityAlerts">
+                <div class="col-6">
+                    <div class="alert-card alert-card-critical">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label">Critical</div>
+                                <div class="alert-card-value"><span id="criticalCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="criticalCount">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-exclamation-octagon-fill alert-icon"></i>
+                        </div>
                     </div>
-                    <i class="bi bi-exclamation-octagon-fill alert-icon"></i>
+                </div>
+                <div class="col-6">
+                    <div class="alert-card alert-card-high">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label">High</div>
+                                <div class="alert-card-value"><span id="highCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="highCount">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-exclamation-triangle-fill alert-icon"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="alert-card alert-card-medium">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label">Medium</div>
+                                <div class="alert-card-value"><span id="mediumCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="mediumCount">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-info-circle-fill alert-icon"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="alert-card alert-card-low">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label">Low</div>
+                                <div class="alert-card-value"><span id="lowCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="lowCount">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-shield-check alert-icon"></i>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-high">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="alert-card-label">High</div>
-                        <div class="alert-card-value"><span id="highCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="highCount">-</span>)</small></div>
-                        <small class="text-muted">CVEs (matches)</small>
-                    </div>
-                    <i class="bi bi-exclamation-triangle-fill alert-icon"></i>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-medium">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="alert-card-label">Medium</div>
-                        <div class="alert-card-value"><span id="mediumCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="mediumCount">-</span>)</small></div>
-                        <small class="text-muted">CVEs (matches)</small>
-                    </div>
-                    <i class="bi bi-info-circle-fill alert-icon"></i>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-low">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="alert-card-label">Low</div>
-                        <div class="alert-card-value"><span id="lowCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="lowCount">-</span>)</small></div>
-                        <small class="text-muted">CVEs (matches)</small>
-                    </div>
-                    <i class="bi bi-shield-check alert-icon"></i>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Statistics Cards -->
-    <div class="row g-2 mb-3" id="statsContainer">
-        <div class="col-xl-3 col-md-6">
-            <div class="card stat-card stat-card-compact" style="border-left-color: #3b82f6;">
-                <div class="card-body py-2 px-3 position-relative">
-                    <i class="bi bi-database stat-icon-sm"></i>
-                    <div class="stat-label-sm text-uppercase">Total Vulnerabilities</div>
-                    <div class="stat-value-sm text-primary" id="totalVulns">-</div>
-                    <small class="text-muted" style="font-size: 0.75rem;">In CISA KEV Catalog</small>
+            <!-- Stats (compact list) -->
+            <div class="card" id="statsContainer">
+                <div class="card-body p-2">
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
+                        <small class="text-muted"><i class="bi bi-database me-1"></i>KEV Catalog</small>
+                        <span class="fw-bold text-primary" id="totalVulns">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
+                        <small class="text-muted"><i class="bi bi-exclamation-triangle me-1"></i>Affecting Products</small>
+                        <span class="fw-bold text-danger" id="totalMatches">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
+                        <small class="text-muted"><i class="bi bi-clock-history me-1"></i>Needs Review</small>
+                        <span class="fw-bold text-warning" id="unacknowledged">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2">
+                        <small class="text-muted"><i class="bi bi-gear-fill me-1"></i>Products Tracked</small>
+                        <span class="fw-bold text-success" id="productsTracked">-</span>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="card stat-card stat-card-compact" style="border-left-color: #ef4444;">
-                <div class="card-body py-2 px-3 position-relative">
-                    <i class="bi bi-exclamation-triangle stat-icon-sm"></i>
-                    <div class="stat-label-sm text-uppercase">Affecting Products</div>
-                    <div class="stat-value-sm text-danger" id="totalMatches">-</div>
-                    <small class="text-muted" style="font-size: 0.75rem;">Direct matches found</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="card stat-card stat-card-compact" style="border-left-color: #f59e0b;">
-                <div class="card-body py-2 px-3 position-relative">
-                    <i class="bi bi-clock-history stat-icon-sm"></i>
-                    <div class="stat-label-sm text-uppercase">Needs Review</div>
-                    <div class="stat-value-sm text-warning" id="unacknowledged">-</div>
-                    <small class="text-muted" style="font-size: 0.75rem;">Unacknowledged items</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="card stat-card stat-card-compact" style="border-left-color: #10b981;">
-                <div class="card-body py-2 px-3 position-relative">
-                    <i class="bi bi-gear-fill stat-icon-sm"></i>
-                    <div class="stat-label-sm text-uppercase">Products Tracked</div>
-                    <div class="stat-value-sm text-success" id="productsTracked">-</div>
-                    <small class="text-muted" style="font-size: 0.75rem;">Active inventory</small>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Vulnerability Trends Chart -->
-    <div class="card mb-3" id="trendChartCard">
-        <div class="card-header py-2 d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-graph-up me-2"></i>Vulnerability Trends (30 Days)</span>
-            <div>
-                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="loadTrendChart()" title="Refresh">
-                    <i class="bi bi-arrow-clockwise"></i>
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-bs-toggle="collapse" data-bs-target="#trendChartBody">
-                    <i class="bi bi-chevron-down"></i>
-                </button>
-            </div>
-        </div>
-        <div class="card-body py-3 collapse show" id="trendChartBody">
-            <div id="trendChartContainer" style="position: relative; height: 250px;">
-                <canvas id="trendChart"></canvas>
-            </div>
-            <div id="trendNoData" class="text-center text-muted py-4 d-none">
-                <i class="bi bi-bar-chart fs-1 opacity-50"></i>
-                <p class="mt-2 mb-0">No trend data available yet. Snapshots are taken daily at 2 AM.</p>
-                {% if session.get('is_admin') %}
-                <button class="btn btn-sm btn-outline-primary mt-2" onclick="takeManualSnapshot()">
-                    <i class="bi bi-camera"></i> Take Snapshot Now
-                </button>
-                {% endif %}
+        <!-- Right Column: Trends Chart -->
+        <div class="col-lg-7 col-xl-8">
+            <div class="card h-100" id="trendChartCard">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-graph-up me-2"></i>Vulnerability Trends (30 Days)</span>
+                    <div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="loadTrendChart()" title="Refresh">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-bs-toggle="collapse" data-bs-target="#trendChartBody">
+                            <i class="bi bi-chevron-down"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body py-3 collapse show" id="trendChartBody">
+                    <div id="trendChartContainer" style="position: relative; height: 220px;">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                    <div id="trendNoData" class="text-center text-muted py-4 d-none">
+                        <i class="bi bi-bar-chart fs-1 opacity-50"></i>
+                        <p class="mt-2 mb-0">No trend data available yet. Snapshots are taken daily at 2 AM.</p>
+                        {% if session.get('is_admin') %}
+                        <button class="btn btn-sm btn-outline-primary mt-2" onclick="takeManualSnapshot()">
+                            <i class="bi bi-camera"></i> Take Snapshot Now
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Unmapped Products Warning -->
     <div id="unmappedWarning" class="alert alert-warning d-none mb-3" role="alert">
-        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-        <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
-        These cannot be checked for vulnerabilities.
-        <a href="/admin#products" class="alert-link">Review and assign CPE mappings</a> to ensure complete coverage.
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
+                These cannot be checked for vulnerabilities.
+                <a href="/admin#products" class="alert-link">Review manually</a>
+            </div>
+            <button class="btn btn-warning btn-sm ms-3" onclick="autoFixCpe()" id="autoFixCpeBtn">
+                <i class="bi bi-magic me-1"></i>Auto-Detect CPE
+            </button>
+        </div>
     </div>
 
     <!-- Advanced Filters Panel -->
@@ -2166,6 +2155,32 @@
     /**
      * Load shared view if share_token is present
      */
+    async function autoFixCpe() {
+        const btn = document.getElementById('autoFixCpeBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Detecting...';
+        }
+        try {
+            const response = await fetch('/api/products/apply-cpe', { method: 'POST' });
+            if (!response.ok) throw new Error(`Server error: ${response.status}`);
+            const data = await response.json();
+            if (data.updated > 0) {
+                showToast(`CPE mapped for ${data.updated} products. Coverage: ${data.coverage?.coverage_percent || '?'}%`, 'success');
+                loadStats();
+            } else {
+                showToast('No additional CPE mappings could be auto-detected. These products may need manual mapping.', 'info');
+            }
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-magic me-1"></i>Auto-Detect CPE';
+            }
+        }
+    }
+
     async function loadSharedView() {
         const shareToken = '{{ share_token | default("") }}';
         if (!shareToken) return;
@@ -2361,28 +2376,25 @@
         const epssRank = epssPercentile ? Math.round((1 - epssPercentile) * 100) : null;
         const epssColor = epssPercentile >= 0.95 ? '#dc2626' : epssPercentile >= 0.85 ? '#ea580c' : epssPercentile >= 0.70 ? '#3b82f6' : '#22c55e';
 
-        // Build fix version info from CVE CPE data
+        // Build fix version info from CVE CPE data - compact inline badges
         const fixVersions = vuln.fix_versions || [];
         let fixVersionHtml = '';
         if (fixVersions.length > 0) {
-            const fixItems = fixVersions.map(fv => {
-                const rangeStart = fv.version_start ? `${fv.version_start_type === 'excluding' ? '>' : '>='} ${fv.version_start}` : '';
-                const fixLabel = fv.fix_type === 'excluding'
-                    ? `Upgrade to <strong>${fv.fix_version}</strong>`
-                    : `Upgrade past <strong>${fv.fix_version}</strong>`;
-                const affected = rangeStart ? `<small class="text-muted ms-2">(affected: ${rangeStart})</small>` : '';
-                return `<div class="d-flex align-items-center mb-1">
-                    <i class="bi bi-arrow-up-circle-fill text-success me-2"></i>
-                    <span>${fv.vendor} ${fv.product}: ${fixLabel}${affected}</span>
-                </div>`;
+            const fixBadges = fixVersions.slice(0, 4).map(fv => {
+                const fixLabel = fv.fix_type === 'excluding' ? fv.fix_version : `> ${fv.fix_version}`;
+                return `<span class="badge bg-success me-1 mb-1" title="${fv.vendor} ${fv.product}: upgrade to ${fv.fix_version}"><i class="bi bi-arrow-up-circle me-1"></i>${fv.product} ${fixLabel}</span>`;
             }).join('');
+            const moreCount = fixVersions.length > 4 ? `<span class="badge bg-secondary mb-1">+${fixVersions.length - 4} more</span>` : '';
             fixVersionHtml = `
-                <div class="mb-3 p-3 bg-light border-start border-4 border-primary rounded-end">
-                    <div class="d-flex align-items-center mb-1">
-                        <i class="bi bi-box-arrow-up text-primary me-1"></i>
-                        <small class="fw-bold text-uppercase text-primary">Fix Version</small>
-                    </div>
-                    ${fixItems}
+                <div class="mb-2">
+                    <small class="text-muted fw-semibold me-2">FIX:</small>${fixBadges}${moreCount}
+                </div>`;
+        } else if (vuln.has_cpe_data) {
+            fixVersionHtml = `
+                <div class="mb-2">
+                    <small class="text-muted fw-semibold me-2">FIX:</small>
+                    <span class="badge bg-secondary"><i class="bi bi-info-circle me-1"></i>Check vendor advisory</span>
+                    <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank" class="badge bg-outline-secondary text-decoration-none border ms-1"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>
                 </div>`;
         }
 
@@ -2485,81 +2497,36 @@
                         <h5 class="mt-2 mb-0 fw-semibold">${vuln.vulnerability_name}</h5>
                     </div>
 
-                    <!-- Score Cards Row -->
-                    <div class="row g-2 mb-3">
-                        <!-- CVSS Score -->
-                        <div class="col-md-4">
-                            <div class="border rounded p-2 h-100 bg-light">
-                                <div class="d-flex justify-content-between align-items-center mb-1">
-                                    <small class="text-muted fw-semibold">CVSS SCORE</small>
-                                    <span class="fw-bold" style="color: ${cvssColor}">${vuln.cvss_score || 'N/A'}</span>
-                                </div>
-                                ${vuln.cvss_score ? `
-                                <div class="progress" style="height: 6px;">
-                                    <div class="progress-bar" role="progressbar" style="width: ${cvssPercent}%; background-color: ${cvssColor}"></div>
-                                </div>
-                                <small class="text-muted">${vuln.severity || 'Unknown'} severity</small>
-                                ` : '<small class="text-muted">No CVSS data available</small>'}
-                            </div>
-                        </div>
-                        <!-- EPSS Score -->
-                        <div class="col-md-4">
-                            <div class="border rounded p-2 h-100 bg-light">
-                                <div class="d-flex justify-content-between align-items-center mb-1">
-                                    <small class="text-muted fw-semibold">EPSS PROBABILITY</small>
-                                    <span class="fw-bold" style="color: ${epssScore != null ? epssColor : '#6b7280'}">${epssPercent != null ? epssPercent.toFixed(1) + '%' : 'N/A'}</span>
-                                </div>
-                                ${epssScore != null ? `
-                                <div class="progress" style="height: 6px;">
-                                    <div class="progress-bar" role="progressbar" style="width: ${epssPercent}%; background-color: ${epssColor}"></div>
-                                </div>
-                                <small class="text-muted">Top ${epssRank}% most likely to be exploited</small>
-                                ` : '<small class="text-muted">No EPSS data available</small>'}
-                            </div>
-                        </div>
-                        <!-- Exposure -->
-                        <div class="col-md-4">
-                            <div class="border rounded p-2 h-100 bg-light">
-                                <div class="d-flex justify-content-between align-items-center mb-1">
-                                    <small class="text-muted fw-semibold">YOUR EXPOSURE</small>
-                                    <span class="fw-bold ${group.unacknowledged_count > 0 ? 'text-danger' : 'text-success'}">${group.product_count}</span>
-                                </div>
-                                <div class="d-flex align-items-center">
-                                    ${group.unacknowledged_count > 0 ?
-                                        `<i class="bi bi-exclamation-circle-fill text-warning me-1"></i>
-                                        <small class="text-warning fw-semibold">${group.unacknowledged_count} need review</small>` :
-                                        `<i class="bi bi-check-circle-fill text-success me-1"></i>
-                                        <small class="text-success fw-semibold">All resolved</small>`
-                                    }
-                                </div>
-                                <small class="text-muted">${group.product_count} product${group.product_count > 1 ? 's' : ''} in your inventory</small>
-                                ${group.total_affected_assets > 0 ?
-                                    `<div class="mt-1"><span class="badge bg-info text-dark"><i class="bi bi-hdd-network me-1"></i>${group.total_affected_assets} endpoint${group.total_affected_assets > 1 ? 's' : ''} affected</span></div>` : ''
-                                }
+                    <!-- Scores + Exposure (compact badge row) -->
+                    <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+                        ${vuln.cvss_score ? `
+                        <span class="badge rounded-pill" style="background-color: ${cvssColor}; font-size: 0.8rem;">
+                            CVSS ${vuln.cvss_score} (${vuln.severity || '?'})
+                        </span>` : ''}
+                        ${epssScore != null ? `
+                        <span class="badge rounded-pill" style="background-color: ${epssColor}; font-size: 0.8rem;" title="Top ${epssRank}% most likely to be exploited">
+                            <i class="bi bi-lightning-charge"></i> EPSS ${epssPercent.toFixed(1)}%
+                        </span>` : ''}
+                        <span class="badge rounded-pill ${group.unacknowledged_count > 0 ? 'bg-warning text-dark' : 'bg-success'}" style="font-size: 0.8rem;">
+                            ${group.product_count} product${group.product_count > 1 ? 's' : ''}${group.unacknowledged_count > 0 ? ` (${group.unacknowledged_count} unresolved)` : ' resolved'}
+                        </span>
+                        ${group.total_affected_assets > 0 ? `
+                        <span class="badge rounded-pill bg-info text-dark" style="font-size: 0.8rem;">
+                            <i class="bi bi-hdd-network"></i> ${group.total_affected_assets} endpoint${group.total_affected_assets > 1 ? 's' : ''}
+                        </span>` : ''}
+                    </div>
+
+                    <!-- Impact + How to Fix (combined compact) -->
+                    <p class="text-secondary mb-2 small">${vuln.short_description}</p>
+                    <div class="mb-3 p-2 bg-light border-start border-3 border-success rounded-end">
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-wrench-adjustable text-success me-2 mt-1"></i>
+                            <div>
+                                <span class="fw-medium">${vuln.required_action}</span>
+                                ${fixVersionHtml}
                             </div>
                         </div>
                     </div>
-
-                    <!-- Impact Section -->
-                    <div class="mb-3">
-                        <div class="d-flex align-items-center mb-1">
-                            <i class="bi bi-lightning-charge-fill text-danger me-1"></i>
-                            <small class="text-muted fw-bold text-uppercase">Impact</small>
-                        </div>
-                        <p class="mb-0 text-secondary">${vuln.short_description}</p>
-                    </div>
-
-                    <!-- How to Fix Section -->
-                    <div class="mb-3 p-3 bg-light border-start border-4 border-success rounded-end">
-                        <div class="d-flex align-items-center mb-1">
-                            <i class="bi bi-wrench-adjustable text-success me-1"></i>
-                            <small class="fw-bold text-uppercase text-success">How to Fix</small>
-                        </div>
-                        <p class="mb-0 fw-medium">${vuln.required_action}</p>
-                    </div>
-
-                    <!-- Fix Version Section (from NVD CPE data) -->
-                    ${fixVersionHtml}
 
                     <!-- Affected Products (Collapsible) -->
                     <div class="mb-3">
@@ -2579,14 +2546,14 @@
                     </div>
 
                     <!-- Action Buttons -->
-                    <div class="d-flex gap-2 flex-wrap justify-content-between align-items-center pt-2 border-top">
-                        <div class="d-flex gap-2">
+                    <div class="d-flex gap-1 flex-wrap justify-content-between align-items-center pt-2 border-top">
+                        <div class="d-flex gap-1">
                             ${group.unacknowledged_count > 0 ?
-                                `<button class="btn btn-success" onclick="acknowledgeCVE('${vuln.cve_id}')">
-                                    <i class="bi bi-check-all me-1"></i> Resolve All (${group.unacknowledged_count})
+                                `<button class="btn btn-sm btn-success" onclick="acknowledgeCVE('${vuln.cve_id}')">
+                                    <i class="bi bi-check-all me-1"></i>Resolve (${group.unacknowledged_count})
                                 </button>` :
-                                `<button class="btn btn-outline-secondary" onclick="unacknowledgeCVE('${vuln.cve_id}')">
-                                    <i class="bi bi-arrow-counterclockwise me-1"></i> Reopen
+                                `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeCVE('${vuln.cve_id}')">
+                                    <i class="bi bi-arrow-counterclockwise me-1"></i>Reopen
                                 </button>`
                             }
                             ${trackerBtn}

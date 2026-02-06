@@ -1075,6 +1075,21 @@ def create_vulnerability_issue(
         if product:
             lines.append(f"**Affected Product:** {product.vendor} {product.product_name} {product.version or ''}")
 
+        # Add fix version info from NVD CPE data
+        fix_versions = vuln.get_fix_versions()
+        if fix_versions:
+            lines.extend(["", "## Fix Version"])
+            for fv in fix_versions:
+                if fv.get('fix_type') == 'excluding':
+                    lines.append(f"- **{fv['vendor']} {fv['product']}**: Upgrade to **{fv['fix_version']}** or later")
+                else:
+                    lines.append(f"- **{fv['vendor']} {fv['product']}**: Upgrade past **{fv['fix_version']}**")
+                if fv.get('version_start'):
+                    start_op = '>' if fv.get('version_start_type') == 'excluding' else '>='
+                    lines.append(f"  - Affected range: {start_op} {fv['version_start']}")
+        else:
+            lines.extend(["", "## Fix Version", "No specific fix version available from NVD. Check vendor advisory for patch information."])
+
         lines.extend([
             "",
             "## Description",
@@ -1137,7 +1152,8 @@ def create_vulnerability_issue(
         'cvss_score': vuln.cvss_score,
         'epss_score': vuln.epss_score,
         'due_date': vuln.due_date.isoformat() if vuln.due_date else None,
-        'known_ransomware': vuln.known_ransomware
+        'known_ransomware': vuln.known_ransomware,
+        'fix_versions': vuln.get_fix_versions()
     }
 
     if product:
