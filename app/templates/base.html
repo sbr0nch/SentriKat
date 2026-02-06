@@ -339,6 +339,24 @@
             color: var(--text-color);
         }
 
+        /* Dark mode: fix version box, collapsible sections, software overview rows */
+        [data-theme="dark"] .border-start.border-success.bg-light {
+            background-color: rgba(16, 185, 129, 0.1) !important;
+        }
+
+        [data-theme="dark"] .software-overview-row {
+            border-bottom-color: var(--border-color, #333) !important;
+        }
+
+        [data-theme="dark"] .software-overview-row:hover {
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+
+        /* Dark mode settings group separator */
+        [data-theme="dark"] .settings-group-separator hr {
+            border-color: rgba(255, 255, 255, 0.15) !important;
+        }
+
         [data-theme="dark"] .modal-title {
             color: var(--text-color);
         }

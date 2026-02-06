@@ -159,7 +159,7 @@
     </div>
 
     <!-- Unmapped Products Warning (top-level, right under title) -->
-    <div id="unmappedWarning" class="alert alert-warning d-none mb-3" role="alert">
+    <div id="unmappedWarning" class="alert alert-warning d-none mb-3 alert-dismissible" role="alert">
         <div class="d-flex justify-content-between align-items-center">
             <div>
                 <i class="bi bi-exclamation-triangle-fill me-2"></i>
@@ -167,9 +167,12 @@
                 These cannot be checked for vulnerabilities.
                 <a href="/admin#products" class="alert-link">Review manually</a>
             </div>
-            <button class="btn btn-warning btn-sm ms-3" onclick="autoFixCpe()" id="autoFixCpeBtn">
-                <i class="bi bi-magic me-1"></i>Auto-Detect CPE
-            </button>
+            <div class="d-flex align-items-center gap-2 ms-3">
+                <button class="btn btn-warning btn-sm" onclick="autoFixCpe()" id="autoFixCpeBtn">
+                    <i class="bi bi-magic me-1"></i>Auto-Detect CPE
+                </button>
+                <button type="button" class="btn-close" aria-label="Dismiss" onclick="dismissUnmappedWarning()"></button>
+            </div>
         </div>
     </div>
 
@@ -306,6 +309,7 @@
                         <option value="CRITICAL">Critical</option>
                         <option value="HIGH">High</option>
                         <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
@@ -931,14 +935,27 @@
             document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
             document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
 
-            // Show/hide unmapped products warning
+            // Show/hide unmapped products warning (respects dismiss)
             const unmappedWarning = document.getElementById('unmappedWarning');
             const unmappedCount = document.getElementById('unmappedCount');
             if (unmappedWarning && stats.products_unmapped > 0) {
                 unmappedCount.textContent = stats.products_unmapped;
-                unmappedWarning.classList.remove('d-none');
+                // Check if user dismissed this warning recently (4-hour cooldown)
+                const dismissedAt = localStorage.getItem('unmappedWarningDismissed');
+                const dismissedCount = parseInt(localStorage.getItem('unmappedWarningDismissedCount') || '0');
+                const cooldownMs = 4 * 60 * 60 * 1000; // 4 hours
+                const isStillDismissed = dismissedAt && (Date.now() - parseInt(dismissedAt)) < cooldownMs
+                    && dismissedCount === stats.products_unmapped;
+                if (!isStillDismissed) {
+                    unmappedWarning.classList.remove('d-none');
+                    // Clear stale dismiss if count changed
+                    if (dismissedCount !== stats.products_unmapped) {
+                        localStorage.removeItem('unmappedWarningDismissed');
+                    }
+                }
             } else if (unmappedWarning) {
                 unmappedWarning.classList.add('d-none');
+                localStorage.removeItem('unmappedWarningDismissed');
             }
 
             // Update priority counts - CVE counts and match counts
@@ -1018,6 +1035,13 @@
             const maxUnack = Math.max(0, ...(trends.unacknowledged || []));
             const needsDualAxis = maxUnack > maxSeverity * 5 && maxSeverity > 0;
 
+            // Dark mode aware colors
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+            const tickColor = isDark ? '#9ca3af' : '#6b7280';
+            const legendColor = isDark ? '#d1d5db' : undefined;
+            const tooltipBg = isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)';
+
             trendChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -1062,7 +1086,7 @@
                         {
                             label: 'Unacknowledged',
                             data: trends.unacknowledged,
-                            borderColor: '#6b7280',
+                            borderColor: isDark ? '#9ca3af' : '#6b7280',
                             borderDash: [5, 5],
                             fill: false,
                             tension: 0.3,
@@ -1086,11 +1110,14 @@
                             labels: {
                                 usePointStyle: true,
                                 padding: 15,
-                                font: { size: 11 }
+                                font: { size: 11 },
+                                color: legendColor
                             }
                         },
                         tooltip: {
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            backgroundColor: tooltipBg,
+                            titleColor: '#fff',
+                            bodyColor: '#e5e7eb',
                             padding: 12,
                             titleFont: { size: 13 },
                             bodyFont: { size: 12 },
@@ -1108,7 +1135,7 @@
                     scales: {
                         x: {
                             grid: { display: false },
-                            ticks: { font: { size: 10 } }
+                            ticks: { font: { size: 10 }, color: tickColor }
                         },
                         y: {
                             type: 'linear',
@@ -1118,11 +1145,12 @@
                                 display: needsDualAxis,
                                 text: 'By Severity',
                                 font: { size: 10, weight: 'bold' },
-                                color: '#6b7280'
+                                color: tickColor
                             },
-                            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                            grid: { color: gridColor },
                             ticks: {
                                 font: { size: 10 },
+                                color: tickColor,
                                 precision: 0,
                                 callback: formatAxisValue
                             }
@@ -1136,13 +1164,13 @@
                                     display: true,
                                     text: 'Unacknowledged',
                                     font: { size: 10, weight: 'bold' },
-                                    color: '#6b7280'
+                                    color: tickColor
                                 },
                                 grid: { drawOnChartArea: false },
                                 ticks: {
                                     font: { size: 10 },
                                     precision: 0,
-                                    color: '#6b7280',
+                                    color: tickColor,
                                     callback: formatAxisValue
                                 }
                             }
@@ -2201,6 +2229,14 @@
     /**
      * Load shared view if share_token is present
      */
+    function dismissUnmappedWarning() {
+        const warning = document.getElementById('unmappedWarning');
+        if (warning) warning.classList.add('d-none');
+        const count = document.getElementById('unmappedCount')?.textContent || '0';
+        localStorage.setItem('unmappedWarningDismissed', Date.now().toString());
+        localStorage.setItem('unmappedWarningDismissedCount', count);
+    }
+
     async function autoFixCpe() {
         const btn = document.getElementById('autoFixCpeBtn');
         if (btn) {

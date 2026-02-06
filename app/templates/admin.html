@@ -302,6 +302,13 @@
                             <h6 class="mb-0 fw-bold">Find Your Product</h6>
                         </div>
 
+                        <!-- CPE missing hint (shown when editing product without CPE) -->
+                        <div id="noCpeHint" class="alert alert-warning py-2 px-3 mb-2 small" style="display: none;">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            <strong>No CPE assigned</strong> — Search below and select a match to enable vulnerability tracking.
+                            Press <kbd>Search</kbd> or hit <kbd>Enter</kbd>.
+                        </div>
+
                         <!-- NVD Search -->
                         <div class="input-group mb-1">
                             <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
@@ -855,7 +862,7 @@
                     const hasCpe = group.has_cpe;
                     const cpeDisplay = hasCpe
                         ? '<span class="badge bg-success" title="CPE mapped - vulnerability matching active"><i class="bi bi-check-circle-fill"></i></span>'
-                        : '<span class="badge bg-warning text-dark" title="No CPE - click Edit > Advanced to add"><i class="bi bi-exclamation-triangle-fill"></i></span>';
+                        : `<a href="#" class="badge bg-warning text-dark text-decoration-none" title="No CPE mapping - click to assign" onclick="event.preventDefault(); event.stopPropagation(); assignCpe(${firstVersionId}, '${escapeHtml(group.product_name)}')"><i class="bi bi-exclamation-triangle-fill me-1"></i>Assign</a>`;
 
                     // Build platform display
                     const platforms = group.platforms || [];
@@ -1067,6 +1074,21 @@
             // Hide manual entry toggle when editing (data is already filled)
             safeSetDisplay('manualEntryToggle', 'none');
 
+            // If product has no CPE, pre-fill NVD search with product name as hint
+            const hasCpe = product.cpe_vendor && product.cpe_product;
+            const hasEffectiveCpe = product.effective_cpe_vendor && product.effective_cpe_product;
+            if (!hasCpe && !hasEffectiveCpe) {
+                const searchInput = document.getElementById('nvdSearchInput');
+                if (searchInput) {
+                    searchInput.value = product.product_name || '';
+                    searchInput.setAttribute('placeholder', 'Search NVD to assign CPE for vulnerability matching...');
+                }
+                // Show the no-CPE hint banner
+                safeSetDisplay('noCpeHint', 'block');
+            } else {
+                safeSetDisplay('noCpeHint', 'none');
+            }
+
             // Collapse advanced options by default
             const advancedCollapse = document.getElementById('advancedOptionsCollapse');
             if (advancedCollapse) advancedCollapse.classList.remove('show');
@@ -1080,6 +1102,25 @@
         } catch (error) {
             showToast(`Error loading product: ${error.message}`, 'danger');
         }
+    }
+
+    // Open product modal focused on CPE assignment with auto-search
+    async function assignCpe(productId, productName) {
+        await editProduct(productId);
+        // After modal opens, pre-fill NVD search and trigger it
+        setTimeout(() => {
+            const searchInput = document.getElementById('nvdSearchInput');
+            if (searchInput && productName) {
+                searchInput.value = productName;
+                searchInput.focus();
+                // Highlight the search area to draw attention
+                searchInput.classList.add('border-warning');
+                searchInput.setAttribute('placeholder', 'Search NVD to assign CPE...');
+                setTimeout(() => searchInput.classList.remove('border-warning'), 3000);
+                // Auto-trigger the search
+                performNVDSearchNow();
+            }
+        }, 400);
     }
 
     async function saveProduct() {
@@ -2593,10 +2634,11 @@
         safeSetText('nvdSelectedCpe', `CPE: ${vendor}:${product}:${versionStr}`);
         safeSetDisplay('nvdSelectedProduct', 'block');
 
-        // Hide search results and manual entry toggle
+        // Hide search results, manual entry toggle, and CPE hint
         safeSetDisplay('nvdResultsList', 'none');
         safeSetDisplay('nvdSearchStatus', 'none');
         safeSetDisplay('manualEntryToggle', 'none');
+        safeSetDisplay('noCpeHint', 'none');
 
         // Auto-fill vendor and product name fields
         // Format product for display (capitalize words, replace underscores)
@@ -2720,8 +2762,15 @@
         const clearCpeBtnEl = document.getElementById('clearCpeBtn');
         const toggleEl = document.getElementById('manualEntryToggle');
 
-        if (nvdSearchInputEl) nvdSearchInputEl.value = '';
+        if (nvdSearchInputEl) {
+            nvdSearchInputEl.value = '';
+            nvdSearchInputEl.setAttribute('placeholder', "Search (e.g., 'apache tomcat', 'windows server')...");
+            nvdSearchInputEl.classList.remove('border-warning');
+        }
         if (nvdSearchStatusEl) nvdSearchStatusEl.style.display = 'none';
+        // Hide CPE hint banner
+        const noCpeHintEl = document.getElementById('noCpeHint');
+        if (noCpeHintEl) noCpeHintEl.style.display = 'none';
         if (nvdResultsListEl) {
             nvdResultsListEl.style.display = 'none';
             nvdResultsListEl.innerHTML = '';

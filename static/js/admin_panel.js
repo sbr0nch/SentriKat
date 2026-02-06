@@ -5875,6 +5875,9 @@ function showSettingsGroup(groupName, btn) {
         }
     });
 
+    // Remove any previously injected separators
+    document.querySelectorAll('.settings-group-separator').forEach(el => el.remove());
+
     // Show panes in this group
     const groupPanes = SETTINGS_GROUPS[groupName] || [];
     groupPanes.forEach((id, index) => {
@@ -5882,11 +5885,22 @@ function showSettingsGroup(groupName, btn) {
         if (pane) {
             pane.style.display = '';
             pane.classList.add('show', 'active');
-            // Add spacing between stacked panes
+            pane.style.marginTop = '';
+
             if (index > 0) {
-                pane.style.marginTop = '1.5rem';
-            } else {
-                pane.style.marginTop = '';
+                // Insert a visible separator before this pane
+                const sep = document.createElement('div');
+                sep.className = 'settings-group-separator';
+                sep.innerHTML = '<hr class="my-4" style="border-top: 2px dashed var(--bs-border-color, #dee2e6); opacity: 0.5;">';
+                pane.parentNode.insertBefore(sep, pane);
+            }
+
+            // Add a subtle left accent border to each card for group identity
+            const card = pane.querySelector('.card');
+            if (card && groupPanes.length > 1) {
+                card.style.borderLeft = '3px solid var(--bs-primary, #0d6efd)';
+            } else if (card) {
+                card.style.borderLeft = '';
             }
         }
     });
