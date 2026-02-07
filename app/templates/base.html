@@ -105,6 +105,11 @@
             color: var(--text-color);
         }
 
+        [data-theme="dark"] .app-footer {
+            background-color: var(--surface-color) !important;
+            border-top-color: var(--border-color) !important;
+        }
+
         [data-theme="dark"] .card-header {
             background-color: var(--gray-100);
             border-color: var(--border-color);
@@ -339,6 +344,24 @@
             color: var(--text-color);
         }
 
+        /* Dark mode: fix version box, collapsible sections, software overview rows */
+        [data-theme="dark"] .border-start.border-success.bg-light {
+            background-color: rgba(16, 185, 129, 0.1) !important;
+        }
+
+        [data-theme="dark"] .software-overview-row {
+            border-bottom-color: var(--border-color, #333) !important;
+        }
+
+        [data-theme="dark"] .software-overview-row:hover {
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+
+        /* Dark mode settings group separator */
+        [data-theme="dark"] .settings-group-separator hr {
+            border-color: rgba(255, 255, 255, 0.15) !important;
+        }
+
         [data-theme="dark"] .modal-title {
             color: var(--text-color);
         }
@@ -482,6 +505,192 @@
             border-color: #475569 !important;
             color: #e2e8f0 !important;
         }
+
+        /* ========== COMPREHENSIVE DARK MODE OVERRIDES ========== */
+
+        /* bg-white used on card-headers, containers, etc. */
+        [data-theme="dark"] .bg-white {
+            background-color: var(--surface-color) !important;
+            color: var(--text-color) !important;
+        }
+
+        /* Nav tabs - the tab bar and individual tab buttons */
+        [data-theme="dark"] .nav-tabs {
+            border-bottom-color: var(--border-color);
+        }
+        [data-theme="dark"] .nav-tabs .nav-link {
+            color: var(--text-muted);
+            border-color: transparent;
+        }
+        [data-theme="dark"] .nav-tabs .nav-link:hover {
+            border-color: var(--border-color) var(--border-color) transparent;
+            color: var(--text-color);
+        }
+        [data-theme="dark"] .nav-tabs .nav-link.active {
+            background-color: var(--surface-color);
+            border-color: var(--border-color) var(--border-color) var(--surface-color);
+            color: var(--primary-light);
+        }
+
+        /* Input group text (search icons, input addons) */
+        [data-theme="dark"] .input-group-text {
+            background-color: var(--gray-100) !important;
+            border-color: var(--border-color);
+            color: var(--text-muted);
+        }
+
+        /* List groups */
+        [data-theme="dark"] .list-group-item {
+            background-color: var(--surface-color);
+            border-color: var(--border-color);
+            color: var(--text-color);
+        }
+        [data-theme="dark"] .list-group-item-action:hover,
+        [data-theme="dark"] .list-group-item-action:focus {
+            background-color: var(--gray-100);
+            color: var(--text-color);
+        }
+
+        /* Progress bars */
+        [data-theme="dark"] .progress {
+            background-color: var(--gray-100);
+        }
+
+        /* Card body - ensure no white bg leaks */
+        [data-theme="dark"] .card-body {
+            background-color: var(--surface-color);
+            color: var(--text-color);
+        }
+        [data-theme="dark"] .card-footer {
+            background-color: var(--gray-100);
+            border-color: var(--border-color);
+        }
+
+        /* Modal header and footer */
+        [data-theme="dark"] .modal-header {
+            background-color: var(--gray-100) !important;
+            border-color: var(--border-color);
+            color: var(--text-color);
+        }
+        [data-theme="dark"] .modal-header .btn-close {
+            filter: invert(1) grayscale(100%) brightness(200%);
+        }
+        [data-theme="dark"] .modal-footer {
+            background-color: var(--gray-100);
+            border-color: var(--border-color);
+        }
+        [data-theme="dark"] .modal-body {
+            background-color: var(--surface-color);
+            color: var(--text-color);
+        }
+
+        /* Form check inputs (checkboxes, radios) */
+        [data-theme="dark"] .form-check-input {
+            background-color: var(--gray-100);
+            border-color: var(--border-color);
+        }
+        [data-theme="dark"] .form-check-input:checked {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        /* Breadcrumb */
+        [data-theme="dark"] .breadcrumb {
+            background-color: transparent;
+        }
+        [data-theme="dark"] .breadcrumb-item a {
+            color: var(--primary-light);
+        }
+        [data-theme="dark"] .breadcrumb-item.active {
+            color: var(--text-muted);
+        }
+
+        /* Accordion (if used) */
+        [data-theme="dark"] .accordion-item {
+            background-color: var(--surface-color);
+            border-color: var(--border-color);
+        }
+        [data-theme="dark"] .accordion-button {
+            background-color: var(--gray-100);
+            color: var(--text-color);
+        }
+        [data-theme="dark"] .accordion-button:not(.collapsed) {
+            background-color: var(--gray-100);
+            color: var(--primary-light);
+        }
+
+        /* Borders that reference Bootstrap default colors */
+        [data-theme="dark"] .border,
+        [data-theme="dark"] .border-top,
+        [data-theme="dark"] .border-bottom,
+        [data-theme="dark"] .border-start,
+        [data-theme="dark"] .border-end {
+            border-color: var(--border-color) !important;
+        }
+        [data-theme="dark"] .border-success {
+            border-color: rgba(16, 185, 129, 0.4) !important;
+        }
+        [data-theme="dark"] .border-danger {
+            border-color: rgba(220, 38, 38, 0.4) !important;
+        }
+        [data-theme="dark"] .border-warning {
+            border-color: rgba(245, 158, 11, 0.4) !important;
+        }
+        [data-theme="dark"] .border-primary {
+            border-color: rgba(96, 165, 250, 0.4) !important;
+        }
+
+        /* Table striped */
+        [data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) > * {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        /* bg-opacity variants used with bg-success, bg-primary etc. */
+        [data-theme="dark"] .bg-success.bg-opacity-10 {
+            background-color: rgba(16, 185, 129, 0.15) !important;
+        }
+        [data-theme="dark"] .bg-primary.bg-opacity-10 {
+            background-color: rgba(96, 165, 250, 0.15) !important;
+        }
+        [data-theme="dark"] .bg-danger.bg-opacity-10 {
+            background-color: rgba(220, 38, 38, 0.15) !important;
+        }
+
+        /* Badge text-dark override for dark mode */
+        [data-theme="dark"] .badge.text-dark {
+            color: var(--text-color) !important;
+        }
+
+        /* Alert info */
+        [data-theme="dark"] .alert-info {
+            background-color: rgba(59, 130, 246, 0.15) !important;
+            border-color: rgba(59, 130, 246, 0.4) !important;
+            color: #93c5fd !important;
+        }
+
+        /* Close button in dark mode */
+        [data-theme="dark"] .btn-close {
+            filter: invert(1) grayscale(100%) brightness(200%);
+        }
+
+        /* Table light header rows */
+        [data-theme="dark"] .table-light,
+        [data-theme="dark"] .table-light th {
+            background-color: var(--gray-100) !important;
+            color: var(--text-color) !important;
+        }
+
+        /* Page title text */
+        [data-theme="dark"] .text-dark {
+            color: var(--text-color) !important;
+        }
+
+        /* Sticky table headers need explicit background in dark mode */
+        [data-theme="dark"] thead.sticky-top {
+            background-color: var(--gray-100) !important;
+        }
+
+        /* ========== END COMPREHENSIVE DARK MODE OVERRIDES ========== */
 
         /* Dark mode table text */
         [data-theme="dark"] td,
@@ -1786,7 +1995,7 @@
 
         /* Footer */
         .app-footer {
-            background: white;
+            background-color: white;
             padding: 1.5rem 0;
             margin-top: auto; /* Push to bottom */
             border-top: 1px solid var(--gray-200);
@@ -2673,10 +2882,25 @@
                 <!-- Assets & Inventory Section -->
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Inventory</div>
-                    <a href="/admin" class="sidebar-link {{ 'active' if request.endpoint == 'main.admin' else '' }}" data-tooltip="Products">
+                    <a href="#" class="sidebar-link {{ 'active expanded' if request.endpoint == 'main.admin' else '' }}" onclick="toggleSubmenu(this, event)" data-tooltip="Products">
                         <i class="bi bi-box-seam-fill"></i>
                         <span class="link-text">Products</span>
+                        <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
+                    <div class="sidebar-submenu {{ 'open' if request.endpoint == 'main.admin' else '' }}">
+                        <a href="/admin" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.admin' and not request.args.get('tab') else '' }}" onclick="navigateInventoryTab('products', event)" data-tooltip="Products">
+                            <i class="bi bi-box-seam"></i>
+                            Products
+                        </a>
+                        <a href="/admin#endpoints" class="sidebar-sublink" onclick="navigateInventoryTab('endpoints', event)" data-tooltip="Endpoints">
+                            <i class="bi bi-pc-display"></i>
+                            Endpoints
+                        </a>
+                        <a href="/admin#software-overview" class="sidebar-sublink" onclick="navigateInventoryTab('software-overview', event)" data-tooltip="Software Overview">
+                            <i class="bi bi-layers"></i>
+                            Software Overview
+                        </a>
+                    </div>
                 </div>
 
                 <!-- User Management Section (visible for admins) -->
@@ -2768,38 +2992,37 @@
             <div class="main-content">
                 {% block content %}{% endblock %}
             </div>
+
+            <!-- Footer (inside app-main so it respects sidebar width) -->
+            <footer class="app-footer">
+                <div class="container-fluid px-4">
+                    <div class="text-center">
+                        <p class="mb-1">
+                            <strong>{{ branding.app_name }}</strong> - Enterprise Vulnerability Management Platform
+                        </p>
+                        <p class="copyright-notice mb-1">
+                            Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
+                            {% if branding.support_email %}
+                            | <a href="mailto:{{ branding.support_email }}">Support</a>
+                            {% endif %}
+                        </p>
+                        <!-- CVE Service Status Indicator -->
+                        {% if branding.show_version %}
+                        <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
+                            <span class="status-led status-led-yellow" id="cveStatusLed"></span>
+                            <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
+                        </div>
+                        {% endif %}
+                        {% if branding.show_powered_by | default(true) %}
+                        <p class="text-muted mt-1 mb-0" style="font-size: 0.7rem; opacity: 0.7;">
+                            Powered by <a href="https://github.com/sbr0nch/SentriKat" target="_blank" class="text-muted text-decoration-none">SentriKat</a>
+                        </p>
+                        {% endif %}
+                    </div>
+                </div>
+            </footer>
         </div>
     </div>
-
-    <!-- Footer -->
-    <footer class="app-footer">
-        <div class="container-fluid px-4">
-            <div class="text-center">
-                <p class="mb-1">
-                    <strong>{{ branding.app_name }}</strong> - Enterprise Vulnerability Management Platform
-                </p>
-                <p class="copyright-notice mb-1">
-                    Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
-                    {% if branding.support_email %}
-                    | <a href="mailto:{{ branding.support_email }}">Support</a>
-                    {% endif %}
-                </p>
-                <!-- CVE Service Status Indicator -->
-                {% if branding.show_version %}
-                <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
-                    <span class="status-led status-led-yellow" id="cveStatusLed"></span>
-                    <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
-                </div>
-                {% endif %}
-                {% if branding.show_powered_by | default(true) %}
-                <p class="text-muted mt-1 mb-0" style="font-size: 0.7rem; opacity: 0.7;">
-                    Powered by <a href="https://github.com/sbr0nch/SentriKat" target="_blank" class="text-muted text-decoration-none">SentriKat</a>
-                </p>
-                {% endif %}
-                <p class="text-muted mb-0" style="font-size: 0.65rem; opacity: 0.5;">v{{ app_version }}</p>
-            </div>
-        </div>
-    </footer>
 
     <!-- Toast Container -->
     <div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
@@ -3499,6 +3722,41 @@
                 submenuStates[submenuId] = !isOpen;
                 localStorage.setItem('submenuStates', JSON.stringify(submenuStates));
             }
+        }
+
+        // Navigate to an inventory tab (Products/Endpoints/Software Overview)
+        // If already on /admin, switch tabs in-place; otherwise navigate via href
+        function navigateInventoryTab(tabName, event) {
+            const isOnAdmin = window.location.pathname === '/admin';
+            if (isOnAdmin) {
+                event.preventDefault();
+                event.stopPropagation();
+                const tabMap = {
+                    'products': 'products-tab',
+                    'endpoints': 'endpoints-tab',
+                    'software-overview': 'software-overview-tab'
+                };
+                const tabId = tabMap[tabName];
+                const tabEl = document.getElementById(tabId);
+                if (tabEl) {
+                    const tab = new bootstrap.Tab(tabEl);
+                    tab.show();
+                    // Update URL hash without reload
+                    if (tabName === 'products') {
+                        history.replaceState(null, '', '/admin');
+                    } else {
+                        history.replaceState(null, '', '/admin#' + tabName);
+                    }
+                    // Update active state on sidebar sub-links
+                    document.querySelectorAll('.sidebar-submenu .sidebar-sublink').forEach(link => {
+                        link.classList.remove('active');
+                    });
+                    event.currentTarget.classList.add('active');
+                    // Scroll to top of content
+                    window.scrollTo(0, 0);
+                }
+            }
+            // If not on /admin, let the default href navigation happen
         }
 
         function initSidebar() {
