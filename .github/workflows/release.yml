@@ -74,6 +74,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Write VERSION file so the app knows its version
+      - name: Set VERSION file
+        run: echo "${GITHUB_REF_NAME#v}" > VERSION
+
       # Extract version from tag (v1.0.0 -> 1.0.0)
       - name: Extract metadata
         id: meta
@@ -119,7 +123,10 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          # Ensure VERSION file matches the release tag
+          echo "${GITHUB_REF_NAME#v}" > VERSION
 
       # Create the deployment package that customers download
       - name: Create deployment package
@@ -257,6 +264,20 @@ jobs:
           Purchase a Professional license at https://sentrikat.com/pricing
 
           ## Updating
+
+          ### Automatic (recommended)
+          ```bash
+          # Linux/macOS
+          ./scripts/update.sh
+
+          # Windows (PowerShell)
+          .\scripts\update.ps1
+
+          # Check for updates only
+          ./scripts/update.sh --check
+          ```
+
+          ### Manual (Docker)
           ```bash
           docker compose pull
           docker compose up -d
@@ -266,6 +287,11 @@ jobs:
           - Portal: https://portal.sentrikat.com
           - Docs: https://docs.sentrikat.com
           README
+
+          # ── update scripts ──
+          cp scripts/update.sh "${PKG_DIR}/scripts/update.sh"
+          cp scripts/update.ps1 "${PKG_DIR}/scripts/update.ps1"
+          chmod +x "${PKG_DIR}/scripts/update.sh"
 
           # ── install.sh helper ──
           cat > "${PKG_DIR}/scripts/install.sh" << 'INSTALL'

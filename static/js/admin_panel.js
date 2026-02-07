@@ -6164,6 +6164,16 @@ function displayLicenseInfo(data) {
             </p>
         `;
     }
+
+    // Append version info
+    if (data.app_version) {
+        statusHtml += `
+            <div class="mt-2 pt-2 border-top">
+                <small class="text-muted"><i class="bi bi-info-circle me-1"></i>SentriKat v${escapeHtml(data.app_version)}</small>
+            </div>
+        `;
+    }
+
     detailsEl.innerHTML = statusHtml;
 
     // Usage info
