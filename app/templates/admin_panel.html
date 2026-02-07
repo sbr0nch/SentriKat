@@ -3749,12 +3749,16 @@ window.addEventListener('hashchange', function() {
     activateTabFromHash();
 });
 
-// Handle tab clicks to update URL
+// Handle tab clicks to update URL and sidebar highlight
 document.querySelectorAll('#adminTabs button[data-bs-toggle="tab"]').forEach(function(tabButton) {
     tabButton.addEventListener('shown.bs.tab', function(e) {
         const target = e.target.getAttribute('data-bs-target');
         if (target) {
             history.replaceState(null, null, target);
+            // Update sidebar highlighting to match the new tab
+            if (typeof updateSidebarHighlight === 'function') {
+                updateSidebarHighlight();
+            }
         }
     });
 });
