@@ -34,15 +34,22 @@ INSTALLATION_ID_ENV_VAR = 'SENTRIKAT_INSTALLATION_ID'
 # Public key file path (shared with generate_license.py)
 PUBLIC_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools', '.license_keys', 'public_key.pem')
 
-# Default RSA Public Key (fallback if no key file exists)
+# Default RSA Public Key - matches the SentriKat-web license server (RSA-4096)
+# This is the PUBLIC key used to verify license signatures from portal.sentrikat.com
+# Can be overridden via SENTRIKAT_LICENSE_PUBLIC_KEY env var or key file
 _DEFAULT_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3vVRIgzYRX3ikhfymPhO
-E2Sl13baVqnqUgWt+vwXRxNek114ToNZaOfka75HxD7bHFq6+nGscUyp+I6Uq0l5
-YXYCqeA9euHhWS/uH367xOo3J2tugH+9jMxHUlnOVD+XpUv9TShePwwWIN7h5jWs
-TWGHjF0yg+nOb1NjHf9UBYLhATNHsoajWEFptYlr8YtbmeegC6m3+6fF9mB0PdN9
-Lp+Ty4P6GfcuCkGA1GIAFNquN+W4x1Q47n0zj7TJ/wwy4cDe2TTIRi+2xosmdXs4
-jMD7apb2qLXSRm6ZHkUTw/8O1r4FrSrIIg7Yz1dpHCrs7kCafpBEQOEUobdm65TX
-rwIDAQAB
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAzRWZLd3WBTlBt+eb6dmU
+19EflrCuAP9dBq9uYjG1gbgE4oi5b3hqpH9Rcqt00uyhGdNSFyD40Vb3eA0CSe6q
++Pw5yYP7Sp5rqe7O1WNPO16yfVBsWTIA3+bGhbGtbhLFQvANynBP69n9YinFmc+c
+tW6RgUwQhNUXEd5I5ebSxWvPryQCPHdpuI8tH9ms149zFxmQ/jd0MVdHvrHQ2Yd7
+fGEYaWAAijJzVhqxXtrX6ExM2UZn8e9vB2GZl567pPhf81HIUCkM1b7ycrEN1BYd
+7uEA5KYe3T1RZFwO6MuFNQqEfLvvzTRjv58htHh0RklwDzFrCrOydtyHU7F4pXEN
+wr0zXQHxODgMsF5UiaRn7ULew+F8Ku0k1+L+VT+3wnGUxB9vZ7GU1wFOJGGGLg6W
+IEzFOG+OSXV4+EsWhgJfqDc3+XckSy+5lI2eEKsSWDjJ3Scv7rHMQTUJNjA16+Mw
+PNe/8GjwEIbDe1tFRunp/a/1Dr7hu047UN9hQTj9pepR41R7PF6B2Gfv5jyNEr0U
+fvI2UG3mitwIXbictDfAJaMP9FJX9gn9lN4cFpmAjrpXhBi/ARpOlUtDTrKMCgT3
+7dh4mZUlOlY+HO4vdoHBUok8JDayqf0LSDdme3ZZgzX65VWNoOnqn6lytxw8hRAF
+IY94kykxxPz0CLuSxoJbzkUCAwEAAQ==
 -----END PUBLIC KEY-----"""
 
 def get_license_public_key():
