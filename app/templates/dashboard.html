@@ -291,11 +291,21 @@
     </div>
 
     <!-- Unmapped Products Warning -->
-    <div id="unmappedWarning" class="alert alert-warning d-none mb-3" role="alert">
-        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-        <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
-        These cannot be checked for vulnerabilities.
-        <a href="/admin#products" class="alert-link">Review and assign CPE mappings</a> to ensure complete coverage.
+    <div id="unmappedWarning" class="alert alert-warning alert-dismissible d-none mb-3" role="alert">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
+                These cannot be checked for vulnerabilities.
+                <a href="/admin#products" class="alert-link">Review manually</a>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="autoDetectCPE()" id="autoDetectCpeBtn">
+                    <i class="bi bi-magic me-1"></i>Auto-Detect CPE
+                </button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        </div>
     </div>
 
     <!-- Advanced Filters Panel -->
@@ -1799,6 +1809,37 @@
                 card.classList.remove('active-filter');
             }
         });
+    }
+
+    /**
+     * Auto-detect CPE mappings for unmapped products
+     */
+    async function autoDetectCPE() {
+        const btn = document.getElementById('autoDetectCpeBtn');
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Detecting...';
+
+        try {
+            const response = await fetch('/api/products/apply-cpe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                showToast(data.message || `Applied CPE to ${data.updated} products`, 'success');
+                // Refresh stats to update the unmapped count
+                loadStats();
+            } else {
+                showToast(data.message || 'Failed to auto-detect CPE', 'danger');
+            }
+        } catch (error) {
+            showToast('Error running CPE auto-detection: ' + error.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
     }
 
     function resetFilters() {
