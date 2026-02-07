@@ -2685,23 +2685,23 @@
                     <div class="sidebar-nav-title">Management</div>
 
                     <!-- Users & Access submenu -->
-                    <a href="#" class="sidebar-link" onclick="toggleSubmenu(this, event)" data-tooltip="Users & Access">
+                    <a href="#" class="sidebar-link" onclick="toggleSubmenu(this, event)" data-tooltip="Users & Access" data-admin-panel-hashes="users,ldapUsers,ldapGroups">
                         <i class="bi bi-people-fill"></i>
                         <span class="link-text">Users & Access</span>
                         <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
                     <div class="sidebar-submenu">
-                        <a href="/admin-panel#users" class="sidebar-sublink">
+                        <a href="/admin-panel#users" class="sidebar-sublink" data-hash="users">
                             <i class="bi bi-person"></i>
                             All Users
                         </a>
                         {% if license and license.is_professional() %}
-                        <a href="/admin-panel#ldapUsers" class="sidebar-sublink">
+                        <a href="/admin-panel#ldapUsers" class="sidebar-sublink" data-hash="ldapUsers">
                             <i class="bi bi-diagram-3"></i>
                             LDAP Users
                         </a>
                         {% if current_user and current_user.is_super_admin() %}
-                        <a href="/admin-panel#ldapGroups" class="sidebar-sublink">
+                        <a href="/admin-panel#ldapGroups" class="sidebar-sublink" data-hash="ldapGroups">
                             <i class="bi bi-diagram-2"></i>
                             LDAP Groups
                         </a>
@@ -2710,7 +2710,7 @@
                     </div>
 
                     <!-- Organizations -->
-                    <a href="/admin-panel#organizations" class="sidebar-link" data-tooltip="Organizations">
+                    <a href="/admin-panel#organizations" class="sidebar-link" data-tooltip="Organizations" data-hash="organizations">
                         <i class="bi bi-building"></i>
                         <span class="link-text">Organizations</span>
                     </a>
@@ -2722,7 +2722,7 @@
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Integrations</div>
-                    <a href="/admin-panel#integrations" class="sidebar-link" data-tooltip="Integrations">
+                    <a href="/admin-panel#integrations" class="sidebar-link" data-tooltip="Integrations" data-hash="integrations">
                         <i class="bi bi-plug-fill"></i>
                         <span class="link-text">Integrations</span>
                     </a>
@@ -2734,7 +2734,7 @@
                 {% if current_user and current_user.is_super_admin() %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">System</div>
-                    <a href="/admin-panel#settings" class="sidebar-link" data-tooltip="Settings">
+                    <a href="/admin-panel#settings" class="sidebar-link" data-tooltip="Settings" data-hash="settings">
                         <i class="bi bi-gear-fill"></i>
                         <span class="link-text">Settings</span>
                     </a>
@@ -3534,8 +3534,62 @@
             });
         }
 
+        // Highlight sidebar links based on current page and hash
+        function updateSidebarHighlight() {
+            const path = window.location.pathname;
+            const hash = window.location.hash.replace('#', '') || '';
+            const isAdminPanel = (path === '/admin-panel');
+
+            if (!isAdminPanel) return;
+
+            // Clear all admin-panel related active states
+            document.querySelectorAll('.sidebar-link[data-hash], .sidebar-sublink[data-hash]').forEach(el => {
+                el.classList.remove('active');
+            });
+
+            // Also clear the parent submenu toggle link
+            document.querySelectorAll('.sidebar-link[data-admin-panel-hashes]').forEach(el => {
+                el.classList.remove('active');
+            });
+
+            // User-related hashes go to the Users & Access submenu
+            const userHashes = ['users', 'ldapUsers', 'ldapGroups'];
+            const currentHash = hash || 'users'; // Default tab is users
+
+            if (userHashes.includes(currentHash)) {
+                // Highlight the Users & Access parent link
+                const parentLink = document.querySelector('.sidebar-link[data-admin-panel-hashes]');
+                if (parentLink) {
+                    parentLink.classList.add('active');
+                    // Auto-expand the submenu
+                    const submenu = parentLink.nextElementSibling;
+                    if (submenu && submenu.classList.contains('sidebar-submenu')) {
+                        submenu.classList.add('open');
+                        parentLink.classList.add('expanded');
+                    }
+                }
+                // Highlight the specific sublink
+                const sublink = document.querySelector(`.sidebar-sublink[data-hash="${currentHash}"]`);
+                if (sublink) {
+                    sublink.classList.add('active');
+                }
+            } else {
+                // Highlight the matching top-level sidebar link (organizations, integrations, settings)
+                const matchingLink = document.querySelector(`.sidebar-link[data-hash="${currentHash}"]`);
+                if (matchingLink) {
+                    matchingLink.classList.add('active');
+                }
+            }
+        }
+
         // Initialize sidebar on page load
-        document.addEventListener('DOMContentLoaded', initSidebar);
+        document.addEventListener('DOMContentLoaded', function() {
+            initSidebar();
+            updateSidebarHighlight();
+        });
+
+        // Update highlighting when hash changes (tab navigation within admin-panel)
+        window.addEventListener('hashchange', updateSidebarHighlight);
 
         // ============================================================================
         // Theme Toggle Functions
