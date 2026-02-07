@@ -25,6 +25,16 @@ from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
+# App version (read from VERSION file)
+_VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'VERSION')
+
+def _get_app_version():
+    try:
+        with open(_VERSION_FILE, 'r') as f:
+            return f.read().strip()
+    except Exception:
+        return '0.0.0'
+
 # Installation ID file path (persists across restarts)
 INSTALLATION_ID_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', '.installation_id')
 
@@ -479,7 +489,9 @@ class LicenseInfo:
             'error': self.error,
             # Installation info
             'installation_id': current_installation_id,
-            'licensed_installation_id': self.licensed_installation_id
+            'licensed_installation_id': self.licensed_installation_id,
+            # App version
+            'app_version': _get_app_version()
         }
 
 

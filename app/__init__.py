@@ -7,6 +7,14 @@ from flask_limiter.util import get_remote_address
 from config import Config
 import os
 
+# Read version from VERSION file (single source of truth)
+_VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'VERSION')
+try:
+    with open(_VERSION_FILE, 'r') as _f:
+        APP_VERSION = _f.read().strip()
+except Exception:
+    APP_VERSION = '0.0.0'
+
 db = SQLAlchemy()
 migrate = Migrate()
 csrf = CSRFProtect()
@@ -234,7 +242,8 @@ def create_app(config_class=Config):
             auth_enabled=auth_enabled,
             branding=branding,
             license=license_info,
-            session_timeout_minutes=session_timeout_minutes
+            session_timeout_minutes=session_timeout_minutes,
+            app_version=APP_VERSION
         )
 
     # Setup wizard redirect
@@ -264,7 +273,7 @@ def create_app(config_class=Config):
         # Only add headers to API responses
         if request.path.startswith('/api/'):
             response.headers['X-API-Version'] = 'v1'
-            response.headers['X-App-Version'] = '1.0.0'
+            response.headers['X-App-Version'] = APP_VERSION
         return response
 
     with app.app_context():
