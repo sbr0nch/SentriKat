@@ -10,17 +10,19 @@ from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required, org_admin_required, manager_required
 from app.licensing import requires_professional, check_user_limit, check_org_limit, check_product_limit
 from app.error_utils import safe_error_response, ERROR_MSGS
+from app import APP_VERSION
 import json
 import re
 import logging
+import requests as http_requests
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 # Application version
-APP_VERSION = "1.0.0"
 API_VERSION = "v1"  # API version for future versioned endpoints (/api/v1/...)
 APP_NAME = "SentriKat"
+GITHUB_REPO = "sbr0nch/SentriKat"
 
 bp = Blueprint('main', __name__)
 
@@ -99,6 +101,49 @@ def get_version():
         'api_base': '/api',
         'api_docs': '/docs/API.md'
     })
+
+
+@bp.route('/api/updates/check', methods=['GET'])
+@login_required
+@admin_required
+def check_for_updates():
+    """Check GitHub for the latest SentriKat release."""
+    try:
+        resp = http_requests.get(
+            f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest',
+            timeout=5,
+            headers={'Accept': 'application/vnd.github.v3+json'}
+        )
+        if resp.status_code != 200:
+            return jsonify({'error': 'Could not reach update server', 'update_available': False}), 200
+
+        data = resp.json()
+        latest_tag = data.get('tag_name', '').lstrip('v')
+        current = APP_VERSION
+
+        # Simple tuple-based version comparison
+        def parse_ver(v):
+            try:
+                return tuple(int(x) for x in v.split('.'))
+            except (ValueError, AttributeError):
+                return (0, 0, 0)
+
+        update_available = parse_ver(latest_tag) > parse_ver(current)
+
+        return jsonify({
+            'update_available': update_available,
+            'current_version': current,
+            'latest_version': latest_tag,
+            'release_name': data.get('name', ''),
+            'release_url': data.get('html_url', ''),
+            'published_at': data.get('published_at', ''),
+        })
+    except http_requests.exceptions.RequestException:
+        # Offline or network error - not critical
+        return jsonify({'error': 'Could not reach update server', 'update_available': False}), 200
+    except Exception as e:
+        logger.warning(f'Update check failed: {e}')
+        return jsonify({'error': 'Update check failed', 'update_available': False}), 200
 
 
 @bp.route('/api/status', methods=['GET'])
@@ -1857,6 +1902,9 @@ def acknowledge_match(match_id):
             return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
 
     match.acknowledged = True
+    match.auto_acknowledged = False
+    match.resolution_reason = 'manual'
+    match.acknowledged_at = datetime.utcnow()
     db.session.commit()
     return jsonify(match.to_dict())
 
@@ -1879,6 +1927,9 @@ def unacknowledge_match(match_id):
             return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
 
     match.acknowledged = False
+    match.auto_acknowledged = False
+    match.resolution_reason = None
+    match.acknowledged_at = None
     # Reset first_alerted_at so it will be alerted again as "new"
     match.first_alerted_at = None
     db.session.commit()
@@ -2009,8 +2060,12 @@ def acknowledge_by_cve(cve_id):
 
     # Acknowledge all matches
     acknowledged_ids = []
+    now = datetime.utcnow()
     for match in matches:
         match.acknowledged = True
+        match.auto_acknowledged = False
+        match.resolution_reason = 'manual'
+        match.acknowledged_at = now
         acknowledged_ids.append(match.id)
 
     db.session.commit()
