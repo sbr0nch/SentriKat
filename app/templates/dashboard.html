@@ -17,12 +17,25 @@
         background: linear-gradient(135deg, var(--card-bg-start) 0%, var(--card-bg-end) 100%);
         box-shadow: 0 1px 4px rgba(0,0,0,0.06);
         height: 100%;
+        cursor: pointer;
+        user-select: none;
     }
 
     .alert-card:hover {
         transform: translateY(-1px);
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
+
+    .alert-card.active-filter {
+        border: 2px solid var(--active-border-color, #6b7280);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+        transform: translateY(-1px);
+    }
+
+    .alert-card-critical.active-filter { --active-border-color: #dc2626; }
+    .alert-card-high.active-filter { --active-border-color: #f59e0b; }
+    .alert-card-medium.active-filter { --active-border-color: #3b82f6; }
+    .alert-card-low.active-filter { --active-border-color: #10b981; }
 
     .alert-card-critical {
         --card-bg-start: #fef2f2;
@@ -155,7 +168,7 @@
     <!-- Priority Alert Cards -->
     <div class="row g-2 mb-3" id="priorityAlerts">
         <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-critical">
+            <div class="alert-card alert-card-critical" data-priority="critical" onclick="filterByPriority('critical')" title="Click to filter Critical vulnerabilities">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="alert-card-label">Critical</div>
@@ -167,7 +180,7 @@
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-high">
+            <div class="alert-card alert-card-high" data-priority="high" onclick="filterByPriority('high')" title="Click to filter High vulnerabilities">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="alert-card-label">High</div>
@@ -179,7 +192,7 @@
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-medium">
+            <div class="alert-card alert-card-medium" data-priority="medium" onclick="filterByPriority('medium')" title="Click to filter Medium vulnerabilities">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="alert-card-label">Medium</div>
@@ -191,7 +204,7 @@
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-low">
+            <div class="alert-card alert-card-low" data-priority="low" onclick="filterByPriority('low')" title="Click to filter Low vulnerabilities">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="alert-card-label">Low</div>
@@ -300,8 +313,9 @@
                     <select class="form-select" id="filterPriority">
                         <option value="">All</option>
                         <option value="critical">Critical</option>
-                        <option value="high">High+</option>
-                        <option value="medium">Medium+</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
@@ -1750,6 +1764,43 @@
         }
     }
 
+    /**
+     * Filter vulnerabilities by clicking a priority card.
+     * Clicking the same card again clears the filter.
+     */
+    function filterByPriority(priority) {
+        const currentFilter = document.getElementById('filterPriority').value;
+
+        // Toggle: clicking the active filter clears it
+        if (currentFilter === priority) {
+            document.getElementById('filterPriority').value = '';
+        } else {
+            document.getElementById('filterPriority').value = priority;
+        }
+
+        // Update active card highlight
+        updateActiveCard();
+
+        // Reload vulnerabilities and scroll to the list
+        currentPage = 1;
+        loadGroupedVulnerabilities();
+        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    /**
+     * Update the active-filter class on priority cards based on current filter
+     */
+    function updateActiveCard() {
+        const currentFilter = document.getElementById('filterPriority').value;
+        document.querySelectorAll('.alert-card[data-priority]').forEach(card => {
+            if (card.dataset.priority === currentFilter) {
+                card.classList.add('active-filter');
+            } else {
+                card.classList.remove('active-filter');
+            }
+        });
+    }
+
     function resetFilters() {
         document.getElementById('filterPriority').value = '';
         document.getElementById('filterSeverity').value = '';
@@ -1761,6 +1812,7 @@
         document.getElementById('filterRansomware').checked = false;
         document.getElementById('filterUnack').checked = false;
         document.getElementById('sortBy').value = 'priority';
+        updateActiveCard();
         currentPage = 1;  // Reset pagination
         loadGroupedVulnerabilities();
     }
@@ -1932,7 +1984,10 @@
     }
 
     // Handle filter changes - use grouped view (reset to page 1)
-    document.getElementById('filterPriority').addEventListener('change', resetAndLoadVulnerabilities);
+    document.getElementById('filterPriority').addEventListener('change', function() {
+        updateActiveCard();
+        resetAndLoadVulnerabilities();
+    });
     document.getElementById('filterSeverity').addEventListener('change', resetAndLoadVulnerabilities);
     document.getElementById('filterUrgency').addEventListener('change', resetAndLoadVulnerabilities);
     document.getElementById('filterAge').addEventListener('change', resetAndLoadVulnerabilities);
