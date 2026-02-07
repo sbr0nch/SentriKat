@@ -141,12 +141,13 @@ jobs:
           cp docker-compose.yml "${PKG_DIR}/docker-compose.yml"
 
           # Replace "build:" block with "image:" for the pre-built Docker image
-          # Remove build context and args, add image reference and port mapping
+          # Remove build context and args
           sed -i '/^\s*build:/,/^\s*NO_PROXY:.*$/{ /^\s*build:/d; /^\s*context:/d; /^\s*args:/d; /^\s*HTTP_PROXY:/d; /^\s*HTTPS_PROXY:/d; /^\s*NO_PROXY:.*$/d; }' "${PKG_DIR}/docker-compose.yml"
           # Add image line after container_name
           sed -i "/container_name: sentrikat$/a\\    image: ghcr.io/sbr0nch/sentrikat:${VERSION}" "${PKG_DIR}/docker-compose.yml"
-          # Add direct port mapping (in addition to expose for nginx)
-          sed -i "/expose:/a\\    ports:\n      - \"\${SENTRIKAT_PORT:-5000}:5000\"" "${PKG_DIR}/docker-compose.yml"
+          # Replace "expose" with "ports" for direct access (keep nginx too)
+          sed -i 's/^\(\s*\)expose:/\1ports:/' "${PKG_DIR}/docker-compose.yml"
+          sed -i "s/- \"5000\"/- \"\${SENTRIKAT_PORT:-5000}:5000\"/" "${PKG_DIR}/docker-compose.yml"
           # Add SENTRIKAT_LICENSE env var if not present
           if ! grep -q "SENTRIKAT_LICENSE" "${PKG_DIR}/docker-compose.yml"; then
             sed -i "/SENTRIKAT_INSTALLATION_ID/a\\      - SENTRIKAT_LICENSE=\${SENTRIKAT_LICENSE:-}" "${PKG_DIR}/docker-compose.yml"

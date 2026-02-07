@@ -63,6 +63,29 @@ if (-not $InstallDir) {
 
 Write-Info "Installation directory: $InstallDir"
 
+# Load proxy settings from .env if present
+$EnvFile = Join-Path $InstallDir ".env"
+if (Test-Path $EnvFile) {
+    $envContent = Get-Content $EnvFile
+    foreach ($line in $envContent) {
+        if ($line -match '^(HTTP_PROXY|HTTPS_PROXY|NO_PROXY)=(.+)$') {
+            $varName = $Matches[1]
+            $varValue = $Matches[2]
+            if (-not [Environment]::GetEnvironmentVariable($varName)) {
+                [Environment]::SetEnvironmentVariable($varName, $varValue, "Process")
+            }
+        }
+    }
+}
+$proxy = [Environment]::GetEnvironmentVariable("HTTPS_PROXY")
+if (-not $proxy) { $proxy = [Environment]::GetEnvironmentVariable("HTTP_PROXY") }
+if ($proxy) {
+    Write-Info "Proxy: $proxy"
+    # Configure PowerShell to use the proxy
+    [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy($proxy)
+    [System.Net.WebRequest]::DefaultWebProxy.BypassProxyOnLocal = $true
+}
+
 # Get current version
 $CurrentVersion = "unknown"
 $VersionFile = Join-Path $InstallDir "VERSION"

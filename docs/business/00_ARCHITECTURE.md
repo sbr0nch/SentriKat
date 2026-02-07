@@ -4,7 +4,7 @@
 
 ---
 
-**Document Version:** 1.0.0
+**Document Version:** 1.1.0
 **Last Updated:** February 2026
 **Classification:** CONFIDENTIAL - NOT FOR PUBLIC DISTRIBUTION
 **Author:** SentriKat Development Team
@@ -27,7 +27,8 @@
 12. [Deployment Architecture](#12-deployment-architecture)
 13. [Business Model](#13-business-model)
 14. [Intellectual Property](#14-intellectual-property)
-15. [Appendices](#15-appendices)
+15. [UI/UX Architecture](#15-uiux-architecture)
+16. [Appendices](#16-appendices)
 
 ---
 
@@ -118,11 +119,13 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 - **Escalation**: Re-alert if not acknowledged within N days
 
 ### Issue Tracking Integration
+- **Multi-Tracker Support**: Enable multiple issue trackers simultaneously (comma-separated configuration)
 - **Jira**: Cloud and Server/Data Center support
 - **GitHub Issues**: Create issues from CVEs
 - **GitLab Issues**: Create issues from CVEs
 - **YouTrack**: JetBrains issue tracker
 - **Generic Webhook**: Custom integrations
+- **Per-Tracker Actions**: Dashboard shows dedicated buttons per enabled tracker for ticket creation
 
 ### Reporting & Compliance
 - **CISA BOD 22-01**: Compliance dashboard and reports
@@ -174,7 +177,7 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 | Template Engine | Jinja2 | Server-side rendering |
 | Charts | Chart.js | Data visualization |
 | Tables | DataTables | Sortable/filterable tables |
-| Icons | Font Awesome | UI icons |
+| Icons | Bootstrap Icons | UI icons |
 
 ## 3.3 Security Libraries
 
@@ -232,13 +235,15 @@ SentriKat/
 │   ├── ldap_*.py                 # LDAP modules (1,500+ LOC)
 │   ├── saml_*.py                 # SAML modules (650+ LOC)
 │   ├── jira_integration.py       # Jira connector (400+ LOC)
+│   ├── issue_trackers.py          # Multi-tracker engine (Jira/GitHub/GitLab/YouTrack)
 │   ├── email_alerts.py           # Email system (626 LOC)
 │   ├── scheduler.py              # Background jobs (468 LOC)
 │   ├── encryption.py             # Fernet utils (141 LOC)
 │   └── templates/                # Jinja2 templates
-│       ├── base.html             # Layout (174 KB)
-│       ├── dashboard.html        # Main view (115 KB)
-│       ├── admin_panel.html      # Settings (245 KB)
+│       ├── base.html             # Layout, dark mode, global CSS/JS
+│       ├── dashboard.html        # Dashboard with charts, priority cards, CVE table
+│       ├── admin.html            # Inventory (Products, Endpoints, Software Overview)
+│       ├── admin_panel.html      # Admin (Users, Orgs, Integrations, Settings)
 │       └── ...
 │
 ├── agents/                       # Agent scripts
@@ -246,6 +251,9 @@ SentriKat/
 │   └── sentrikat-agent-linux.sh
 │
 ├── static/                       # CSS, JS, images
+│   └── js/
+│       ├── admin_panel.js        # Admin panel logic (~9500 LOC)
+│       └── sentrikat-core.js     # Core utilities (DOM, Toast, escaping)
 ├── tests/                        # pytest suite
 ├── nginx/                        # Reverse proxy config
 ├── docker-compose.yml            # Orchestration
@@ -685,10 +693,11 @@ DEFAULT: 1000/day, 200/hour per IP
 | Vulnerability | Protection |
 |---------------|------------|
 | SQL Injection | SQLAlchemy ORM (parameterized) |
-| XSS | Jinja2 autoescaping |
-| CSRF | flask-wtf tokens |
+| XSS | Jinja2 autoescaping + `escapeHtml()` for dynamic innerHTML/showToast/onclick |
+| CSRF | flask-wtf tokens (agent API routes exempt) |
 | Clickjacking | X-Frame-Options: SAMEORIGIN |
 | MIME Sniffing | X-Content-Type-Options: nosniff |
+| Markdown Injection | Sanitized issue tracker ticket descriptions |
 
 ## 7.6 Audit Logging
 
@@ -714,6 +723,8 @@ All security events logged:
 | GitLab Issues | Create from CVE |
 | YouTrack | Create from CVE |
 | Generic Webhook | Custom HTTP POST |
+
+**Multi-Tracker Architecture**: Multiple trackers can be enabled simultaneously via comma-separated `issue_tracker_type` setting (e.g., `jira,github`). The dashboard renders per-tracker action buttons, and admin settings show all tracker configurations at once via checkboxes.
 
 ## 8.2 Authentication Providers
 
@@ -1060,9 +1071,41 @@ jobs:
 
 ---
 
-# 15. APPENDICES
+# 15. UI/UX ARCHITECTURE
+
+## 15.1 Dashboard
+
+- **Two-Column Widget Layout**: Stats cards (left) and vulnerability trends chart (right) side by side
+- **Clickable Priority Cards**: CRITICAL/HIGH/MEDIUM/LOW cards filter the CVE table by severity
+- **Dual Y-Axis Chart**: Auto-detects when Unacknowledged count significantly exceeds severity data and adds a secondary Y-axis
+- **Dark Mode Awareness**: Chart.js colors (grid, ticks, legend, tooltips) adapt to the active theme
+- **Dismissible CPE Warning**: Products-without-CPE alert can be dismissed; reappears after 4 hours or when the count changes
+
+## 15.2 Inventory Page (admin.html)
+
+- **Products Tab**: Grouped product table with vendor, versions (vulnerable highlighted in red), CPE status, platforms, organizations
+- **Connected Endpoints Tab**: Asset inventory (previously on Integrations page)
+- **Software Overview Tab**: Cross-endpoint de-duplicated view with version sprawl detection and platform counts
+- **Assign CPE Shortcut**: Products without CPE show a clickable "Assign" badge that opens the edit modal with NVD search pre-populated
+
+## 15.3 Admin Panel (admin_panel.html)
+
+- **Settings Tab Consolidation**: 12 settings sub-tabs consolidated to 6 grouped tabs using `showSettingsGroup()` with visual separators (dashed `<hr>` dividers and accent borders)
+- **Multi-Tracker Checkboxes**: Issue tracker selection uses checkboxes instead of single dropdown, allowing simultaneous configuration
+- **Integrations Tab**: Simplified view with Agent Keys (renamed from Push Agents) management
+
+## 15.4 Theming
+
+- **Dark Mode**: Full support via `[data-theme="dark"]` CSS selectors on `<html>` element
+- **CSS Custom Properties**: `--surface-color`, `--text-color`, `--border-color`, etc. for consistent theming
+- **Component Coverage**: All cards, tables, charts, modals, alerts, and separators adapt to dark mode
+
+---
+
+# 16. APPENDICES
 
 ## A. Environment Variables
+
 
 ```bash
 # ── REQUIRED ──────────────────────────────────────────
@@ -1124,7 +1167,7 @@ DB_PASSWORD=change-me-to-a-secure-password
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0.0 | Feb 2026 | Development Team | Initial release |
-| 1.1.0 | Feb 2026 | Development Team | Added: CVE auto-resolution on version upgrade, in-app update check, sidebar navigation highlighting, complete vulnerability resolution documentation |
+| 1.1.0 | Feb 2026 | Development Team | Added: CVE auto-resolution, in-app update check, sidebar highlighting, dashboard redesign, clickable priority cards, dark mode, multi-tracker support, XSS fixes, settings consolidation, Software Overview tab, CPE UX improvements |
 
 ---
 

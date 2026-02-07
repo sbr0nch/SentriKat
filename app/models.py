@@ -559,7 +559,38 @@ class Vulnerability(db.Model):
         """Check if CPE data is available."""
         return bool(self.cpe_data)
 
+    def get_fix_versions(self):
+        """Extract fix version info from CPE data.
+
+        Returns a list of dicts with vendor, product, and the version that
+        resolves the vulnerability (versionEndExcluding or versionEndIncluding).
+        """
+        entries = self.get_cpe_entries()
+        fix_versions = []
+        seen = set()
+        for entry in entries:
+            version_end = entry.get('version_end')
+            version_end_type = entry.get('version_end_type')
+            if not version_end:
+                continue
+            vendor = entry.get('vendor', self.vendor_project or '')
+            product = entry.get('product', self.product or '')
+            key = f"{vendor}|{product}|{version_end}"
+            if key in seen:
+                continue
+            seen.add(key)
+            fix_versions.append({
+                'vendor': vendor,
+                'product': product,
+                'fix_version': version_end,
+                'fix_type': version_end_type,  # 'excluding' means upgrade to this version; 'including' means upgrade past this version
+                'version_start': entry.get('version_start'),
+                'version_start_type': entry.get('version_start_type'),
+            })
+        return fix_versions
+
     def to_dict(self):
+        fix_versions = self.get_fix_versions()
         return {
             'id': self.id,
             'cve_id': self.cve_id,
@@ -581,7 +612,10 @@ class Vulnerability(db.Model):
             # EPSS (Exploit Prediction Scoring System)
             'epss_score': self.epss_score,
             'epss_percentile': self.epss_percentile,
-            'epss_fetched_at': self.epss_fetched_at.isoformat() if self.epss_fetched_at else None
+            'epss_fetched_at': self.epss_fetched_at.isoformat() if self.epss_fetched_at else None,
+            # Fix version info from NVD CPE data
+            'fix_versions': fix_versions,
+            'has_fix_version': len(fix_versions) > 0
         }
 
 class VulnerabilityMatch(db.Model):

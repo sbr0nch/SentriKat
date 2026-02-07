@@ -1776,11 +1776,14 @@ def create_issue_generic():
     if not vulnerability_id:
         return jsonify({'error': 'vulnerability_id is required'}), 400
 
+    tracker_type = data.get('tracker_type')  # Optional: specify which tracker to use
+
     success, message, issue_key, issue_url = create_vulnerability_issue(
         vulnerability_id=vulnerability_id,
         product_id=product_id,
         custom_summary=custom_summary,
-        custom_description=custom_description
+        custom_description=custom_description,
+        tracker_type=tracker_type
     )
 
     if success:

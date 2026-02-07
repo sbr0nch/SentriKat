@@ -54,17 +54,21 @@
 
 ### Planned Features
 
-| Feature | Priority | Effort | Description |
-|---------|----------|--------|-------------|
-| Skip initial sync button | High | 1 day | Allow skipping CISA sync during setup |
-| Bulk CVE acknowledgement | High | 2 days | Acknowledge multiple CVEs at once |
-| Dashboard customization | Medium | 1 week | Widget-based dashboard |
-| Export to Excel | High | 3 days | XLSX export for reports |
-| macOS agent | High | 1 week | Homebrew/pkgutil inventory |
-| Improved CPE matching | High | 1 week | ML-assisted product matching |
-| Dark mode | Medium | 3 days | UI theme toggle |
-| Audit log export | Medium | 2 days | CSV/JSON export |
-| Multi-language support | Low | 2 weeks | i18n framework |
+| Feature | Priority | Effort | Status | Description |
+|---------|----------|--------|--------|-------------|
+| Skip initial sync button | High | 1 day | Planned | Allow skipping CISA sync during setup |
+| Bulk CVE acknowledgement | High | 2 days | ✅ Done | Acknowledge multiple CVEs at once |
+| Dashboard customization | Medium | 1 week | ✅ Done | Two-column widget layout, dual Y-axis chart, clickable priority cards |
+| Export to Excel | High | 3 days | Planned | XLSX export for reports |
+| macOS agent | High | 1 week | Planned | Homebrew/pkgutil inventory |
+| Improved CPE matching | High | 1 week | ✅ Partial | Assign CPE shortcut, NVD search auto-populate, hint banner |
+| Dark mode | Medium | 3 days | ✅ Done | Full dark mode with chart awareness |
+| Audit log export | Medium | 2 days | Planned | CSV/JSON export |
+| Multi-language support | Low | 2 weeks | Planned | i18n framework |
+| Multi-tracker support | High | 3 days | ✅ Done | Multiple issue trackers simultaneously |
+| Settings consolidation | Medium | 2 days | ✅ Done | 12→6 grouped tabs with visual separators |
+| Software Overview | Medium | 3 days | ✅ Done | Cross-endpoint dedup view, version sprawl detection |
+| Security hardening | High | 2 days | ✅ Done | XSS escaping, markdown injection sanitization |
 
 ### Technical Debt
 - [ ] Increase Gunicorn timeout for large syncs

@@ -17,12 +17,25 @@
         background: linear-gradient(135deg, var(--card-bg-start) 0%, var(--card-bg-end) 100%);
         box-shadow: 0 1px 4px rgba(0,0,0,0.06);
         height: 100%;
+        cursor: pointer;
+        user-select: none;
     }
 
     .alert-card:hover {
         transform: translateY(-1px);
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
+
+    .alert-card.active-filter {
+        border: 2px solid var(--active-border-color, #6b7280);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+        transform: translateY(-1px);
+    }
+
+    .alert-card-critical.active-filter { --active-border-color: #dc2626; }
+    .alert-card-high.active-filter { --active-border-color: #f59e0b; }
+    .alert-card-medium.active-filter { --active-border-color: #3b82f6; }
+    .alert-card-low.active-filter { --active-border-color: #10b981; }
 
     .alert-card-critical {
         --card-bg-start: #fef2f2;
@@ -143,146 +156,138 @@
 </style>
 <div class="fade-in">
     <!-- Page Header -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <h1 class="display-6 fw-bold text-dark mb-2">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h4 fw-bold text-dark mb-0">
                 <i class="bi bi-speedometer2 me-2"></i>Vulnerability Dashboard
             </h1>
-            <p class="text-muted mb-0">Real-time monitoring of known exploited vulnerabilities affecting your infrastructure</p>
+            <small class="text-muted">Real-time monitoring of known exploited vulnerabilities</small>
         </div>
     </div>
 
-    <!-- Priority Alert Cards -->
-    <div class="row g-2 mb-3" id="priorityAlerts">
-        <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-critical">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="alert-card-label">Critical</div>
-                        <div class="alert-card-value"><span id="criticalCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="criticalCount">-</span>)</small></div>
-                        <small class="text-muted">CVEs (matches)</small>
-                    </div>
-                    <i class="bi bi-exclamation-octagon-fill alert-icon"></i>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-high">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="alert-card-label">High</div>
-                        <div class="alert-card-value"><span id="highCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="highCount">-</span>)</small></div>
-                        <small class="text-muted">CVEs (matches)</small>
-                    </div>
-                    <i class="bi bi-exclamation-triangle-fill alert-icon"></i>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-medium">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="alert-card-label">Medium</div>
-                        <div class="alert-card-value"><span id="mediumCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="mediumCount">-</span>)</small></div>
-                        <small class="text-muted">CVEs (matches)</small>
-                    </div>
-                    <i class="bi bi-info-circle-fill alert-icon"></i>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="alert-card alert-card-low">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="alert-card-label">Low</div>
-                        <div class="alert-card-value"><span id="lowCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.9rem;">(<span id="lowCount">-</span>)</small></div>
-                        <small class="text-muted">CVEs (matches)</small>
-                    </div>
-                    <i class="bi bi-shield-check alert-icon"></i>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Statistics Cards -->
-    <div class="row g-2 mb-3" id="statsContainer">
-        <div class="col-xl-3 col-md-6">
-            <div class="card stat-card stat-card-compact" style="border-left-color: #3b82f6;">
-                <div class="card-body py-2 px-3 position-relative">
-                    <i class="bi bi-database stat-icon-sm"></i>
-                    <div class="stat-label-sm text-uppercase">Total Vulnerabilities</div>
-                    <div class="stat-value-sm text-primary" id="totalVulns">-</div>
-                    <small class="text-muted" style="font-size: 0.75rem;">In CISA KEV Catalog</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="card stat-card stat-card-compact" style="border-left-color: #ef4444;">
-                <div class="card-body py-2 px-3 position-relative">
-                    <i class="bi bi-exclamation-triangle stat-icon-sm"></i>
-                    <div class="stat-label-sm text-uppercase">Affecting Products</div>
-                    <div class="stat-value-sm text-danger" id="totalMatches">-</div>
-                    <small class="text-muted" style="font-size: 0.75rem;">Direct matches found</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="card stat-card stat-card-compact" style="border-left-color: #f59e0b;">
-                <div class="card-body py-2 px-3 position-relative">
-                    <i class="bi bi-clock-history stat-icon-sm"></i>
-                    <div class="stat-label-sm text-uppercase">Needs Review</div>
-                    <div class="stat-value-sm text-warning" id="unacknowledged">-</div>
-                    <small class="text-muted" style="font-size: 0.75rem;">Unacknowledged items</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="card stat-card stat-card-compact" style="border-left-color: #10b981;">
-                <div class="card-body py-2 px-3 position-relative">
-                    <i class="bi bi-gear-fill stat-icon-sm"></i>
-                    <div class="stat-label-sm text-uppercase">Products Tracked</div>
-                    <div class="stat-value-sm text-success" id="productsTracked">-</div>
-                    <small class="text-muted" style="font-size: 0.75rem;">Active inventory</small>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Vulnerability Trends Chart -->
-    <div class="card mb-3" id="trendChartCard">
-        <div class="card-header py-2 d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-graph-up me-2"></i>Vulnerability Trends (30 Days)</span>
+    <!-- Unmapped Products Warning (top-level, right under title) -->
+    <div id="unmappedWarning" class="alert alert-warning d-none mb-3 alert-dismissible" role="alert">
+        <div class="d-flex justify-content-between align-items-center">
             <div>
-                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="loadTrendChart()" title="Refresh">
-                    <i class="bi bi-arrow-clockwise"></i>
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-bs-toggle="collapse" data-bs-target="#trendChartBody">
-                    <i class="bi bi-chevron-down"></i>
-                </button>
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
+                These cannot be checked for vulnerabilities.
+                <a href="/admin#products" class="alert-link">Review manually</a>
             </div>
-        </div>
-        <div class="card-body py-3 collapse show" id="trendChartBody">
-            <div id="trendChartContainer" style="position: relative; height: 250px;">
-                <canvas id="trendChart"></canvas>
-            </div>
-            <div id="trendNoData" class="text-center text-muted py-4 d-none">
-                <i class="bi bi-bar-chart fs-1 opacity-50"></i>
-                <p class="mt-2 mb-0">No trend data available yet. Snapshots are taken daily at 2 AM.</p>
-                {% if session.get('is_admin') %}
-                <button class="btn btn-sm btn-outline-primary mt-2" onclick="takeManualSnapshot()">
-                    <i class="bi bi-camera"></i> Take Snapshot Now
+            <div class="d-flex align-items-center gap-2 ms-3">
+                <button class="btn btn-warning btn-sm" onclick="autoFixCpe()" id="autoFixCpeBtn">
+                    <i class="bi bi-magic me-1"></i>Auto-Detect CPE
                 </button>
-                {% endif %}
+                <button type="button" class="btn-close" aria-label="Dismiss" onclick="dismissUnmappedWarning()"></button>
             </div>
         </div>
     </div>
 
-    <!-- Unmapped Products Warning -->
-    <div id="unmappedWarning" class="alert alert-warning d-none mb-3" role="alert">
-        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-        <strong><span id="unmappedCount">0</span> products without CPE mapping</strong> -
-        These cannot be checked for vulnerabilities.
-        <a href="/admin#products" class="alert-link">Review and assign CPE mappings</a> to ensure complete coverage.
+    <!-- Dashboard Top: Two-Column Widget Layout -->
+    <div class="row g-3 mb-3">
+        <!-- Left Column: Priority + Stats -->
+        <div class="col-lg-5 col-xl-4">
+            <!-- Priority Alert Cards (compact 2x2 grid) -->
+            <div class="row g-2 mb-2" id="priorityAlerts">
+                <div class="col-6">
+                    <div class="alert-card alert-card-critical" data-priority="critical" onclick="filterBySeverity('CRITICAL')" title="Click to filter by Critical">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label">Critical</div>
+                                <div class="alert-card-value"><span id="criticalCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="criticalCount">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-exclamation-octagon-fill alert-icon"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="alert-card alert-card-high" data-priority="high" onclick="filterBySeverity('HIGH')" title="Click to filter by High">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label">High</div>
+                                <div class="alert-card-value"><span id="highCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="highCount">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-exclamation-triangle-fill alert-icon"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="alert-card alert-card-medium" data-priority="medium" onclick="filterBySeverity('MEDIUM')" title="Click to filter by Medium">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label">Medium</div>
+                                <div class="alert-card-value"><span id="mediumCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="mediumCount">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-info-circle-fill alert-icon"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="alert-card alert-card-low" data-priority="low" onclick="filterBySeverity('LOW')" title="Click to filter by Low">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label">Low</div>
+                                <div class="alert-card-value"><span id="lowCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="lowCount">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-shield-check alert-icon"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats (compact list) -->
+            <div class="card" id="statsContainer">
+                <div class="card-body p-2">
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
+                        <small class="text-muted"><i class="bi bi-database me-1"></i>KEV Catalog</small>
+                        <span class="fw-bold text-primary" id="totalVulns">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
+                        <small class="text-muted"><i class="bi bi-exclamation-triangle me-1"></i>Affecting Products</small>
+                        <span class="fw-bold text-danger" id="totalMatches">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
+                        <small class="text-muted"><i class="bi bi-clock-history me-1"></i>Needs Review</small>
+                        <span class="fw-bold text-warning" id="unacknowledged">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2">
+                        <small class="text-muted"><i class="bi bi-gear-fill me-1"></i>Products Tracked</small>
+                        <span class="fw-bold text-success" id="productsTracked">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Trends Chart -->
+        <div class="col-lg-7 col-xl-8">
+            <div class="card h-100" id="trendChartCard">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-graph-up me-2"></i>Vulnerability Trends (30 Days)</span>
+                    <div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="loadTrendChart()" title="Refresh">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-bs-toggle="collapse" data-bs-target="#trendChartBody">
+                            <i class="bi bi-chevron-down"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body py-3 collapse show" id="trendChartBody">
+                    <div id="trendChartContainer" style="position: relative; height: 220px;">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                    <div id="trendNoData" class="text-center text-muted py-4 d-none">
+                        <i class="bi bi-bar-chart fs-1 opacity-50"></i>
+                        <p class="mt-2 mb-0">No trend data available yet. Snapshots are taken daily at 2 AM.</p>
+                        {% if session.get('is_admin') %}
+                        <button class="btn btn-sm btn-outline-primary mt-2" onclick="takeManualSnapshot()">
+                            <i class="bi bi-camera"></i> Take Snapshot Now
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Advanced Filters Panel -->
@@ -300,8 +305,9 @@
                     <select class="form-select" id="filterPriority">
                         <option value="">All</option>
                         <option value="critical">Critical</option>
-                        <option value="high">High+</option>
-                        <option value="medium">Medium+</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
@@ -311,6 +317,7 @@
                         <option value="CRITICAL">Critical</option>
                         <option value="HIGH">High</option>
                         <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
@@ -936,14 +943,27 @@
             document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
             document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
 
-            // Show/hide unmapped products warning
+            // Show/hide unmapped products warning (respects dismiss)
             const unmappedWarning = document.getElementById('unmappedWarning');
             const unmappedCount = document.getElementById('unmappedCount');
             if (unmappedWarning && stats.products_unmapped > 0) {
                 unmappedCount.textContent = stats.products_unmapped;
-                unmappedWarning.classList.remove('d-none');
+                // Check if user dismissed this warning recently (4-hour cooldown)
+                const dismissedAt = localStorage.getItem('unmappedWarningDismissed');
+                const dismissedCount = parseInt(localStorage.getItem('unmappedWarningDismissedCount') || '0');
+                const cooldownMs = 4 * 60 * 60 * 1000; // 4 hours
+                const isStillDismissed = dismissedAt && (Date.now() - parseInt(dismissedAt)) < cooldownMs
+                    && dismissedCount === stats.products_unmapped;
+                if (!isStillDismissed) {
+                    unmappedWarning.classList.remove('d-none');
+                    // Clear stale dismiss if count changed
+                    if (dismissedCount !== stats.products_unmapped) {
+                        localStorage.removeItem('unmappedWarningDismissed');
+                    }
+                }
             } else if (unmappedWarning) {
                 unmappedWarning.classList.add('d-none');
+                localStorage.removeItem('unmappedWarningDismissed');
             }
 
             // Update priority counts - CVE counts and match counts
@@ -1010,6 +1030,26 @@
                 return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             });
 
+            // Compute smart Y-axis formatting
+            function formatAxisValue(value) {
+                if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+                if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
+                return value;
+            }
+
+            // Check if severity data is dwarfed by unacknowledged (>5x difference)
+            const allSeverity = [...(trends.critical || []), ...(trends.high || []), ...(trends.medium || [])];
+            const maxSeverity = Math.max(0, ...allSeverity);
+            const maxUnack = Math.max(0, ...(trends.unacknowledged || []));
+            const needsDualAxis = maxUnack > maxSeverity * 5 && maxSeverity > 0;
+
+            // Dark mode aware colors
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+            const tickColor = isDark ? '#9ca3af' : '#6b7280';
+            const legendColor = isDark ? '#d1d5db' : undefined;
+            const tooltipBg = isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)';
+
             trendChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -1023,7 +1063,9 @@
                             fill: true,
                             tension: 0.3,
                             pointRadius: 2,
-                            pointHoverRadius: 5
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
+                            yAxisID: 'y'
                         },
                         {
                             label: 'High',
@@ -1033,7 +1075,9 @@
                             fill: true,
                             tension: 0.3,
                             pointRadius: 2,
-                            pointHoverRadius: 5
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
+                            yAxisID: 'y'
                         },
                         {
                             label: 'Medium',
@@ -1043,17 +1087,21 @@
                             fill: true,
                             tension: 0.3,
                             pointRadius: 2,
-                            pointHoverRadius: 5
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
+                            yAxisID: 'y'
                         },
                         {
                             label: 'Unacknowledged',
                             data: trends.unacknowledged,
-                            borderColor: '#6b7280',
+                            borderColor: isDark ? '#9ca3af' : '#6b7280',
                             borderDash: [5, 5],
                             fill: false,
                             tension: 0.3,
                             pointRadius: 2,
-                            pointHoverRadius: 5
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
+                            yAxisID: needsDualAxis ? 'y1' : 'y'
                         }
                     ]
                 },
@@ -1070,11 +1118,14 @@
                             labels: {
                                 usePointStyle: true,
                                 padding: 15,
-                                font: { size: 11 }
+                                font: { size: 11 },
+                                color: legendColor
                             }
                         },
                         tooltip: {
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            backgroundColor: tooltipBg,
+                            titleColor: '#fff',
+                            bodyColor: '#e5e7eb',
                             padding: 12,
                             titleFont: { size: 13 },
                             bodyFont: { size: 12 },
@@ -1082,6 +1133,9 @@
                                 title: function(context) {
                                     const idx = context[0].dataIndex;
                                     return trends.dates[idx];
+                                },
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + formatAxisValue(context.parsed.y);
                                 }
                             }
                         }
@@ -1089,17 +1143,46 @@
                     scales: {
                         x: {
                             grid: { display: false },
-                            ticks: { font: { size: 10 } }
+                            ticks: { font: { size: 10 }, color: tickColor }
                         },
                         y: {
+                            type: 'linear',
+                            position: 'left',
                             beginAtZero: true,
-                            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                            title: {
+                                display: needsDualAxis,
+                                text: 'By Severity',
+                                font: { size: 10, weight: 'bold' },
+                                color: tickColor
+                            },
+                            grid: { color: gridColor },
                             ticks: {
                                 font: { size: 10 },
-                                stepSize: 1,
-                                precision: 0
+                                color: tickColor,
+                                precision: 0,
+                                callback: formatAxisValue
                             }
-                        }
+                        },
+                        ...(needsDualAxis ? {
+                            y1: {
+                                type: 'linear',
+                                position: 'right',
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Unacknowledged',
+                                    font: { size: 10, weight: 'bold' },
+                                    color: tickColor
+                                },
+                                grid: { drawOnChartArea: false },
+                                ticks: {
+                                    font: { size: 10 },
+                                    precision: 0,
+                                    color: tickColor,
+                                    callback: formatAxisValue
+                                }
+                            }
+                        } : {})
                     }
                 }
             });
@@ -1337,6 +1420,23 @@
             </span>` :
             (vuln.epss_fetched_at ? '<span class="badge bg-secondary" title="EPSS data not available for this CVE"><i class="bi bi-lightning-charge"></i> No EPSS</span>' : '');
 
+        // Fix version info from CVE CPE data
+        const fixVersions = vuln.fix_versions || [];
+        let fixVersionHtml = '';
+        if (fixVersions.length > 0) {
+            const fixItems = fixVersions.slice(0, 3).map(fv => {
+                const fixLabel = fv.fix_type === 'excluding'
+                    ? `<strong>${escapeHtml(fv.fix_version)}</strong>`
+                    : `> <strong>${escapeHtml(fv.fix_version)}</strong>`;
+                return `<span class="badge bg-success me-1"><i class="bi bi-arrow-up-circle me-1"></i>${escapeHtml(fv.vendor)} ${escapeHtml(fv.product)}: ${fixLabel}</span>`;
+            }).join('');
+            fixVersionHtml = `
+                            <div class="mb-3">
+                                <small class="text-muted fw-semibold">FIX VERSION</small>
+                                <div>${fixItems}</div>
+                            </div>`;
+        }
+
         return `
             <div class="card vuln-card mb-3" id="match-${match.id}" style="border-left: 4px solid ${getPriorityColor(priority)};">
                 <div class="card-body">
@@ -1392,6 +1492,8 @@
                                 <p class="mb-0 fw-medium text-danger">${vuln.required_action}</p>
                             </div>
 
+                            ${fixVersionHtml}
+
                             <div class="mb-3">
                                 <small class="text-muted fw-semibold">MATCH REASON</small>
                                 <p class="mb-0 text-primary">${match.match_reason}</p>
@@ -1423,10 +1525,7 @@
                                 <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
                                     <i class="bi bi-share"></i> Share
                                 </button>
-                                ${window.jiraEnabled ? `
-                                <button class="btn btn-sm btn-outline-secondary" onclick="createJiraIssue(${vuln.id}, ${product.id}, '${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')" title="Create Jira Issue">
-                                    <i class="bi bi-kanban"></i> Jira
-                                </button>` : ''}
+                                ${getTrackerButtonsHtml(vuln.id, product.id, vuln.cve_id, vuln.vulnerability_name)}
                             </div>
                         </div>
                     </div>
@@ -1761,6 +1860,7 @@
         document.getElementById('filterRansomware').checked = false;
         document.getElementById('filterUnack').checked = false;
         document.getElementById('sortBy').value = 'priority';
+        document.querySelectorAll('.alert-card').forEach(card => card.classList.remove('active-filter'));
         currentPage = 1;  // Reset pagination
         loadGroupedVulnerabilities();
     }
@@ -1840,10 +1940,11 @@
         setInterval(loadStats, 300000);
     });
 
-    // Initialize issue tracker state (supports Jira, YouTrack, GitHub, GitLab, Webhook)
-    window.jiraEnabled = false;  // Legacy - kept for button visibility
+    // Initialize issue tracker state (supports multiple simultaneous trackers)
+    window.jiraEnabled = false;  // Legacy - kept for backward compat
     window.issueTrackerType = 'disabled';
     window.issueTrackerName = '';
+    window.enabledTrackers = [];  // Array of {type, name, icon}
 
     async function loadJiraEnabled() {
         try {
@@ -1851,31 +1952,39 @@
             if (response.ok) {
                 const config = await response.json();
                 window.issueTrackerType = config.type || 'disabled';
-                window.jiraEnabled = config.enabled;  // For button visibility
+                window.jiraEnabled = config.enabled;
 
-                // Set friendly name for display
-                const names = {
-                    'jira': 'Jira',
-                    'youtrack': 'YouTrack',
-                    'github': 'GitHub',
-                    'gitlab': 'GitLab',
-                    'webhook': 'Issue'
-                };
-                window.issueTrackerName = names[config.type] || 'Issue';
+                // Multi-tracker: store all enabled trackers
+                window.enabledTrackers = config.trackers || [];
+
+                // Legacy single-tracker name (first enabled)
+                if (window.enabledTrackers.length > 0) {
+                    window.issueTrackerName = window.enabledTrackers[0].name;
+                }
             }
         } catch (error) {
             console.warn('Could not load issue tracker settings:', error);
         }
     }
 
-    // Create issue from vulnerability (supports all configured trackers)
-    async function createJiraIssue(vulnId, productId, cveId, vulnName) {
-        if (!window.jiraEnabled || window.issueTrackerType === 'disabled') {
-            showToast('Issue tracker not configured. Go to Admin Panel > Integrations > Issue Trackers.', 'warning');
-            return;
-        }
+    // Build issue tracker buttons HTML for a vulnerability
+    function getTrackerButtonsHtml(vulnId, productId, cveId, vulnName) {
+        if (!window.enabledTrackers || window.enabledTrackers.length === 0) return '';
+        return window.enabledTrackers.map(tracker => {
+            const safeName = escapeHtml(vulnName);
+            const safeType = escapeHtml(tracker.type);
+            const safeCveId = escapeHtml(cveId);
+            return `<button class="btn btn-sm btn-outline-secondary" onclick="createTrackerIssue(${parseInt(vulnId)}, ${productId ? parseInt(productId) : 'null'}, '${safeCveId}', '${safeName.replace(/'/g, "\\'")}', '${safeType}')" title="Create ${escapeHtml(tracker.name)} Issue">
+                <i class="bi ${escapeHtml(tracker.icon)}"></i> ${escapeHtml(tracker.name)}
+            </button>`;
+        }).join('\n');
+    }
 
-        const trackerName = window.issueTrackerName || 'Issue';
+    // Create issue on a specific tracker
+    async function createTrackerIssue(vulnId, productId, cveId, vulnName, trackerType) {
+        const tracker = window.enabledTrackers.find(t => t.type === trackerType);
+        const trackerName = tracker ? tracker.name : 'Issue';
+
         const confirmed = await showConfirm(
             `Create a ${trackerName} issue for ${cveId}?\n\n"${vulnName}"`,
             `Create ${trackerName} Issue`,
@@ -1892,7 +2001,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     vulnerability_id: vulnId,
-                    product_id: productId
+                    product_id: productId,
+                    tracker_type: trackerType
                 })
             });
 
@@ -1900,19 +2010,29 @@
 
             if (response.ok && result.success) {
                 const issueId = result.issue_key || 'Issue';
-                showToast(`${trackerName} issue created: ${issueId}`, 'success');
-                // Open the issue in a new tab if URL provided
+                showToast(`${escapeHtml(trackerName)} issue created: ${escapeHtml(issueId)}`, 'success');
                 if (result.issue_url) {
                     window.open(result.issue_url, '_blank');
                 }
             } else {
-                showToast(`Failed to create issue: ${result.error || result.message}`, 'danger');
+                showToast(`Failed to create issue: ${escapeHtml(result.error || result.message)}`, 'danger');
             }
         } catch (error) {
-            showToast(`Error creating issue: ${error.message}`, 'danger');
+            showToast(`Error creating issue: ${escapeHtml(error.message)}`, 'danger');
         } finally {
             hideLoading();
         }
+    }
+
+    // Legacy wrapper for backward compatibility
+    function createJiraIssue(vulnId, productId, cveId, vulnName) {
+        if (!window.jiraEnabled) {
+            showToast('Issue tracker not configured. Go to Admin Panel > Integrations > Issue Trackers.', 'warning');
+            return;
+        }
+        // Use first enabled tracker if no specific type
+        const trackerType = window.enabledTrackers.length > 0 ? window.enabledTrackers[0].type : null;
+        createTrackerIssue(vulnId, productId, cveId, vulnName, trackerType);
     }
 
     // Handle Enter key in filter inputs - trigger reload on Enter (reset to page 1)
@@ -1931,8 +2051,40 @@
         loadGroupedVulnerabilities();
     }
 
+    // Filter by effective priority when clicking priority alert cards
+    function filterBySeverity(severity) {
+        const priorityFilter = document.getElementById('filterPriority');
+        const priorityValue = severity.toLowerCase();  // API expects lowercase
+        // Toggle: if already filtering by this priority, clear it
+        if (priorityFilter.value === priorityValue) {
+            priorityFilter.value = '';
+        } else {
+            priorityFilter.value = priorityValue;
+        }
+        // Clear severity filter to avoid conflict
+        document.getElementById('filterSeverity').value = '';
+        // Highlight active card
+        document.querySelectorAll('.alert-card').forEach(card => card.classList.remove('active-filter'));
+        if (priorityFilter.value) {
+            const cardClass = 'alert-card-' + priorityValue;
+            const activeCard = document.querySelector('.' + cardClass);
+            if (activeCard) activeCard.classList.add('active-filter');
+        }
+        // Scroll to vulnerability list
+        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        resetAndLoadVulnerabilities();
+    }
+
     // Handle filter changes - use grouped view (reset to page 1)
-    document.getElementById('filterPriority').addEventListener('change', resetAndLoadVulnerabilities);
+    document.getElementById('filterPriority').addEventListener('change', function() {
+        // Sync card highlight with dropdown
+        document.querySelectorAll('.alert-card').forEach(card => card.classList.remove('active-filter'));
+        if (this.value) {
+            const activeCard = document.querySelector('.alert-card-' + this.value);
+            if (activeCard) activeCard.classList.add('active-filter');
+        }
+        resetAndLoadVulnerabilities();
+    });
     document.getElementById('filterSeverity').addEventListener('change', resetAndLoadVulnerabilities);
     document.getElementById('filterUrgency').addEventListener('change', resetAndLoadVulnerabilities);
     document.getElementById('filterAge').addEventListener('change', resetAndLoadVulnerabilities);
@@ -2095,6 +2247,40 @@
     /**
      * Load shared view if share_token is present
      */
+    function dismissUnmappedWarning() {
+        const warning = document.getElementById('unmappedWarning');
+        if (warning) warning.classList.add('d-none');
+        const count = document.getElementById('unmappedCount')?.textContent || '0';
+        localStorage.setItem('unmappedWarningDismissed', Date.now().toString());
+        localStorage.setItem('unmappedWarningDismissedCount', count);
+    }
+
+    async function autoFixCpe() {
+        const btn = document.getElementById('autoFixCpeBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Detecting...';
+        }
+        try {
+            const response = await fetch('/api/products/apply-cpe', { method: 'POST' });
+            if (!response.ok) throw new Error(`Server error: ${response.status}`);
+            const data = await response.json();
+            if (data.updated > 0) {
+                showToast(`CPE mapped for ${data.updated} products. Coverage: ${data.coverage?.coverage_percent || '?'}%`, 'success');
+                loadStats();
+            } else {
+                showToast('No additional CPE mappings could be auto-detected. These products may need manual mapping.', 'info');
+            }
+        } catch (error) {
+            showToast(`Error: ${escapeHtml(error.message)}`, 'danger');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-magic me-1"></i>Auto-Detect CPE';
+            }
+        }
+    }
+
     async function loadSharedView() {
         const shareToken = '{{ share_token | default("") }}';
         if (!shareToken) return;
@@ -2290,12 +2476,52 @@
         const epssRank = epssPercentile ? Math.round((1 - epssPercentile) * 100) : null;
         const epssColor = epssPercentile >= 0.95 ? '#dc2626' : epssPercentile >= 0.85 ? '#ea580c' : epssPercentile >= 0.70 ? '#3b82f6' : '#22c55e';
 
+        // Build fix version info from CVE CPE data - compact inline badges
+        const fixVersions = vuln.fix_versions || [];
+        let fixVersionHtml = '';
+        if (fixVersions.length > 0) {
+            const fixBadges = fixVersions.slice(0, 4).map(fv => {
+                const fixLabel = fv.fix_type === 'excluding' ? escapeHtml(fv.fix_version) : `> ${escapeHtml(fv.fix_version)}`;
+                return `<span class="badge bg-success me-1 mb-1" title="${escapeHtml(fv.vendor)} ${escapeHtml(fv.product)}: upgrade to ${escapeHtml(fv.fix_version)}"><i class="bi bi-arrow-up-circle me-1"></i>${escapeHtml(fv.product)} ${fixLabel}</span>`;
+            }).join('');
+            const moreCount = fixVersions.length > 4 ? `<span class="badge bg-secondary mb-1">+${fixVersions.length - 4} more</span>` : '';
+            fixVersionHtml = `
+                <div class="mb-2">
+                    <small class="text-muted fw-semibold me-2">FIX:</small>${fixBadges}${moreCount}
+                </div>`;
+        } else if (vuln.has_cpe_data) {
+            fixVersionHtml = `
+                <div class="mb-2">
+                    <small class="text-muted fw-semibold me-2">FIX:</small>
+                    <span class="badge bg-secondary"><i class="bi bi-info-circle me-1"></i>Check vendor advisory</span>
+                    <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank" class="badge bg-light text-dark text-decoration-none border ms-1"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>
+                </div>`;
+        }
+
         // Build affected products list with assets
         const productsHtml = group.affected_products.map(prod => {
             const ackIcon = prod.acknowledged ?
                 '<i class="bi bi-check-circle-fill text-success"></i>' :
                 '<i class="bi bi-exclamation-circle-fill text-warning"></i>';
             const statusText = prod.acknowledged ? 'Resolved' : 'Needs Review';
+
+            // Show product version
+            const versionBadge = prod.version ? `<span class="badge bg-secondary ms-1">v${prod.version}</span>` : '';
+
+            // Find matching fix version for this product
+            let fixBadge = '';
+            if (fixVersions.length > 0) {
+                const matchingFix = fixVersions.find(fv =>
+                    fv.vendor.toLowerCase() === (prod.vendor || '').toLowerCase() &&
+                    fv.product.toLowerCase() === (prod.product_name || '').toLowerCase()
+                ) || fixVersions[0];  // fallback to first fix version
+                if (matchingFix) {
+                    const fixLabel = matchingFix.fix_type === 'excluding'
+                        ? matchingFix.fix_version
+                        : `> ${matchingFix.fix_version}`;
+                    fixBadge = `<span class="badge bg-success ms-1" title="Fix version"><i class="bi bi-arrow-up-circle me-1"></i>${fixLabel}</span>`;
+                }
+            }
 
             // Build assets list for this product
             const assetsCount = prod.affected_assets_count || 0;
@@ -2310,7 +2536,7 @@
                         <div class="d-flex align-items-center">
                             ${ackIcon}
                             <div class="ms-2">
-                                <div class="fw-semibold">${prod.vendor} ${prod.product_name}</div>
+                                <div class="fw-semibold">${prod.vendor} ${prod.product_name} ${versionBadge} ${fixBadge}</div>
                                 <small class="text-muted">${statusText}</small>
                             </div>
                         </div>
@@ -2335,12 +2561,8 @@
         const matchIds = group.affected_products.map(p => p.match_id);
         const matchIdsJson = JSON.stringify(matchIds);
 
-        // Issue tracker button
-        const trackerName = window.issueTrackerName || 'Issue';
-        const trackerBtn = window.jiraEnabled ? `
-            <button class="btn btn-sm btn-outline-secondary" onclick="createJiraIssue(${vuln.id}, null, '${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')" title="Create ${trackerName}">
-                <i class="bi bi-kanban"></i> ${trackerName}
-            </button>` : '';
+        // Issue tracker buttons (one per enabled tracker)
+        const trackerBtn = getTrackerButtonsHtml(vuln.id, null, vuln.cve_id, vuln.vulnerability_name);
 
         return `
             <div class="card vuln-card-v2 mb-4 shadow-sm overflow-hidden" data-match-ids='${matchIdsJson}'>
@@ -2371,77 +2593,35 @@
                         <h5 class="mt-2 mb-0 fw-semibold">${vuln.vulnerability_name}</h5>
                     </div>
 
-                    <!-- Score Cards Row -->
-                    <div class="row g-2 mb-3">
-                        <!-- CVSS Score -->
-                        <div class="col-md-4">
-                            <div class="border rounded p-2 h-100 bg-light">
-                                <div class="d-flex justify-content-between align-items-center mb-1">
-                                    <small class="text-muted fw-semibold">CVSS SCORE</small>
-                                    <span class="fw-bold" style="color: ${cvssColor}">${vuln.cvss_score || 'N/A'}</span>
-                                </div>
-                                ${vuln.cvss_score ? `
-                                <div class="progress" style="height: 6px;">
-                                    <div class="progress-bar" role="progressbar" style="width: ${cvssPercent}%; background-color: ${cvssColor}"></div>
-                                </div>
-                                <small class="text-muted">${vuln.severity || 'Unknown'} severity</small>
-                                ` : '<small class="text-muted">No CVSS data available</small>'}
-                            </div>
-                        </div>
-                        <!-- EPSS Score -->
-                        <div class="col-md-4">
-                            <div class="border rounded p-2 h-100 bg-light">
-                                <div class="d-flex justify-content-between align-items-center mb-1">
-                                    <small class="text-muted fw-semibold">EPSS PROBABILITY</small>
-                                    <span class="fw-bold" style="color: ${epssScore != null ? epssColor : '#6b7280'}">${epssPercent != null ? epssPercent.toFixed(1) + '%' : 'N/A'}</span>
-                                </div>
-                                ${epssScore != null ? `
-                                <div class="progress" style="height: 6px;">
-                                    <div class="progress-bar" role="progressbar" style="width: ${epssPercent}%; background-color: ${epssColor}"></div>
-                                </div>
-                                <small class="text-muted">Top ${epssRank}% most likely to be exploited</small>
-                                ` : '<small class="text-muted">No EPSS data available</small>'}
-                            </div>
-                        </div>
-                        <!-- Exposure -->
-                        <div class="col-md-4">
-                            <div class="border rounded p-2 h-100 bg-light">
-                                <div class="d-flex justify-content-between align-items-center mb-1">
-                                    <small class="text-muted fw-semibold">YOUR EXPOSURE</small>
-                                    <span class="fw-bold ${group.unacknowledged_count > 0 ? 'text-danger' : 'text-success'}">${group.product_count}</span>
-                                </div>
-                                <div class="d-flex align-items-center">
-                                    ${group.unacknowledged_count > 0 ?
-                                        `<i class="bi bi-exclamation-circle-fill text-warning me-1"></i>
-                                        <small class="text-warning fw-semibold">${group.unacknowledged_count} need review</small>` :
-                                        `<i class="bi bi-check-circle-fill text-success me-1"></i>
-                                        <small class="text-success fw-semibold">All resolved</small>`
-                                    }
-                                </div>
-                                <small class="text-muted">${group.product_count} product${group.product_count > 1 ? 's' : ''} in your inventory</small>
-                                ${group.total_affected_assets > 0 ?
-                                    `<div class="mt-1"><span class="badge bg-info text-dark"><i class="bi bi-hdd-network me-1"></i>${group.total_affected_assets} endpoint${group.total_affected_assets > 1 ? 's' : ''} affected</span></div>` : ''
-                                }
-                            </div>
-                        </div>
+                    <!-- Scores + Exposure (compact badge row) -->
+                    <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+                        ${vuln.cvss_score ? `
+                        <span class="badge rounded-pill" style="background-color: ${cvssColor}; font-size: 0.8rem;">
+                            CVSS ${vuln.cvss_score} (${vuln.severity || '?'})
+                        </span>` : ''}
+                        ${epssScore != null ? `
+                        <span class="badge rounded-pill" style="background-color: ${epssColor}; font-size: 0.8rem;" title="Top ${epssRank}% most likely to be exploited">
+                            <i class="bi bi-lightning-charge"></i> EPSS ${epssPercent.toFixed(1)}%
+                        </span>` : ''}
+                        <span class="badge rounded-pill ${group.unacknowledged_count > 0 ? 'bg-warning text-dark' : 'bg-success'}" style="font-size: 0.8rem;">
+                            ${group.product_count} product${group.product_count > 1 ? 's' : ''}${group.unacknowledged_count > 0 ? ` (${group.unacknowledged_count} unresolved)` : ' resolved'}
+                        </span>
+                        ${group.total_affected_assets > 0 ? `
+                        <span class="badge rounded-pill bg-info text-dark" style="font-size: 0.8rem;">
+                            <i class="bi bi-hdd-network"></i> ${group.total_affected_assets} endpoint${group.total_affected_assets > 1 ? 's' : ''}
+                        </span>` : ''}
                     </div>
 
-                    <!-- Impact Section -->
-                    <div class="mb-3">
-                        <div class="d-flex align-items-center mb-1">
-                            <i class="bi bi-lightning-charge-fill text-danger me-1"></i>
-                            <small class="text-muted fw-bold text-uppercase">Impact</small>
+                    <!-- Impact + How to Fix (combined compact) -->
+                    <p class="text-secondary mb-2 small">${vuln.short_description}</p>
+                    <div class="mb-3 p-2 bg-light border-start border-3 border-success rounded-end">
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-wrench-adjustable text-success me-2 mt-1"></i>
+                            <div>
+                                <span class="fw-medium">${vuln.required_action}</span>
+                                ${fixVersionHtml}
+                            </div>
                         </div>
-                        <p class="mb-0 text-secondary">${vuln.short_description}</p>
-                    </div>
-
-                    <!-- How to Fix Section -->
-                    <div class="mb-3 p-3 bg-light border-start border-4 border-success rounded-end">
-                        <div class="d-flex align-items-center mb-1">
-                            <i class="bi bi-wrench-adjustable text-success me-1"></i>
-                            <small class="fw-bold text-uppercase text-success">How to Fix</small>
-                        </div>
-                        <p class="mb-0 fw-medium">${vuln.required_action}</p>
                     </div>
 
                     <!-- Affected Products (Collapsible) -->
@@ -2462,14 +2642,14 @@
                     </div>
 
                     <!-- Action Buttons -->
-                    <div class="d-flex gap-2 flex-wrap justify-content-between align-items-center pt-2 border-top">
-                        <div class="d-flex gap-2">
+                    <div class="d-flex gap-1 flex-wrap justify-content-between align-items-center pt-2 border-top">
+                        <div class="d-flex gap-1">
                             ${group.unacknowledged_count > 0 ?
-                                `<button class="btn btn-success" onclick="acknowledgeCVE('${vuln.cve_id}')">
-                                    <i class="bi bi-check-all me-1"></i> Resolve All (${group.unacknowledged_count})
+                                `<button class="btn btn-sm btn-success" onclick="acknowledgeCVE('${vuln.cve_id}')">
+                                    <i class="bi bi-check-all me-1"></i>Resolve (${group.unacknowledged_count})
                                 </button>` :
-                                `<button class="btn btn-outline-secondary" onclick="unacknowledgeCVE('${vuln.cve_id}')">
-                                    <i class="bi bi-arrow-counterclockwise me-1"></i> Reopen
+                                `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeCVE('${vuln.cve_id}')">
+                                    <i class="bi bi-arrow-counterclockwise me-1"></i>Reopen
                                 </button>`
                             }
                             ${trackerBtn}

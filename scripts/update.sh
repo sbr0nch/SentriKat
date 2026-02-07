@@ -21,6 +21,35 @@ CURRENT_VERSION=""
 TARGET_VERSION=""
 CHECK_ONLY=false
 
+# Load proxy settings from .env if present (so curl and docker use them)
+load_proxy_from_env() {
+    local env_file=""
+    for candidate in "./.env" "../.env" "${INSTALL_DIR:-.}/.env"; do
+        if [ -f "$candidate" ]; then
+            env_file="$candidate"
+            break
+        fi
+    done
+    [ -z "$env_file" ] && return
+
+    # Only set if not already in environment
+    if [ -z "${HTTP_PROXY:-}" ]; then
+        local val
+        val=$(grep -E '^HTTP_PROXY=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2-)
+        [ -n "$val" ] && export HTTP_PROXY="$val"
+    fi
+    if [ -z "${HTTPS_PROXY:-}" ]; then
+        local val
+        val=$(grep -E '^HTTPS_PROXY=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2-)
+        [ -n "$val" ] && export HTTPS_PROXY="$val"
+    fi
+    if [ -z "${NO_PROXY:-}" ]; then
+        local val
+        val=$(grep -E '^NO_PROXY=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2-)
+        [ -n "$val" ] && export NO_PROXY="$val"
+    fi
+}
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -234,6 +263,12 @@ if [ -z "$INSTALL_DIR" ]; then
 fi
 INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd)
 log_info "Installation directory: ${INSTALL_DIR}"
+
+# Load proxy settings from .env (for curl and docker commands)
+load_proxy_from_env
+if [ -n "${HTTP_PROXY:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
+    log_info "Proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}"
+fi
 
 # Get current version
 get_current_version "$INSTALL_DIR"

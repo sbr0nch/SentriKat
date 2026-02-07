@@ -1,29 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Products - SentriKat{% endblock %}
+{% block title %}Inventory - SentriKat{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item active" aria-current="page">Products</li>
+<li class="breadcrumb-item active" aria-current="page">Inventory</li>
 {% endblock %}
 
 {% block content %}
 <div class="fade-in">
-    <div class="row mb-4">
+    <div class="row mb-3">
         <div class="col">
             <h1 class="display-6 fw-bold text-dark mb-2">
-                <i class="bi bi-gear me-2"></i>Product Management
+                <i class="bi bi-boxes me-2"></i>Inventory
             </h1>
-            <p class="text-muted">Manage your software inventory for vulnerability tracking</p>
+            <p class="text-muted mb-0">Manage your software products and connected endpoints</p>
         </div>
-        {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
-        <div class="col-auto">
+        <!-- Products-specific actions (hidden on Endpoints/Software Overview tabs) -->
+        <div id="productsHeaderActions" class="col-auto d-flex gap-2">
+            {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#productModal" onclick="showAddProduct()">
                 <i class="bi bi-plus-circle me-2"></i>Add Product
             </button>
-        </div>
-        {% endif %}
-        {% if current_user and current_user.is_super_admin() %}
-        <div class="col-auto">
+            {% endif %}
+            {% if current_user and current_user.is_super_admin() %}
             <div class="dropdown">
                 <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                     <i class="bi bi-tools me-1"></i>Admin Tools
@@ -50,9 +49,38 @@
                     </li>
                 </ul>
             </div>
+            {% endif %}
         </div>
-        {% endif %}
     </div>
+    <script>
+    // Immediately hide Products-specific actions on non-Products tabs (prevents flash)
+    if (window.location.hash === '#endpoints' || window.location.hash === '#software-overview') {
+        document.getElementById('productsHeaderActions').style.display = 'none';
+    }
+    </script>
+
+    <!-- Inventory Tabs: Products | Endpoints -->
+    <ul class="nav nav-tabs mb-3" id="inventoryTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="products-tab" data-bs-toggle="tab" data-bs-target="#productsPane" type="button">
+                <i class="bi bi-box-seam me-1"></i>Products
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="endpoints-tab" data-bs-toggle="tab" data-bs-target="#endpointsPane" type="button">
+                <i class="bi bi-pc-display me-1"></i>Endpoints
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="software-overview-tab" data-bs-toggle="tab" data-bs-target="#softwareOverviewPane" type="button">
+                <i class="bi bi-layers me-1"></i>Software Overview
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="inventoryTabContent">
+    <!-- Products Tab -->
+    <div class="tab-pane fade show active" id="productsPane" role="tabpanel">
 
     {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
     <!-- Bulk Actions Toolbar (hidden by default) -->
@@ -176,7 +204,82 @@
             </nav>
         </div>
     </div>
-</div>
+    </div><!-- /productsPane -->
+
+    <!-- Endpoints Tab -->
+    <div class="tab-pane fade" id="endpointsPane" role="tabpanel">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-pc-display me-2"></i>Connected Endpoints</span>
+                <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" id="endpointSearchInput" placeholder="Search endpoints..." style="width: 200px;" onkeyup="if(event.key==='Enter') loadEndpoints()">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="loadEndpoints()" title="Refresh">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="endpointsTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th data-sort="hostname" onclick="sortEndpoints('hostname')" style="cursor:pointer;">Hostname <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th data-sort="ip_address" onclick="sortEndpoints('ip_address')" style="cursor:pointer;">IP Address <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th data-sort="os_name" onclick="sortEndpoints('os_name')" style="cursor:pointer;">OS <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th>Organization</th>
+                                <th>Products</th>
+                                <th data-sort="status" onclick="sortEndpoints('status')" style="cursor:pointer;">Status <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th data-sort="last_checkin" onclick="sortEndpoints('last_checkin')" style="cursor:pointer;">Last Seen <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th style="width: 100px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="endpointsTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center py-4 text-muted">
+                                    <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
+                                    <p class="mt-2 mb-0">Click the Endpoints tab to load data</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer">
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted" id="endpointsCount"></small>
+                    <nav aria-label="Endpoints pagination">
+                        <ul class="pagination pagination-sm mb-0" id="endpointsPagination">
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div><!-- /endpointsPane -->
+
+    <!-- Software Overview Tab -->
+    <div class="tab-pane fade" id="softwareOverviewPane" role="tabpanel">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-layers me-2"></i>Software Overview <small class="text-muted ms-2">Cross-endpoint software distribution</small></span>
+                <div class="d-flex gap-2 align-items-center">
+                    <input type="text" class="form-control form-control-sm" id="softwareOverviewSearch" placeholder="Search software..." style="width: 200px;" oninput="filterSoftwareOverview()">
+                    <select class="form-select form-select-sm" id="softwareOverviewSort" style="width: 160px;" onchange="loadSoftwareOverview()">
+                        <option value="endpoints">Most Endpoints</option>
+                        <option value="versions">Most Versions</option>
+                        <option value="name">Name A-Z</option>
+                    </select>
+                    <span class="text-muted small text-nowrap" id="softwareOverviewCount">-</span>
+                </div>
+            </div>
+            <div class="card-body p-0" id="softwareOverviewBody">
+                <div class="text-center py-5 text-muted">
+                    <div class="spinner-border spinner-border-sm me-2"></div> Loading software overview...
+                </div>
+            </div>
+        </div>
+    </div><!-- /softwareOverviewPane -->
+
+    </div><!-- /inventoryTabContent -->
 
 <!-- Product Modal - Redesigned with cleaner UX -->
 <div class="modal fade" id="productModal" tabindex="-1">
@@ -201,6 +304,13 @@
                         <div class="d-flex align-items-center mb-2">
                             <span class="badge bg-primary rounded-circle me-2" style="width: 24px; height: 24px; line-height: 16px;">1</span>
                             <h6 class="mb-0 fw-bold">Find Your Product</h6>
+                        </div>
+
+                        <!-- CPE missing hint (shown when editing product without CPE) -->
+                        <div id="noCpeHint" class="alert alert-warning py-2 px-3 mb-2 small" style="display: none;">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            <strong>No CPE assigned</strong> — Search below and select a match to enable vulnerability tracking.
+                            Press <kbd>Search</kbd> or hit <kbd>Enter</kbd>.
                         </div>
 
                         <!-- NVD Search -->
@@ -389,7 +499,7 @@
                 </div>
                 <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
                     <table class="table table-hover">
-                        <thead class="sticky-top bg-white">
+                        <thead class="sticky-top">
                             <tr>
                                 <th style="width: 40px;">
                                     <input type="checkbox" class="form-check-input" id="catalogSelectAll" onchange="toggleCatalogSelectAll()">
@@ -756,7 +866,7 @@
                     const hasCpe = group.has_cpe;
                     const cpeDisplay = hasCpe
                         ? '<span class="badge bg-success" title="CPE mapped - vulnerability matching active"><i class="bi bi-check-circle-fill"></i></span>'
-                        : '<span class="badge bg-warning text-dark" title="No CPE - click Edit > Advanced to add"><i class="bi bi-exclamation-triangle-fill"></i></span>';
+                        : `<a href="#" class="badge bg-warning text-dark text-decoration-none" title="No CPE mapping - click to assign" onclick="event.preventDefault(); event.stopPropagation(); assignCpe(${firstVersionId}, '${escapeHtml(group.product_name)}')"><i class="bi bi-exclamation-triangle-fill me-1"></i>Assign</a>`;
 
                     // Build platform display
                     const platforms = group.platforms || [];
@@ -968,6 +1078,21 @@
             // Hide manual entry toggle when editing (data is already filled)
             safeSetDisplay('manualEntryToggle', 'none');
 
+            // If product has no CPE, pre-fill NVD search with product name as hint
+            const hasCpe = product.cpe_vendor && product.cpe_product;
+            const hasEffectiveCpe = product.effective_cpe_vendor && product.effective_cpe_product;
+            if (!hasCpe && !hasEffectiveCpe) {
+                const searchInput = document.getElementById('nvdSearchInput');
+                if (searchInput) {
+                    searchInput.value = product.product_name || '';
+                    searchInput.setAttribute('placeholder', 'Search NVD to assign CPE for vulnerability matching...');
+                }
+                // Show the no-CPE hint banner
+                safeSetDisplay('noCpeHint', 'block');
+            } else {
+                safeSetDisplay('noCpeHint', 'none');
+            }
+
             // Collapse advanced options by default
             const advancedCollapse = document.getElementById('advancedOptionsCollapse');
             if (advancedCollapse) advancedCollapse.classList.remove('show');
@@ -981,6 +1106,25 @@
         } catch (error) {
             showToast(`Error loading product: ${error.message}`, 'danger');
         }
+    }
+
+    // Open product modal focused on CPE assignment with auto-search
+    async function assignCpe(productId, productName) {
+        await editProduct(productId);
+        // After modal opens, pre-fill NVD search and trigger it
+        setTimeout(() => {
+            const searchInput = document.getElementById('nvdSearchInput');
+            if (searchInput && productName) {
+                searchInput.value = productName;
+                searchInput.focus();
+                // Highlight the search area to draw attention
+                searchInput.classList.add('border-warning');
+                searchInput.setAttribute('placeholder', 'Search NVD to assign CPE...');
+                setTimeout(() => searchInput.classList.remove('border-warning'), 3000);
+                // Auto-trigger the search
+                performNVDSearchNow();
+            }
+        }, 400);
     }
 
     async function saveProduct() {
@@ -1171,14 +1315,22 @@
     // Toggle selection for a group of products
     function toggleGroupSelect(versionIds, checkbox) {
         const ids = versionIds.split(',').filter(id => id);
-        ids.forEach(id => {
+        ids.forEach(idStr => {
+            const id = parseInt(idStr);
             if (checkbox.checked) {
-                selectedProducts.add(parseInt(id));
+                // Get product info from the row
+                const row = checkbox.closest('tr');
+                const statusBadge = row ? row.querySelector('.badge-status-active, .badge-status-inactive') : null;
+                const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+                const vendorCell = row ? row.querySelector('td[data-column="vendor"]') : null;
+                const productCell = row ? row.querySelector('td[data-column="product"]') : null;
+                const name = `${vendorCell?.textContent || ''} ${productCell?.textContent || ''}`.trim();
+                selectedProducts.set(id, { id: id, active: isActive, name: name });
             } else {
-                selectedProducts.delete(parseInt(id));
+                selectedProducts.delete(id);
             }
         });
-        updateBulkActionButtons();
+        updateBulkToolbar();
     }
 
     // Show modal with all versions of a product
@@ -1752,12 +1904,12 @@
         updateBulkToolbar();
     }
 
-    function toggleProductRow(productId, event) {
+    function toggleProductRow(productIds, event) {
         if (event) event.stopPropagation();
-        const checkbox = document.querySelector(`.product-checkbox[data-product-id="${productId}"]`);
+        const checkbox = document.querySelector(`.product-checkbox[data-product-ids="${productIds}"]`);
         if (checkbox) {
             checkbox.checked = !checkbox.checked;
-            toggleProductSelect(productId, checkbox);
+            toggleGroupSelect(productIds, checkbox);
         }
     }
 
@@ -1779,23 +1931,27 @@
 
         checkboxes.forEach(checkbox => {
             checkbox.checked = isChecked;
-            const productId = parseInt(checkbox.dataset.productId);
+            // data-product-ids contains comma-separated IDs for grouped products
+            const productIdsStr = checkbox.dataset.productIds || '';
+            const productIds = productIdsStr.split(',').filter(id => id).map(id => parseInt(id));
 
-            if (!isNaN(productId)) {
-                if (isChecked) {
-                    // Get product info from the row
-                    const row = checkbox.closest('tr');
-                    const statusBadge = row.querySelector('.badge-status-active, .badge-status-inactive');
-                    const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
-                    const vendorCell = row.querySelector('td[data-column="vendor"]');
-                    const productCell = row.querySelector('td[data-column="product"]');
-                    const name = `${vendorCell?.textContent || ''} ${productCell?.textContent || ''}`.trim();
+            productIds.forEach(productId => {
+                if (!isNaN(productId)) {
+                    if (isChecked) {
+                        // Get product info from the row
+                        const row = checkbox.closest('tr');
+                        const statusBadge = row ? row.querySelector('.badge-status-active, .badge-status-inactive') : null;
+                        const isActive = statusBadge ? statusBadge.classList.contains('badge-status-active') : true;
+                        const vendorCell = row ? row.querySelector('td[data-column="vendor"]') : null;
+                        const productCell = row ? row.querySelector('td[data-column="product"]') : null;
+                        const name = `${vendorCell?.textContent || ''} ${productCell?.textContent || ''}`.trim();
 
-                    selectedProducts.set(productId, { id: productId, active: isActive, name: name });
-                } else {
-                    selectedProducts.delete(productId);
+                        selectedProducts.set(productId, { id: productId, active: isActive, name: name });
+                    } else {
+                        selectedProducts.delete(productId);
+                    }
                 }
-            }
+            });
         });
 
         updateBulkToolbar();
@@ -2482,10 +2638,11 @@
         safeSetText('nvdSelectedCpe', `CPE: ${vendor}:${product}:${versionStr}`);
         safeSetDisplay('nvdSelectedProduct', 'block');
 
-        // Hide search results and manual entry toggle
+        // Hide search results, manual entry toggle, and CPE hint
         safeSetDisplay('nvdResultsList', 'none');
         safeSetDisplay('nvdSearchStatus', 'none');
         safeSetDisplay('manualEntryToggle', 'none');
+        safeSetDisplay('noCpeHint', 'none');
 
         // Auto-fill vendor and product name fields
         // Format product for display (capitalize words, replace underscores)
@@ -2609,8 +2766,15 @@
         const clearCpeBtnEl = document.getElementById('clearCpeBtn');
         const toggleEl = document.getElementById('manualEntryToggle');
 
-        if (nvdSearchInputEl) nvdSearchInputEl.value = '';
+        if (nvdSearchInputEl) {
+            nvdSearchInputEl.value = '';
+            nvdSearchInputEl.setAttribute('placeholder', "Search (e.g., 'apache tomcat', 'windows server')...");
+            nvdSearchInputEl.classList.remove('border-warning');
+        }
         if (nvdSearchStatusEl) nvdSearchStatusEl.style.display = 'none';
+        // Hide CPE hint banner
+        const noCpeHintEl = document.getElementById('noCpeHint');
+        if (noCpeHintEl) noCpeHintEl.style.display = 'none';
         if (nvdResultsListEl) {
             nvdResultsListEl.style.display = 'none';
             nvdResultsListEl.innerHTML = '';
@@ -3049,5 +3213,400 @@
             });
         }
     });
+
+    // ========================================================================
+    // ENDPOINTS TAB - Connected Endpoints Management
+    // ========================================================================
+    let endpointsLoaded = false;
+    let endpointsPage = 1;
+    const endpointsPerPage = 20;
+    let endpointsSortColumn = 'hostname';
+    let endpointsSortDirection = 'asc';
+
+    function sortEndpoints(column) {
+        if (endpointsSortColumn === column) {
+            endpointsSortDirection = endpointsSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            endpointsSortColumn = column;
+            endpointsSortDirection = 'asc';
+        }
+        loadEndpoints(1);
+    }
+
+    function formatRelativeTime(dateStr) {
+        if (!dateStr) return 'Never';
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 30) return `${diffDays}d ago`;
+        return date.toLocaleDateString();
+    }
+
+    async function loadEndpoints(page = 1) {
+        endpointsPage = page;
+        const tbody = document.getElementById('endpointsTableBody');
+        const countEl = document.getElementById('endpointsCount');
+        const paginationEl = document.getElementById('endpointsPagination');
+        if (!tbody) return;
+
+        const search = document.getElementById('endpointSearchInput')?.value || '';
+
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <span class="ms-2">Loading endpoints...</span>
+        </td></tr>`;
+
+        try {
+            const params = new URLSearchParams({
+                page: page,
+                per_page: endpointsPerPage,
+                order: endpointsSortColumn,
+                direction: endpointsSortDirection
+            });
+            if (search) params.set('search', search);
+
+            const response = await fetch(`/api/assets?${params}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const assets = data.assets || [];
+            const total = data.total || 0;
+            const pages = Math.ceil(total / endpointsPerPage);
+
+            if (countEl) countEl.textContent = `Showing ${assets.length} of ${total} endpoints`;
+
+            if (assets.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-muted">
+                    <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0">No endpoints discovered</p>
+                    <p class="small">Endpoints appear when agents report their inventory</p>
+                </td></tr>`;
+                if (paginationEl) paginationEl.innerHTML = '';
+            } else {
+                const statusBadges = {
+                    'online': '<span class="badge bg-success"><i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>Online</span>',
+                    'offline': '<span class="badge bg-secondary"><i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>Offline</span>',
+                    'stale': '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>Stale</span>',
+                    'decommissioned': '<span class="badge bg-dark"><i class="bi bi-x-circle me-1"></i>Decommissioned</span>'
+                };
+
+                tbody.innerHTML = assets.map(asset => {
+                    const statusBadge = statusBadges[asset.status] || `<span class="badge bg-secondary">${escapeHtml(asset.status || 'Unknown')}</span>`;
+                    const vulnCount = asset.total_vulnerabilities || 0;
+                    const vulnBadge = vulnCount > 0 ? `<span class="badge bg-danger ms-1" title="${vulnCount} vulnerabilities">${vulnCount} CVEs</span>` : '';
+                    const lastSeen = asset.last_checkin || asset.last_inventory_at;
+                    const lastSeenDisplay = lastSeen ? formatRelativeTime(lastSeen) : '<span class="text-muted">Never</span>';
+
+                    return `<tr>
+                        <td><strong>${escapeHtml(asset.hostname)}</strong></td>
+                        <td><code>${escapeHtml(asset.ip_address || '-')}</code></td>
+                        <td>${escapeHtml(asset.os_name || '-')} ${escapeHtml(asset.os_version || '')}</td>
+                        <td>${escapeHtml(asset.organization_name || 'Unknown')}</td>
+                        <td><span class="badge bg-primary">${asset.product_count || 0}</span>${vulnBadge}</td>
+                        <td>${statusBadge}</td>
+                        <td>${lastSeenDisplay}</td>
+                        <td>
+                            <button class="btn btn-outline-danger btn-sm" onclick="deleteEndpoint(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Delete endpoint">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>`;
+                }).join('');
+
+                // Build pagination
+                if (paginationEl && pages > 1) {
+                    let html = `<li class="page-item ${page === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="loadEndpoints(${page - 1}); return false;">&laquo;</a></li>`;
+                    for (let i = 1; i <= pages; i++) {
+                        if (i === 1 || i === pages || (i >= page - 2 && i <= page + 2)) {
+                            html += `<li class="page-item ${i === page ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="loadEndpoints(${i}); return false;">${i}</a></li>`;
+                        } else if (i === page - 3 || i === page + 3) {
+                            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                        }
+                    }
+                    html += `<li class="page-item ${page === pages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="loadEndpoints(${page + 1}); return false;">&raquo;</a></li>`;
+                    paginationEl.innerHTML = html;
+                } else if (paginationEl) {
+                    paginationEl.innerHTML = '';
+                }
+            }
+            endpointsLoaded = true;
+
+            // Update sort indicators
+            document.querySelectorAll('#endpointsTable th[data-sort]').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === endpointsSortColumn) {
+                    th.classList.add(endpointsSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        } catch (error) {
+            console.error('Error loading endpoints:', error);
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>Error loading endpoints: ${escapeHtml(error.message)}
+            </td></tr>`;
+        }
+    }
+
+    async function deleteEndpoint(assetId, hostname) {
+        if (!confirm(`Delete endpoint "${hostname}"? This will remove the asset and its inventory data.`)) return;
+        try {
+            const response = await fetch(`/api/assets/${assetId}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            showToast(`Endpoint "${hostname}" deleted`, 'success');
+            loadEndpoints(endpointsPage);
+        } catch (error) {
+            showToast(`Failed to delete endpoint: ${escapeHtml(error.message)}`, 'danger');
+        }
+    }
+
+    // Load endpoints when tab is shown (lazy load)
+    document.getElementById('endpoints-tab')?.addEventListener('shown.bs.tab', function() {
+        if (!endpointsLoaded) loadEndpoints();
+    });
+
+    // Sync sidebar active state, URL hash, and header visibility when tabs change
+    document.querySelectorAll('#inventoryTabs button[data-bs-toggle="tab"]').forEach(btn => {
+        btn.addEventListener('shown.bs.tab', function(e) {
+            const hashMap = {
+                'products-tab': '',
+                'endpoints-tab': '#endpoints',
+                'software-overview-tab': '#software-overview'
+            };
+            const hash = hashMap[e.target.id] || '';
+            history.replaceState(null, '', '/admin' + hash);
+            // Update sidebar sub-links
+            document.querySelectorAll('.sidebar-submenu .sidebar-sublink').forEach(link => {
+                const href = link.getAttribute('href') || '';
+                const isMatch = hash ? href.endsWith(hash) : href === '/admin';
+                link.classList.toggle('active', isMatch);
+            });
+            // Show/hide Products-specific header actions
+            const headerActions = document.getElementById('productsHeaderActions');
+            if (headerActions) {
+                headerActions.style.display = (e.target.id === 'products-tab') ? '' : 'none';
+            }
+        });
+    });
+
+    // Unified hash-based tab navigation
+    function activateTabFromHash() {
+        const hash = window.location.hash;
+        const tabMap = {
+            '#endpoints': 'endpoints-tab',
+            '#software-overview': 'software-overview-tab'
+        };
+        const tabId = tabMap[hash];
+        if (tabId) {
+            const tabEl = document.getElementById(tabId);
+            if (tabEl) {
+                const tab = new bootstrap.Tab(tabEl);
+                tab.show();
+                window.scrollTo(0, 0);
+            }
+            // Hide Products-specific header actions on non-products tabs
+            const headerActions = document.getElementById('productsHeaderActions');
+            if (headerActions) headerActions.style.display = 'none';
+        }
+    }
+    // Activate on page load
+    activateTabFromHash();
+    // Also activate on hash change (e.g., sidebar link clicked while already on page)
+    window.addEventListener('hashchange', activateTabFromHash);
+
+    // =========================================================================
+    // SOFTWARE OVERVIEW TAB
+    // =========================================================================
+    let softwareOverviewLoaded = false;
+    let softwareOverviewData = [];
+
+    async function loadSoftwareOverview() {
+        const body = document.getElementById('softwareOverviewBody');
+        if (!body) return;
+
+        try {
+            const response = await fetch('/api/products?grouped=true&per_page=500&status=active');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const products = data.products || [];
+
+            // Map to normalized structure
+            softwareOverviewData = products.map(p => {
+                const versions = (p.versions || []).map(v => v.version || 'Any');
+                const uniqueVersions = [...new Set(versions)];
+                return {
+                    vendor: p.vendor || 'Unknown',
+                    product_name: p.product_name || 'Unknown',
+                    versions: uniqueVersions,
+                    version_count: uniqueVersions.length,
+                    has_cpe: p.has_cpe || false,
+                    cpe_vendor: p.cpe_vendor || '',
+                    cpe_product: p.cpe_product || '',
+                    platform_counts: p.platform_counts || {},
+                    platforms_list: p.platforms || [],
+                    total_installations: p.total_installations || 0,
+                    total_vulnerabilities: p.total_vulnerabilities || 0,
+                    has_vulnerable_version: p.has_vulnerable_version || false,
+                    criticality: p.criticality || 'medium',
+                    source: p.source || 'manual',
+                    organization_names: p.organization_names || [],
+                    endpoint_hostnames: p.endpoint_hostnames || []
+                };
+            });
+
+            renderSoftwareOverview();
+            softwareOverviewLoaded = true;
+        } catch (error) {
+            console.error('Error loading software overview:', error);
+            body.innerHTML = `<div class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>Error loading software overview: ${escapeHtml(error.message)}
+            </div>`;
+        }
+    }
+
+    function filterSoftwareOverview() {
+        renderSoftwareOverview();
+    }
+
+    function renderSoftwareOverview() {
+        const body = document.getElementById('softwareOverviewBody');
+        const countEl = document.getElementById('softwareOverviewCount');
+        const searchTerm = (document.getElementById('softwareOverviewSearch')?.value || '').toLowerCase();
+        const sortBy = document.getElementById('softwareOverviewSort')?.value || 'endpoints';
+
+        let filtered = softwareOverviewData;
+
+        // Apply search filter
+        if (searchTerm) {
+            filtered = filtered.filter(p =>
+                p.vendor.toLowerCase().includes(searchTerm) ||
+                p.product_name.toLowerCase().includes(searchTerm) ||
+                (p.cpe_vendor || '').toLowerCase().includes(searchTerm) ||
+                (p.cpe_product || '').toLowerCase().includes(searchTerm)
+            );
+        }
+
+        // Sort
+        if (sortBy === 'endpoints') {
+            filtered.sort((a, b) => b.total_installations - a.total_installations);
+        } else if (sortBy === 'versions') {
+            filtered.sort((a, b) => b.version_count - a.version_count);
+        } else {
+            filtered.sort((a, b) => `${a.vendor} ${a.product_name}`.localeCompare(`${b.vendor} ${b.product_name}`));
+        }
+
+        if (countEl) countEl.textContent = `${filtered.length} products`;
+
+        if (filtered.length === 0) {
+            body.innerHTML = `<div class="text-center py-5 text-muted">
+                <i class="bi bi-layers" style="font-size: 2rem;"></i>
+                <p class="mt-2 mb-0">${searchTerm ? 'No matching software found' : 'No software data available'}</p>
+            </div>`;
+            return;
+        }
+
+        // Calculate stats
+        const multiVersionCount = filtered.filter(p => p.version_count > 1).length;
+        const agentSourceCount = filtered.filter(p => p.source === 'agent').length;
+        const noCpeCount = filtered.filter(p => !p.has_cpe).length;
+
+        // Build stats bar
+        const statsBar = `
+            <div class="d-flex gap-3 p-3 bg-light border-bottom">
+                <span class="badge bg-primary rounded-pill">${filtered.length} Products</span>
+                ${multiVersionCount > 0 ? `<span class="badge bg-warning text-dark rounded-pill" title="Products with multiple versions across endpoints"><i class="bi bi-exclamation-triangle me-1"></i>${multiVersionCount} Version Sprawl</span>` : ''}
+                ${agentSourceCount > 0 ? `<span class="badge bg-info text-dark rounded-pill"><i class="bi bi-robot me-1"></i>${agentSourceCount} Agent-Reported</span>` : ''}
+                ${noCpeCount > 0 ? `<span class="badge bg-secondary rounded-pill"><i class="bi bi-shield-x me-1"></i>${noCpeCount} No CPE</span>` : ''}
+            </div>`;
+
+        // Build cards
+        const cards = filtered.slice(0, 100).map(p => {
+            const platformIcons = {
+                linux: '<i class="bi bi-ubuntu text-warning" title="Linux"></i>',
+                windows: '<i class="bi bi-windows text-info" title="Windows"></i>',
+                macos: '<i class="bi bi-apple text-secondary" title="macOS"></i>',
+                other: '<i class="bi bi-question-circle text-muted" title="Other"></i>'
+            };
+            const platformHtml = Object.entries(p.platform_counts || {})
+                .filter(([, count]) => count > 0)
+                .map(([platform, count]) => `${platformIcons[platform] || platformIcons.other} <small>${count}</small>`)
+                .join(' ');
+
+            const versionBadges = (p.versions || []).slice(0, 5).map(v =>
+                `<span class="badge bg-light text-dark border me-1 mb-1">${escapeHtml(v)}</span>`
+            ).join('');
+            const moreVersions = p.version_count > 5 ? `<span class="badge bg-secondary mb-1">+${p.version_count - 5} more</span>` : '';
+
+            const versionSprawl = p.version_count > 1
+                ? `<span class="badge bg-warning text-dark ms-1" title="${p.version_count} different versions found"><i class="bi bi-exclamation-triangle"></i> ${p.version_count} versions</span>`
+                : '';
+
+            const vulnBadge = p.total_vulnerabilities > 0
+                ? `<span class="badge bg-danger ms-1">${p.total_vulnerabilities} CVEs</span>`
+                : '';
+
+            const cpeBadge = p.has_cpe
+                ? `<span class="badge bg-success ms-1" title="${escapeHtml(p.cpe_vendor)}:${escapeHtml(p.cpe_product)}"><i class="bi bi-shield-check"></i> CPE</span>`
+                : `<span class="badge bg-secondary ms-1"><i class="bi bi-shield-x"></i> No CPE</span>`;
+
+            const sourceBadge = p.source === 'agent'
+                ? '<span class="badge bg-info text-dark"><i class="bi bi-robot"></i> Agent</span>'
+                : '<span class="badge bg-light text-dark border"><i class="bi bi-person"></i> Manual</span>';
+
+            // Build endpoint hostnames display
+            const endpoints = p.endpoint_hostnames || [];
+            let endpointHtml = '';
+            if (endpoints.length > 0) {
+                const shown = endpoints.slice(0, 5).map(h => `<span class="badge bg-light text-dark border me-1"><i class="bi bi-pc-display me-1"></i>${escapeHtml(h)}</span>`).join('');
+                const more = endpoints.length > 5 ? `<span class="badge bg-secondary">+${endpoints.length - 5} more</span>` : '';
+                endpointHtml = `<div class="mt-1 d-flex flex-wrap align-items-center gap-1">
+                    <small class="text-muted me-1">Found on:</small>${shown}${more}
+                </div>`;
+            }
+
+            return `
+            <div class="d-flex align-items-start gap-3 p-3 border-bottom software-overview-row" style="cursor: default;">
+                <div class="text-center" style="min-width: 50px;">
+                    <div class="fs-4 fw-bold text-primary">${p.total_installations}</div>
+                    <small class="text-muted">endpoint${p.total_installations !== 1 ? 's' : ''}</small>
+                </div>
+                <div class="flex-grow-1">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <strong>${escapeHtml(p.vendor)}</strong>
+                        <span class="text-muted">/</span>
+                        <strong>${escapeHtml(p.product_name)}</strong>
+                        ${versionSprawl}${vulnBadge}${cpeBadge}
+                    </div>
+                    <div class="mt-1 d-flex flex-wrap align-items-center gap-1">
+                        ${versionBadges}${moreVersions}
+                    </div>
+                    ${endpointHtml}
+                    <div class="mt-1 d-flex align-items-center gap-3 text-muted small">
+                        ${platformHtml ? `<span>Platforms: ${platformHtml}</span>` : ''}
+                        ${sourceBadge}
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        const moreMessage = filtered.length > 100
+            ? `<div class="text-center py-3 text-muted small">Showing 100 of ${filtered.length} products. Use search to narrow results.</div>`
+            : '';
+
+        body.innerHTML = statsBar + cards + moreMessage;
+    }
+
+    // Lazy load software overview on tab show
+    document.getElementById('software-overview-tab')?.addEventListener('shown.bs.tab', function() {
+        if (!softwareOverviewLoaded) loadSoftwareOverview();
+    });
+
+    // Hash-based navigation for software-overview is handled by activateTabFromHash() above
 </script>
 {% endblock %}
