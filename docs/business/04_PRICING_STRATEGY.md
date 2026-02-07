@@ -302,13 +302,53 @@
 
 ---
 
+## IMPLEMENTATION STATUS
+
+### Currently Implemented (v1.0.2)
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| Demo (free) tier | ✅ Done | 5 agents, 1 user, 1 org, 50 products |
+| Professional tier | ✅ Done | Configurable limits via license payload |
+| Agent packs | ✅ Done | Limits set in signed license (e.g., 110 agents) |
+| RSA-4096 license signing | ✅ Done | Portal signs, SentriKat verifies |
+| Installation ID binding | ✅ Done | Hardware-locked licenses |
+| License rebinding | ✅ Done | Portal supports rebind for server migration |
+| Stripe integration | ✅ Done | Payment via portal.sentrikat.com |
+| GUI activation | ✅ Done | Admin > License > paste & activate |
+| ENV var activation | ✅ Done | SENTRIKAT_LICENSE env var with DB sync |
+| Update scripts | ✅ Done | update.sh (Linux) + update.ps1 (Windows) |
+
+### Technical Licensing Details
+
+```
+Edition mapping (portal → SentriKat):
+  "pro"  → "professional"  (all features)
+  "demo" → "community"     (limited features)
+
+Limit mapping (portal → SentriKat):
+  null   → -1 (unlimited)
+  10     → 10 (exact value)
+
+License format:
+  base64url(JSON_payload).base64url(RSA_signature)
+  Signed with: RSA-4096 + PKCS1v15 + SHA-256
+
+Actual pricing (SentriKat-web portal):
+  PRO base: €999/year
+  Agent packs: 25/€199, 50/€349, 100/€599, unlimited/€899
+  Priority support: €299/year
+  Multi-year: 2yr 10% off, 3yr 15% off
+```
+
 ## IMPLEMENTATION TIMELINE
 
 | Phase | Timing | Actions |
 |-------|--------|---------|
-| Launch | Now | Demo + Professional tiers |
+| Launch | ✅ Done | Demo + Professional tiers |
 | Expand | Q2 2026 | Add Business tier |
 | Enterprise | Q3 2026 | Custom pricing, SOW |
+| In-app update check | Q2 2026 | Admin panel "update available" notification |
 | Optimization | Ongoing | A/B test, adjust based on data |
 
 ---

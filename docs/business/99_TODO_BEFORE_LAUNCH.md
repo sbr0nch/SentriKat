@@ -249,17 +249,42 @@ I seguenti dati nei documenti hanno fonti affidabili:
 
 ## 10. CHECKLIST FINALE PRE-LANCIO
 
-### Must Have
+### Must Have - Business
 - [ ] Società costituita e operativa
 - [ ] P.IVA attiva
 - [ ] Conto corrente aziendale
-- [ ] Stripe configurato e testato
+- [x] Stripe configurato e testato
 - [ ] ToS e Privacy Policy completati
 - [ ] Dominio e hosting attivi
 - [ ] Email aziendali funzionanti
-- [ ] Prezzi definiti
+- [x] Prezzi definiti (PRO €999/anno + agent packs)
 - [ ] Landing page online
-- [ ] Demo disponibile
+- [x] Demo disponibile
+
+### Must Have - Licensing System
+- [x] License server (RSA-4096 signing, FastAPI)
+- [x] Portal license management (bind, rebind, download, copy)
+- [x] Stripe payment integration on portal
+- [x] SentriKat license validation (signature verification, hardware lock)
+- [x] Input cleaning (prefix stripping, JSON extraction, BOM removal)
+- [x] Edition mapping (pro→professional, demo→community)
+- [x] Limit mapping (null→unlimited)
+- [x] ENV→DB license sync
+- [x] Embedded production RSA-4096 public key
+- [x] GUI activation (Admin > License)
+- [x] Installation ID generation and persistence
+- [x] Docker-safe installation ID (SENTRIKAT_INSTALLATION_ID env var)
+- [x] Feature gating (@requires_professional decorator)
+- [x] License lifecycle (activation, expiration, migration/rebind)
+
+### Must Have - Update & Deployment
+- [x] CI/CD pipeline (GitHub Actions: test → build → push → release)
+- [x] Docker image on GHCR (ghcr.io/sbr0nch/sentrikat)
+- [x] Release packages (sentrikat-<version>.tar.gz)
+- [x] Update scripts (update.sh for Linux, update.ps1 for Windows)
+- [x] Centralized VERSION file
+- [x] Version display in footer and license page
+- [ ] In-app update notification (check for new versions in admin panel)
 
 ### Nice to Have
 - [ ] Demo video
@@ -267,6 +292,7 @@ I seguenti dati nei documenti hanno fonti affidabili:
 - [ ] Social media setup
 - [ ] Newsletter pronta
 - [ ] Certificazioni (SOC 2, etc.)
+- [ ] In-app "Check for Updates" button
 
 ---
 

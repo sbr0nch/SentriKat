@@ -757,60 +757,233 @@ chmod +x agent.sh
 ## 10.1 License Format
 
 ```
-<base64(json_payload)>.<base64(rsa_signature)>
+Format: <base64url(JSON_payload)>.<base64url(RSA_signature)>
 
-Payload:
+Signed Payload:
 {
-  "license_id": "LIC-2025-001-ABC123",
+  "license_id": "e863e3e3-94d4-42af-901c-cbcf2be11b09",
   "customer": "Acme Corp",
   "email": "admin@acme.com",
-  "edition": "professional",
-  "issued_at": "2025-01-01",
-  "expires_at": "2026-01-01",
-  "installation_id": "SK-INST-<hash>",
+  "edition": "pro",                           // Maps to "professional" in SentriKat
+  "issued_at": "2026-02-05T16:07:43.990328",
+  "expires_at": null,                          // null = perpetual
+  "installation_id": "SK-INST-<32-hex-chars>",
   "limits": {
-    "max_users": -1,
-    "max_organizations": -1,
-    "max_products": -1,
-    "max_agents": 50
+    "max_users": null,                         // null = unlimited (-1 in SentriKat)
+    "max_organizations": null,
+    "max_products": null,
+    "max_agents": 10,
+    "max_agent_api_keys": 10
   },
-  "features": ["ldap", "email_alerts", "white_label"]
+  "features": ["all", "ldap", "sso", "webhooks", "api"]
 }
+
+Cryptographic Details:
+- Algorithm: RSA-4096 with PKCS1v15 padding + SHA-256
+- Signing: json.dumps(payload, sort_keys=True, separators=(',',':'))
+- Encoding: base64url (URL-safe base64 with padding)
+- Key: License server private key signs, SentriKat app has embedded public key
 ```
 
-## 10.2 Hardware Locking
+## 10.2 Edition & Limit Mapping
 
 ```
-Installation ID = SHA256(
-  database_uri +
-  data_volume_path +
-  random_component (persisted)
-)
-
-Format: SK-INST-<64-char-hex>
-
-For Docker: Set SENTRIKAT_INSTALLATION_ID in .env
+SentriKat-web (portal/server)  →  SentriKat (Flask app)
+─────────────────────────────────────────────────────────
+Edition:  "pro"                →  "professional"
+Edition:  "demo"               →  "community"
+Limits:   null                 →  -1 (unlimited)
+Limits:   10                   →  10 (exact value)
 ```
 
-## 10.3 Validation Flow
+## 10.3 Hardware Locking (Installation ID)
 
 ```
-1. Extract payload and signature
-2. Verify RSA signature (public key in app)
-3. Check installation ID matches hardware
-4. Check expiration date
-5. Apply limits and features
+Generation Priority:
+1. SENTRIKAT_INSTALLATION_ID env var (recommended for Docker)
+2. Existing ID from data/.installation_id file
+3. Auto-generated from system properties (hostname, MAC, etc.)
+
+Format: SK-INST-<32-uppercase-hex-chars>
+Example: SK-INST-30E9761FE3895E4377B45AB37658A49C
+
+For Docker: ALWAYS set SENTRIKAT_INSTALLATION_ID in .env
+  → Survives container rebuilds
+  → Without it, ID changes on every rebuild = license invalidated
 ```
 
-## 10.4 Feature Gating
+## 10.4 Complete License Activation Flow
+
+```
+┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│   Customer   │     │  Portal + Server  │     │    SentriKat     │
+│  (Browser)   │     │ (SentriKat-web)   │     │   (Flask App)    │
+└──────┬───────┘     └────────┬─────────┘     └────────┬─────────┘
+       │                      │                         │
+       │  1. Purchase PRO     │                         │
+       │─────────────────────>│                         │
+       │  (Stripe checkout)   │                         │
+       │                      │                         │
+       │  2. Get license key  │                         │
+       │<─────────────────────│                         │
+       │  SK-XXXX-XXXX-XXXX   │                         │
+       │                      │                         │
+       │  3. Install SentriKat│                         │
+       │──────────────────────────────────────────────>│
+       │  docker compose up -d│                         │
+       │                      │                         │
+       │  4. Get Installation ID                        │
+       │<─────────────────────────────────────────────│
+       │  SK-INST-XXXXXXXX    │ (Admin > License tab)   │
+       │                      │                         │
+       │  5. Bind Installation│                         │
+       │─────────────────────>│                         │
+       │  (paste SK-INST-xxx) │                         │
+       │                      │                         │
+       │                      │  6. Sign license        │
+       │                      │  (RSA-4096 + SHA-256)   │
+       │                      │                         │
+       │  7. Copy signed license                        │
+       │<─────────────────────│                         │
+       │  SENTRIKAT_LICENSE=  │                         │
+       │  eyJ...payload.sig   │                         │
+       │                      │                         │
+       │  8. Paste in GUI or .env                       │
+       │──────────────────────────────────────────────>│
+       │                      │                         │
+       │                      │  9. SentriKat validates: │
+       │                      │  - Strip prefix          │
+       │                      │  - Decode base64         │
+       │                      │  - Verify RSA signature  │
+       │                      │  - Check installation ID │
+       │                      │  - Map edition/limits    │
+       │                      │  - Save to database      │
+       │                      │                         │
+       │  10. Professional!   │                         │
+       │<─────────────────────────────────────────────│
+       │  All features unlocked                         │
+```
+
+## 10.5 Input Cleaning (Common Paste Errors)
+
+SentriKat handles these common customer mistakes automatically:
+
+```python
+# 1. Portal "Copy to Clipboard" adds prefix:
+"SENTRIKAT_LICENSE=eyJ...payload.signature"  →  "eyJ...payload.signature"
+
+# 2. Customer pastes from shell:
+"export SENTRIKAT_LICENSE=eyJ..."  →  "eyJ...payload.signature"
+
+# 3. Customer pastes the JSON download file:
+{"sentrikat_license": "eyJ...sig", "license_key": "SK-XXXX"}  →  "eyJ...sig"
+
+# 4. Customer wraps in quotes:
+'"eyJ...payload.signature"'  →  "eyJ...payload.signature"
+
+# 5. BOM characters, whitespace, newlines: all stripped
+```
+
+## 10.6 License Sources & Sync
+
+```
+Priority Order (for loading):
+1. Database (system_settings.license_key)
+2. SENTRIKAT_LICENSE environment variable
+
+Sync Behavior:
+- If env var has a license and DB doesn't → auto-saves to DB
+- If env var has a DIFFERENT license than DB → updates DB
+- GUI always shows the current active license (from DB)
+- This means: set SENTRIKAT_LICENSE env var → appears in GUI automatically
+```
+
+## 10.7 Public Key Configuration
+
+```
+Priority Order (for public key):
+1. SENTRIKAT_LICENSE_PUBLIC_KEY env var (PEM content directly)
+2. SENTRIKAT_LICENSE_PUBLIC_KEY_FILE env var (path to PEM file)
+3. tools/.license_keys/public_key.pem file
+4. Default embedded key (RSA-4096, matches license server)
+
+For 99% of installations: the embedded default key works.
+Only override if using a self-hosted license server with custom keys.
+```
+
+## 10.8 Validation Flow (Detailed)
+
+```
+1. Clean input (_clean_license_input)
+   - Strip SENTRIKAT_LICENSE= prefix
+   - Extract from JSON wrapper
+   - Remove BOM, quotes, whitespace
+
+2. Split on "." → payload_b64, signature_b64
+   - Must be exactly 2 parts
+
+3. Decode payload (base64url → UTF-8 → JSON)
+   - Add base64 padding if needed
+   - Parse JSON payload
+
+4. Verify RSA signature
+   - Load public key (priority chain)
+   - PKCS1v15 + SHA-256
+   - Verify against raw payload bytes (NOT re-serialized)
+
+5. Check installation ID
+   - payload.installation_id must match this server's ID
+   - Mismatch = "License is for a different installation"
+   - No installation_id = legacy license, allowed
+
+6. Map editions and limits
+   - "pro" → "professional", "demo" → "community"
+   - null → -1 (unlimited)
+
+7. Check expiration
+   - expires_at null = perpetual (never expires)
+   - Expired = revert to Demo mode
+
+8. Apply features and save to database
+```
+
+## 10.9 Feature Gating
 
 ```python
 @requires_professional('Email Alerts')
 def send_alert():
-    # Only Professional edition
+    # Returns 403 if Demo edition
     pass
 
-# Returns 403 if Demo edition
+# Limit checks:
+check_user_limit()          # Returns False if at limit
+check_organization_limit()  # -1 = unlimited
+check_agent_limit()         # Based on license + agent packs
+```
+
+## 10.10 License Lifecycle
+
+```
+Purchase → Bind → Activate → Use → Renew/Expire
+   │         │        │        │        │
+   │         │        │        │     ┌──┴──┐
+   │         │        │        │   Renew  Expire
+   │         │        │        │     │      │
+   │         │        │        │   New sig  Demo mode
+   │         │        │        │            (30-day warning)
+   │         │        │        │
+   │         │        │     Server Migration:
+   │         │        │     → Rebind on portal with new SK-INST-xxx
+   │         │        │     → Get new signed license
+   │         │        │     → Old license rejected (ID mismatch)
+   │         │        │
+   │         │     Professional mode (all features)
+   │         │     Saved in database, persists across restarts
+   │         │
+   │      Portal signs with RSA-4096
+   │      License locked to installation ID
+   │
+   Stripe payment → portal account created
 ```
 
 ---
@@ -828,28 +1001,35 @@ SentriKat-web/
 └── docker-compose.yml
 ```
 
-## 11.2 License Server
+## 11.2 License Server (FastAPI)
 
 ```python
-# FastAPI endpoints:
-POST /api/licenses/request     # Customer requests license
-POST /api/licenses/generate    # Admin generates license
-GET  /api/licenses/{id}        # Get license status
-POST /api/licenses/{id}/revoke # Revoke license
+# License API endpoints:
+POST /api/licenses/activate          # Bind installation ID to license
+POST /api/licenses/verify-signed     # Verify a signed license string
+GET  /api/licenses/{key}             # Get license status
+POST /api/licenses/{key}/rebind      # Rebind to new installation ID
 
-# RSA key management:
-- Private key: Signs licenses (NEVER shipped)
-- Public key: Embedded in SentriKat app
+# Signing process:
+1. Customer binds installation ID via portal
+2. Server serializes: json.dumps(payload, sort_keys=True, separators=(',',':'))
+3. Signs with RSA-4096 private key (PKCS1v15 + SHA-256)
+4. Returns: base64url(payload) + "." + base64url(signature)
+
+# RSA-4096 key pair:
+- Private key: /app/keys/license_private.pem (signs licenses, NEVER shipped)
+- Public key: /app/keys/license_public.pem (embedded in SentriKat app)
 ```
 
-## 11.3 Customer Portal
+## 11.3 Customer Portal (Astro)
 
 Features:
-- License request form
-- Download center (releases)
-- Support ticket creation
-- Documentation links
-- Account management
+- License management (view, bind, rebind, download)
+- "Copy to Clipboard" button (copies SENTRIKAT_LICENSE=<signed_string>)
+- "Download as File" button (JSON with sentrikat_license field)
+- Download center (latest releases, update scripts)
+- Account management (Stripe billing integration)
+- Installation guides and documentation links
 
 ## 11.4 Release Integration
 
@@ -912,16 +1092,57 @@ services:
 
 ```yaml
 # .github/workflows/release.yml
+# Triggered by: git tag v1.0.3 -m "Release" && git push origin v1.0.3
 on:
   push:
     tags: ["v*.*.*"]
 
 jobs:
-  test:        # Run pytest
-  build:       # Build Docker image
-  push:        # Push to GHCR
-  release:     # Create GitHub Release
-  notify:      # Update portal
+  test:        # Run pytest with PostgreSQL
+  build:       # Build Docker image, write VERSION file from tag
+  push:        # Push to GHCR (ghcr.io/sbr0nch/sentrikat:<version>)
+  release:     # Create GitHub Release with sentrikat-<version>.tar.gz
+  notify:      # POST to portal API (optional)
+```
+
+## 12.4 Update Mechanism
+
+```
+Update Scripts (included in release packages):
+- scripts/update.sh    (Linux/macOS)
+- scripts/update.ps1   (Windows PowerShell)
+
+What gets updated:
+✓ Docker image (new code, dependencies)
+✓ Application files (app/, static/, templates/)
+✓ VERSION file
+
+What is PRESERVED (never touched):
+✓ .env file (all configuration)
+✓ Database (PostgreSQL volume)
+✓ License (stored in database)
+✓ Installation ID (env var or data/.installation_id)
+✓ Custom certificates
+✓ Data directory (uploads, backups)
+
+Usage:
+  ./scripts/update.sh              # Auto-update to latest
+  ./scripts/update.sh --check      # Check only, no install
+  ./scripts/update.sh 1.0.3        # Update to specific version
+  .\scripts\update.ps1             # Windows equivalent
+
+Docker users can also:
+  docker compose pull && docker compose up -d
+```
+
+## 12.5 Versioning
+
+```
+Single source of truth: VERSION file in repo root
+- Read by app at startup (app/__init__.py → APP_VERSION)
+- Displayed in footer, license page, and X-App-Version header
+- Set automatically by CI/CD from git tag (v1.0.3 → "1.0.3")
+- Update script uses VERSION to detect current vs available version
 ```
 
 ---
