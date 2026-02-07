@@ -134,90 +134,35 @@ jobs:
           VERSION=${{ steps.version.outputs.VERSION }}
           PKG_DIR="sentrikat-${VERSION}"
           mkdir -p "${PKG_DIR}/scripts"
+          mkdir -p "${PKG_DIR}/nginx/ssl"
+          mkdir -p "${PKG_DIR}/certs"
 
-          # ── docker-compose.yml (customer version) ──
-          cat > "${PKG_DIR}/docker-compose.yml" << 'COMPOSE'
-          # SentriKat - Docker Compose Deployment
-          # Documentation: https://docs.sentrikat.com
+          # ── docker-compose.yml (from repo, with build: replaced by image:) ──
+          cp docker-compose.yml "${PKG_DIR}/docker-compose.yml"
 
-          services:
-            sentrikat:
-              image: ghcr.io/sbr0nch/sentrikat:VERSION_PLACEHOLDER
-              restart: unless-stopped
-              ports:
-                - "${SENTRIKAT_PORT:-5000}:5000"
-              environment:
-                - SENTRIKAT_LICENSE=${SENTRIKAT_LICENSE}
-                - SENTRIKAT_INSTALLATION_ID=${SENTRIKAT_INSTALLATION_ID}
-                - DATABASE_URL=postgresql://${DB_USER:-sentrikat}:${DB_PASSWORD}@db:5432/${DB_NAME:-sentrikat}
-                - SECRET_KEY=${SECRET_KEY}
-                - FLASK_ENV=production
-              volumes:
-                - sentrikat-data:/app/data
-                - sentrikat-logs:/app/logs
-              depends_on:
-                db:
-                  condition: service_healthy
-              networks:
-                - sentrikat-net
+          # Replace "build:" block with "image:" for the pre-built Docker image
+          # Remove build context and args, add image reference and port mapping
+          sed -i '/^\s*build:/,/^\s*NO_PROXY:.*$/{ /^\s*build:/d; /^\s*context:/d; /^\s*args:/d; /^\s*HTTP_PROXY:/d; /^\s*HTTPS_PROXY:/d; /^\s*NO_PROXY:.*$/d; }' "${PKG_DIR}/docker-compose.yml"
+          # Add image line after container_name
+          sed -i "/container_name: sentrikat$/a\\    image: ghcr.io/sbr0nch/sentrikat:${VERSION}" "${PKG_DIR}/docker-compose.yml"
+          # Add direct port mapping (in addition to expose for nginx)
+          sed -i "/expose:/a\\    ports:\n      - \"\${SENTRIKAT_PORT:-5000}:5000\"" "${PKG_DIR}/docker-compose.yml"
+          # Add SENTRIKAT_LICENSE env var if not present
+          if ! grep -q "SENTRIKAT_LICENSE" "${PKG_DIR}/docker-compose.yml"; then
+            sed -i "/SENTRIKAT_INSTALLATION_ID/a\\      - SENTRIKAT_LICENSE=\${SENTRIKAT_LICENSE:-}" "${PKG_DIR}/docker-compose.yml"
+          fi
 
-            db:
-              image: postgres:16-alpine
-              restart: unless-stopped
-              environment:
-                - POSTGRES_USER=${DB_USER:-sentrikat}
-                - POSTGRES_PASSWORD=${DB_PASSWORD}
-                - POSTGRES_DB=${DB_NAME:-sentrikat}
-              volumes:
-                - postgres-data:/var/lib/postgresql/data
-              healthcheck:
-                test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-sentrikat}"]
-                interval: 10s
-                timeout: 5s
-                retries: 5
-              networks:
-                - sentrikat-net
+          # ── nginx config files ──
+          cp nginx/nginx.conf.template "${PKG_DIR}/nginx/"
+          cp nginx/nginx-ssl.conf.template "${PKG_DIR}/nginx/"
+          cp nginx/docker-entrypoint.sh "${PKG_DIR}/nginx/"
+          chmod +x "${PKG_DIR}/nginx/docker-entrypoint.sh"
+          cp nginx/README.md "${PKG_DIR}/nginx/"
+          touch "${PKG_DIR}/nginx/ssl/.gitkeep"
+          touch "${PKG_DIR}/certs/.gitkeep"
 
-          volumes:
-            sentrikat-data:
-            sentrikat-logs:
-            postgres-data:
-
-          networks:
-            sentrikat-net:
-              driver: bridge
-          COMPOSE
-
-          # Replace version placeholder
-          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" "${PKG_DIR}/docker-compose.yml"
-
-          # ── .env.example ──
-          cat > "${PKG_DIR}/.env.example" << 'ENVFILE'
-          # ============================================
-          # SentriKat Configuration
-          # ============================================
-          # Copy this file to .env and fill in the values
-          # cp .env.example .env
-          # ============================================
-
-          # License key (get from portal.sentrikat.com after purchase)
-          # Leave empty for Demo mode (limited features)
-          SENTRIKAT_LICENSE=
-
-          # Installation ID (IMPORTANT for Docker!)
-          # Generate once and keep forever: python3 -c "import uuid; print(f'SK-INST-{uuid.uuid4().hex[:32].upper()}')"
-          # This ensures your license survives container rebuilds
-          SENTRIKAT_INSTALLATION_ID=
-
-          # Database
-          DB_USER=sentrikat
-          DB_PASSWORD=CHANGE_ME_TO_A_STRONG_PASSWORD
-          DB_NAME=sentrikat
-
-          # App
-          SECRET_KEY=CHANGE_ME_GENERATE_WITH_python3_-c_"import secrets; print(secrets.token_hex(32))"
-          SENTRIKAT_PORT=5000
-          ENVFILE
+          # ── .env.example (from repo) ──
+          cp .env.example "${PKG_DIR}/.env.example"
 
           # ── README.md ──
           cat > "${PKG_DIR}/README.md" << 'README'

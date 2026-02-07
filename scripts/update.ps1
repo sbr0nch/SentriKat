@@ -109,26 +109,39 @@ $DockerCompose = Join-Path $InstallDir "docker-compose.yml"
 $IsDocker = (Test-Path $DockerCompose) -and (Get-Command docker -ErrorAction SilentlyContinue)
 
 if ($IsDocker -and (Select-String -Path $DockerCompose -Pattern "ghcr.io/sbr0nch/sentrikat" -Quiet)) {
-    # Docker update
+    # Docker update - only update image tag, never replace docker-compose.yml
     Write-Info "Updating Docker installation..."
 
-    # Backup docker-compose.yml
-    $backupName = "docker-compose.yml.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
-    Copy-Item $DockerCompose (Join-Path $InstallDir $backupName)
-    Write-Info "Backed up docker-compose.yml"
-
-    # Update image tag
+    # Update image tag in docker-compose.yml
     (Get-Content $DockerCompose) -replace 'ghcr.io/sbr0nch/sentrikat:[^\s"]+', "ghcr.io/sbr0nch/sentrikat:$TargetVersion" |
         Set-Content $DockerCompose
-    Write-Info "Updated image tag"
+    Write-Info "Updated image tag to $TargetVersion"
 
     # Pull and restart
     Push-Location $InstallDir
     try {
         Write-Info "Pulling new Docker image..."
-        docker compose pull
+        $pullResult = docker compose pull 2>&1
+        $pullExitCode = $LASTEXITCODE
+        if ($pullExitCode -ne 0) {
+            Write-Err "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:$TargetVersion"
+            Write-Err "The image may not exist yet. Check: https://github.com/$Repo/actions"
+            Write-Err "If using a tag-triggered CI, ensure you pushed a git tag (v$TargetVersion)."
+            # Revert image tag
+            (Get-Content $DockerCompose) -replace 'ghcr.io/sbr0nch/sentrikat:[^\s"]+', "ghcr.io/sbr0nch/sentrikat:$CurrentVersion" |
+                Set-Content $DockerCompose
+            Write-Warn "Reverted docker-compose.yml to v$CurrentVersion"
+            exit 1
+        }
+        Write-OK "Docker image pulled"
+
         Write-Info "Restarting SentriKat..."
         docker compose up -d
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Failed to restart containers. Check: docker compose logs"
+            exit 1
+        }
+        Write-OK "SentriKat restarted"
     } finally {
         Pop-Location
     }
@@ -174,10 +187,10 @@ if ($IsDocker -and (Select-String -Path $DockerCompose -Pattern "ghcr.io/sbr0nch
         }
         Write-OK "Backup created"
 
-        # Update files (preserve .env and data)
+        # Update files (preserve .env, docker-compose.yml, and data)
         Write-Info "Updating application files..."
         $updateItems = @("app", "static", "templates", "scripts", "tools", "agents", "docs",
-                         "Dockerfile", "docker-compose.yml", "docker-entrypoint.sh",
+                         "Dockerfile", "docker-entrypoint.sh",
                          "requirements.txt", "VERSION", "README.md")
 
         foreach ($item in $updateItems) {

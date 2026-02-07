@@ -84,7 +84,7 @@ version_gt() {
     [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -1)" != "$2" ]
 }
 
-# Docker-based update
+# Docker-based update - only updates the image tag, never replaces docker-compose.yml
 update_docker() {
     local install_dir="$1"
     local version="$2"
@@ -97,20 +97,24 @@ update_docker() {
         exit 1
     fi
 
-    # Backup current docker-compose.yml
-    cp "${install_dir}/docker-compose.yml" "${install_dir}/docker-compose.yml.bak.$(date +%Y%m%d%H%M%S)"
-    log_info "Backed up docker-compose.yml"
-
-    # Update image tag in docker-compose.yml
+    # Update image tag in docker-compose.yml (only the tag, not the whole file)
     if grep -q "ghcr.io/sbr0nch/sentrikat:" "${install_dir}/docker-compose.yml"; then
-        sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ ]*|ghcr.io/sbr0nch/sentrikat:${version}|g" "${install_dir}/docker-compose.yml"
-        log_info "Updated image tag in docker-compose.yml"
+        sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${version}|g" "${install_dir}/docker-compose.yml"
+        log_info "Updated image tag to ${version}"
     fi
 
     # Pull new image
     log_info "Pulling new Docker image..."
     cd "${install_dir}"
-    docker compose pull 2>/dev/null || docker-compose pull
+    if ! (docker compose pull 2>/dev/null || docker-compose pull); then
+        log_error "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:${version}"
+        log_error "The image may not exist yet. Check: https://github.com/${REPO}/actions"
+        log_error "If using a tag-triggered CI, ensure you pushed a git tag (v${version})."
+        # Revert image tag
+        sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${CURRENT_VERSION}|g" "${install_dir}/docker-compose.yml"
+        log_warn "Reverted docker-compose.yml to v${CURRENT_VERSION}"
+        exit 1
+    fi
     log_ok "Docker image pulled"
 
     # Restart services
@@ -168,10 +172,10 @@ update_files() {
     done
     log_ok "Backup created"
 
-    # Update app files (preserve .env and data)
+    # Update app files (preserve .env, docker-compose.yml, and data)
     log_info "Updating application files..."
     for item in app static templates scripts tools agents docs nginx \
-                Dockerfile docker-compose.yml docker-entrypoint.sh \
+                Dockerfile docker-entrypoint.sh \
                 requirements.txt VERSION README.md; do
         if [ -e "${extract_dir}/${item}" ]; then
             # Remove old and copy new
