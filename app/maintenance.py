@@ -38,6 +38,7 @@ class MaintenanceResult:
         self.products_auto_disabled = 0
         self.import_queue_cleaned = 0
         self.vulnerabilities_auto_acknowledged = 0
+        self.vulnerabilities_upgraded_acknowledged = 0
         self.errors = []
 
     def to_dict(self):
@@ -49,6 +50,7 @@ class MaintenanceResult:
             'products_auto_disabled': self.products_auto_disabled,
             'import_queue_cleaned': self.import_queue_cleaned,
             'vulnerabilities_auto_acknowledged': self.vulnerabilities_auto_acknowledged,
+            'vulnerabilities_upgraded_acknowledged': self.vulnerabilities_upgraded_acknowledged,
             'errors': self.errors,
             'success': len(self.errors) == 0
         }
@@ -382,6 +384,104 @@ def auto_acknowledge_resolved_vulnerabilities(dry_run=False):
     return count
 
 
+def auto_acknowledge_upgraded_vulnerabilities(dry_run=False):
+    """
+    Auto-acknowledge vulnerability matches for products that have been upgraded
+    to a version no longer in the vulnerable range.
+
+    When all installations of a product report a version newer than the
+    vulnerable range, the CVE match is no longer relevant and can be
+    auto-acknowledged.
+
+    Returns:
+        Number of vulnerability matches auto-acknowledged
+    """
+    from app.models import VulnerabilityMatch, ProductInstallation
+
+    count = 0
+
+    # Get unacknowledged matches for products that have CPE data (precise matching)
+    unacked_matches = VulnerabilityMatch.query.filter(
+        VulnerabilityMatch.acknowledged == False
+    ).join(
+        Product, VulnerabilityMatch.product_id == Product.id
+    ).filter(
+        Product.cpe_vendor.isnot(None),
+        Product.cpe_product.isnot(None),
+        Product.active == True
+    ).all()
+
+    if not unacked_matches:
+        return 0
+
+    # Group matches by product for efficiency
+    product_matches = {}
+    for match in unacked_matches:
+        if match.product_id not in product_matches:
+            product_matches[match.product_id] = []
+        product_matches[match.product_id].append(match)
+
+    now = datetime.utcnow()
+
+    for product_id, matches in product_matches.items():
+        product = matches[0].product
+
+        # Get all current installation versions for this product
+        installations = ProductInstallation.query.filter_by(
+            product_id=product_id
+        ).all()
+
+        if not installations:
+            continue  # No installations - handled by software_removed logic
+
+        # Get all unique current versions
+        installed_versions = set()
+        for inst in installations:
+            if inst.version:
+                installed_versions.add(inst.version)
+
+        if not installed_versions:
+            continue
+
+        # For each vulnerability match, check if ALL installed versions are outside the vulnerable range
+        for match in matches:
+            vuln = match.vulnerability
+            if not vuln or not vuln.cve_id:
+                continue
+
+            try:
+                from app.nvd_cpe_api import check_product_affected
+                all_versions_safe = True
+
+                for version in installed_versions:
+                    is_affected, _ = check_product_affected(
+                        product.cpe_vendor,
+                        product.cpe_product,
+                        version,
+                        vuln.cve_id
+                    )
+                    if is_affected:
+                        all_versions_safe = False
+                        break
+
+                if all_versions_safe and not dry_run:
+                    match.acknowledged = True
+                    match.auto_acknowledged = True
+                    match.resolution_reason = 'version_upgraded'
+                    match.acknowledged_at = now
+                    count += 1
+
+            except Exception as e:
+                logger.debug(f"Version check failed for {vuln.cve_id}/{product.product_name}: {e}")
+                continue
+
+    if count > 0 and not dry_run:
+        db.session.commit()
+        logger.info(f"Auto-acknowledged {count} vulnerability matches due to version upgrades")
+
+    return count
+
+
 def run_full_maintenance(dry_run=False, settings=None):
     """
     Run all maintenance tasks.
@@ -458,6 +558,19 @@ def run_full_maintenance(dry_run=False, settings=None):
     except Exception as e:
         result.errors.append(f"Vulnerability auto-acknowledge failed: {str(e)}")
         logger.error(f"Vulnerability auto-acknowledge failed: {e}", exc_info=True)
+
+    try:
+        # 7. Auto-acknowledge vulnerabilities where product was upgraded past vulnerable range
+        auto_upgrade_ack = settings.get('auto_acknowledge_upgraded_software', True)
+        if auto_upgrade_ack:
+            result.vulnerabilities_upgraded_acknowledged = auto_acknowledge_upgraded_vulnerabilities(
+                dry_run=dry_run
+            )
+        else:
+            logger.debug("Auto-acknowledge for upgraded software is disabled")
+    except Exception as e:
+        result.errors.append(f"Upgraded vulnerability auto-acknowledge failed: {str(e)}")
+        logger.error(f"Upgraded vulnerability auto-acknowledge failed: {e}", exc_info=True)
 
     return result
 

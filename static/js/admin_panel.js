@@ -6079,6 +6079,9 @@ async function loadLicenseInfo() {
         window.licenseInfo = data; // Update global
         displayLicenseInfo(data);
 
+        // Auto-check for updates after license info loads
+        setTimeout(checkForUpdates, 500);
+
     } catch (error) {
         console.error('Error loading license:', error);
         if (detailsEl) {
@@ -6165,11 +6168,17 @@ function displayLicenseInfo(data) {
         `;
     }
 
-    // Append version info
+    // Append version info with update check
     if (data.app_version) {
         statusHtml += `
             <div class="mt-2 pt-2 border-top">
-                <small class="text-muted"><i class="bi bi-info-circle me-1"></i>SentriKat v${escapeHtml(data.app_version)}</small>
+                <div class="d-flex align-items-center justify-content-between">
+                    <small class="text-muted"><i class="bi bi-info-circle me-1"></i>SentriKat v${escapeHtml(data.app_version)}</small>
+                    <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="checkForUpdates()" title="Check for updates">
+                        <i class="bi bi-arrow-repeat"></i> <small>Check</small>
+                    </button>
+                </div>
+                <div id="updateCheckContainer" class="mt-2"></div>
             </div>
         `;
     }
@@ -6244,6 +6253,45 @@ function displayLicenseInfo(data) {
             </div>
         ` : ''}
     `;
+}
+
+async function checkForUpdates() {
+    const container = document.getElementById('updateCheckContainer');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/updates/check');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (data.update_available) {
+            const published = data.published_at ? new Date(data.published_at).toLocaleDateString() : '';
+            container.innerHTML = `
+                <div class="alert alert-info alert-dismissible fade show mb-3" role="alert">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-arrow-up-circle-fill me-2 fs-5"></i>
+                        <div>
+                            <strong>Update available!</strong> SentriKat v${escapeHtml(data.latest_version)} is available${published ? ' (released ' + published + ')' : ''}.
+                            You are running v${escapeHtml(data.current_version)}.
+                            <div class="mt-1">
+                                <small class="text-muted">
+                                    Update via: <code>./scripts/update.sh</code> or
+                                    <code>docker compose pull && docker compose up -d</code>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            `;
+        } else if (!data.error) {
+            container.innerHTML = `
+                <small class="text-success"><i class="bi bi-check-circle me-1"></i>Up to date</small>
+            `;
+        }
+    } catch (e) {
+        // Silently fail - offline or network issue
+    }
 }
 
 async function activateLicense() {
