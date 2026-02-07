@@ -2446,6 +2446,53 @@ def get_usage_history(org_id):
     })
 
 
+@agent_bp.route('/api/admin/blocked-agents', methods=['GET'])
+@login_required
+def list_blocked_agents():
+    """
+    List recent agent registration attempts that were blocked due to license limits.
+    Shows which machines tried to connect but were rejected, when, and why.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user.is_super_admin() and not user.is_org_admin():
+        return jsonify({'error': 'Admin access required'}), 403
+
+    days = request.args.get('days', 30, type=int)
+    start_date = datetime.utcnow() - timedelta(days=days)
+
+    query = AgentEvent.query.filter(
+        AgentEvent.event_type == 'license_exceeded',
+        AgentEvent.created_at >= start_date
+    )
+
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = query.filter(AgentEvent.organization_id.in_(user_org_ids))
+
+    events = query.order_by(AgentEvent.created_at.desc()).limit(50).all()
+
+    blocked = []
+    for event in events:
+        details = event.get_details()
+        blocked.append({
+            'hostname': details.get('hostname', 'Unknown'),
+            'source_ip': event.source_ip,
+            'blocked_at': event.created_at.isoformat() if event.created_at else None,
+            'reason': details.get('message', 'License limit reached'),
+            'current_agents': details.get('license', {}).get('current_agents'),
+            'max_agents': details.get('license', {}).get('max_agents'),
+            'organization_id': event.organization_id,
+        })
+
+    return jsonify({
+        'blocked_agents': blocked,
+        'total': len(blocked),
+        'days': days
+    })
+
+
 @agent_bp.route('/api/admin/events', methods=['GET'])
 @login_required
 def list_agent_events():

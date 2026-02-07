@@ -284,3 +284,242 @@ class TestVersionRange:
 
         # No bounds means any version matches
         assert _version_in_range('999.0.0', None, None, None, None)
+
+
+class TestVersionSortKey:
+    """Tests for the _version_sort_key function in app.version_utils."""
+
+    def test_simple_semver(self):
+        """Test simple semver string produces correct numeric tuples."""
+        from app.version_utils import _version_sort_key
+
+        result = _version_sort_key('1.2.3')
+        assert result == ((0, 1), (0, 2), (0, 3))
+
+    def test_complex_version(self):
+        """Test complex version string with multi-digit components."""
+        from app.version_utils import _version_sort_key
+
+        result = _version_sort_key('10.1.18')
+        assert result == ((0, 10), (0, 1), (0, 18))
+
+    def test_mixed_alphanumeric(self):
+        """Test mixed alphanumeric parts like '18ubuntu1' are split correctly."""
+        from app.version_utils import _version_sort_key
+
+        result = _version_sort_key('18ubuntu1')
+        # '18ubuntu1' has no delimiters, so regex splits into numeric prefix 18
+        # and alpha remainder 'ubuntu1'
+        assert result[0] == (0, 18)
+        assert result[1] == (1, 'ubuntu1')
+        assert len(result) == 2
+
+    def test_empty_version(self):
+        """Test empty or None version returns empty tuple."""
+        from app.version_utils import _version_sort_key
+
+        assert _version_sort_key('') == tuple()
+        assert _version_sort_key(None) == tuple()
+
+    def test_version_with_plus(self):
+        """Test version with + delimiter (e.g., build metadata)."""
+        from app.version_utils import _version_sort_key
+
+        result = _version_sort_key('1.0.0+build123')
+        # + is a delimiter, so splits into '1', '0', '0', 'build123'
+        assert result[0] == (0, 1)
+        assert result[1] == (0, 0)
+        assert result[2] == (0, 0)
+        # 'build123' is mixed alphanumeric — should not crash
+        assert len(result) >= 4
+
+    def test_version_comparison_ordering(self):
+        """Verify that version sort keys produce correct ordering."""
+        from app.version_utils import _version_sort_key
+
+        key_10 = _version_sort_key('10.1.0')
+        key_9 = _version_sort_key('9.9.9')
+        key_1 = _version_sort_key('1.0.0')
+
+        assert key_10 > key_9
+        assert key_9 > key_1
+        assert key_10 > key_1
+
+
+class TestVendorFixOverride:
+    """Tests for vendor fix override matching logic."""
+
+    def test_no_override_returns_match(self, app, db_session, test_org,
+                                       sample_product, sample_vulnerability):
+        """Without a VendorFixOverride, a CVE match should work normally."""
+        from app.filters import check_match
+
+        # Ensure the product and vulnerability match via CPE inference
+        match_reasons, method, confidence = check_match(
+            sample_vulnerability, sample_product
+        )
+        assert len(match_reasons) > 0, "Expected a match without override"
+
+    def test_approved_override_suppresses_match(self, app, db_session, test_org,
+                                                 sample_product, sample_vulnerability):
+        """An approved VendorFixOverride for the CVE+product+version should suppress the match."""
+        from app.models import VendorFixOverride
+        from app.filters import check_match
+
+        override = VendorFixOverride(
+            cve_id='CVE-2024-1234',
+            vendor='apache',
+            product='tomcat',
+            fixed_version='10.1.18',
+            fix_type='backport_patch',
+            status='approved',
+            organization_id=test_org.id
+        )
+        db_session.add(override)
+        db_session.commit()
+
+        match_reasons, method, confidence = check_match(
+            sample_vulnerability, sample_product
+        )
+        assert len(match_reasons) == 0, "Expected match to be suppressed by approved override"
+
+    def test_pending_override_does_not_suppress(self, app, db_session, test_org,
+                                                 sample_product, sample_vulnerability):
+        """A pending VendorFixOverride should NOT suppress the match."""
+        from app.models import VendorFixOverride
+        from app.filters import check_match
+
+        override = VendorFixOverride(
+            cve_id='CVE-2024-1234',
+            vendor='apache',
+            product='tomcat',
+            fixed_version='10.1.18',
+            fix_type='backport_patch',
+            status='pending',
+            organization_id=test_org.id
+        )
+        db_session.add(override)
+        db_session.commit()
+
+        match_reasons, method, confidence = check_match(
+            sample_vulnerability, sample_product
+        )
+        assert len(match_reasons) > 0, "Pending override should not suppress the match"
+
+    def test_override_with_cpe_names(self, app, db_session, test_org,
+                                      sample_product, sample_vulnerability):
+        """Override using CPE vendor/product names also works."""
+        from app.models import VendorFixOverride
+        from app.filters import has_vendor_fix_override
+
+        # Use CPE-style names (cpe_vendor/cpe_product) instead of display names
+        override = VendorFixOverride(
+            cve_id='CVE-2024-1234',
+            vendor='apache',
+            product='tomcat',
+            fixed_version='10.1.18',
+            fix_type='backport_patch',
+            status='approved',
+            organization_id=test_org.id
+        )
+        db_session.add(override)
+        db_session.commit()
+
+        result = has_vendor_fix_override(sample_vulnerability, sample_product)
+        assert result is not None, "Override with CPE names should be found"
+
+
+class TestExtractCoreProductName:
+    """Tests for the extract_core_product_name function."""
+
+    def test_with_architecture(self):
+        """Test removal of architecture/language parenthetical suffix."""
+        from app.filters import extract_core_product_name
+
+        result = extract_core_product_name('Mozilla Firefox (x64 en-US)')
+        assert result == 'mozilla firefox'
+
+    def test_with_version(self):
+        """Test removal of version number and architecture."""
+        from app.filters import extract_core_product_name
+
+        result = extract_core_product_name('7-Zip 25.01 (x64)')
+        assert result == '7-zip'
+
+    def test_simple(self):
+        """Test simple product name is lowered."""
+        from app.filters import extract_core_product_name
+
+        result = extract_core_product_name('Git')
+        assert result == 'git'
+
+    def test_empty(self):
+        """Test empty string returns empty string."""
+        from app.filters import extract_core_product_name
+
+        result = extract_core_product_name('')
+        assert result == ''
+
+
+class TestMatchVulnerabilitiesToProducts:
+    """Integration tests for match_vulnerabilities_to_products (requires DB)."""
+
+    def test_creates_new_matches(self, app, db_session, test_org,
+                                  sample_product, sample_vulnerability):
+        """Creating a product+vulnerability pair should produce a match."""
+        from app.filters import match_vulnerabilities_to_products
+        from app.models import VulnerabilityMatch
+
+        count = match_vulnerabilities_to_products()
+        assert count >= 1, "Expected at least one new match to be created"
+
+        match = VulnerabilityMatch.query.filter_by(
+            product_id=sample_product.id,
+            vulnerability_id=sample_vulnerability.id
+        ).first()
+        assert match is not None, "Match record should exist in the database"
+
+    def test_does_not_duplicate_matches(self, app, db_session, test_org,
+                                         sample_product, sample_vulnerability):
+        """Running match_vulnerabilities_to_products twice should not create duplicates."""
+        from app.filters import match_vulnerabilities_to_products
+        from app.models import VulnerabilityMatch
+
+        first_count = match_vulnerabilities_to_products()
+        second_count = match_vulnerabilities_to_products()
+        assert second_count == 0, "Second run should not create new matches"
+
+        total = VulnerabilityMatch.query.filter_by(
+            product_id=sample_product.id,
+            vulnerability_id=sample_vulnerability.id
+        ).count()
+        assert total == 1, "Should have exactly one match, not duplicates"
+
+    def test_cleanup_invalid_matches(self, app, db_session, test_org,
+                                      sample_product, sample_vulnerability):
+        """cleanup_invalid_matches should remove matches that no longer pass."""
+        from app.filters import match_vulnerabilities_to_products, cleanup_invalid_matches
+        from app.models import VulnerabilityMatch
+
+        # First create a match
+        match_vulnerabilities_to_products()
+
+        match = VulnerabilityMatch.query.filter_by(
+            product_id=sample_product.id,
+            vulnerability_id=sample_vulnerability.id
+        ).first()
+        assert match is not None, "Match should exist before cleanup"
+
+        # Now change the vulnerability so it no longer matches this product
+        sample_vulnerability.vendor_project = 'Microsoft'
+        sample_vulnerability.product = 'Windows'
+        db_session.commit()
+
+        removed = cleanup_invalid_matches()
+        assert removed >= 1, "Should have removed at least one invalid match"
+
+        match = VulnerabilityMatch.query.filter_by(
+            product_id=sample_product.id,
+            vulnerability_id=sample_vulnerability.id
+        ).first()
+        assert match is None, "Invalid match should have been removed"
