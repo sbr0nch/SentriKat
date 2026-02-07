@@ -284,6 +284,19 @@ SentriKat/
 | Vulnerability Snapshot | Daily 02:00 UTC | Historical tracking |
 | Scheduled Reports | Every 15 min | Process report queue |
 | LDAP Sync | Configurable | Sync users from AD |
+| **Maintenance** | Daily 04:00 UTC | 7-step cleanup & auto-resolution |
+
+### 4.3.1 Maintenance Pipeline (7 Steps)
+
+| Step | Task | Description |
+|------|------|-------------|
+| 1 | Clean stale installations | Remove ProductInstallation records not seen for 30+ days |
+| 2 | Update asset status | Mark offline agents as stale (14d) or removed (90d) |
+| 3 | Clean orphaned products | Remove products with no installations or matches |
+| 4 | Clean import queue | Purge old processed import queue entries |
+| 5 | Auto-disable stale products | Disable products not reported by agents |
+| 6 | Auto-acknowledge (removed) | Resolve CVEs for products with zero installations |
+| 7 | **Auto-acknowledge (upgraded)** | Resolve CVEs where all installations upgraded past vulnerable range |
 
 ---
 
@@ -512,9 +525,51 @@ POST   /api/products/rematch         # Re-run CVE matching
 GET    /api/vulnerabilities          # List CVEs
 GET    /api/vulnerabilities/stats    # Counts by severity
 GET    /api/vulnerabilities/trends   # Historical data
-POST   /api/matches/<id>/acknowledge # Mark as handled
+POST   /api/matches/<id>/acknowledge # Mark as handled (sets resolution_reason='manual')
+POST   /api/matches/<id>/unacknowledge  # Reopen for alerts
 POST   /api/matches/<id>/snooze      # Defer alerts
+POST   /api/matches/acknowledge-by-cve/<cve_id>  # Bulk acknowledge all matches for a CVE
+POST   /api/matches/unacknowledge-by-cve/<cve_id> # Bulk reopen all matches for a CVE
 ```
+
+### 6.3.1 Vulnerability Resolution Methods
+
+SentriKat tracks HOW a vulnerability was resolved via `resolution_reason`:
+
+| Method | Trigger | Description |
+|--------|---------|-------------|
+| `manual` | User clicks Acknowledge | Admin manually reviews and marks as handled |
+| `software_removed` | Maintenance job | Product has zero installations (uninstalled from all assets) |
+| `version_upgraded` | Maintenance job | All installations upgraded past the vulnerable version range |
+
+### 6.3.2 Cumulative Update / Auto-Resolution Logic
+
+When vendors release software updates that fix CVEs (e.g., Firefox 126 fixes CVE-2024-XXXX
+that affected versions 100-125), SentriKat automatically detects this:
+
+```
+                  NVD says: CVE-2024-XXXX affects Firefox 100.0 - 125.0
+
+    Your installation: Firefox 126.0
+                       ↓
+    check_product_affected("mozilla", "firefox", "126.0", "CVE-2024-XXXX")
+                       ↓
+    Version 126.0 > versionEnd 125.0 → NOT AFFECTED
+                       ↓
+    All installations safe → auto_acknowledge(resolution_reason='version_upgraded')
+```
+
+**How it works step by step:**
+
+1. NVD publishes affected version ranges for each CVE (versionStart, versionEnd)
+2. During maintenance (step 7), the system queries all unacknowledged CVE matches
+3. For each match, it checks ALL installations of that product across all assets
+4. Using NVD CPE version range data, it determines if each installed version is affected
+5. If **ALL** installed versions are outside the vulnerable range → CVE auto-acknowledged
+6. If even ONE machine still runs a vulnerable version → CVE stays active
+
+**Key detail:** This only works for products with CPE data (precise NVD matching).
+Keyword-only matches are not auto-resolved since version ranges aren't available.
 
 ## 6.4 Agent API
 
@@ -542,10 +597,33 @@ POST   /api/import/queue/<id>/approve  # Approve import
 GET    /api/settings/ldap            # LDAP config
 POST   /api/settings/ldap            # Update LDAP
 POST   /api/settings/ldap/test       # Test connection
-GET    /api/license                  # License info
+GET    /api/license                  # License info + usage stats
 POST   /api/license                  # Activate license
-GET    /api/license/installation-id  # Hardware ID
+GET    /api/license/installation-id  # Hardware ID for license binding
+GET    /api/version                  # App version, edition, API info
+GET    /api/updates/check            # Check GitHub for latest release (admin-only)
 ```
+
+### In-App Update Check
+
+The `/api/updates/check` endpoint queries the GitHub Releases API to check if a newer
+version is available. It returns:
+
+```json
+{
+  "update_available": true,
+  "current_version": "1.0.3",
+  "latest_version": "1.0.4",
+  "release_name": "SentriKat v1.0.4",
+  "release_url": "https://github.com/sbr0nch/SentriKat/releases/tag/v1.0.4",
+  "published_at": "2026-02-10T12:00:00Z"
+}
+```
+
+- Auto-checks when admin opens the License tab
+- Manual "Check for updates" button available
+- Gracefully handles offline scenarios (returns `update_available: false` with error message)
+- 5-second timeout to avoid blocking the UI
 
 **Total: 80+ REST endpoints with proper HTTP methods**
 
@@ -987,18 +1065,31 @@ jobs:
 ## A. Environment Variables
 
 ```bash
-# Required
-SECRET_KEY=<32-byte-hex>
-ENCRYPTION_KEY=<fernet-key>
-DATABASE_URL=postgresql://...
-SENTRIKAT_INSTALLATION_ID=SK-INST-...
+# ── REQUIRED ──────────────────────────────────────────
+SECRET_KEY=<random-string>           # Flask session signing (generate with: python -c "import secrets; print(secrets.token_hex(32))")
+DB_PASSWORD=<database-password>      # PostgreSQL password
 
-# Optional
-NVD_API_KEY=<nvd-key>
-SENTRIKAT_LICENSE=<license-key>
-FLASK_ENV=production
-VERIFY_SSL=true
-HTTP_PROXY=http://proxy:3128
+# ── OPTIONAL (auto-generated if missing) ──────────────
+ENCRYPTION_KEY=<fernet-key>          # Auto-generated on first run, stored in DB
+SENTRIKAT_INSTALLATION_ID=SK-INST-...  # Auto-generated hardware fingerprint
+
+# ── LICENSE ───────────────────────────────────────────
+SENTRIKAT_LICENSE=<signed-license-string>  # From portal.sentrikat.com (auto-syncs to DB)
+# SENTRIKAT_LICENSE_PUBLIC_KEY=<base64-pem> # Override embedded public key (advanced)
+
+# ── NVD API ───────────────────────────────────────────
+NVD_API_KEY=<nvd-key>               # Optional but recommended (higher rate limits)
+
+# ── NETWORK ───────────────────────────────────────────
+FLASK_ENV=production                 # production or development
+VERIFY_SSL=true                      # Set to false only for dev/self-signed certs
+HTTP_PROXY=http://proxy:3128         # Corporate proxy support
+```
+
+**Minimum `.env` for Docker deployment:**
+```bash
+SECRET_KEY=change-me-to-something-random-and-long
+DB_PASSWORD=change-me-to-a-secure-password
 ```
 
 ## B. API Rate Limits
@@ -1033,6 +1124,7 @@ HTTP_PROXY=http://proxy:3128
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0.0 | Feb 2026 | Development Team | Initial release |
+| 1.1.0 | Feb 2026 | Development Team | Added: CVE auto-resolution on version upgrade, in-app update check, sidebar navigation highlighting, complete vulnerability resolution documentation |
 
 ---
 
