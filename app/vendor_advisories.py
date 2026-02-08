@@ -21,9 +21,11 @@ Architecture:
 """
 
 import logging
+import re
 import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple, Any
+from app.version_utils import is_version_patched, detect_version_format
 
 logger = logging.getLogger(__name__)
 
@@ -337,12 +339,18 @@ def _parse_osv_response(cve_id: str, osv_data: dict, products: List[dict]) -> Li
             if not _osv_package_matches_product(pkg_name, ecosystem, product_name, vendor):
                 continue
 
-            # Check if our version is in the fixed range
-            # OSV tells us the fixed version; if the product has a distro_package_version,
-            # we compare that. Otherwise we compare the base version.
+            # Compare installed version against the vendor's fixed version.
+            # Use distro_package_version (full distro version from agent) if available,
+            # otherwise fall back to the base upstream version.
             compare_version = product_info.get('distro_package_version') or version
+            os_info = product_info.get('os', '')
+            version_format = detect_version_format(ecosystem, os_info)
 
             for fixed_ver in fixed_versions:
+                # Only create override if installed version >= fixed version
+                if not is_version_patched(compare_version, fixed_ver, version_format):
+                    continue  # Still vulnerable, don't suppress
+
                 results.append({
                     'cve_id': cve_id,
                     'vendor': product_info['display_vendor'],
@@ -354,7 +362,7 @@ def _parse_osv_response(cve_id: str, osv_data: dict, products: List[dict]) -> Li
                     'advisory_url': f'https://osv.dev/vulnerability/{osv_data.get("id", cve_id)}',
                     'ecosystem': ecosystem,
                     'fixed_in_version': fixed_ver,
-                    'notes': f'OSV.dev: Fixed in {pkg_name} {fixed_ver} ({ecosystem})',
+                    'notes': f'OSV.dev: {pkg_name} {compare_version} >= {fixed_ver} ({version_format})',
                 })
 
     return results
@@ -478,12 +486,18 @@ def _parse_redhat_response(cve_id: str, rh_data: dict, products: List[dict]) -> 
         if not package_name:
             continue
 
-        # Extract base package name from RPM NVR
+        # Extract base package name and fixed version from RPM NVR
         # e.g., "httpd-2.4.37-47.module+el8.6.0+15654+427eba2e.2.x86_64"
-        rpm_name = package_name.split('-')[0] if '-' in package_name else package_name
+        rpm_name, fixed_evr = _parse_rpm_nvr(package_name)
 
         for product_info in products:
             if _redhat_package_matches_product(rpm_name, product_info):
+                # Compare installed version against fixed version using RPM comparison
+                installed_ver = product_info.get('distro_package_version') or product_info['version']
+                if fixed_evr and installed_ver:
+                    if not is_version_patched(installed_ver, fixed_evr, 'rpm'):
+                        continue  # Still vulnerable, don't suppress
+
                 results.append({
                     'cve_id': cve_id,
                     'vendor': product_info['display_vendor'],
@@ -493,7 +507,7 @@ def _parse_redhat_response(cve_id: str, rh_data: dict, products: List[dict]) -> 
                     'source': 'redhat',
                     'advisory_id': advisory,
                     'advisory_url': f'https://access.redhat.com/errata/{advisory}' if advisory else '',
-                    'notes': f'Red Hat: Fixed in {package_name} ({advisory})',
+                    'notes': f'Red Hat: {installed_ver} >= {fixed_evr} ({advisory})',
                 })
 
     # Also check package_state for "not affected" status
@@ -515,6 +529,33 @@ def _parse_redhat_response(cve_id: str, rh_data: dict, products: List[dict]) -> 
                     })
 
     return results
+
+
+def _parse_rpm_nvr(nvr: str) -> Tuple[str, str]:
+    """
+    Parse an RPM NVR (Name-Version-Release) or NEVRA into (name, version-release).
+
+    Examples:
+        "httpd-2.4.37-47.el8.x86_64" -> ("httpd", "2.4.37-47.el8")
+        "python3-urllib3-1.26.5-3.el9.noarch" -> ("python3-urllib3", "1.26.5-3.el9")
+        "vim-8.0.1763-19.el8_6.4" -> ("vim", "8.0.1763-19.el8_6.4")
+    """
+    s = nvr.strip()
+    # Strip architecture suffix (.x86_64, .noarch, .i686, .aarch64, .src)
+    s = re.sub(r'\.(x86_64|noarch|i[3-6]86|aarch64|ppc64le|s390x|src)$', '', s)
+
+    # RPM NVR: name is everything before the second-to-last dash
+    # Version is between second-to-last and last dash
+    # Release is after last dash
+    # We split on '-' and the last two segments are version and release
+    parts = s.rsplit('-', 2)
+    if len(parts) == 3:
+        name = parts[0]
+        evr = f'{parts[1]}-{parts[2]}'
+        return (name, evr)
+    elif len(parts) == 2:
+        return (parts[0], parts[1])
+    return (s, '')
 
 
 def _redhat_package_matches_product(rpm_name: str, product_info: dict) -> bool:
@@ -623,9 +664,9 @@ def _sync_msrc_advisories(active_cves: Dict[str, List[dict]]) -> List[dict]:
                         for kb in kb_articles
                     ) if installed_kbs else False
 
-                    # If KB is installed, or if we know the advisory exists for this product
-                    if kb_installed or _msrc_product_matches(entry.get('fixed_products', []), product_info):
-                        fix_type = 'hotfix' if kb_installed else 'vendor_advisory'
+                    # Only create override if KB is confirmed installed by the agent
+                    if kb_installed:
+                        fix_type = 'hotfix'
                         notes_parts = []
                         if kb_articles:
                             notes_parts.append(f"KB: {', '.join(kb_articles[:3])}")
@@ -797,6 +838,11 @@ def _sync_debian_advisories(active_cves: Dict[str, List[dict]]) -> List[dict]:
                     if status == 'resolved' and fixed_version:
                         for product_info in debian_products:
                             if _debian_package_matches_product(pkg_name, product_info):
+                                # Compare installed version against fixed using dpkg
+                                installed_ver = product_info.get('distro_package_version') or product_info['version']
+                                if not is_version_patched(installed_ver, fixed_version, 'dpkg'):
+                                    continue  # Still vulnerable
+
                                 results.append({
                                     'cve_id': cve_id,
                                     'vendor': product_info['display_vendor'],
@@ -806,7 +852,7 @@ def _sync_debian_advisories(active_cves: Dict[str, List[dict]]) -> List[dict]:
                                     'source': 'debian',
                                     'advisory_id': cve_info.get('debianbug', ''),
                                     'advisory_url': f'https://security-tracker.debian.org/tracker/{cve_id}',
-                                    'notes': f'Debian {release_name}: Fixed in {pkg_name} {fixed_version}',
+                                    'notes': f'Debian {release_name}: {installed_ver} >= {fixed_version}',
                                 })
 
     except Exception as e:
