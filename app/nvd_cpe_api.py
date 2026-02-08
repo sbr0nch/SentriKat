@@ -20,6 +20,7 @@ from typing import Optional, Dict, List, Tuple, Any
 from config import Config
 import urllib3
 from app.nvd_rate_limiter import get_rate_limiter
+from app.version_utils import _version_sort_key, _version_in_range
 
 logger = logging.getLogger(__name__)
 
@@ -521,21 +522,6 @@ def search_cpe_grouped(
     return grouped
 
 
-def _version_sort_key(version: str) -> Tuple:
-    """
-    Generate a sortable key for version strings.
-    Handles semver-like versions: 1.2.3, 10.1.18, etc.
-    """
-    parts = []
-    for part in re.split(r'[.\-_]', version):
-        # Try to convert to int for numeric comparison
-        try:
-            parts.append((0, int(part)))
-        except ValueError:
-            parts.append((1, part.lower()))
-    return tuple(parts)
-
-
 def get_cpe_versions(vendor: str, product: str, limit: int = 50) -> List[str]:
     """
     Get available versions for a specific vendor/product combination.
@@ -741,44 +727,6 @@ def check_product_affected(
             return True, f"CPE version range match: {cpe['cpe_uri']}"
 
     return False, None
-
-
-def _version_in_range(
-    version: str,
-    start: Optional[str],
-    end: Optional[str],
-    start_type: Optional[str],
-    end_type: Optional[str]
-) -> bool:
-    """
-    Check if a version falls within a specified range.
-    """
-    if not version:
-        return False
-
-    version_key = _version_sort_key(version)
-
-    # Check start bound
-    if start:
-        start_key = _version_sort_key(start)
-        if start_type == 'including':
-            if version_key < start_key:
-                return False
-        else:  # excluding
-            if version_key <= start_key:
-                return False
-
-    # Check end bound
-    if end:
-        end_key = _version_sort_key(end)
-        if end_type == 'including':
-            if version_key > end_key:
-                return False
-        else:  # excluding
-            if version_key >= end_key:
-                return False
-
-    return True
 
 
 def clear_cache():

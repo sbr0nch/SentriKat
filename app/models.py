@@ -687,6 +687,72 @@ class VulnerabilityMatch(db.Model):
             'effective_priority': self.calculate_effective_priority()
         }
 
+
+class VendorFixOverride(db.Model):
+    """
+    Tracks vendor patches that fix CVEs without changing the product version.
+
+    This solves the "Path B" problem: when a vendor patches v3.3 in-place
+    (backport fix), the NVD CPE data still says 3.2-3.3 are affected.
+    This override tells SentriKat that a specific version is actually safe
+    for a specific CVE, despite what the CPE range says.
+    """
+    __tablename__ = 'vendor_fix_overrides'
+
+    id = db.Column(db.Integer, primary_key=True)
+    cve_id = db.Column(db.String(20), nullable=False, index=True)
+    vendor = db.Column(db.String(255), nullable=False)
+    product = db.Column(db.String(255), nullable=False)
+
+    # The version that was patched in-place
+    fixed_version = db.Column(db.String(100), nullable=False)
+
+    # Evidence / justification
+    fix_type = db.Column(db.String(50), nullable=False, default='backport_patch')  # backport_patch, hotfix, config_mitigation
+    vendor_advisory_url = db.Column(db.Text, nullable=True)
+    vendor_advisory_id = db.Column(db.String(100), nullable=True)
+    patch_identifier = db.Column(db.String(255), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    # Audit trail
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    approved_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), default='approved', nullable=False)  # pending, approved, rejected
+
+    # Scope
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True)
+
+    __table_args__ = (
+        db.Index('idx_vendor_fix_lookup', 'cve_id', 'vendor', 'product', 'fixed_version'),
+    )
+
+    creator = db.relationship('User', foreign_keys=[created_by])
+    approver = db.relationship('User', foreign_keys=[approved_by])
+    organization = db.relationship('Organization', backref=db.backref('vendor_fix_overrides', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'cve_id': self.cve_id,
+            'vendor': self.vendor,
+            'product': self.product,
+            'fixed_version': self.fixed_version,
+            'fix_type': self.fix_type,
+            'vendor_advisory_url': self.vendor_advisory_url,
+            'vendor_advisory_id': self.vendor_advisory_id,
+            'patch_identifier': self.patch_identifier,
+            'notes': self.notes,
+            'created_by': self.creator.username if self.creator else None,
+            'approved_by': self.approver.username if self.approver else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'approved_at': self.approved_at.isoformat() if self.approved_at else None,
+            'status': self.status,
+            'organization_id': self.organization_id,
+        }
+
+
 class SyncLog(db.Model):
     """Log of CISA KEV sync operations"""
     __tablename__ = 'sync_logs'
@@ -1279,6 +1345,7 @@ class Asset(db.Model):
     notes = db.Column(db.Text, nullable=True)  # Admin notes
     tags = db.Column(db.Text, nullable=True)  # JSON array of tags
     metadata_json = db.Column(db.Text, nullable=True)  # JSON for custom fields
+    installed_kbs = db.Column(db.Text, nullable=True)  # JSON array of installed KBs (Windows)
 
     # Agent Command & Control (server-side management)
     pending_scan = db.Column(db.Boolean, default=False)  # True = agent should scan immediately
@@ -1405,6 +1472,7 @@ class ProductInstallation(db.Model):
 
     # Installation details
     install_path = db.Column(db.String(500), nullable=True)  # Where it's installed
+    distro_package_version = db.Column(db.String(200), nullable=True)  # Full distro version e.g. 2.4.52-1ubuntu4.6
     detected_by = db.Column(db.String(50), default='agent')  # agent, manual, scan
     detected_on_os = db.Column(db.String(50), nullable=True, index=True)  # linux, windows, macos, etc.
 

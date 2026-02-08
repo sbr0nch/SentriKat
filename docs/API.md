@@ -18,6 +18,7 @@
 10. [Agents & Integrations](#agents--integrations)
 11. [CPE Management](#cpe-management)
 12. [SAML SSO](#saml-sso)
+13. [Vendor Advisory Sync](#vendor-advisory-sync)
 13. [Licensing](#licensing)
 
 ---
@@ -910,5 +911,79 @@ GET /api/products?page=1&per_page=25
   "page": 1,
   "per_page": 25,
   "pages": 6
+}
+```
+
+---
+
+## Vendor Advisory Sync
+
+SentriKat automatically detects in-place vendor patches (backport fixes) by syncing with vendor advisory feeds. This eliminates false positives where NVD CPE data still marks a version as affected even though the vendor has backported the fix.
+
+### How It Works
+
+1. SentriKat daily syncs advisory data from OSV.dev, Red Hat, Microsoft MSRC, and Debian
+2. When an advisory confirms a fix exists for a CVE+product+version already in your inventory
+3. The CVE match is automatically resolved with `resolution_reason: "vendor_fix"`
+4. The CVE disappears from the dashboard, email alerts, and webhook notifications
+
+### GET `/api/vendor-fix-overrides`
+
+List all vendor fix override records (both manual and automatic).
+
+**Query Parameters**:
+- `cve_id` (optional): Filter by CVE ID
+- `status` (optional): Filter by status (`approved`, `pending`, `rejected`)
+
+**Response**:
+```json
+[
+  {
+    "id": 1,
+    "cve_id": "CVE-2024-38475",
+    "vendor": "Apache",
+    "product": "HTTP Server",
+    "fixed_version": "2.4.52",
+    "fix_type": "backport_patch",
+    "source": "osv.dev",
+    "vendor_advisory_url": "https://osv.dev/vulnerability/USN-6885-1",
+    "status": "approved",
+    "created_at": "2025-01-15T03:00:00Z"
+  }
+]
+```
+
+### POST `/api/vendor-fix-overrides/sync`
+
+Manually trigger a vendor advisory sync. Requires admin role.
+
+**Response**:
+```json
+{
+  "overrides_created": 12,
+  "matches_resolved": 8,
+  "feeds_checked": 4,
+  "errors": []
+}
+```
+
+### GET `/api/vendor-advisories/check/<cve_id>`
+
+Check vendor advisory feeds for patches related to a specific CVE.
+
+**Response**:
+```json
+{
+  "cve_id": "CVE-2024-38475",
+  "advisories": [
+    {
+      "source": "osv.dev",
+      "package": "apache2",
+      "ecosystem": "Ubuntu:22.04",
+      "fixed_versions": ["2.4.52-1ubuntu4.10"],
+      "url": "https://osv.dev/vulnerability/USN-6885-1"
+    }
+  ],
+  "count": 1
 }
 ```

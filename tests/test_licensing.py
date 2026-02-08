@@ -282,3 +282,311 @@ class TestAgentLimit:
             assert 'current' in usage['agents']
             assert 'limit' in usage['agents']
             assert 'api_keys' in usage
+
+
+class TestGlobalAgentLimitEnforcement:
+    """Tests that agent limits are enforced globally across all organizations."""
+
+    def test_limit_blocks_when_exceeded(self, app, db_session):
+        """Create enough assets to hit the limit, then verify check_agent_limit returns (False, limit, message)."""
+        from app.models import Asset, Organization
+        from app.licensing import check_agent_limit
+
+        org = Organization(name='limitorg', display_name='Limit Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        # Community edition allows 5 agents - create exactly 5 to hit the limit
+        for i in range(5):
+            asset = Asset(
+                hostname=f'agent{i}.limit.local',
+                ip_address=f'10.1.0.{i}',
+                asset_type='server',
+                organization_id=org.id,
+                active=True
+            )
+            db_session.add(asset)
+        db_session.commit()
+
+        with app.app_context():
+            allowed, limit, message = check_agent_limit()
+            assert allowed is False
+            assert limit == 5
+            assert message is not None
+            assert isinstance(message, str)
+
+    def test_limit_allows_within_bounds(self, app, db_session):
+        """Fewer assets than limit returns (True, limit, None)."""
+        from app.models import Asset, Organization
+        from app.licensing import check_agent_limit
+
+        org = Organization(name='boundsorg', display_name='Bounds Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        # Create only 3 assets - well under the community limit of 5
+        for i in range(3):
+            asset = Asset(
+                hostname=f'bounded{i}.test.local',
+                ip_address=f'10.2.0.{i}',
+                asset_type='server',
+                organization_id=org.id,
+                active=True
+            )
+            db_session.add(asset)
+        db_session.commit()
+
+        with app.app_context():
+            allowed, limit, message = check_agent_limit()
+            assert allowed is True
+            assert limit == 5
+            assert message is None
+
+    def test_inactive_agents_not_counted(self, app, db_session):
+        """Inactive assets (active=False) should NOT count toward the agent limit."""
+        from app.models import Asset, Organization
+        from app.licensing import check_agent_limit
+
+        org = Organization(name='inactiveorg', display_name='Inactive Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        # Create 3 active assets
+        for i in range(3):
+            asset = Asset(
+                hostname=f'active{i}.test.local',
+                ip_address=f'10.3.0.{i}',
+                asset_type='server',
+                organization_id=org.id,
+                active=True
+            )
+            db_session.add(asset)
+
+        # Create 5 INACTIVE assets - these should not count
+        for i in range(5):
+            asset = Asset(
+                hostname=f'inactive{i}.test.local',
+                ip_address=f'10.3.1.{i}',
+                asset_type='server',
+                organization_id=org.id,
+                active=False
+            )
+            db_session.add(asset)
+        db_session.commit()
+
+        with app.app_context():
+            allowed, limit, message = check_agent_limit()
+            # Only 3 active assets, so should be allowed
+            assert allowed is True
+            assert limit == 5
+            assert message is None
+
+
+class TestGlobalApiKeyLimitEnforcement:
+    """Tests for API key limits enforced globally."""
+
+    def test_api_key_limit_blocks_when_exceeded(self, app, db_session):
+        """Create active API keys up to the limit and verify blocking."""
+        import hashlib
+        from app.models import AgentApiKey, Organization
+        from app.licensing import check_agent_api_key_limit
+
+        org = Organization(name='apikeyorg', display_name='ApiKey Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        # Community edition allows 5 API keys - create exactly 5 to hit the limit
+        for i in range(5):
+            raw_key = f'sk_test_apikey_{i}_abcdef1234567890'
+            key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+            api_key = AgentApiKey(
+                organization_id=org.id,
+                name=f'Test Key {i}',
+                key_hash=key_hash,
+                key_prefix=raw_key[:8],
+                active=True
+            )
+            db_session.add(api_key)
+        db_session.commit()
+
+        with app.app_context():
+            allowed, limit, message = check_agent_api_key_limit()
+            assert allowed is False
+            assert limit == 5
+            assert message is not None
+            assert isinstance(message, str)
+
+    def test_api_key_limit_allows_within_bounds(self, app, db_session):
+        """Fewer API keys than limit returns (True, limit, None)."""
+        import hashlib
+        from app.models import AgentApiKey, Organization
+        from app.licensing import check_agent_api_key_limit
+
+        org = Organization(name='apiboundsorg', display_name='ApiBounds Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        # Create only 2 API keys - under the community limit of 5
+        for i in range(2):
+            raw_key = f'sk_test_bounds_{i}_abcdef1234567890'
+            key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+            api_key = AgentApiKey(
+                organization_id=org.id,
+                name=f'Bounds Key {i}',
+                key_hash=key_hash,
+                key_prefix=raw_key[:8],
+                active=True
+            )
+            db_session.add(api_key)
+        db_session.commit()
+
+        with app.app_context():
+            allowed, limit, message = check_agent_api_key_limit()
+            assert allowed is True
+            assert limit == 5
+            assert message is None
+
+    def test_inactive_keys_not_counted(self, app, db_session):
+        """Keys with active=False should not count toward the limit."""
+        import hashlib
+        from app.models import AgentApiKey, Organization
+        from app.licensing import check_agent_api_key_limit
+
+        org = Organization(name='inactivekeysorg', display_name='InactiveKeys Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        # Create 2 active keys
+        for i in range(2):
+            raw_key = f'sk_test_activekey_{i}_abcdef1234567890'
+            key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+            api_key = AgentApiKey(
+                organization_id=org.id,
+                name=f'Active Key {i}',
+                key_hash=key_hash,
+                key_prefix=raw_key[:8],
+                active=True
+            )
+            db_session.add(api_key)
+
+        # Create 10 INACTIVE keys - these should not count
+        for i in range(10):
+            raw_key = f'sk_test_inactivekey_{i}_abcdef1234567890'
+            key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+            api_key = AgentApiKey(
+                organization_id=org.id,
+                name=f'Inactive Key {i}',
+                key_hash=key_hash,
+                key_prefix=raw_key[:8],
+                active=False
+            )
+            db_session.add(api_key)
+        db_session.commit()
+
+        with app.app_context():
+            allowed, limit, message = check_agent_api_key_limit()
+            # Only 2 active keys, so should be allowed
+            assert allowed is True
+            assert limit == 5
+            assert message is None
+
+
+class TestProductLimitEnforcement:
+    """Test product limit checking."""
+
+    def test_product_limit_community(self, app, db_session):
+        """Community edition has max 50 products."""
+        from app.models import Product, Organization
+        from app.licensing import check_product_limit
+
+        org = Organization(name='prodorg', display_name='Prod Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        # Create exactly 50 products to hit the community limit
+        for i in range(50):
+            product = Product(
+                vendor=f'Vendor{i}',
+                product_name=f'Product{i}',
+                version='1.0',
+                criticality='medium',
+                active=True,
+                cpe_vendor=f'vendor{i}',
+                cpe_product=f'product{i}',
+                match_type='auto',
+                organization_id=org.id
+            )
+            db_session.add(product)
+        db_session.commit()
+
+        with app.app_context():
+            allowed, limit, message = check_product_limit()
+            assert allowed is False
+            assert limit == 50
+            assert message is not None
+
+    def test_product_limit_within_bounds(self, app, db_session):
+        """Fewer products than the limit should be allowed."""
+        from app.models import Product, Organization
+        from app.licensing import check_product_limit
+
+        org = Organization(name='prodboundsorg', display_name='ProdBounds Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        # Create only 10 products - well under the 50 limit
+        for i in range(10):
+            product = Product(
+                vendor=f'BoundsVendor{i}',
+                product_name=f'BoundsProduct{i}',
+                version='1.0',
+                criticality='low',
+                active=True,
+                cpe_vendor=f'boundsvendor{i}',
+                cpe_product=f'boundsproduct{i}',
+                match_type='auto',
+                organization_id=org.id
+            )
+            db_session.add(product)
+        db_session.commit()
+
+        with app.app_context():
+            allowed, limit, message = check_product_limit()
+            assert allowed is True
+            assert limit == 50
+            assert message is None
+
+
+class TestLicenseEditions:
+    """Test edition detection."""
+
+    def test_community_edition_detected(self, app):
+        """With no license key, edition should be 'community'."""
+        from app.licensing import get_license
+
+        with app.app_context():
+            license_info = get_license()
+            assert license_info.edition == 'community'
+
+    def test_community_is_not_professional(self, app):
+        """Community license.is_professional() returns False."""
+        from app.licensing import get_license
+
+        with app.app_context():
+            license_info = get_license()
+            assert license_info.is_professional() is False
+
+    def test_community_features(self, app):
+        """Community features don't include professional-only features."""
+        from app.licensing import get_license
+
+        with app.app_context():
+            license_info = get_license()
+            # Community edition has an empty features list
+            assert 'push_agents' not in license_info.features
+            assert 'ldap' not in license_info.features
+            assert 'email_alerts' not in license_info.features
+            assert 'white_label' not in license_info.features
+            assert 'api_access' not in license_info.features
+            assert 'multi_org' not in license_info.features
+            assert 'jira_integration' not in license_info.features

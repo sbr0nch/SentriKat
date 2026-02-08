@@ -88,6 +88,7 @@ Configuration is stored at: `/etc/sentrikat/agent.conf`
 - Installed programs from Windows Registry (Add/Remove Programs)
 - 32-bit and 64-bit applications
 - Windows Features and Roles (on Server editions)
+- **Installed KBs/Hotfixes** (for automatic vendor patch detection)
 
 ### Linux
 - Packages from system package manager:
@@ -95,8 +96,37 @@ Configuration is stored at: `/etc/sentrikat/agent.conf`
   - RHEL/CentOS/Fedora: rpm
   - Alpine: apk
   - Arch: pacman
+- **Full distro package versions** (e.g., `2.4.52-1ubuntu4.6` for backport detection)
 - Snap packages
 - Flatpak packages
+
+### Vendor Backport Detection
+
+SentriKat agents collect distro-specific package version strings and installed patches to enable **automatic false-positive detection**. When a vendor backports a security fix into an existing version (e.g., Ubuntu patches Apache 2.4.52 in-place), SentriKat automatically:
+
+1. Detects the full distro package version from the agent
+2. Cross-references vendor advisory feeds (OSV.dev, Red Hat, MSRC, Debian)
+3. Removes the false-positive CVE match from the dashboard, emails, and webhooks
+
+The agent inventory payload now supports these optional fields:
+
+```json
+{
+  "products": [
+    {
+      "vendor": "Apache",
+      "product": "HTTP Server",
+      "version": "2.4.52",
+      "path": "/usr/sbin/apache2",
+      "distro_package_version": "2.4.52-1ubuntu4.6"
+    }
+  ],
+  "installed_kbs": ["KB5040442", "KB5034763"]
+}
+```
+
+- `distro_package_version`: Full distro-specific version string (Linux agents)
+- `installed_kbs`: List of installed KB article IDs (Windows agents)
 
 ## API Endpoints
 

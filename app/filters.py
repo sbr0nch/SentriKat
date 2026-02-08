@@ -1,5 +1,6 @@
 from app import db
-from app.models import Product, Vulnerability, VulnerabilityMatch
+from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride
+from app.version_utils import _version_sort_key, _version_in_range
 import re
 import json
 
@@ -128,85 +129,6 @@ def check_cpe_match(vulnerability, product):
     return [], None, None
 
 
-def _version_in_range(version, start, end, start_type, end_type):
-    """
-    Check if a version falls within a specified range.
-
-    ENTERPRISE LOGIC:
-    - If no version range specified (no start AND no end): Returns True (all versions affected)
-    - If version range exists but product has no version: Returns False (can't verify, be conservative)
-    - Otherwise: Check if version is within the specified range
-
-    This prevents false positives by requiring version verification when CPE data has ranges.
-    """
-    # If no version range specified at all, all versions are affected
-    if not start and not end:
-        return True
-
-    # If version range exists but product has no version, we can't verify - be conservative
-    if not version:
-        return False  # Changed from True - don't assume match without version proof
-
-    version_key = _version_sort_key(version)
-
-    if start:
-        start_key = _version_sort_key(start)
-        if start_type == 'including':
-            if version_key < start_key:
-                return False
-        else:  # excluding
-            if version_key <= start_key:
-                return False
-
-    if end:
-        end_key = _version_sort_key(end)
-        if end_type == 'including':
-            if version_key > end_key:
-                return False
-        else:  # excluding
-            if version_key >= end_key:
-                return False
-
-    return True
-
-
-def _version_sort_key(version):
-    """
-    Generate a sortable key for version strings.
-    Handles semver-like versions properly: 1.2.3, 10.1.18, etc.
-
-    Key format: tuple of (type, value) pairs where:
-    - type 0 = numeric (for proper numeric comparison)
-    - type 1 = string (for alphabetic comparison)
-
-    Examples:
-    - "10.1.18" -> ((0,10), (0,1), (0,18))
-    - "1.0.0-alpha" -> ((0,1), (0,0), (0,0), (1,'alpha'))
-    """
-    if not version:
-        return tuple()
-
-    parts = []
-    # Split on common version delimiters
-    for part in re.split(r'[.\-_+]', str(version)):
-        if not part:
-            continue
-        # Try to convert to int for numeric comparison
-        try:
-            parts.append((0, int(part)))
-        except ValueError:
-            # Handle mixed alphanumeric like "18ubuntu1"
-            # Split into numeric prefix and alpha suffix
-            match = re.match(r'^(\d+)(.*)$', part)
-            if match:
-                parts.append((0, int(match.group(1))))
-                if match.group(2):
-                    parts.append((1, match.group(2).lower()))
-            else:
-                parts.append((1, part.lower()))
-    return tuple(parts)
-
-
 def check_keyword_match(vulnerability, product):
     """
     Check if a vulnerability matches a product using keyword/vendor/product matching.
@@ -318,6 +240,46 @@ def check_keyword_match(vulnerability, product):
     return [], None, None
 
 
+def has_vendor_fix_override(vulnerability, product):
+    """
+    Check if an approved vendor fix override exists for this CVE + product version.
+
+    This handles "Path B" — when a vendor patches a version in-place (e.g., backport fix)
+    but the NVD CPE data still lists that version as affected.
+
+    Returns:
+        VendorFixOverride or None
+    """
+    if not vulnerability.cve_id or not product.version:
+        return None
+
+    try:
+        from sqlalchemy import func
+        override = VendorFixOverride.query.filter(
+            VendorFixOverride.cve_id == vulnerability.cve_id,
+            func.lower(VendorFixOverride.vendor) == normalize_string(product.vendor),
+            func.lower(VendorFixOverride.product) == normalize_string(product.product_name),
+            VendorFixOverride.fixed_version == product.version,
+            VendorFixOverride.status == 'approved'
+        ).first()
+
+        if not override:
+            # Also try matching via CPE vendor/product names
+            cpe_vendor, cpe_product, _ = product.get_effective_cpe()
+            if cpe_vendor and cpe_product:
+                override = VendorFixOverride.query.filter(
+                    VendorFixOverride.cve_id == vulnerability.cve_id,
+                    func.lower(VendorFixOverride.vendor) == cpe_vendor.lower(),
+                    func.lower(VendorFixOverride.product) == cpe_product.lower(),
+                    VendorFixOverride.fixed_version == product.version,
+                    VendorFixOverride.status == 'approved'
+                ).first()
+
+        return override
+    except Exception:
+        return None
+
+
 def check_match(vulnerability, product):
     """
     Check if a vulnerability matches a product.
@@ -327,6 +289,9 @@ def check_match(vulnerability, product):
     - cpe: Only use CPE matching
     - keyword: Only use keyword matching
     - both: Use both CPE and keyword matching
+
+    Also checks for vendor fix overrides (Path B: in-place patches).
+    If an approved override exists, the match is suppressed.
 
     Returns:
         tuple: (match_reasons: list, match_method: str, match_confidence: str)
@@ -357,25 +322,32 @@ def check_match(vulnerability, product):
         else:
             keyword_reasons, keyword_method, keyword_confidence = check_keyword_match(vulnerability, product)
 
-    # Combine results based on match_type
-    if match_type == 'both':
-        # Return CPE if matched, or keyword if matched, prefer CPE
-        if cpe_reasons:
-            return cpe_reasons, cpe_method, cpe_confidence
-        elif keyword_reasons:
-            return keyword_reasons, keyword_method, keyword_confidence
-    elif match_type == 'cpe':
-        return cpe_reasons, cpe_method, cpe_confidence
-    elif match_type == 'keyword':
-        return keyword_reasons, keyword_method, keyword_confidence
-    else:  # auto
-        # Prefer CPE matches (higher confidence)
-        if cpe_reasons:
-            return cpe_reasons, cpe_method, cpe_confidence
-        elif keyword_reasons:
-            return keyword_reasons, keyword_method, keyword_confidence
+    # Determine the result
+    result_reasons = []
+    result_method = None
+    result_confidence = None
 
-    return [], None, None
+    if match_type == 'both':
+        if cpe_reasons:
+            result_reasons, result_method, result_confidence = cpe_reasons, cpe_method, cpe_confidence
+        elif keyword_reasons:
+            result_reasons, result_method, result_confidence = keyword_reasons, keyword_method, keyword_confidence
+    elif match_type == 'cpe':
+        result_reasons, result_method, result_confidence = cpe_reasons, cpe_method, cpe_confidence
+    elif match_type == 'keyword':
+        result_reasons, result_method, result_confidence = keyword_reasons, keyword_method, keyword_confidence
+    else:  # auto
+        if cpe_reasons:
+            result_reasons, result_method, result_confidence = cpe_reasons, cpe_method, cpe_confidence
+        elif keyword_reasons:
+            result_reasons, result_method, result_confidence = keyword_reasons, keyword_method, keyword_confidence
+
+    # Check for vendor fix override (Path B: in-place vendor patch)
+    # If a match was found but an approved override exists, suppress it
+    if result_reasons and has_vendor_fix_override(vulnerability, product):
+        return [], None, None
+
+    return result_reasons, result_method, result_confidence
 
 def match_vulnerabilities_to_products():
     """Match all active vulnerabilities against active products"""

@@ -3,7 +3,7 @@ from app import db, csrf, limiter
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 import os
-from app.models import Product, Vulnerability, VulnerabilityMatch, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
+from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
@@ -2196,6 +2196,137 @@ def unacknowledge_by_cve(cve_id):
         'cve_id': cve_id,
         'message': f'Unacknowledged {len(unacknowledged_ids)} product(s) for {cve_id}'
     })
+
+
+# ============================================================================
+# Vendor Fix Override API (Path B - in-place vendor patches)
+# ============================================================================
+
+@bp.route('/api/vendor-fix-overrides', methods=['GET'])
+@login_required
+def list_vendor_fix_overrides():
+    """List all vendor fix overrides for the current organization."""
+    from app.models import VendorFixOverride
+    org_id = session.get('organization_id')
+
+    query = VendorFixOverride.query
+    if org_id:
+        query = query.filter(
+            db.or_(
+                VendorFixOverride.organization_id == org_id,
+                VendorFixOverride.organization_id.is_(None)
+            )
+        )
+
+    # Filter by CVE if specified
+    cve_id = request.args.get('cve_id')
+    if cve_id:
+        query = query.filter(VendorFixOverride.cve_id == cve_id)
+
+    # Filter by status
+    status = request.args.get('status')
+    if status:
+        query = query.filter(VendorFixOverride.status == status)
+
+    overrides = query.order_by(VendorFixOverride.created_at.desc()).all()
+    return jsonify([o.to_dict() for o in overrides])
+
+
+@bp.route('/api/vendor-fix-overrides/sync', methods=['POST'])
+@org_admin_required
+def trigger_vendor_advisory_sync():
+    """Manually trigger vendor advisory sync (OSV.dev, Red Hat, MSRC, Debian)."""
+    from app.vendor_advisories import sync_vendor_advisories
+    from app.logging_config import log_audit_event
+
+    try:
+        result = sync_vendor_advisories()
+        log_audit_event(
+            'VENDOR_ADVISORY_SYNC',
+            'vendor_fix_overrides',
+            None,
+            details=f"Manual vendor advisory sync: {result.get('overrides_created', 0)} overrides, "
+                     f"{result.get('matches_resolved', 0)} resolved"
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def _apply_vendor_fix_override(override):
+    """
+    When a vendor fix override is approved, resolve matching vulnerability matches.
+    Returns the number of matches resolved.
+    """
+    # Find the vulnerability
+    vuln = Vulnerability.query.filter_by(cve_id=override.cve_id).first()
+    if not vuln:
+        return 0
+
+    # Find products matching the override's vendor/product/version
+    products = Product.query.filter(
+        func.lower(Product.vendor) == override.vendor.lower(),
+        func.lower(Product.product_name) == override.product.lower(),
+        Product.version == override.fixed_version,
+        Product.active == True
+    ).all()
+
+    if not products:
+        # Also try matching via CPE vendor/product
+        products = Product.query.filter(
+            func.lower(Product.cpe_vendor) == override.vendor.lower(),
+            func.lower(Product.cpe_product) == override.product.lower(),
+            Product.version == override.fixed_version,
+            Product.active == True
+        ).all()
+
+    if not products:
+        return 0
+
+    product_ids = [p.id for p in products]
+    now = datetime.utcnow()
+
+    # Find unacknowledged matches for these products + this CVE
+    matches = VulnerabilityMatch.query.filter(
+        VulnerabilityMatch.product_id.in_(product_ids),
+        VulnerabilityMatch.vulnerability_id == vuln.id,
+        VulnerabilityMatch.acknowledged == False
+    ).all()
+
+    for match in matches:
+        match.acknowledged = True
+        match.auto_acknowledged = True
+        match.resolution_reason = 'vendor_fix'
+        match.acknowledged_at = now
+
+    db.session.commit()
+    return len(matches)
+
+
+@bp.route('/api/vendor-advisories/check/<cve_id>', methods=['GET'])
+@login_required
+def check_vendor_advisories(cve_id):
+    """
+    Check vendor advisory feeds for patches related to a specific CVE.
+    Returns suggestions for vendor fix overrides based on published advisories.
+    """
+    try:
+        from app.vendor_advisories import check_advisory_for_cve
+        advisories = check_advisory_for_cve(cve_id)
+        return jsonify({
+            'cve_id': cve_id,
+            'advisories': advisories,
+            'count': len(advisories)
+        })
+    except Exception as e:
+        logger.warning(f'Advisory check failed for {cve_id}: {e}')
+        return jsonify({
+            'cve_id': cve_id,
+            'suggestions': [],
+            'count': 0,
+            'error': str(e)
+        })
+
 
 @bp.route('/api/sync', methods=['POST'])
 @admin_required

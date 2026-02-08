@@ -1001,15 +1001,18 @@ def report_inventory():
                 "vendor": "Apache",
                 "product": "HTTP Server",
                 "version": "2.4.52",
-                "path": "/usr/sbin/apache2"
+                "path": "/usr/sbin/apache2",
+                "distro_package_version": "2.4.52-1ubuntu4.6"
             },
             {
                 "vendor": "OpenSSL",
                 "product": "OpenSSL",
                 "version": "3.0.2",
-                "path": "/usr/bin/openssl"
+                "path": "/usr/bin/openssl",
+                "distro_package_version": "3.0.2-0ubuntu1.15"
             }
-        ]
+        ],
+        "installed_kbs": ["KB5040442", "KB5034763"]
     }
 
     Response includes:
@@ -1153,6 +1156,12 @@ def report_inventory():
             asset.agent_id = agent_info['id']
         asset.agent_version = agent_info.get('version')
 
+        # Store installed KBs (Windows agents report this)
+        installed_kbs = data.get('installed_kbs')
+        if installed_kbs and isinstance(installed_kbs, list):
+            import json as _json
+            asset.installed_kbs = _json.dumps(installed_kbs[:500])  # Cap at 500 KBs
+
         asset.last_checkin = datetime.utcnow()
         asset.last_inventory_at = datetime.utcnow()
         asset.status = 'online'
@@ -1254,6 +1263,7 @@ def report_inventory():
                     product_id=product.id,
                     version=version,
                     install_path=product_data.get('path'),
+                    distro_package_version=product_data.get('distro_package_version'),
                     detected_by='agent',
                     detected_on_os=platform  # Track which OS this came from
                 )
@@ -1286,6 +1296,7 @@ def report_inventory():
                 # Update existing installation
                 installation.version = version
                 installation.install_path = product_data.get('path')
+                installation.distro_package_version = product_data.get('distro_package_version') or installation.distro_package_version
                 installation.last_seen_at = datetime.utcnow()
                 installations_updated += 1
 
@@ -2443,6 +2454,53 @@ def get_usage_history(org_id):
             'total_new_agents': total_new_agents,
             'average_daily_agents': round(sum(r.active_agents for r in records) / max(len(records), 1), 1)
         }
+    })
+
+
+@agent_bp.route('/api/admin/blocked-agents', methods=['GET'])
+@login_required
+def list_blocked_agents():
+    """
+    List recent agent registration attempts that were blocked due to license limits.
+    Shows which machines tried to connect but were rejected, when, and why.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    if not user.is_super_admin() and not user.is_org_admin():
+        return jsonify({'error': 'Admin access required'}), 403
+
+    days = request.args.get('days', 30, type=int)
+    start_date = datetime.utcnow() - timedelta(days=days)
+
+    query = AgentEvent.query.filter(
+        AgentEvent.event_type == 'license_exceeded',
+        AgentEvent.created_at >= start_date
+    )
+
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = query.filter(AgentEvent.organization_id.in_(user_org_ids))
+
+    events = query.order_by(AgentEvent.created_at.desc()).limit(50).all()
+
+    blocked = []
+    for event in events:
+        details = event.get_details()
+        blocked.append({
+            'hostname': details.get('hostname', 'Unknown'),
+            'source_ip': event.source_ip,
+            'blocked_at': event.created_at.isoformat() if event.created_at else None,
+            'reason': details.get('message', 'License limit reached'),
+            'current_agents': details.get('license', {}).get('current_agents'),
+            'max_agents': details.get('license', {}).get('max_agents'),
+            'organization_id': event.organization_id,
+        })
+
+    return jsonify({
+        'blocked_agents': blocked,
+        'total': len(blocked),
+        'days': days
     })
 
 

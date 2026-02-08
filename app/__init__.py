@@ -45,6 +45,18 @@ def _apply_schema_migrations(logger, db_uri):
         ('assets', 'scan_interval_override', 'INTEGER', 'INTEGER'),
         ('assets', 'pending_scan_requested_at', 'DATETIME', 'TIMESTAMP'),
         ('assets', 'pending_scan_requested_by', 'VARCHAR(100)', 'VARCHAR(100)'),
+        # Vendor Fix Override table (auto-created by SQLAlchemy, columns here for safety)
+        # Phase 2: Agent distro version and KB reporting
+        ('product_installations', 'distro_package_version', 'VARCHAR(200)', 'VARCHAR(200)'),
+        ('assets', 'installed_kbs', 'TEXT', 'TEXT'),
+        ('vendor_fix_overrides', 'fix_type', "VARCHAR(50) DEFAULT 'backport_patch'", "VARCHAR(50) DEFAULT 'backport_patch'"),
+        ('vendor_fix_overrides', 'vendor_advisory_url', 'TEXT', 'TEXT'),
+        ('vendor_fix_overrides', 'vendor_advisory_id', 'VARCHAR(100)', 'VARCHAR(100)'),
+        ('vendor_fix_overrides', 'patch_identifier', 'VARCHAR(255)', 'VARCHAR(255)'),
+        ('vendor_fix_overrides', 'notes', 'TEXT', 'TEXT'),
+        ('vendor_fix_overrides', 'approved_by', 'INTEGER', 'INTEGER'),
+        ('vendor_fix_overrides', 'approved_at', 'DATETIME', 'TIMESTAMP'),
+        ('vendor_fix_overrides', 'status', "VARCHAR(20) DEFAULT 'approved'", "VARCHAR(20) DEFAULT 'approved'"),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

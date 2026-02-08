@@ -604,6 +604,7 @@
         </div>
     </div>
 </div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -2545,8 +2546,10 @@
                             ${!prod.acknowledged ?
                                 `<button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${prod.match_id})" title="Mark as resolved">
                                     <i class="bi bi-check-lg"></i>
-                                </button>` :
-                                `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${prod.match_id})" title="Reopen">
+                                </button>
+` :
+                                `${prod.resolution_reason === 'vendor_fix' ? '<span class="badge bg-success" title="Resolved via vendor patch"><i class="bi bi-shield-check"></i> Vendor Fix</span>' : ''}
+                                <button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${prod.match_id})" title="Reopen">
                                     <i class="bi bi-arrow-counterclockwise"></i>
                                 </button>`
                             }
@@ -2724,5 +2727,6 @@
             hideLoading();
         }
     }
+
 </script>
 {% endblock %}

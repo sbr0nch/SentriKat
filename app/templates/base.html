@@ -100,14 +100,9 @@
         [data-theme="dark"] .modal-content,
         [data-theme="dark"] .dropdown-menu,
         [data-theme="dark"] .app-footer {
-            background-color: var(--surface-color);
-            border-color: var(--border-color);
-            color: var(--text-color);
-        }
-
-        [data-theme="dark"] .app-footer {
             background-color: var(--surface-color) !important;
             border-top-color: var(--border-color) !important;
+            color: var(--text-color);
         }
 
         [data-theme="dark"] .card-header {
@@ -1996,13 +1991,15 @@
         /* Footer */
         .app-footer {
             background-color: white;
-            padding: 1.5rem 0;
+            padding: 1rem 2rem;
             margin-top: auto; /* Push to bottom */
             border-top: 1px solid var(--gray-200);
             text-align: center;
             color: var(--gray-600);
             font-size: 0.875rem;
             flex-shrink: 0;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         /* Modal Improvements - Compact Styling */
@@ -2995,32 +2992,28 @@
 
             <!-- Footer (inside app-main so it respects sidebar width) -->
             <footer class="app-footer">
-                <div class="container-fluid px-4">
-                    <div class="text-center">
-                        <p class="mb-1">
-                            <strong>{{ branding.app_name }}</strong> - Enterprise Vulnerability Management Platform
-                        </p>
-                        <p class="copyright-notice mb-1">
-                            Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
-                            {% if branding.support_email %}
-                            | <a href="mailto:{{ branding.support_email }}">Support</a>
-                            {% endif %}
-                        </p>
-                        <!-- CVE Service Status Indicator -->
-                        {% if branding.show_version %}
-                        <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
-                            <span class="status-led status-led-yellow" id="cveStatusLed"></span>
-                            <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
-                        </div>
-                        {% endif %}
-                        {% if branding.show_powered_by | default(true) %}
-                        <p class="text-muted mt-1 mb-0" style="font-size: 0.7rem; opacity: 0.7;">
-                            Powered by <a href="https://github.com/sbr0nch/SentriKat" target="_blank" class="text-muted text-decoration-none">SentriKat</a>
-                        </p>
-                        {% endif %}
-                        <p class="text-muted mb-0" style="font-size: 0.65rem; opacity: 0.5;">v{{ app_version }}</p>
-                    </div>
+                <p class="mb-1">
+                    <strong>{{ branding.app_name }}</strong> - Enterprise Vulnerability Management Platform
+                </p>
+                <p class="copyright-notice mb-1">
+                    Data from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank">CISA KEV Catalog</a>
+                    {% if branding.support_email %}
+                    | <a href="mailto:{{ branding.support_email }}">Support</a>
+                    {% endif %}
+                </p>
+                <!-- CVE Service Status Indicator -->
+                {% if branding.show_version %}
+                <div class="d-flex align-items-center justify-content-center gap-2" id="cveServiceStatus" title="CVE Service Status">
+                    <span class="status-led status-led-yellow" id="cveStatusLed"></span>
+                    <small class="text-muted" id="cveStatusText">NVD: Checking...</small>
                 </div>
+                {% endif %}
+                {% if branding.show_powered_by | default(true) %}
+                <p class="text-muted mt-1 mb-0" style="font-size: 0.7rem; opacity: 0.7;">
+                    Powered by <a href="https://github.com/sbr0nch/SentriKat" target="_blank" class="text-muted text-decoration-none">SentriKat</a>
+                </p>
+                {% endif %}
+                <p class="text-muted mb-0" style="font-size: 0.65rem; opacity: 0.5;">v{{ app_version }}</p>
             </footer>
         </div>
     </div>

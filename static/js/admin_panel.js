@@ -6341,6 +6341,54 @@ function displayLicenseInfo(data) {
             </div>
         ` : ''}
     `;
+
+    // Fetch and display blocked agents when near/at agent limit
+    const agentCurrent = agents.current || 0;
+    const agentLimit = limits.max_agents || 0;
+    if (agentLimit > 0 && agentCurrent >= agentLimit * 0.8) {
+        fetchBlockedAgents(usageEl);
+    }
+}
+
+async function fetchBlockedAgents(containerEl) {
+    try {
+        const response = await fetch('/api/admin/blocked-agents');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        const blocked = data.blocked_agents || [];
+        if (blocked.length === 0) return;
+
+        const rows = blocked.slice(0, 10).map(agent => `
+            <tr>
+                <td><small>${escapeHtml(agent.hostname || 'Unknown')}</small></td>
+                <td><small class="text-muted">${escapeHtml(agent.ip_address || '-')}</small></td>
+                <td><small class="text-muted">${agent.timestamp ? new Date(agent.timestamp).toLocaleString() : '-'}</small></td>
+            </tr>
+        `).join('');
+
+        const blockedHtml = `
+            <div class="mt-3 pt-2 border-top">
+                <small class="text-danger fw-bold"><i class="bi bi-shield-exclamation me-1"></i>Recently Blocked Agents (${blocked.length})</small>
+                <table class="table table-sm table-borderless mt-1 mb-1">
+                    <thead>
+                        <tr>
+                            <th><small class="text-muted">Hostname</small></th>
+                            <th><small class="text-muted">IP</small></th>
+                            <th><small class="text-muted">Time</small></th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                <small class="text-muted">
+                    <i class="bi bi-info-circle me-1"></i>Deactivate unused agents to free up slots.
+                </small>
+            </div>
+        `;
+        containerEl.insertAdjacentHTML('beforeend', blockedHtml);
+    } catch (e) {
+        // Silently fail
+    }
 }
 
 async function checkForUpdates() {
