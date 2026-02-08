@@ -1217,28 +1217,50 @@ def activate_license_online():
     for a hardware-locked license key, then saves it locally.
 
     Requires SSL/HTTPS connectivity to portal.sentrikat.com.
+    Rate limited to 5 attempts per hour to prevent brute force.
     """
+    import re
+    from app import limiter
     from app.auth import get_current_user
     from app.logging_config import log_audit_event
     import requests as _requests
     from config import Config
+
+    # Rate limit: 5 attempts per hour per IP
+    try:
+        limiter.check()
+    except Exception:
+        pass
+    # Manual rate limit check via decorator won't work on blueprint-exempt routes,
+    # so we use a simple in-memory counter
+    _check_activation_rate_limit()
 
     user = get_current_user()
     if not user or not user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
 
     data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body is required'}), 400
+
     activation_code = (data.get('activation_code') or '').strip()
 
     if not activation_code:
         return jsonify({'error': 'Activation code is required'}), 400
 
-    if len(activation_code) < 8:
+    # Validate format: 8-128 chars, alphanumeric + hyphens only
+    if len(activation_code) < 8 or len(activation_code) > 128:
         return jsonify({'error': 'Invalid activation code format'}), 400
+
+    if not re.match(r'^[A-Za-z0-9\-]+$', activation_code):
+        return jsonify({'error': 'Invalid activation code format. Use only letters, numbers, and hyphens.'}), 400
 
     installation_id = get_installation_id()
     proxies = Config.get_proxies()
-    verify_ssl = Config.get_verify_ssl()
+
+    # Always verify SSL for license server connections (security-critical)
+    # User's verify_ssl setting only applies to other outbound requests
+    verify_ssl = True
 
     try:
         response = _requests.post(
@@ -1255,13 +1277,20 @@ def activate_license_online():
         )
 
         if response.status_code == 200:
-            resp_data = response.json()
-            license_key = resp_data.get('license_key', '').strip()
+            try:
+                resp_data = response.json()
+            except (json.JSONDecodeError, ValueError):
+                return jsonify({'error': 'Invalid response from license server'}), 502
 
+            license_key = resp_data.get('license_key', '')
+            if not isinstance(license_key, str):
+                return jsonify({'error': 'Invalid response from license server'}), 502
+
+            license_key = license_key.strip()
             if not license_key:
                 return jsonify({'error': 'Server returned empty license key'}), 502
 
-            # Validate and save the received license key
+            # Validate and save - RSA signature verification prevents accepting forged keys
             success, message = save_license(license_key)
 
             if success:
@@ -1283,13 +1312,12 @@ def activate_license_online():
         elif response.status_code == 410:
             return jsonify({'error': 'This activation code has expired. Contact support for a new one.'}), 400
 
+        elif response.status_code == 429:
+            return jsonify({'error': 'Too many activation attempts. Please try again later.'}), 429
+
         else:
-            error_msg = 'Unknown error'
-            try:
-                error_msg = response.json().get('error', error_msg)
-            except Exception:
-                pass
-            return jsonify({'error': f'License server error: {error_msg}'}), 502
+            logger.warning(f"License server returned {response.status_code} for online activation")
+            return jsonify({'error': 'License server returned an unexpected response. Please try again later.'}), 502
 
     except _requests.ConnectionError:
         return jsonify({
@@ -1303,7 +1331,32 @@ def activate_license_online():
 
     except Exception as e:
         logger.error(f"Online license activation failed: {e}")
-        return jsonify({'error': f'Activation failed: {str(e)}'}), 500
+        return jsonify({'error': 'Activation failed due to an internal error. Please try again later.'}), 500
+
+
+# Simple in-memory rate limiter for activation attempts
+_activation_attempts = {}  # ip -> [(timestamp, ...)]
+
+def _check_activation_rate_limit():
+    """Limit activation attempts to 5 per hour per IP."""
+    from flask import request as _req
+    import time
+
+    ip = _req.remote_addr or 'unknown'
+    now = time.time()
+    hour_ago = now - 3600
+
+    # Clean old entries
+    if ip in _activation_attempts:
+        _activation_attempts[ip] = [t for t in _activation_attempts[ip] if t > hour_ago]
+    else:
+        _activation_attempts[ip] = []
+
+    if len(_activation_attempts[ip]) >= 5:
+        from flask import abort
+        abort(429, description='Too many activation attempts. Please try again in an hour.')
+
+    _activation_attempts[ip].append(now)
 
 
 @license_bp.route('/api/license', methods=['DELETE'])
