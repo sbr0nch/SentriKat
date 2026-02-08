@@ -64,6 +64,10 @@ def setup_status():
 def create_initial_organization():
     """Create the default organization"""
     try:
+        # Block access after setup is complete
+        if is_setup_complete():
+            return jsonify({'error': 'Setup already completed. Use admin panel to manage organizations.'}), 403
+
         data = request.get_json()
 
         # Check if default org already exists
@@ -141,6 +145,10 @@ def create_initial_organization():
 def create_admin_user():
     """Create the initial admin user"""
     try:
+        # Block access after setup is complete
+        if is_setup_complete():
+            return jsonify({'error': 'Setup already completed. Use admin panel to manage users.'}), 403
+
         data = request.get_json()
 
         # Validate required fields
@@ -216,6 +224,10 @@ def create_admin_user():
 def save_proxy_settings():
     """Save proxy settings to system settings"""
     try:
+        # Block access after setup is complete
+        if is_setup_complete():
+            return jsonify({'error': 'Setup already completed. Use admin panel to manage proxy settings.'}), 403
+
         from app.models import SystemSettings
         data = request.get_json()
 
@@ -247,7 +259,8 @@ def save_proxy_settings():
         if proxy_username:
             proxy_settings.append(SystemSettings(key='proxy_username', value=proxy_username))
         if proxy_password:
-            proxy_settings.append(SystemSettings(key='proxy_password', value=proxy_password))
+            from app.encryption import encrypt_value
+            proxy_settings.append(SystemSettings(key='proxy_password', value=encrypt_value(proxy_password)))
 
         for setting in proxy_settings:
             db.session.add(setting)
@@ -267,6 +280,10 @@ def save_proxy_settings():
 def seed_service_catalog():
     """Seed the service catalog with common enterprise services"""
     try:
+        # Block access after setup is complete
+        if is_setup_complete():
+            return jsonify({'error': 'Setup already completed.'}), 403
+
         # Check if services already exist
         existing_count = ServiceCatalog.query.count()
         if existing_count > 0:
@@ -378,6 +395,10 @@ def seed_service_catalog():
 def run_initial_sync():
     """Run initial CISA KEV sync"""
     try:
+        # Block access after setup is complete
+        if is_setup_complete():
+            return jsonify({'error': 'Setup already completed. Use admin panel to trigger sync.'}), 403
+
         # Check if proxy is configured
         has_proxy = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
 

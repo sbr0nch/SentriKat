@@ -1236,8 +1236,10 @@ def create_vulnerability_issue(
         labels.append('ransomware')
 
     # Tracker-specific parameters
-    effective_type = tracker_type or _parse_enabled_types(get_setting('issue_tracker_type', 'disabled'))[:1]
-    effective_type = effective_type[0] if isinstance(effective_type, list) and effective_type else effective_type
+    enabled_types = _parse_enabled_types(get_setting('issue_tracker_type', 'disabled'))
+    effective_type = tracker_type or (enabled_types[0] if enabled_types else None)
+    if not effective_type:
+        return False, 'No issue tracker configured', None, None
     extra_params = {}
 
     if effective_type == 'jira':

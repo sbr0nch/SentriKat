@@ -15,6 +15,7 @@ Can be run via:
 
 from datetime import datetime, timedelta
 import logging
+from sqlalchemy import or_
 from app import db
 from app.models import Asset, ProductInstallation, Product, Organization
 
@@ -138,10 +139,10 @@ def update_asset_status(stale_days=None, remove_days=None, dry_run=False):
         offline_query.update({'status': 'offline'}, synchronize_session=False)
         db.session.commit()
 
-    # Mark stale (no checkin for X days)
+    # Mark stale (no checkin for X days, including assets with NULL last_checkin)
     stale_query = Asset.query.filter(
         Asset.status.in_(['online', 'offline']),
-        Asset.last_checkin < stale_threshold
+        or_(Asset.last_checkin.is_(None), Asset.last_checkin < stale_threshold)
     )
     marked_stale = stale_query.count()
     if marked_stale > 0 and not dry_run:

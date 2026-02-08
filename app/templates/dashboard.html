@@ -67,7 +67,7 @@
         text-transform: uppercase;
         letter-spacing: 0.03em;
         margin-bottom: 0.25rem;
-        color: #374151;
+        color: var(--text-color, #374151);
     }
 
     .alert-card-value {
@@ -99,7 +99,7 @@
     .stat-label-sm {
         font-size: 0.8rem;
         font-weight: 600;
-        color: #6b7280;
+        color: var(--text-muted, #6b7280);
         letter-spacing: 0.02em;
         margin-bottom: 0.15rem;
     }
@@ -1258,7 +1258,7 @@
         } catch (error) {
             container.innerHTML = `
                 <div class="alert alert-danger">
-                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${error.message}
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${escapeHtml(error.message)}
                 </div>
             `;
         } finally {
@@ -1410,7 +1410,7 @@
 
         // CVSS Severity Badge
         const severityBadge = vuln.severity ?
-            `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}"><i class="bi bi-graph-up"></i> CVSS: ${vuln.severity} ${vuln.cvss_score ? `(${vuln.cvss_score})` : ''}</span>` :
+            `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}"><i class="bi bi-graph-up"></i> CVSS: ${escapeHtml(vuln.severity)} ${vuln.cvss_score ? `(${escapeHtml(String(vuln.cvss_score))})` : ''}</span>` :
             '<span class="badge bg-secondary"><i class="bi bi-question-circle"></i> No CVSS Data</span>';
 
         // EPSS (Exploit Prediction Scoring System) Badge
@@ -1449,8 +1449,8 @@
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <div>
                                     <h5 class="card-title mb-2">
-                                        <span class="badge bg-dark">${vuln.cve_id}</span>
-                                        ${vuln.vulnerability_name}
+                                        <span class="badge bg-dark">${escapeHtml(vuln.cve_id)}</span>
+                                        ${escapeHtml(vuln.vulnerability_name)}
                                     </h5>
                                     <div class="mb-2">
                                         ${priorityBadge}
@@ -1471,32 +1471,32 @@
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <small class="text-muted fw-semibold">AFFECTED PRODUCT</small>
-                                    <p class="mb-0"><strong>${vuln.vendor_project}</strong> - ${vuln.product}</p>
+                                    <p class="mb-0"><strong>${escapeHtml(vuln.vendor_project)}</strong> - ${escapeHtml(vuln.product)}</p>
                                 </div>
                                 <div class="col-md-6">
                                     <small class="text-muted fw-semibold">YOUR PRODUCT</small>
                                     <p class="mb-0">
-                                        <strong>${product.vendor}</strong> - ${product.product_name}
-                                        ${product.version ? `<span class="badge bg-info">v${product.version}</span>` : ''}
+                                        <strong>${escapeHtml(product.vendor)}</strong> - ${escapeHtml(product.product_name)}
+                                        ${product.version ? `<span class="badge bg-info">v${escapeHtml(product.version)}</span>` : ''}
                                     </p>
                                 </div>
                             </div>
 
                             <div class="mb-2">
                                 <small class="text-muted fw-semibold">DESCRIPTION</small>
-                                <p class="mb-0">${vuln.short_description}</p>
+                                <p class="mb-0">${escapeHtml(vuln.short_description)}</p>
                             </div>
 
                             <div class="mb-3">
                                 <small class="text-muted fw-semibold">REQUIRED ACTION</small>
-                                <p class="mb-0 fw-medium text-danger">${vuln.required_action}</p>
+                                <p class="mb-0 fw-medium text-danger">${escapeHtml(vuln.required_action)}</p>
                             </div>
 
                             ${fixVersionHtml}
 
                             <div class="mb-3">
                                 <small class="text-muted fw-semibold">MATCH REASON</small>
-                                <p class="mb-0 text-primary">${match.match_reason}</p>
+                                <p class="mb-0 text-primary">${escapeHtml(match.match_reason)}</p>
                             </div>
 
                             <div class="btn-group" role="group">
@@ -1518,11 +1518,11 @@
                                         <i class="bi bi-arrow-counterclockwise"></i> Unacknowledge
                                     </button>`
                                 }
-                                <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank"
+                                <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(vuln.cve_id)}" target="_blank"
                                    class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-box-arrow-up-right"></i> View in NVD
                                 </a>
-                                <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
+                                <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${escapeHtml(vuln.cve_id).replace(/'/g, "\\'")}', '${escapeHtml(vuln.vulnerability_name).replace(/'/g, "\\'")}')">
                                     <i class="bi bi-share"></i> Share
                                 </button>
                                 ${getTrackerButtonsHtml(vuln.id, product.id, vuln.cve_id, vuln.vulnerability_name)}
@@ -2381,7 +2381,7 @@
         } catch (error) {
             container.innerHTML = `
                 <div class="alert alert-danger">
-                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${error.message}
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${escapeHtml(error.message)}
                 </div>
             `;
         } finally {
@@ -2494,7 +2494,7 @@
                 <div class="mb-2">
                     <small class="text-muted fw-semibold me-2">FIX:</small>
                     <span class="badge bg-secondary"><i class="bi bi-info-circle me-1"></i>Check vendor advisory</span>
-                    <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank" class="badge bg-light text-dark text-decoration-none border ms-1"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>
+                    <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(vuln.cve_id)}" target="_blank" class="badge bg-light text-dark text-decoration-none border ms-1"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>
                 </div>`;
         }
 
@@ -2520,7 +2520,7 @@
             }
 
             // Show product version
-            const versionBadge = prod.version ? `<span class="badge bg-secondary ms-1">v${prod.version}</span>` : '';
+            const versionBadge = prod.version ? `<span class="badge bg-secondary ms-1">v${escapeHtml(prod.version)}</span>` : '';
 
             // Find matching fix version for this product
             let fixBadge = '';
@@ -2531,8 +2531,8 @@
                 ) || fixVersions[0];  // fallback to first fix version
                 if (matchingFix) {
                     const fixLabel = matchingFix.fix_type === 'excluding'
-                        ? matchingFix.fix_version
-                        : `> ${matchingFix.fix_version}`;
+                        ? escapeHtml(matchingFix.fix_version)
+                        : `> ${escapeHtml(matchingFix.fix_version)}`;
                     fixBadge = `<span class="badge bg-success ms-1" title="Fix version"><i class="bi bi-arrow-up-circle me-1"></i>${fixLabel}</span>`;
                 }
             }
@@ -2540,7 +2540,7 @@
             // Build assets list for this product
             const assetsCount = prod.affected_assets_count || 0;
             const assetsList = (prod.affected_assets || []).map(a =>
-                `<span class="badge bg-secondary me-1 mb-1" title="${a.ip || 'No IP'}"><i class="bi bi-pc-display me-1"></i>${a.hostname}</span>`
+                `<span class="badge bg-secondary me-1 mb-1" title="${escapeHtml(a.ip || 'No IP')}"><i class="bi bi-pc-display me-1"></i>${escapeHtml(a.hostname)}</span>`
             ).join('');
             const moreAssets = assetsCount > 10 ? `<span class="badge bg-light text-dark">+${assetsCount - 10} more</span>` : '';
 
@@ -2550,7 +2550,7 @@
                         <div class="d-flex align-items-center">
                             ${ackIcon}
                             <div class="ms-2">
-                                <div class="fw-semibold">${prod.vendor} ${prod.product_name} ${versionBadge} ${fixBadge}</div>
+                                <div class="fw-semibold">${escapeHtml(prod.vendor)} ${escapeHtml(prod.product_name)} ${versionBadge} ${fixBadge}</div>
                                 <small class="text-muted">${statusText}</small>
                             </div>
                         </div>
@@ -2606,20 +2606,20 @@
                     <div class="mb-3">
                         <div class="d-flex align-items-start justify-content-between">
                             <div>
-                                <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank" class="text-decoration-none">
-                                    <span class="badge bg-dark fs-6 me-2">${vuln.cve_id}</span>
+                                <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(vuln.cve_id)}" target="_blank" class="text-decoration-none">
+                                    <span class="badge bg-dark fs-6 me-2">${escapeHtml(vuln.cve_id)}</span>
                                 </a>
                                 <span class="badge bg-secondary"><i class="bi bi-calendar3"></i> ${formatDate(vuln.date_added)}</span>
                             </div>
                         </div>
-                        <h5 class="mt-2 mb-0 fw-semibold">${vuln.vulnerability_name}</h5>
+                        <h5 class="mt-2 mb-0 fw-semibold">${escapeHtml(vuln.vulnerability_name)}</h5>
                     </div>
 
                     <!-- Scores + Exposure (compact badge row) -->
                     <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
                         ${vuln.cvss_score ? `
                         <span class="badge rounded-pill" style="background-color: ${cvssColor}; font-size: 0.8rem;">
-                            CVSS ${vuln.cvss_score} (${vuln.severity || '?'})
+                            CVSS ${escapeHtml(String(vuln.cvss_score))} (${escapeHtml(vuln.severity || '?')})
                         </span>` : ''}
                         ${epssScore != null ? `
                         <span class="badge rounded-pill" style="background-color: ${epssColor}; font-size: 0.8rem;" title="Top ${epssRank}% most likely to be exploited">
@@ -2635,12 +2635,12 @@
                     </div>
 
                     <!-- Impact + How to Fix (combined compact) -->
-                    <p class="text-secondary mb-2 small">${vuln.short_description}</p>
+                    <p class="text-secondary mb-2 small">${escapeHtml(vuln.short_description)}</p>
                     <div class="mb-3 p-2 bg-light border-start border-3 border-success rounded-end">
                         <div class="d-flex align-items-start">
                             <i class="bi bi-wrench-adjustable text-success me-2 mt-1"></i>
                             <div>
-                                <span class="fw-medium">${vuln.required_action}</span>
+                                <span class="fw-medium">${escapeHtml(vuln.required_action)}</span>
                                 ${fixVersionHtml}
                             </div>
                         </div>
@@ -2667,20 +2667,20 @@
                     <div class="d-flex gap-1 flex-wrap justify-content-between align-items-center pt-2 border-top">
                         <div class="d-flex gap-1">
                             ${group.unacknowledged_count > 0 ?
-                                `<button class="btn btn-sm btn-success" onclick="acknowledgeCVE('${vuln.cve_id}')">
+                                `<button class="btn btn-sm btn-success" onclick="acknowledgeCVE('${escapeHtml(vuln.cve_id).replace(/'/g, "\\'")}')">
                                     <i class="bi bi-check-all me-1"></i>Resolve (${group.unacknowledged_count})
                                 </button>` :
-                                `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeCVE('${vuln.cve_id}')">
+                                `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeCVE('${escapeHtml(vuln.cve_id).replace(/'/g, "\\'")}')">
                                     <i class="bi bi-arrow-counterclockwise me-1"></i>Reopen
                                 </button>`
                             }
                             ${trackerBtn}
                         </div>
                         <div class="btn-group">
-                            <a href="https://nvd.nist.gov/vuln/detail/${vuln.cve_id}" target="_blank" class="btn btn-sm btn-outline-primary">
+                            <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(vuln.cve_id)}" target="_blank" class="btn btn-sm btn-outline-primary">
                                 <i class="bi bi-box-arrow-up-right"></i> NVD
                             </a>
-                            <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${vuln.cve_id}', '${escapeHtml(vuln.vulnerability_name)}')">
+                            <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${escapeHtml(vuln.cve_id).replace(/'/g, "\\'")}', '${escapeHtml(vuln.vulnerability_name).replace(/'/g, "\\'")}')">
                                 <i class="bi bi-share"></i> Share
                             </button>
                         </div>

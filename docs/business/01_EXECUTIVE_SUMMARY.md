@@ -6,7 +6,7 @@
 **Company:** SentriKat
 **Industry:** Cybersecurity / Vulnerability Management
 **Stage:** Product-Ready, Seeking Growth Capital
-**Contact:** [your-email]
+**Contact:** info@sentrikat.com
 
 ---
 
@@ -68,9 +68,9 @@ SentriKat is an **automated vulnerability management platform** that:
 | Tier | Agents | Price |
 |------|--------|-------|
 | Demo | 5 | Free |
-| Professional | 10 | $X/month |
-| +10 Agent Pack | +10 | +$Y/month |
-| +25 Agent Pack | +25 | +$Z/month |
+| Professional | 10 | EUR 2,499/year |
+| +25 Agent Pack | +25 | +EUR 499/year |
+| +100 Agent Pack | +100 | +EUR 1,499/year |
 | Enterprise | Unlimited | Custom |
 
 ### Unit Economics (Target)
@@ -148,7 +148,7 @@ SentriKat is an **automated vulnerability management platform** that:
 ## TEAM
 
 ### Founder
-- **[Your Name]** - CEO/CTO
+- **Denis Sota** - CEO/CTO
   - Background in cybersecurity and software development
   - Built SentriKat from scratch
 
@@ -203,7 +203,7 @@ SentriKat is an **automated vulnerability management platform** that:
 ## APPENDIX
 
 ### Contact Information
-- **Email**: [your-email]
+- **Email**: info@sentrikat.com
 - **Website**: https://sentrikat.com
 - **Demo**: Available upon request
 

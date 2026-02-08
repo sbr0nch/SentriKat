@@ -212,8 +212,8 @@ Our services are not intended for children under 16. We do not knowingly collect
 
 ## 11. INTERNATIONAL TRANSFERS
 
-For users outside [Your Jurisdiction]:
-- Data may be processed in [Your Jurisdiction]
+For users outside Switzerland:
+- Data may be processed in Switzerland
 - We implement appropriate safeguards (SCCs, etc.)
 - Self-hosted installations keep data in your jurisdiction
 
@@ -236,7 +236,7 @@ For privacy-related inquiries:
 
 **Email:** privacy@sentrikat.com
 **Data Protection Officer:** dpo@sentrikat.com
-**Address:** [Your Address]
+**Address:** Via Lucomagno 97, 6715 Dongio, Switzerland
 
 ---
 

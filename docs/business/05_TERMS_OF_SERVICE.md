@@ -260,7 +260,7 @@ If Customer is a government entity, additional terms may apply. Contact us for g
 
 ### 11.1 Governing Law
 
-This Agreement is governed by the laws of [Jurisdiction], without regard to conflicts of law principles.
+This Agreement is governed by the laws of Switzerland, without regard to conflicts of law principles.
 
 ### 11.2 Dispute Resolution
 
@@ -292,7 +292,7 @@ Neither party is liable for delays due to circumstances beyond reasonable contro
 ### 11.8 Notices
 
 Notices should be sent to:
-- **SentriKat**: [email/address]
+- **SentriKat**: info@sentrikat.com / Via Lucomagno 97, 6715 Dongio, Switzerland
 - **Customer**: Email address on file
 
 ---
