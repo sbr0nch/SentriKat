@@ -346,6 +346,9 @@ def save_ldap_settings():
     """Save LDAP configuration settings"""
     data = request.get_json()
 
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
     try:
         set_setting('ldap_enabled', 'true' if data.get('ldap_enabled') else 'false', 'ldap', 'Enable LDAP authentication')
         set_setting('ldap_server', data.get('ldap_server', ''), 'ldap', 'LDAP server URL')
@@ -355,7 +358,11 @@ def save_ldap_settings():
 
         # Encrypt bind password
         if data.get('ldap_bind_password'):
-            set_setting('ldap_bind_password', data['ldap_bind_password'], 'ldap', 'LDAP bind password', is_encrypted=True)
+            try:
+                set_setting('ldap_bind_password', data['ldap_bind_password'], 'ldap', 'LDAP bind password', is_encrypted=True)
+            except Exception as enc_err:
+                logger.error(f"Failed to encrypt LDAP bind password: {type(enc_err).__name__}")
+                return jsonify({'error': 'Failed to encrypt bind password. Check ENCRYPTION_KEY is set.'}), 500
 
         set_setting('ldap_search_filter', data.get('ldap_search_filter', '(sAMAccountName={username})'), 'ldap', 'LDAP search filter')
         set_setting('ldap_username_attr', data.get('ldap_username_attr', 'sAMAccountName'), 'ldap', 'LDAP username attribute')
@@ -365,9 +372,13 @@ def save_ldap_settings():
         set_setting('ldap_sync_interval_hours', str(data.get('ldap_sync_interval_hours', 24)), 'ldap', 'LDAP sync interval (hours)')
 
         return jsonify({'success': True, 'message': 'LDAP settings saved successfully'})
+    except ValueError as e:
+        logger.warning(f"LDAP settings validation error: {e}")
+        return jsonify({'error': f'Invalid setting: {str(e)}'}), 400
     except Exception as e:
         logger.exception("Failed to save LDAP settings")
-        return jsonify({'error': ERROR_MSGS['config']}), 500
+        db.session.rollback()
+        return jsonify({'error': 'Failed to save LDAP settings. Check server logs for details.'}), 500
 
 @settings_bp.route('/ldap/test', methods=['POST'])
 @admin_required
@@ -441,6 +452,9 @@ def save_smtp_settings():
     """Save global SMTP settings"""
     data = request.get_json()
 
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
     try:
         set_setting('smtp_host', data.get('smtp_host', ''), 'smtp', 'SMTP server hostname')
         set_setting('smtp_port', str(data.get('smtp_port', 587)), 'smtp', 'SMTP server port')
@@ -448,7 +462,11 @@ def save_smtp_settings():
 
         # Encrypt SMTP password
         if data.get('smtp_password'):
-            set_setting('smtp_password', data['smtp_password'], 'smtp', 'SMTP password', is_encrypted=True)
+            try:
+                set_setting('smtp_password', data['smtp_password'], 'smtp', 'SMTP password', is_encrypted=True)
+            except Exception as enc_err:
+                logger.error(f"Failed to encrypt SMTP password: {type(enc_err).__name__}")
+                return jsonify({'error': 'Failed to encrypt password. Check ENCRYPTION_KEY is set.'}), 500
 
         set_setting('smtp_from_email', data.get('smtp_from_email', ''), 'smtp', 'From email address')
         set_setting('smtp_from_name', data.get('smtp_from_name', 'SentriKat Alerts'), 'smtp', 'From name')
@@ -456,9 +474,13 @@ def save_smtp_settings():
         set_setting('smtp_use_ssl', 'true' if data.get('smtp_use_ssl') else 'false', 'smtp', 'Use SSL/TLS')
 
         return jsonify({'success': True, 'message': 'SMTP settings saved successfully'})
+    except ValueError as e:
+        logger.warning(f"SMTP settings validation error: {e}")
+        return jsonify({'error': f'Invalid setting: {str(e)}'}), 400
     except Exception as e:
         logger.exception("Failed to save SMTP settings")
-        return jsonify({'error': ERROR_MSGS['config']}), 500
+        db.session.rollback()
+        return jsonify({'error': 'Failed to save SMTP settings. Check server logs for details.'}), 500
 
 @settings_bp.route('/smtp/test', methods=['POST'])
 @admin_required
@@ -638,6 +660,9 @@ def save_sync_settings():
     """Save sync schedule settings"""
     data = request.get_json()
 
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
     try:
         set_setting('auto_sync_enabled', 'true' if data.get('auto_sync_enabled') else 'false', 'sync', 'Enable automatic sync')
         set_setting('sync_interval', data.get('sync_interval', 'daily'), 'sync', 'Sync interval')
@@ -664,9 +689,13 @@ def save_sync_settings():
         # If 'nvd_api_key' not in data, don't change the existing key
 
         return jsonify({'success': True, 'message': 'Sync settings saved successfully'})
+    except ValueError as e:
+        logger.warning(f"Sync settings validation error: {e}")
+        return jsonify({'error': f'Invalid setting: {str(e)}'}), 400
     except Exception as e:
         logger.exception("Failed to save sync settings")
-        return jsonify({'error': ERROR_MSGS['config']}), 500
+        db.session.rollback()
+        return jsonify({'error': 'Failed to save sync settings. Check server logs for details.'}), 500
 
 
 def _validate_nvd_api_key(api_key):
