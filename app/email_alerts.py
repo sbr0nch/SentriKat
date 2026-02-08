@@ -231,6 +231,8 @@ class EmailAlertManager:
         cve_priority_seen = {}  # Track which CVEs we've counted
 
         for match in matches:
+            if not match.product or not match.vulnerability:
+                continue  # Skip orphaned matches
             priority = match.calculate_effective_priority()
             cve_id = match.vulnerability.cve_id
 
@@ -254,6 +256,8 @@ class EmailAlertManager:
         by_product = {}
         product_cves = {}  # Track unique CVEs per product
         for match in matches:
+            if not match.product or not match.vulnerability:
+                continue  # Skip orphaned matches (product or vulnerability deleted)
             product_key = f"{match.product.vendor} {match.product.product_name}"
             cve_id = match.vulnerability.cve_id
             if product_key not in by_product:

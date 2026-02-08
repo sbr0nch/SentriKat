@@ -557,7 +557,7 @@ def load_license():
             env_key = _clean_license_input(env_key)
 
         # Sync: if env has a license and DB doesn't (or has a different one), save to DB
-        if env_key and env_key != 'SENTRIKAT-DEV-PROFESSIONAL':
+        if env_key:
             if not db_key or db_key != env_key:
                 try:
                     if setting:
@@ -1066,10 +1066,6 @@ def license_heartbeat():
     # No heartbeat needed for community edition (no license key)
     if not license_info.is_valid or license_info.edition == 'community':
         return {'success': True, 'message': 'Community edition, no heartbeat needed'}
-
-    # Don't heartbeat dev licenses
-    if license_info.license_id and license_info.license_id.startswith('DEV-'):
-        return {'success': True, 'message': 'Dev license, no heartbeat needed'}
 
     try:
         from app.models import Asset, Product, AgentApiKey, Organization
