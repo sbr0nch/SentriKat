@@ -841,7 +841,7 @@ GET /api/license
 GET /api/license/installation-id
 ```
 
-### Upload License
+### Activate License (Offline)
 
 ```http
 POST /api/license
@@ -851,6 +851,59 @@ Content-Type: application/json
   "license_key": "LICENSE_KEY_STRING"
 }
 ```
+
+**Response** (200):
+```json
+{
+  "success": true,
+  "message": "License activated: Professional edition for Acme Corp",
+  "license": { ... }
+}
+```
+
+### Activate License (Online)
+
+Exchange an activation code for a hardware-locked license key via the SentriKat license portal.
+Requires HTTPS connectivity to `portal.sentrikat.com`. Rate limited to 5 attempts per hour.
+
+```http
+POST /api/license/activate-online
+Content-Type: application/json
+
+{
+  "activation_code": "SK-XXXX-XXXX-XXXX-XXXX"
+}
+```
+
+**Response** (200):
+```json
+{
+  "success": true,
+  "message": "License activated: Professional edition for Acme Corp",
+  "license": { ... }
+}
+```
+
+**Error responses**:
+| Code | Description |
+|------|-------------|
+| 400 | Invalid/expired/already-used activation code |
+| 403 | Super admin access required |
+| 429 | Too many attempts (max 5/hour) |
+| 502 | License server returned an unexpected response |
+| 503 | Cannot reach license server |
+| 504 | License server timeout |
+
+**Security**: SSL is always enforced for license server connections regardless of the `VERIFY_SSL` setting.
+Activation codes must match `^[A-Za-z0-9\-]+$` (8-128 characters).
+
+### Remove License
+
+```http
+DELETE /api/license
+```
+
+Reverts to Community edition.
 
 ---
 

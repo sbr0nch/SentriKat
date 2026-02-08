@@ -10,6 +10,26 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _parse_ldap_server(server_str):
+    """Parse LDAP server URL, handling ldap://, ldaps://, and bare hostname formats.
+
+    Returns (hostname, use_ssl) tuple. Port is handled separately from settings.
+    Strips protocol prefix to avoid double-protocol issues with ldap3.Server().
+    """
+    if not server_str:
+        return '', False
+    server_str = server_str.strip()
+    use_ssl = False
+    if server_str.startswith('ldaps://'):
+        use_ssl = True
+        server_str = server_str[len('ldaps://'):]
+    elif server_str.startswith('ldap://'):
+        server_str = server_str[len('ldap://'):]
+    # Strip any trailing port (e.g. "host:389" -> "host"), port comes from settings
+    hostname = server_str.split(':')[0].strip('/')
+    return hostname, use_ssl
+
+
 class LDAPManager:
     """Manages LDAP user discovery and synchronization"""
 
@@ -56,11 +76,12 @@ class LDAPManager:
                 return {'success': False, 'error': 'LDAP not fully configured'}
 
             # Parse server URL
-            server_url = config['server'].replace('ldap://', '').replace('ldaps://', '').split(':')[0]
-            use_ssl = 'ldaps://' in config['server']
+            server_host, use_ssl = _parse_ldap_server(config['server'])
+            if not server_host:
+                return {'success': False, 'error': 'LDAP server URL is empty'}
 
             # Create server and connection
-            server = ldap3.Server(server_url, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)
+            server = ldap3.Server(server_host, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)
             conn = ldap3.Connection(server, user=config['bind_dn'], password=config['bind_password'], auto_bind=True)
 
             # Build search filter
@@ -175,11 +196,12 @@ class LDAPManager:
                 return {'success': False, 'error': 'LDAP is not enabled'}
 
             # Parse server URL
-            server_url = config['server'].replace('ldap://', '').replace('ldaps://', '').split(':')[0]
-            use_ssl = 'ldaps://' in config['server']
+            server_host, use_ssl = _parse_ldap_server(config['server'])
+            if not server_host:
+                return {'success': False, 'error': 'LDAP server URL is empty'}
 
             # Create server and connection
-            server = ldap3.Server(server_url, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)
+            server = ldap3.Server(server_host, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)
             conn = ldap3.Connection(server, user=config['bind_dn'], password=config['bind_password'], auto_bind=True)
 
             # Search for user
@@ -489,7 +511,11 @@ class LDAPManager:
             base_dn = search_base if search_base else config['base_dn']
 
             # Connect to LDAP
-            server = Server(config['server'], port=config['port'], get_info=ALL, use_ssl=config['use_tls'])
+            server_host, use_ssl = _parse_ldap_server(config['server'])
+            if not server_host:
+                return {'success': False, 'error': 'LDAP server URL is empty'}
+            # Use SSL from URL prefix (ldaps://) or fall back to TLS setting
+            server = Server(server_host, port=config['port'], get_info=ALL, use_ssl=use_ssl or config['use_tls'])
             conn = Connection(
                 server,
                 user=config['bind_dn'],

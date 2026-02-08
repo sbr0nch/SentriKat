@@ -2577,14 +2577,35 @@
                                 </div>
                             </div>
 
-                            <!-- License Key Input -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <i class="bi bi-key-fill me-2"></i>Activate License
+                            <!-- Online Activation -->
+                            <div class="card mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <i class="bi bi-cloud-arrow-up me-2"></i>Activate Online
                                 </div>
                                 <div class="card-body">
                                     <p class="text-muted mb-3">
-                                        Enter your license key to activate Professional features.
+                                        Enter your activation code from the purchase confirmation email.
+                                        Requires HTTPS connectivity to <code>portal.sentrikat.com</code>.
+                                    </p>
+                                    <div class="mb-3">
+                                        <label for="activationCodeInput" class="form-label fw-semibold">Activation Code</label>
+                                        <input type="text" class="form-control font-monospace" id="activationCodeInput" placeholder="e.g. SK-XXXX-XXXX-XXXX-XXXX">
+                                    </div>
+                                    <button type="button" class="btn btn-primary" onclick="activateLicenseOnline()" id="onlineActivateBtn">
+                                        <i class="bi bi-cloud-check me-1"></i>Activate Online
+                                    </button>
+                                    <div id="onlineActivateStatus" class="mt-2" style="display: none;"></div>
+                                </div>
+                            </div>
+
+                            <!-- Offline License Key Input -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <i class="bi bi-key-fill me-2"></i>Activate Offline
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted mb-3">
+                                        No internet? Paste the license key received from SentriKat support.
                                         The license must be generated for this specific installation.
                                     </p>
                                     <div class="mb-3">

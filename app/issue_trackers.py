@@ -131,6 +131,7 @@ class JiraTracker(IssueTrackerBase):
     def get_issue_types(self, project_key: str) -> List[Dict[str, str]]:
         """Get available issue types for a specific project."""
         try:
+            # Try project-specific endpoint first (returns issue types scoped to project)
             response = requests.get(
                 self._api_url(f'project/{project_key}'),
                 headers=self._get_headers(),
@@ -140,14 +141,42 @@ class JiraTracker(IssueTrackerBase):
             if response.status_code == 200:
                 project = response.json()
                 issue_types = project.get('issueTypes', [])
-                # Filter out subtasks and return name/id
-                return [
-                    {'id': it['id'], 'name': it['name']}
-                    for it in issue_types
-                    if not it.get('subtask', False)
-                ]
+                if issue_types:
+                    return [
+                        {'id': it['id'], 'name': it['name']}
+                        for it in issue_types
+                        if not it.get('subtask', False)
+                    ]
+                # Project found but no issueTypes in response - fall through to global endpoint
+                logger.debug(f"Project {project_key} found but no issueTypes in response, trying global endpoint")
+            elif response.status_code == 401:
+                logger.warning(f"Jira auth failed (401) fetching project {project_key}. "
+                               f"Auth mode: {'Bearer/PAT' if self.use_pat else 'Basic'}. "
+                               f"Check credentials.")
+                return []
             elif response.status_code == 404:
                 logger.warning(f"Jira project not found: {project_key}")
+                return []
+
+            # Fallback: global issue types endpoint (works on all Jira versions)
+            response = requests.get(
+                self._api_url('issuetype'),
+                headers=self._get_headers(),
+                timeout=10,
+                verify=self.verify_ssl
+            )
+            if response.status_code == 200:
+                all_types = response.json()
+                if isinstance(all_types, list):
+                    return [
+                        {'id': it['id'], 'name': it['name']}
+                        for it in all_types
+                        if not it.get('subtask', False)
+                    ]
+            elif response.status_code == 401:
+                logger.warning(f"Jira auth failed (401) on global issuetype endpoint. "
+                               f"Auth mode: {'Bearer/PAT' if self.use_pat else 'Basic'}. "
+                               f"If using PAT, ensure your Jira version supports Bearer tokens (DC 8.14+).")
             return []
         except Exception as e:
             logger.error(f"Failed to fetch issue types for {project_key}: {e}")

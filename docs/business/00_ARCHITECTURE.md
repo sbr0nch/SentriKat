@@ -941,17 +941,62 @@ Format: SK-INST-<64-char-hex>
 For Docker: Set SENTRIKAT_INSTALLATION_ID in .env
 ```
 
-## 10.3 Validation Flow
+## 10.3 Activation Methods
+
+### Online Activation (recommended)
+```
+Customer purchases license → receives activation code (SK-XXXX-XXXX-XXXX-XXXX)
+ ↓
+Admin panel → "Activate Online" → enters code
+ ↓
+POST portal.sentrikat.com/api/v1/license/activate
+  { activation_code, installation_id, app_version }
+ ↓
+Portal returns RSA-signed license key (locked to installation_id)
+ ↓
+Local validation (RSA-4096 signature + hardware match) → saved to DB
+```
+
+**Security hardening:**
+- SSL always enforced (ignores VERIFY_SSL setting for license server)
+- Rate limited: 5 attempts/hour/IP (in-memory + server-side)
+- Activation codes: `^[A-Za-z0-9\-]+$`, 8-128 chars
+- Generic error messages (no internal state leakage)
+- RSA signature verification prevents accepting forged keys even if MITM
+
+### Offline Activation
+```
+Admin copies Installation ID from admin panel
+ → sends to SentriKat (email/portal)
+ → receives signed license key
+ → pastes in admin panel → validated locally
+```
+
+## 10.4 Validation Flow
 
 ```
-1. Extract payload and signature
-2. Verify RSA signature (public key in app)
-3. Check installation ID matches hardware
+1. Extract payload and signature from license key
+2. Verify RSA-4096 signature against embedded public key
+3. Check installation_id matches hardware fingerprint
 4. Check expiration date
 5. Apply limits and features
 ```
 
-## 10.4 Feature Gating
+## 10.5 License Heartbeat
+
+```
+Every 12 hours → POST portal.sentrikat.com/api/v1/license/heartbeat
+  { installation_id, license_id, edition, app_version, usage }
+
+Responses:
+  200 + status=active → continue normally
+  200 + status=revoked → store revocation flag, downgrade
+  200 + updated_limits → apply new limits (e.g. agent pack purchased)
+  404 → license not on server (offline-only license, OK)
+  Connection error → graceful degradation, local license continues
+```
+
+## 10.6 Feature Gating
 
 ```python
 @requires_professional('Email Alerts')
@@ -981,14 +1026,21 @@ SentriKat-web/
 
 ```python
 # FastAPI endpoints:
-POST /api/licenses/request     # Customer requests license
-POST /api/licenses/generate    # Admin generates license
-GET  /api/licenses/{id}        # Get license status
-POST /api/licenses/{id}/revoke # Revoke license
+POST /api/v1/license/activate     # Online activation (code → signed key)
+POST /api/v1/license/heartbeat    # Installation heartbeat + telemetry
+POST /api/licenses/request        # Customer requests license (manual flow)
+POST /api/licenses/generate       # Admin generates license
+GET  /api/licenses/{id}           # Get license status
+POST /api/licenses/{id}/revoke    # Revoke license
+
+# Online activation flow:
+# Input:  { activation_code, installation_id, app_version }
+# Output: { license_key: "<base64(payload)>.<base64(signature)>" }
+# Errors: 404=code not found, 409=already used, 410=expired, 429=rate limited
 
 # RSA key management:
-- Private key: Signs licenses (NEVER shipped)
-- Public key: Embedded in SentriKat app
+- Private key: Signs licenses (NEVER shipped, stored on license server only)
+- Public key: Embedded in SentriKat app (validates signatures locally)
 ```
 
 ## 11.3 Customer Portal
@@ -1203,6 +1255,7 @@ DB_PASSWORD=change-me-to-a-secure-password
 | Agent inventory | 60/minute |
 | Agent heartbeat | 120/minute |
 | Password reset | 5/hour |
+| License online activation | 5/hour/IP |
 
 ## C. Supported Browsers
 
@@ -1229,6 +1282,7 @@ DB_PASSWORD=change-me-to-a-secure-password
 | 1.0.0 | Feb 2026 | Development Team | Initial release |
 | 1.1.0 | Feb 2026 | Development Team | Added: CVE auto-resolution, in-app update check, sidebar highlighting, dashboard redesign, clickable priority cards, dark mode, multi-tracker support, XSS fixes, settings consolidation, Software Overview tab, CPE UX improvements |
 | 1.2.0 | Feb 2026 | Development Team | Added: Automatic vendor advisory sync (OSV.dev, Red Hat, MSRC, Debian), distro-native version comparison (dpkg/RPM/APK), three-tier confidence system (affected/likely resolved/resolved), license server heartbeat, agent distro_package_version support |
+| 1.3.0 | Feb 2026 | Development Team | Added: Online license activation (activation code exchange via portal.sentrikat.com with rate limiting and security hardening), fixed agent product organization assignment, fixed Software Overview N+1 query performance |
 
 ---
 
