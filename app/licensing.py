@@ -1092,7 +1092,7 @@ def license_heartbeat():
         }
 
         response = _requests.post(
-            f'{LICENSE_SERVER_URL}/v1/license/heartbeat',
+            f'{LICENSE_SERVER_URL}/v1/heartbeat',
             json=payload,
             timeout=15,
             proxies=proxies,

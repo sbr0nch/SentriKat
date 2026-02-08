@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SentriKat - First Time Setup</title>
+    <title>SentriKat - Setup</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="icon" type="image/x-icon" href="/static/images/favicon.ico">
@@ -239,7 +239,7 @@
                 <img src="/static/images/favicon-128x128.png" alt="SentriKat" style="width: 128px; height: 128px;">
                 <span>SentriKat</span>
             </h1>
-            <p>Enterprise Vulnerability Management - First Time Setup</p>
+            <p>Setup</p>
         </div>
 
         <div class="setup-body">
@@ -269,16 +269,16 @@
 
             <!-- Step 1: Welcome -->
             <div class="step active" id="step-1">
-                <h2 class="mb-4"><i class="bi bi-rocket-takeoff"></i> Welcome to SentriKat!</h2>
-                <p class="lead">Let's get your vulnerability management system up and running.</p>
+                <h2 class="mb-4"><i class="bi bi-rocket-takeoff"></i> Welcome</h2>
+                <p class="lead">Get up and running in a few quick steps.</p>
 
                 <div class="feature-card">
                     <div class="feature-icon">
                         <i class="bi bi-lightning-charge-fill"></i>
                     </div>
                     <div class="feature-content">
-                        <strong>Automated CVE Tracking</strong>
-                        <p>Automatically sync with CISA's Known Exploited Vulnerabilities catalog</p>
+                        <strong>CVE Tracking</strong>
+                        <p>Sync with CISA KEV catalog automatically</p>
                     </div>
                 </div>
 
@@ -287,8 +287,8 @@
                         <i class="bi bi-bell-fill"></i>
                     </div>
                     <div class="feature-content">
-                        <strong>Email Alerts</strong>
-                        <p>Get notified when new critical vulnerabilities affect your products</p>
+                        <strong>Alerts</strong>
+                        <p>Email notifications for new vulnerabilities</p>
                     </div>
                 </div>
 
@@ -297,8 +297,8 @@
                         <i class="bi bi-graph-up-arrow"></i>
                     </div>
                     <div class="feature-content">
-                        <strong>Priority System</strong>
-                        <p>CVSS-based prioritization with CISA urgency consideration</p>
+                        <strong>Prioritization</strong>
+                        <p>CVSS scoring with CISA urgency context</p>
                     </div>
                 </div>
 
@@ -308,58 +308,41 @@
                     </div>
                     <div class="feature-content">
                         <strong>Multi-Tenancy</strong>
-                        <p>Manage multiple organizations with separate product catalogs</p>
+                        <p>Separate orgs with independent product catalogs</p>
                     </div>
-                </div>
-
-                <div class="mt-4">
-                    <p><strong>This wizard will help you:</strong></p>
-                    <ul>
-                        <li>Create your organization</li>
-                        {% if auth_enabled %}<li>Set up an admin account</li>{% endif %}
-                        <li>Seed the service catalog (80+ common services)</li>
-                        <li>Run your first CISA KEV sync</li>
-                    </ul>
                 </div>
 
                 <div class="text-center mt-4">
                     <button class="btn btn-setup btn-lg" onclick="nextStep()">
-                        Let's Get Started <i class="bi bi-arrow-right"></i>
+                        Get Started <i class="bi bi-arrow-right"></i>
                     </button>
                 </div>
             </div>
 
             <!-- Step 2: Create Organization -->
             <div class="step" id="step-2">
-                <h2 class="mb-4"><i class="bi bi-building"></i> Create Your Organization</h2>
-                <p>Set up your primary organization for tracking products and vulnerabilities.</p>
+                <h2 class="mb-4"><i class="bi bi-building"></i> Organization</h2>
 
                 <form id="orgForm">
                     <div class="mb-3">
-                        <label for="org_display_name" class="form-label">Organization Name *</label>
+                        <label for="org_display_name" class="form-label">Name *</label>
                         <input type="text" class="form-control" id="org_display_name"
                                placeholder="e.g., Acme Corporation" required>
-                        <small class="form-text text-muted">This will be shown in the UI</small>
                     </div>
 
                     <div class="mb-3">
                         <label for="org_description" class="form-label">Description <span class="optional-badge">OPTIONAL</span></label>
                         <textarea class="form-control" id="org_description" rows="2"
-                                  placeholder="Brief description of your organization"></textarea>
+                                  placeholder="Short description"></textarea>
                     </div>
 
                     <div class="mb-3">
                         <label for="org_emails" class="form-label">
-                            Notification Emails <span class="optional-badge">OPTIONAL</span>
+                            Alert Emails <span class="optional-badge">OPTIONAL</span>
                         </label>
                         <input type="text" class="form-control" id="org_emails"
                                placeholder="email1@company.com, email2@company.com">
-                        <small class="form-text text-muted">Comma-separated email addresses for alerts</small>
-                    </div>
-
-                    <div class="alert alert-info">
-                        <i class="bi bi-info-circle"></i>
-                        <strong>Note:</strong> You can configure SMTP settings and proxy later in the system settings.
+                        <small class="form-text text-muted">Comma-separated</small>
                     </div>
 
                     <div class="text-center mt-4">
@@ -367,7 +350,7 @@
                             <i class="bi bi-arrow-left"></i> Back
                         </button>
                         <button type="submit" class="btn btn-setup" id="createOrgBtn">
-                            Create Organization <i class="bi bi-arrow-right"></i>
+                            Create <i class="bi bi-arrow-right"></i>
                         </button>
                     </div>
                 </form>
@@ -376,8 +359,7 @@
             <!-- Step 3: Create Admin User (only if auth enabled) -->
             {% if auth_enabled %}
             <div class="step" id="step-3">
-                <h2 class="mb-4"><i class="bi bi-person-badge"></i> Create Admin Account</h2>
-                <p>Set up your administrator account for managing the system.</p>
+                <h2 class="mb-4"><i class="bi bi-person-badge"></i> Admin Account</h2>
 
                 <form id="adminForm">
                     <div class="mb-3">
@@ -395,24 +377,19 @@
                     <div class="mb-3">
                         <label for="admin_full_name" class="form-label">Full Name <span class="optional-badge">OPTIONAL</span></label>
                         <input type="text" class="form-control" id="admin_full_name"
-                               placeholder="System Administrator">
+                               placeholder="Full name">
                     </div>
 
                     <div class="mb-3">
                         <label for="admin_password" class="form-label">Password *</label>
                         <input type="password" class="form-control" id="admin_password"
-                               placeholder="Enter a strong password" required autocomplete="new-password">
+                               placeholder="Min. 8 characters" required autocomplete="new-password">
                     </div>
 
                     <div class="mb-3">
                         <label for="admin_password_confirm" class="form-label">Confirm Password *</label>
                         <input type="password" class="form-control" id="admin_password_confirm"
-                               placeholder="Re-enter your password" required autocomplete="new-password">
-                    </div>
-
-                    <div class="alert alert-warning">
-                        <i class="bi bi-exclamation-triangle"></i>
-                        <strong>Important:</strong> Remember this password! You'll need it to log in.
+                               placeholder="Confirm password" required autocomplete="new-password">
                     </div>
 
                     <div class="text-center mt-4">
@@ -420,7 +397,7 @@
                             <i class="bi bi-arrow-left"></i> Back
                         </button>
                         <button type="submit" class="btn btn-setup" id="createAdminBtn">
-                            Create Admin <i class="bi bi-arrow-right"></i>
+                            Create <i class="bi bi-arrow-right"></i>
                         </button>
                     </div>
                 </form>
@@ -430,67 +407,26 @@
             <!-- Step 4: Seed Services -->
             <div class="step" id="step-{% if auth_enabled %}4{% else %}3{% endif %}">
                 <h2 class="mb-4"><i class="bi bi-collection"></i> Service Catalog</h2>
-                <p>Populate the service catalog with 80+ common enterprise services.</p>
-
-                <div class="feature-card">
-                    <i class="bi bi-microsoft float-start"></i>
-                    <strong>Microsoft Products</strong>
-                    <p class="mb-0 mt-2">Windows Server, Exchange, SQL Server, SharePoint, and more</p>
-                </div>
-
-                <div class="feature-card">
-                    <i class="bi bi-database float-start"></i>
-                    <strong>Database Systems</strong>
-                    <p class="mb-0 mt-2">MySQL, PostgreSQL, MongoDB, Oracle, Redis</p>
-                </div>
-
-                <div class="feature-card">
-                    <i class="bi bi-code-square float-start"></i>
-                    <strong>Web Servers & Frameworks</strong>
-                    <p class="mb-0 mt-2">Apache, Nginx, Tomcat, Node.js, PHP</p>
-                </div>
-
-                <div class="feature-card">
-                    <i class="bi bi-router float-start"></i>
-                    <strong>Network Equipment</strong>
-                    <p class="mb-0 mt-2">Cisco, Juniper, Fortinet, Palo Alto, F5</p>
-                </div>
-
-                <div class="alert alert-info">
-                    <i class="bi bi-info-circle"></i>
-                    This helps you quickly add products to track without typing everything manually.
-                </div>
+                <p>Pre-load 80+ common services &mdash; Microsoft, databases, web servers, network gear, and more.</p>
 
                 <div class="text-center mt-4">
                     <button type="button" class="btn btn-secondary me-2" onclick="previousStep()">
                         <i class="bi bi-arrow-left"></i> Back
                     </button>
                     <button type="button" class="btn btn-setup" onclick="seedServices()" id="seedBtn">
-                        Seed Service Catalog <i class="bi bi-arrow-right"></i>
+                        Seed Catalog <i class="bi bi-arrow-right"></i>
                     </button>
                 </div>
             </div>
 
             <!-- Step 5: Initial Sync -->
             <div class="step" id="step-{% if auth_enabled %}5{% else %}4{% endif %}">
-                <h2 class="mb-4"><i class="bi bi-cloud-download"></i> Initial Sync</h2>
-                <p>Download the latest vulnerabilities from CISA's Known Exploited Vulnerabilities catalog.</p>
-
-                <div class="alert alert-info">
-                    <i class="bi bi-info-circle"></i>
-                    <strong>What happens during sync:</strong>
-                    <ul class="mb-0 mt-2">
-                        <li>Downloads ~1000+ known exploited vulnerabilities from CISA</li>
-                        <li>Enriches first 50 CVEs with CVSS scores from NVD (if API key configured)</li>
-                        <li>Matches vulnerabilities to your products (when you add them)</li>
-                        <li>Takes about 30-60 seconds</li>
-                    </ul>
-                </div>
+                <h2 class="mb-4"><i class="bi bi-cloud-download"></i> CISA KEV Sync</h2>
+                <p>Download latest known exploited vulnerabilities. Takes about 30&ndash;60 seconds.</p>
 
                 <!-- Proxy Configuration -->
                 <hr class="my-4">
-                <h5><i class="bi bi-globe"></i> Proxy Configuration <span class="optional-badge">OPTIONAL</span></h5>
-                <p class="text-muted small">Configure if your network requires a proxy for internet access</p>
+                <h5><i class="bi bi-globe"></i> Proxy <span class="optional-badge">OPTIONAL</span></h5>
 
                 <div class="mb-3">
                     <div class="form-check">
@@ -499,7 +435,6 @@
                             <strong>Use HTTP/HTTPS Proxy</strong>
                         </label>
                     </div>
-                    <small class="form-text text-muted">Enable this if your corporate network requires a proxy</small>
                 </div>
 
                 <div id="proxyFields" style="display: none;">
@@ -507,7 +442,7 @@
                         <div class="col-md-8 mb-3">
                             <label for="proxy_server" class="form-label">Proxy Server *</label>
                             <input type="text" class="form-control" id="proxy_server"
-                                   placeholder="proxy.company.com or 192.168.1.10">
+                                   placeholder="proxy.company.com">
                         </div>
                         <div class="col-md-4 mb-3">
                             <label for="proxy_port" class="form-label">Port *</label>
@@ -520,12 +455,12 @@
                         <div class="col-md-6 mb-3">
                             <label for="proxy_username" class="form-label">Username <span class="optional-badge">OPTIONAL</span></label>
                             <input type="text" class="form-control" id="proxy_username"
-                                   placeholder="Leave blank if not required">
+                                   placeholder="Optional">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="proxy_password" class="form-label">Password <span class="optional-badge">OPTIONAL</span></label>
                             <input type="password" class="form-control" id="proxy_password"
-                                   placeholder="Leave blank if not required">
+                                   placeholder="Optional">
                         </div>
                     </div>
                 </div>
@@ -544,8 +479,8 @@
                         <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status">
                             <span class="visually-hidden">Loading...</span>
                         </div>
-                        <p class="mt-3"><strong>Syncing vulnerabilities...</strong></p>
-                        <p class="text-muted">This may take a minute. Please wait...</p>
+                        <p class="mt-3"><strong>Syncing...</strong></p>
+                        <p class="text-muted">This may take a minute.</p>
                     </div>
                 </div>
             </div>
@@ -556,22 +491,12 @@
                     <div class="success-icon">
                         <i class="bi bi-check-circle-fill"></i>
                     </div>
-                    <h2 class="mt-4 mb-3">Setup Complete!</h2>
-                    <p class="lead">Your SentriKat system is ready to use.</p>
-
-                    <div class="alert alert-success">
-                        <strong>What's next?</strong>
-                        <ul class="text-start mt-2 mb-0">
-                            <li>Add products from your infrastructure</li>
-                            <li>Configure SMTP settings for email alerts</li>
-                            <li>Set up automated daily syncs</li>
-                            <li>Explore the vulnerability dashboard</li>
-                        </ul>
-                    </div>
+                    <h2 class="mt-4 mb-3">You're all set.</h2>
+                    <p class="lead">SentriKat is ready to use.</p>
 
                     <div class="mt-4">
                         <a href="/login" class="btn btn-setup btn-lg">
-                            Go to Login <i class="bi bi-box-arrow-in-right"></i>
+                            Continue <i class="bi bi-arrow-right"></i>
                         </a>
                     </div>
                 </div>
@@ -678,12 +603,12 @@
                 } else {
                     showAlert(data.error || 'Failed to create organization');
                     btn.disabled = false;
-                    btn.innerHTML = 'Create Organization <i class="bi bi-arrow-right"></i>';
+                    btn.innerHTML = 'Create <i class="bi bi-arrow-right"></i>';
                 }
             } catch (error) {
                 showAlert('Error: ' + error.message);
                 btn.disabled = false;
-                btn.innerHTML = 'Create Organization <i class="bi bi-arrow-right"></i>';
+                btn.innerHTML = 'Create <i class="bi bi-arrow-right"></i>';
             }
         });
 
@@ -733,12 +658,12 @@
                     } else {
                         showAlert(data.error || 'Failed to create admin account');
                         btn.disabled = false;
-                        btn.innerHTML = 'Create Admin <i class="bi bi-arrow-right"></i>';
+                        btn.innerHTML = 'Create <i class="bi bi-arrow-right"></i>';
                     }
                 } catch (error) {
                     showAlert('Error: ' + error.message);
                     btn.disabled = false;
-                    btn.innerHTML = 'Create Admin <i class="bi bi-arrow-right"></i>';
+                    btn.innerHTML = 'Create <i class="bi bi-arrow-right"></i>';
                 }
             });
         }
@@ -767,12 +692,12 @@
                 } else {
                     showAlert(data.error || 'Failed to seed services');
                     btn.disabled = false;
-                    btn.innerHTML = 'Seed Service Catalog <i class="bi bi-arrow-right"></i>';
+                    btn.innerHTML = 'Seed Catalog <i class="bi bi-arrow-right"></i>';
                 }
             } catch (error) {
                 showAlert('Error: ' + error.message);
                 btn.disabled = false;
-                btn.innerHTML = 'Seed Service Catalog <i class="bi bi-arrow-right"></i>';
+                btn.innerHTML = 'Seed Catalog <i class="bi bi-arrow-right"></i>';
             }
         }
 
