@@ -1029,6 +1029,121 @@ def get_agent_usage():
 
 
 # ============================================================================
+# License Server Heartbeat
+# ============================================================================
+
+LICENSE_SERVER_URL = os.environ.get('SENTRIKAT_LICENSE_SERVER', 'https://portal.sentrikat.com/api')
+
+def license_heartbeat():
+    """
+    Send a heartbeat to the SentriKat license server.
+
+    Purpose:
+    - Validates the license is still active on the server side
+    - Reports usage telemetry (agent count, product count) for billing
+    - Checks if the license has been revoked or suspended
+    - Retrieves any updated license terms (e.g., expanded agent packs)
+
+    This runs every 12 hours via the scheduler. If the server is unreachable,
+    the local license continues to work (graceful degradation). The license
+    is ONLY invalidated if the server explicitly returns a revocation response.
+
+    Returns dict with 'success' bool and 'message' or 'error'.
+    """
+    import requests as _requests
+    from config import Config
+
+    license_info = get_license()
+
+    # No heartbeat needed for community edition (no license key)
+    if not license_info.is_valid or license_info.edition == 'community':
+        return {'success': True, 'message': 'Community edition, no heartbeat needed'}
+
+    # Don't heartbeat dev licenses
+    if license_info.license_id and license_info.license_id.startswith('DEV-'):
+        return {'success': True, 'message': 'Dev license, no heartbeat needed'}
+
+    try:
+        from app.models import Asset, Product, AgentApiKey, Organization
+
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+        installation_id = get_installation_id()
+
+        payload = {
+            'installation_id': installation_id,
+            'license_id': license_info.license_id,
+            'edition': license_info.edition,
+            'app_version': _get_app_version(),
+            'usage': {
+                'agents': Asset.query.filter(Asset.active == True).count() or 0,
+                'products': Product.query.count() or 0,
+                'organizations': Organization.query.filter(Organization.active == True).count() or 0,
+                'api_keys': AgentApiKey.query.filter(AgentApiKey.active == True).count() or 0,
+            },
+        }
+
+        response = _requests.post(
+            f'{LICENSE_SERVER_URL}/v1/license/heartbeat',
+            json=payload,
+            timeout=15,
+            proxies=proxies,
+            verify=verify_ssl,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+
+            # Check for license revocation
+            if data.get('status') == 'revoked':
+                logger.warning("License has been revoked by the server!")
+                # Store revocation in system settings
+                from app.models import SystemSettings
+                from app import db
+                revoked = SystemSettings.query.filter_by(key='license_revoked').first()
+                if not revoked:
+                    revoked = SystemSettings(key='license_revoked', value='true')
+                    db.session.add(revoked)
+                else:
+                    revoked.value = 'true'
+                db.session.commit()
+                return {'success': False, 'error': 'License has been revoked'}
+
+            # Check for updated limits (e.g., agent pack purchased)
+            if data.get('updated_limits'):
+                logger.info(f"License server provided updated limits: {data['updated_limits']}")
+
+            return {
+                'success': True,
+                'message': data.get('message', 'Heartbeat acknowledged'),
+                'server_status': data.get('status', 'active'),
+            }
+
+        elif response.status_code == 404:
+            # License not found on server - could be first-time or server migration
+            logger.info("License heartbeat: license not found on server (may be offline-only)")
+            return {'success': True, 'message': 'License not registered on server'}
+
+        else:
+            logger.warning(f"License heartbeat returned {response.status_code}")
+            return {'success': False, 'error': f'Server returned {response.status_code}'}
+
+    except _requests.ConnectionError:
+        # Server unreachable - graceful degradation, don't invalidate license
+        logger.info("License heartbeat: server unreachable (offline mode)")
+        return {'success': True, 'message': 'Server unreachable, continuing offline'}
+
+    except _requests.Timeout:
+        logger.info("License heartbeat: server timeout")
+        return {'success': True, 'message': 'Server timeout, continuing offline'}
+
+    except Exception as e:
+        logger.error(f"License heartbeat failed: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+# ============================================================================
 # License API Routes
 # ============================================================================
 

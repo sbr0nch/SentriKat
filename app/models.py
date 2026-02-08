@@ -1345,6 +1345,7 @@ class Asset(db.Model):
     notes = db.Column(db.Text, nullable=True)  # Admin notes
     tags = db.Column(db.Text, nullable=True)  # JSON array of tags
     metadata_json = db.Column(db.Text, nullable=True)  # JSON for custom fields
+    installed_kbs = db.Column(db.Text, nullable=True)  # JSON array of installed KBs (Windows)
 
     # Agent Command & Control (server-side management)
     pending_scan = db.Column(db.Boolean, default=False)  # True = agent should scan immediately
@@ -1471,6 +1472,7 @@ class ProductInstallation(db.Model):
 
     # Installation details
     install_path = db.Column(db.String(500), nullable=True)  # Where it's installed
+    distro_package_version = db.Column(db.String(200), nullable=True)  # Full distro version e.g. 2.4.52-1ubuntu4.6
     detected_by = db.Column(db.String(50), default='agent')  # agent, manual, scan
     detected_on_os = db.Column(db.String(50), nullable=True, index=True)  # linux, windows, macos, etc.
 

@@ -1001,15 +1001,18 @@ def report_inventory():
                 "vendor": "Apache",
                 "product": "HTTP Server",
                 "version": "2.4.52",
-                "path": "/usr/sbin/apache2"
+                "path": "/usr/sbin/apache2",
+                "distro_package_version": "2.4.52-1ubuntu4.6"
             },
             {
                 "vendor": "OpenSSL",
                 "product": "OpenSSL",
                 "version": "3.0.2",
-                "path": "/usr/bin/openssl"
+                "path": "/usr/bin/openssl",
+                "distro_package_version": "3.0.2-0ubuntu1.15"
             }
-        ]
+        ],
+        "installed_kbs": ["KB5040442", "KB5034763"]
     }
 
     Response includes:
@@ -1153,6 +1156,12 @@ def report_inventory():
             asset.agent_id = agent_info['id']
         asset.agent_version = agent_info.get('version')
 
+        # Store installed KBs (Windows agents report this)
+        installed_kbs = data.get('installed_kbs')
+        if installed_kbs and isinstance(installed_kbs, list):
+            import json as _json
+            asset.installed_kbs = _json.dumps(installed_kbs[:500])  # Cap at 500 KBs
+
         asset.last_checkin = datetime.utcnow()
         asset.last_inventory_at = datetime.utcnow()
         asset.status = 'online'
@@ -1254,6 +1263,7 @@ def report_inventory():
                     product_id=product.id,
                     version=version,
                     install_path=product_data.get('path'),
+                    distro_package_version=product_data.get('distro_package_version'),
                     detected_by='agent',
                     detected_on_os=platform  # Track which OS this came from
                 )
@@ -1286,6 +1296,7 @@ def report_inventory():
                 # Update existing installation
                 installation.version = version
                 installation.install_path = product_data.get('path')
+                installation.distro_package_version = product_data.get('distro_package_version') or installation.distro_package_version
                 installation.last_seen_at = datetime.utcnow()
                 installations_updated += 1
 

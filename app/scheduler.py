@@ -106,6 +106,27 @@ def start_scheduler(app):
     )
     logger.info("Scheduled reports processor running every 15 minutes")
 
+    # Schedule vendor advisory sync (1 hour after CISA KEV sync)
+    vendor_sync_hour = (Config.SYNC_HOUR + 1) % 24
+    scheduler.add_job(
+        func=lambda: vendor_advisory_sync_job(app),
+        trigger=CronTrigger(hour=vendor_sync_hour, minute=Config.SYNC_MINUTE),
+        id='vendor_advisory_sync',
+        name='Vendor Advisory Sync (OSV, Red Hat, MSRC, Debian)',
+        replace_existing=True
+    )
+    logger.info(f"Vendor advisory sync scheduled at {vendor_sync_hour:02d}:{Config.SYNC_MINUTE:02d}")
+
+    # Schedule license heartbeat (every 12 hours)
+    scheduler.add_job(
+        func=lambda: license_heartbeat_job(app),
+        trigger=IntervalTrigger(hours=12),
+        id='license_heartbeat',
+        name='License Server Heartbeat',
+        replace_existing=True
+    )
+    logger.info("License heartbeat scheduled every 12 hours")
+
     scheduler.start()
     logger.info(f"Scheduler started. CISA KEV sync scheduled at {Config.SYNC_HOUR:02d}:{Config.SYNC_MINUTE:02d}")
 
@@ -466,3 +487,41 @@ def process_scheduled_reports_job(app):
 
         except Exception as e:
             logger.error(f"Scheduled reports job failed: {str(e)}", exc_info=True)
+
+
+def vendor_advisory_sync_job(app):
+    """Job to sync vendor advisories and auto-resolve false-positive CVE matches"""
+    with app.app_context():
+        try:
+            from app.vendor_advisories import sync_vendor_advisories
+
+            logger.info("Starting vendor advisory sync (OSV.dev, Red Hat, MSRC, Debian)...")
+            result = sync_vendor_advisories()
+            logger.info(f"Vendor advisory sync completed: "
+                        f"{result.get('overrides_created', 0)} overrides created, "
+                        f"{result.get('matches_resolved', 0)} false positives resolved, "
+                        f"{result.get('feeds_checked', 0)} feeds checked")
+
+            if result.get('errors'):
+                for err in result['errors']:
+                    logger.warning(f"Vendor advisory feed error: {err}")
+
+        except Exception as e:
+            logger.error(f"Vendor advisory sync job failed: {str(e)}", exc_info=True)
+
+
+def license_heartbeat_job(app):
+    """Job to send license heartbeat to the license server"""
+    with app.app_context():
+        try:
+            from app.licensing import license_heartbeat
+
+            logger.info("Sending license heartbeat...")
+            result = license_heartbeat()
+            if result.get('success'):
+                logger.info(f"License heartbeat OK: {result.get('message', '')}")
+            else:
+                logger.warning(f"License heartbeat failed: {result.get('error', 'unknown')}")
+
+        except Exception as e:
+            logger.error(f"License heartbeat job failed: {str(e)}", exc_info=True)

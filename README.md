@@ -59,6 +59,7 @@ Unlike traditional vulnerability scanners that overwhelm you with thousands of C
 | **CISA KEV Sync** | Automatic daily sync of Known Exploited Vulnerabilities catalog |
 | **NVD Integration** | Real-time search of 800,000+ products with CVSS enrichment |
 | **Smart Matching** | Multi-method CVE matching (CPE, vendor+product, keywords) |
+| **Vendor Backport Detection** | Automatic false-positive removal via OSV.dev, Red Hat, MSRC, and Debian advisory feeds |
 | **Priority Matrix** | Intelligent prioritization based on severity, criticality, age, and ransomware risk |
 | **Remediation Tracking** | Due date tracking with acknowledgment workflow |
 
@@ -156,6 +157,34 @@ docker-compose up -d
 | `SESSION_COOKIE_SECURE` | No | Set to `true` when using HTTPS |
 | `FORCE_HTTPS` | No | Set to `true` to force HTTPS redirects |
 
+### Network Requirements (Outbound Access)
+
+SentriKat requires outbound HTTPS access to several external services. If your environment uses a proxy or firewall, ensure these domains are reachable:
+
+| Domain | Purpose | Schedule |
+|--------|---------|----------|
+| `www.cisa.gov` | CISA KEV vulnerability catalog sync | Daily (2 AM UTC) |
+| `services.nvd.nist.gov` | NVD CPE/CVSS data enrichment | During product search & daily sync |
+| `api.osv.dev` | Vendor backport detection (Ubuntu, Debian, Alpine, ecosystems) | Daily (3 AM UTC) |
+| `access.redhat.com` | Red Hat/CentOS/Rocky advisory data | Daily (3 AM UTC) |
+| `api.msrc.microsoft.com` | Microsoft MSRC Patch Tuesday data | Daily (3 AM UTC) |
+| `security-tracker.debian.org` | Debian security tracker | Daily (3 AM UTC) |
+| `portal.sentrikat.com` | License validation heartbeat | Every 12 hours |
+| `api.github.com` | Update check (optional) | On admin dashboard load |
+| `api.first.org` | EPSS scores (optional) | Daily |
+
+Configure proxy settings via environment variables or the admin panel (Settings > Network):
+
+```bash
+# Proxy configuration
+HTTP_PROXY=http://proxy.example.com:8080
+HTTPS_PROXY=http://proxy.example.com:8080
+NO_PROXY=localhost,127.0.0.1,db
+
+# Disable SSL verification (not recommended, for testing only)
+VERIFY_SSL=false
+```
+
 ### SSL/TLS Configuration
 
 ```bash
@@ -189,6 +218,10 @@ SYNC_MINUTE=0
 # Proxy settings (if behind corporate proxy)
 HTTP_PROXY=http://proxy.example.com:8080
 HTTPS_PROXY=http://proxy.example.com:8080
+
+# License server (default: portal.sentrikat.com)
+# Only change if using on-premise license server
+SENTRIKAT_LICENSE_SERVER=https://portal.sentrikat.com/api
 ```
 
 ---
