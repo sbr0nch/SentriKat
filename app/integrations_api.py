@@ -12,6 +12,7 @@ from flask import Blueprint, request, jsonify, session, Response
 from datetime import datetime
 import secrets
 import uuid
+import logging
 from functools import wraps
 
 from app import db, csrf
@@ -451,8 +452,8 @@ def approve_queue_item(item_id):
     try:
         from app.filters import match_vulnerabilities_to_products
         match_vulnerabilities_to_products([product])
-    except:
-        pass
+    except Exception as match_err:
+        logging.getLogger(__name__).warning(f"Vulnerability matching failed for product {product.id}: {match_err}")
 
     return jsonify({
         'success': True,
@@ -1024,7 +1025,8 @@ def download_windows_agent():
 
     # Build validation section based on whether key is embedded
     if api_key and api_key != 'YOUR_API_KEY_HERE':
-        key_section = f'''[string]$ApiKey = "{api_key}",'''
+        safe_key = api_key.replace('`', '``').replace('$', '`$').replace('"', '`"')
+        key_section = f'''[string]$ApiKey = "{safe_key}",'''
         validation = ''
     else:
         key_section = '''[Parameter(Mandatory=$true)]
@@ -1232,7 +1234,7 @@ $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 
     return Response(
         script,
-        mimetype='text/plain',
+        mimetype='application/octet-stream',
         headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-windows.ps1'}
     )
 
@@ -1247,7 +1249,8 @@ def download_linux_agent():
 
     # Build key section based on whether embedded
     if api_key and api_key != 'YOUR_API_KEY_HERE':
-        key_section = f'''API_KEY="{api_key}"
+        safe_key = api_key.replace('\\', '\\\\').replace('$', '\\$').replace('`', '\\`').replace('"', '\\"')
+        key_section = f'''API_KEY="{safe_key}"
 API_URL="${{1:-{base_url}}}"'''
         validation = ''
     else:
@@ -1413,7 +1416,7 @@ echo "Agent completed successfully!"
 
     return Response(
         script,
-        mimetype='text/plain',
+        mimetype='application/octet-stream',
         headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-linux.sh'}
     )
 

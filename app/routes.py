@@ -3,7 +3,7 @@ from app import db, csrf, limiter
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 import os
-from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset
+from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
@@ -636,7 +636,7 @@ def create_product():
 
     data = request.get_json()
 
-    if not data.get('vendor') or not data.get('product_name'):
+    if not data.get('vendor', '').strip() or not data.get('product_name', '').strip():
         return jsonify({'error': 'Vendor and product name are required'}), 400
 
     # Get current organization from session
@@ -953,6 +953,7 @@ def delete_product(product_id):
             # Delete all related records first (foreign key constraints)
             ProductInstallation.query.filter_by(product_id=product_id).delete()
             VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+            ProductVersionHistory.query.filter_by(product_id=product_id).delete()
             db.session.delete(product)
             db.session.commit()
 
@@ -992,6 +993,7 @@ def delete_product(product_id):
                 # Delete all related records first (foreign key constraints)
                 ProductInstallation.query.filter_by(product_id=product_id).delete()
                 VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+                ProductVersionHistory.query.filter_by(product_id=product_id).delete()
                 db.session.delete(product)
                 db.session.commit()
 
@@ -1149,6 +1151,7 @@ def remove_product_organization(product_id, org_id):
             # Delete all related records first (foreign key constraints)
             ProductInstallation.query.filter_by(product_id=product_id).delete()
             VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+            ProductVersionHistory.query.filter_by(product_id=product_id).delete()
 
             db.session.delete(product)
             db.session.commit()

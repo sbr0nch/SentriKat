@@ -236,7 +236,7 @@
 
 | Vendor | Annual Cost | Per-Endpoint |
 |--------|-------------|--------------|
-| SentriKat Pro | $X,XXX | $XX |
+| SentriKat Pro | EUR 3,998 | EUR 40 |
 | Tenable.io | $3,663 | $37 |
 | Qualys VMDR | $2,500 | $25 |
 | Rapid7 InsightVM | $4,000 | $40 |
@@ -247,7 +247,7 @@
 
 | Vendor | Annual Cost | Per-Endpoint |
 |--------|-------------|--------------|
-| SentriKat Pro | $XX,XXX | $XX |
+| SentriKat Pro | EUR 4,698 | EUR 4.70 |
 | Tenable.io | $25,000+ | $25+ |
 | Qualys VMDR | $20,000+ | $20+ |
 | Rapid7 InsightVM | $30,000+ | $30+ |

@@ -6,8 +6,26 @@ from app import db
 from config import Config
 import logging
 import os
+import threading
 
 logger = logging.getLogger(__name__)
+
+_job_locks = {}
+_job_locks_lock = threading.Lock()
+
+
+def _run_with_lock(job_name, func, *args, **kwargs):
+    """Run a job function with a lock to prevent overlap."""
+    with _job_locks_lock:
+        if _job_locks.get(job_name):
+            logger.info(f"Job '{job_name}' already running, skipping this execution")
+            return
+        _job_locks[job_name] = True
+    try:
+        return func(*args, **kwargs)
+    finally:
+        with _job_locks_lock:
+            _job_locks[job_name] = False
 
 # Store scheduler globally so we can reschedule jobs when settings change
 _scheduler = None
@@ -41,7 +59,7 @@ def start_scheduler(app):
 
     # Schedule daily CISA KEV sync at configured time
     scheduler.add_job(
-        func=lambda: cisa_sync_job(app),
+        func=lambda: _run_with_lock('cisa_sync', cisa_sync_job, app),
         trigger=CronTrigger(hour=Config.SYNC_HOUR, minute=Config.SYNC_MINUTE),
         id='daily_cisa_sync',
         name='Daily CISA KEV Sync',
@@ -54,7 +72,7 @@ def start_scheduler(app):
         ldap_sync_interval = int(os.environ.get('LDAP_SYNC_INTERVAL_HOURS', '24'))
 
         scheduler.add_job(
-            func=lambda: ldap_sync_job(app),
+            func=lambda: _run_with_lock('ldap_sync', ldap_sync_job, app),
             trigger=IntervalTrigger(hours=ldap_sync_interval),
             id='scheduled_ldap_sync',
             name=f'Scheduled LDAP Sync (every {ldap_sync_interval}h)',
@@ -66,7 +84,7 @@ def start_scheduler(app):
     enabled, hour, minute = get_critical_email_settings(app)
     if enabled:
         scheduler.add_job(
-            func=lambda: critical_cve_reminder_job(app),
+            func=lambda: _run_with_lock('critical_cve_reminder', critical_cve_reminder_job, app),
             trigger=CronTrigger(hour=hour, minute=minute),
             id='daily_critical_cve_reminder',
             name='Daily Critical CVE Reminder Emails',
@@ -78,7 +96,7 @@ def start_scheduler(app):
 
     # Schedule data retention cleanup (daily at 3 AM)
     scheduler.add_job(
-        func=lambda: data_retention_cleanup_job(app),
+        func=lambda: _run_with_lock('data_retention_cleanup', data_retention_cleanup_job, app),
         trigger=CronTrigger(hour=3, minute=0),
         id='data_retention_cleanup',
         name='Data Retention Cleanup',
@@ -88,7 +106,7 @@ def start_scheduler(app):
 
     # Schedule daily vulnerability snapshot (at 2 AM)
     scheduler.add_job(
-        func=lambda: vulnerability_snapshot_job(app),
+        func=lambda: _run_with_lock('vulnerability_snapshot', vulnerability_snapshot_job, app),
         trigger=CronTrigger(hour=2, minute=0),
         id='daily_vulnerability_snapshot',
         name='Daily Vulnerability Snapshot',
@@ -98,7 +116,7 @@ def start_scheduler(app):
 
     # Schedule report processing (every 15 minutes to check for due reports)
     scheduler.add_job(
-        func=lambda: process_scheduled_reports_job(app),
+        func=lambda: _run_with_lock('process_scheduled_reports', process_scheduled_reports_job, app),
         trigger=IntervalTrigger(minutes=15),
         id='process_scheduled_reports',
         name='Process Scheduled Reports',
@@ -109,7 +127,7 @@ def start_scheduler(app):
     # Schedule vendor advisory sync (1 hour after CISA KEV sync)
     vendor_sync_hour = (Config.SYNC_HOUR + 1) % 24
     scheduler.add_job(
-        func=lambda: vendor_advisory_sync_job(app),
+        func=lambda: _run_with_lock('vendor_advisory_sync', vendor_advisory_sync_job, app),
         trigger=CronTrigger(hour=vendor_sync_hour, minute=Config.SYNC_MINUTE),
         id='vendor_advisory_sync',
         name='Vendor Advisory Sync (OSV, Red Hat, MSRC, Debian)',
@@ -119,7 +137,7 @@ def start_scheduler(app):
 
     # Schedule license heartbeat (every 12 hours)
     scheduler.add_job(
-        func=lambda: license_heartbeat_job(app),
+        func=lambda: _run_with_lock('license_heartbeat', license_heartbeat_job, app),
         trigger=IntervalTrigger(hours=12),
         id='license_heartbeat',
         name='License Server Heartbeat',
@@ -147,7 +165,7 @@ def reschedule_critical_email():
 
     if enabled:
         _scheduler.add_job(
-            func=lambda: critical_cve_reminder_job(_app),
+            func=lambda: _run_with_lock('critical_cve_reminder', critical_cve_reminder_job, _app),
             trigger=CronTrigger(hour=hour, minute=minute),
             id='daily_critical_cve_reminder',
             name='Daily Critical CVE Reminder Emails',

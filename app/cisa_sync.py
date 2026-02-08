@@ -274,6 +274,10 @@ def download_cisa_kev(max_retries=3, retry_delay=5):
             )
             response.raise_for_status()
             return response.json()
+        except json.JSONDecodeError as e:
+            last_error = f"Error parsing CISA KEV response: Invalid JSON - {str(e)}"
+            logger.error(last_error)
+            continue
         except requests.exceptions.Timeout as e:
             last_error = f"Timeout connecting to CISA KEV feed (attempt {attempt + 1}/{max_retries})"
             logger.warning(last_error)

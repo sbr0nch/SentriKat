@@ -367,7 +367,7 @@ class VulnerabilityReportGenerator:
         # Unacknowledged vulnerabilities (pending action)
         pending = [m for m in all_matches if not m.acknowledged]
         pending_sorted = sorted(pending, key=lambda m: (
-            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
+            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority() or 'low', 4)
         ))
         self._create_vulnerability_list(elements, pending_sorted, "Pending Action Items")
 
@@ -378,7 +378,7 @@ class VulnerabilityReportGenerator:
         # Acknowledged vulnerabilities
         acknowledged = [m for m in all_matches if m.acknowledged]
         acknowledged_sorted = sorted(acknowledged, key=lambda m: (
-            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
+            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority() or 'low', 4)
         ))
         self._create_vulnerability_list(elements, acknowledged_sorted, "Acknowledged Vulnerabilities")
 
@@ -445,7 +445,7 @@ class VulnerabilityReportGenerator:
         if include_pending:
             pending = [m for m in all_matches if not m.acknowledged]
             pending_sorted = sorted(pending, key=lambda m: (
-                {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
+                {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority() or 'low', 4)
             ))
             self._create_vulnerability_list(elements, pending_sorted, "Pending Action Items")
 
@@ -456,7 +456,7 @@ class VulnerabilityReportGenerator:
 
             acknowledged = [m for m in all_matches if m.acknowledged]
             acknowledged_sorted = sorted(acknowledged, key=lambda m: (
-                {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
+                {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority() or 'low', 4)
             ))
             self._create_vulnerability_list(elements, acknowledged_sorted, "Acknowledged Vulnerabilities")
 
@@ -558,7 +558,7 @@ class VulnerabilityReportGenerator:
         # Pending vulnerabilities
         pending = [m for m in matches if not m.acknowledged]
         pending_sorted = sorted(pending, key=lambda m: (
-            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
+            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority() or 'low', 4)
         ))
         if pending_sorted:
             self._create_vulnerability_list(elements, pending_sorted, "Pending Action Items")
@@ -566,7 +566,7 @@ class VulnerabilityReportGenerator:
         # Acknowledged vulnerabilities
         acknowledged = [m for m in matches if m.acknowledged]
         acknowledged_sorted = sorted(acknowledged, key=lambda m: (
-            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority(), 4)
+            {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(m.calculate_effective_priority() or 'low', 4)
         ))
         if acknowledged_sorted:
             if pending_sorted and len(pending_sorted) > 20:

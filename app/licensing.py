@@ -304,8 +304,12 @@ def _generate_stable_fingerprint(is_docker=False):
                     os.makedirs(data_dir, exist_ok=True)
                 with open(random_file, 'w') as f:
                     f.write(random_component)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    f"Could not persist installation ID random component to {random_file}: {e}. "
+                    f"Installation ID may change on container restart. "
+                    f"Set SENTRIKAT_INSTALLATION_ID in .env to avoid this."
+                )
 
         fingerprint_parts.append(f"rand:{random_component}")
 
@@ -408,7 +412,9 @@ class LicenseInfo:
 
     def has_feature(self, feature):
         """Check if license includes a specific feature."""
-        return self.get_effective_edition() == 'professional'
+        if not self.is_professional():
+            return False
+        return feature in self.features if self.features else False
 
     def is_professional(self):
         """Check if this is an active, valid Professional license."""
@@ -484,7 +490,7 @@ class LicenseInfo:
             'days_until_expiry': self.days_until_expiry,
             'status_message': self.get_status_message(),
             'limits': effective_limits,
-            'features': PROFESSIONAL_FEATURES if self.is_professional() else [],
+            'features': self.features if self.is_professional() and self.features else [],
             'powered_by_required': not self.is_professional(),
             'error': self.error,
             # Installation info
@@ -661,6 +667,30 @@ def validate_license(license_key):
     try:
         # Clean the input (handle common paste errors)
         license_key = _clean_license_input(license_key)
+
+        # Development key for testing - ONLY works in non-production environments
+        # Set SENTRIKAT_ENV=production or FLASK_ENV=production to disable dev license key
+        _flask_env = os.environ.get('FLASK_ENV', '').lower()
+        _sentrikat_env = os.environ.get('SENTRIKAT_ENV', '').lower()
+        is_production = _flask_env == 'production' or _sentrikat_env == 'production'
+        if license_key == 'SENTRIKAT-DEV-PROFESSIONAL':
+            if is_production:
+                logger.warning("Attempted to use development license key in production mode")
+                license_info.error = 'Development license key is disabled in production'
+                return license_info
+            license_info.edition = 'professional'
+            license_info.customer = 'Development Mode'
+            license_info.license_id = 'DEV-001'
+            license_info.is_valid = True
+            license_info.is_hardware_match = True  # Dev key works everywhere
+            license_info.max_users = -1
+            license_info.max_organizations = -1
+            license_info.max_products = -1
+            license_info.max_agents = -1  # Unlimited agents in dev mode
+            license_info.max_agent_api_keys = -1
+            license_info.features = PROFESSIONAL_FEATURES + ['push_agents']
+            logger.info("Development license activated (non-production environment)")
+            return license_info
 
         # Split license key into payload and signature
         parts = license_key.strip().split('.')
@@ -1058,7 +1088,7 @@ def license_heartbeat():
         }
 
         response = _requests.post(
-            f'{LICENSE_SERVER_URL}/v1/license/heartbeat',
+            f'{LICENSE_SERVER_URL}/v1/heartbeat',
             json=payload,
             timeout=15,
             proxies=proxies,

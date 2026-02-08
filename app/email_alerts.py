@@ -315,7 +315,7 @@ class EmailAlertManager:
                                         <span style="color: #6b7280; margin-left: 8px; font-size: 14px;">Security Alert</span>
                                     </td>
                                     <td align="right">
-                                        <span style="font-size: 12px; color: #9ca3af;">{datetime.now().strftime('%Y-%m-%d %H:%M')}</span>
+                                        <span style="font-size: 12px; color: #9ca3af;">{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</span>
                                     </td>
                                 </tr>
                             </table>
@@ -528,13 +528,13 @@ class EmailAlertManager:
                                         </div>
                                         <!-- Description -->
                                         <div style="margin-top: 8px; font-size: 13px; color: #4b5563; line-height: 1.4;">
-                                            {vuln.short_description[:180]}{'...' if len(vuln.short_description) > 180 else ''}
+                                            {(vuln.short_description or '')[:180]}{'...' if len(vuln.short_description or '') > 180 else ''}
                                         </div>
                                         {amber_notice_html}
                                         <!-- Action -->
                                         <div style="margin-top: 10px; padding: 8px 10px; background: #f0fdf4; border-left: 3px solid #16a34a; border-radius: 4px;">
                                             <span style="font-size: 11px; color: #166534; text-transform: uppercase; font-weight: 600;">How to Fix:</span>
-                                            <span style="font-size: 12px; color: #166534;"> {vuln.required_action[:150]}{'...' if len(vuln.required_action) > 150 else ''}</span>
+                                            <span style="font-size: 12px; color: #166534;"> {(vuln.required_action or '')[:150]}{'...' if len(vuln.required_action or '') > 150 else ''}</span>
                                         </div>
                                     </td>
                                 </tr>
@@ -935,7 +935,7 @@ def _build_user_invite_email_html(user, organization):
 
         <div class="footer">
             <p>This is an automated message from SentriKat</p>
-            <p>© {datetime.now().year} {organization.display_name} - Vulnerability Management</p>
+            <p>© {datetime.utcnow().year} {organization.display_name} - Vulnerability Management</p>
         </div>
     </div>
 </body>
@@ -1073,7 +1073,7 @@ def _build_user_status_email_html(user, organization, is_blocked, blocked_by_use
                     <strong>Organization:</strong> {organization.display_name}
                 </div>
                 <div>
-                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                    <strong>Time:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
                 </div>
             </div>
 
@@ -1082,7 +1082,7 @@ def _build_user_status_email_html(user, organization, is_blocked, blocked_by_use
 
         <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
             <p>This is an automated message from SentriKat</p>
-            <p>© {datetime.now().year} {organization.display_name}</p>
+            <p>© {datetime.utcnow().year} {organization.display_name}</p>
         </div>
     </div>
 </body>
@@ -1235,7 +1235,7 @@ def _build_role_change_email_html(user, organization, old_role, new_role, change
                     <strong>Changed by:</strong> {changed_by_username or 'System'}
                 </div>
                 <div>
-                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                    <strong>Time:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
                 </div>
             </div>
 
@@ -1246,7 +1246,7 @@ def _build_role_change_email_html(user, organization, old_role, new_role, change
 
         <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
             <p>This is an automated message from SentriKat</p>
-            <p>© {datetime.now().year} {organization.display_name}</p>
+            <p>© {datetime.utcnow().year} {organization.display_name}</p>
         </div>
     </div>
 </body>
@@ -1385,7 +1385,7 @@ def _build_2fa_reset_email_html(user, organization, reset_by_username=None):
                     <strong>Reset by:</strong> {reset_by_username or 'Administrator'}
                 </div>
                 <div>
-                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                    <strong>Time:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
                 </div>
             </div>
 
@@ -1406,7 +1406,7 @@ def _build_2fa_reset_email_html(user, organization, reset_by_username=None):
 
         <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
             <p>This is an automated security notification from SentriKat</p>
-            <p>© {datetime.now().year} {organization.display_name}</p>
+            <p>© {datetime.utcnow().year} {organization.display_name}</p>
         </div>
     </div>
 </body>
@@ -1529,7 +1529,7 @@ def _build_password_change_forced_email_html(user, organization, forced_by_usern
                     <strong>Required by:</strong> {forced_by_username or 'Administrator'}
                 </div>
                 <div>
-                    <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                    <strong>Time:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
                 </div>
             </div>
 
@@ -1556,7 +1556,7 @@ def _build_password_change_forced_email_html(user, organization, forced_by_usern
 
         <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
             <p>This is an automated security notification from SentriKat</p>
-            <p>© {datetime.now().year} {organization.display_name}</p>
+            <p>© {datetime.utcnow().year} {organization.display_name}</p>
         </div>
     </div>
 </body>
@@ -1638,7 +1638,7 @@ def send_scheduled_report(recipients, report_name, org_name, pdf_buffer):
             <div style="background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px;">
                 <p style="margin: 0; color: #1e40af;">
                     <strong>Report:</strong> {report_name}<br>
-                    <strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                    <strong>Generated:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
                 </p>
             </div>
 
@@ -1655,7 +1655,7 @@ def send_scheduled_report(recipients, report_name, org_name, pdf_buffer):
 
         <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
             <p>This is an automated report from SentriKat</p>
-            <p>© {datetime.now().year} {org_name}</p>
+            <p>© {datetime.utcnow().year} {org_name}</p>
         </div>
     </div>
 </body>
@@ -1672,7 +1672,7 @@ def send_scheduled_report(recipients, report_name, org_name, pdf_buffer):
         pdf_attachment.set_payload(pdf_buffer.read())
         encoders.encode_base64(pdf_attachment)
 
-        filename = f"{report_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        filename = f"{report_name.replace(' ', '_')}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
         pdf_attachment.add_header(
             'Content-Disposition',
             'attachment',

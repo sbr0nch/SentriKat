@@ -3,6 +3,7 @@ Email notification service for product assignments.
 """
 import smtplib
 import logging
+from html import escape as html_escape
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.models import User
@@ -61,7 +62,7 @@ def send_product_assignment_notification(product, organization, action='assigned
                     <div style="background: white; padding: 15px; border-left: 4px solid #1e40af; margin: 20px 0;">
                         <p style="margin: 5px 0;"><strong>Vendor:</strong> {product.vendor}</p>
                         <p style="margin: 5px 0;"><strong>Product:</strong> {product.product_name}</p>
-                        {f'<p style="margin: 5px 0;"><strong>Version:</strong> {product.version}</p>' if product.version else ''}
+                        {f'<p style="margin: 5px 0;"><strong>Version:</strong> {html_escape(str(product.version))}</p>' if product.version else ''}
                         <p style="margin: 5px 0;"><strong>Criticality:</strong> <span style="text-transform: uppercase; color: {'#dc2626' if product.criticality == 'critical' else '#f59e0b' if product.criticality == 'high' else '#3b82f6'};">{product.criticality}</span></p>
                     </div>
 
@@ -93,7 +94,7 @@ def send_product_assignment_notification(product, organization, action='assigned
                     <div style="background: white; padding: 15px; border-left: 4px solid #dc2626; margin: 20px 0;">
                         <p style="margin: 5px 0;"><strong>Vendor:</strong> {product.vendor}</p>
                         <p style="margin: 5px 0;"><strong>Product:</strong> {product.product_name}</p>
-                        {f'<p style="margin: 5px 0;"><strong>Version:</strong> {product.version}</p>' if product.version else ''}
+                        {f'<p style="margin: 5px 0;"><strong>Version:</strong> {html_escape(str(product.version))}</p>' if product.version else ''}
                     </div>
 
                     <p>SentriKat will no longer monitor this product for your organization.</p>
@@ -127,13 +128,15 @@ def send_product_assignment_notification(product, organization, action='assigned
                 if smtp_config.get('use_tls'):
                     server.starttls()
 
-            # Login if credentials provided
-            if smtp_config.get('username') and smtp_config.get('password'):
-                server.login(smtp_config['username'], smtp_config['password'])
+            try:
+                # Login if credentials provided
+                if smtp_config.get('username') and smtp_config.get('password'):
+                    server.login(smtp_config['username'], smtp_config['password'])
 
-            # Send email
-            server.send_message(msg)
-            server.quit()
+                # Send email
+                server.send_message(msg)
+            finally:
+                server.quit()
 
             logger.info(f"Notification sent to {admin.email} for {action} action on product {product.vendor} {product.product_name}")
 
