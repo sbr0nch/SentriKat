@@ -1586,6 +1586,8 @@ def get_vulnerabilities_grouped():
                 'acknowledged': match.acknowledged,
                 'match_method': match.match_method,
                 'match_confidence': match.match_confidence,
+                'resolution_reason': match.resolution_reason,
+                'vendor_fix_confidence': getattr(match, 'vendor_fix_confidence', None),
                 'affected_assets': asset_list,
                 'affected_assets_count': asset_count
             })
@@ -2293,11 +2295,16 @@ def _apply_vendor_fix_override(override):
         VulnerabilityMatch.acknowledged == False
     ).all()
 
+    confidence = getattr(override, 'confidence', 'medium') or 'medium'
     for match in matches:
-        match.acknowledged = True
-        match.auto_acknowledged = True
+        if confidence == 'high':
+            # High confidence: fully resolve
+            match.acknowledged = True
+            match.auto_acknowledged = True
+            match.acknowledged_at = now
+        # Medium confidence: tag but leave unacknowledged (stays in alerts)
         match.resolution_reason = 'vendor_fix'
-        match.acknowledged_at = now
+        match.vendor_fix_confidence = confidence
 
     db.session.commit()
     return len(matches)

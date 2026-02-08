@@ -924,8 +924,28 @@ SentriKat automatically detects in-place vendor patches (backport fixes) by sync
 
 1. SentriKat daily syncs advisory data from OSV.dev, Red Hat, Microsoft MSRC, and Debian
 2. When an advisory confirms a fix exists for a CVE+product+version already in your inventory
-3. The CVE match is automatically resolved with `resolution_reason: "vendor_fix"`
-4. The CVE disappears from the dashboard, email alerts, and webhook notifications
+3. The system compares the installed version against the fixed version using **distro-native algorithms** (dpkg for Debian/Ubuntu, RPM for RHEL/CentOS, APK for Alpine)
+4. Based on comparison quality, a **confidence tier** is assigned
+
+### Three-Tier Confidence System
+
+| Tier | Badge | Behavior | When |
+|------|-------|----------|------|
+| **AFFECTED** | Red | Full alerts, dashboard visibility | No vendor fix data found |
+| **LIKELY RESOLVED** | Amber "Verify Fix" | Stays in alerts with verification notice | Vendor fix detected but used generic comparison or no `distro_package_version` from agent |
+| **RESOLVED** | Green "Verified Fix" | Auto-resolved, hidden from alerts | Distro-native comparison (dpkg/RPM/APK) confirmed with agent-reported package version |
+
+**High confidence** (green) means:
+- The agent reported the distro-native package version (e.g., `2.4.52-1ubuntu4.6`)
+- The correct distro algorithm was used (dpkg EVR for Ubuntu, RPM EVR for RHEL, etc.)
+- The installed version is confirmed >= the vendor's fixed version
+
+**Medium confidence** (amber) means:
+- A vendor fix exists, but verification was done with generic comparison, OR
+- The agent did not report a `distro_package_version`, OR
+- The fix is a vendor "not affected" statement without version proof
+
+Medium-confidence items **remain visible** in email alerts and webhook notifications with a "Verify Fix" indicator until the user manually confirms.
 
 ### GET `/api/vendor-fix-overrides`
 
@@ -945,7 +965,8 @@ List all vendor fix override records (both manual and automatic).
     "product": "HTTP Server",
     "fixed_version": "2.4.52",
     "fix_type": "backport_patch",
-    "source": "osv.dev",
+    "confidence": "high",
+    "confidence_reason": "dpkg comparison: 2.4.52-1ubuntu4.6 >= 2.4.52-1ubuntu4.3",
     "vendor_advisory_url": "https://osv.dev/vulnerability/USN-6885-1",
     "status": "approved",
     "created_at": "2025-01-15T03:00:00Z"
@@ -987,3 +1008,21 @@ Check vendor advisory feeds for patches related to a specific CVE.
   "count": 1
 }
 ```
+
+### VulnerabilityMatch Confidence Fields
+
+The `VulnerabilityMatch` object now includes vendor fix confidence information:
+
+```json
+{
+  "id": 42,
+  "acknowledged": false,
+  "resolution_reason": "vendor_fix",
+  "vendor_fix_confidence": "medium",
+  "match_confidence": "high"
+}
+```
+
+- `vendor_fix_confidence`: `"high"` (verified, auto-resolved) or `"medium"` (needs verification, stays active)
+- `resolution_reason`: `"vendor_fix"` when a vendor advisory was matched
+- `acknowledged`: `false` for medium confidence (stays in alerts), `true` for high confidence

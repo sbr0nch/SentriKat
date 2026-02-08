@@ -21,9 +21,11 @@ Architecture:
 """
 
 import logging
+import re
 import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple, Any
+from app.version_utils import is_version_patched, detect_version_format
 
 logger = logging.getLogger(__name__)
 
@@ -337,12 +339,31 @@ def _parse_osv_response(cve_id: str, osv_data: dict, products: List[dict]) -> Li
             if not _osv_package_matches_product(pkg_name, ecosystem, product_name, vendor):
                 continue
 
-            # Check if our version is in the fixed range
-            # OSV tells us the fixed version; if the product has a distro_package_version,
-            # we compare that. Otherwise we compare the base version.
+            # Compare installed version against the vendor's fixed version.
+            # Use distro_package_version (full distro version from agent) if available,
+            # otherwise fall back to the base upstream version.
+            has_distro_version = bool(product_info.get('distro_package_version'))
             compare_version = product_info.get('distro_package_version') or version
+            os_info = product_info.get('os', '')
+            version_format = detect_version_format(ecosystem, os_info)
+            is_distro_native = version_format in ('dpkg', 'rpm', 'apk')
 
             for fixed_ver in fixed_versions:
+                # Only create override if installed version >= fixed version
+                if not is_version_patched(compare_version, fixed_ver, version_format):
+                    continue  # Still vulnerable, don't suppress
+
+                # Determine confidence tier
+                if is_distro_native and has_distro_version:
+                    confidence = 'high'
+                    confidence_reason = f'{version_format} comparison: {compare_version} >= {fixed_ver}'
+                else:
+                    confidence = 'medium'
+                    if not has_distro_version:
+                        confidence_reason = f'Generic comparison (no distro package version from agent): {compare_version} >= {fixed_ver}'
+                    else:
+                        confidence_reason = f'Generic comparison: {compare_version} >= {fixed_ver}'
+
                 results.append({
                     'cve_id': cve_id,
                     'vendor': product_info['display_vendor'],
@@ -354,7 +375,9 @@ def _parse_osv_response(cve_id: str, osv_data: dict, products: List[dict]) -> Li
                     'advisory_url': f'https://osv.dev/vulnerability/{osv_data.get("id", cve_id)}',
                     'ecosystem': ecosystem,
                     'fixed_in_version': fixed_ver,
-                    'notes': f'OSV.dev: Fixed in {pkg_name} {fixed_ver} ({ecosystem})',
+                    'confidence': confidence,
+                    'confidence_reason': confidence_reason,
+                    'notes': f'OSV.dev: {pkg_name} {compare_version} >= {fixed_ver} ({version_format})',
                 })
 
     return results
@@ -478,12 +501,27 @@ def _parse_redhat_response(cve_id: str, rh_data: dict, products: List[dict]) -> 
         if not package_name:
             continue
 
-        # Extract base package name from RPM NVR
+        # Extract base package name and fixed version from RPM NVR
         # e.g., "httpd-2.4.37-47.module+el8.6.0+15654+427eba2e.2.x86_64"
-        rpm_name = package_name.split('-')[0] if '-' in package_name else package_name
+        rpm_name, fixed_evr = _parse_rpm_nvr(package_name)
 
         for product_info in products:
             if _redhat_package_matches_product(rpm_name, product_info):
+                # Compare installed version against fixed version using RPM comparison
+                has_distro_version = bool(product_info.get('distro_package_version'))
+                installed_ver = product_info.get('distro_package_version') or product_info['version']
+                if fixed_evr and installed_ver:
+                    if not is_version_patched(installed_ver, fixed_evr, 'rpm'):
+                        continue  # Still vulnerable, don't suppress
+
+                # Determine confidence tier
+                if has_distro_version and fixed_evr:
+                    confidence = 'high'
+                    confidence_reason = f'RPM comparison: {installed_ver} >= {fixed_evr}'
+                else:
+                    confidence = 'medium'
+                    confidence_reason = f'Generic comparison (no distro package version from agent): {installed_ver} >= {fixed_evr}'
+
                 results.append({
                     'cve_id': cve_id,
                     'vendor': product_info['display_vendor'],
@@ -493,7 +531,9 @@ def _parse_redhat_response(cve_id: str, rh_data: dict, products: List[dict]) -> 
                     'source': 'redhat',
                     'advisory_id': advisory,
                     'advisory_url': f'https://access.redhat.com/errata/{advisory}' if advisory else '',
-                    'notes': f'Red Hat: Fixed in {package_name} ({advisory})',
+                    'confidence': confidence,
+                    'confidence_reason': confidence_reason,
+                    'notes': f'Red Hat: {installed_ver} >= {fixed_evr} ({advisory})',
                 })
 
     # Also check package_state for "not affected" status
@@ -511,10 +551,39 @@ def _parse_redhat_response(cve_id: str, rh_data: dict, products: List[dict]) -> 
                         'source': 'redhat',
                         'advisory_id': '',
                         'advisory_url': f'https://access.redhat.com/security/cve/{cve_id}',
+                        'confidence': 'medium',
+                        'confidence_reason': f'Vendor statement: {pkg} marked "Not affected" (verify manually)',
                         'notes': f'Red Hat: {pkg} marked as "Not affected"',
                     })
 
     return results
+
+
+def _parse_rpm_nvr(nvr: str) -> Tuple[str, str]:
+    """
+    Parse an RPM NVR (Name-Version-Release) or NEVRA into (name, version-release).
+
+    Examples:
+        "httpd-2.4.37-47.el8.x86_64" -> ("httpd", "2.4.37-47.el8")
+        "python3-urllib3-1.26.5-3.el9.noarch" -> ("python3-urllib3", "1.26.5-3.el9")
+        "vim-8.0.1763-19.el8_6.4" -> ("vim", "8.0.1763-19.el8_6.4")
+    """
+    s = nvr.strip()
+    # Strip architecture suffix (.x86_64, .noarch, .i686, .aarch64, .src)
+    s = re.sub(r'\.(x86_64|noarch|i[3-6]86|aarch64|ppc64le|s390x|src)$', '', s)
+
+    # RPM NVR: name is everything before the second-to-last dash
+    # Version is between second-to-last and last dash
+    # Release is after last dash
+    # We split on '-' and the last two segments are version and release
+    parts = s.rsplit('-', 2)
+    if len(parts) == 3:
+        name = parts[0]
+        evr = f'{parts[1]}-{parts[2]}'
+        return (name, evr)
+    elif len(parts) == 2:
+        return (parts[0], parts[1])
+    return (s, '')
 
 
 def _redhat_package_matches_product(rpm_name: str, product_info: dict) -> bool:
@@ -623,14 +692,13 @@ def _sync_msrc_advisories(active_cves: Dict[str, List[dict]]) -> List[dict]:
                         for kb in kb_articles
                     ) if installed_kbs else False
 
-                    # If KB is installed, or if we know the advisory exists for this product
-                    if kb_installed or _msrc_product_matches(entry.get('fixed_products', []), product_info):
-                        fix_type = 'hotfix' if kb_installed else 'vendor_advisory'
+                    # Only create override if KB is confirmed installed by the agent
+                    if kb_installed:
+                        fix_type = 'hotfix'
                         notes_parts = []
                         if kb_articles:
                             notes_parts.append(f"KB: {', '.join(kb_articles[:3])}")
-                        if kb_installed:
-                            notes_parts.append("(KB confirmed installed)")
+                        notes_parts.append("(KB confirmed installed)")
                         notes_parts.append(f"MSRC: {entry.get('advisory_id', '')}")
 
                         results.append({
@@ -643,6 +711,8 @@ def _sync_msrc_advisories(active_cves: Dict[str, List[dict]]) -> List[dict]:
                             'advisory_id': entry.get('advisory_id', ''),
                             'advisory_url': entry.get('url', ''),
                             'patch_identifier': ', '.join(kb_articles[:3]),
+                            'confidence': 'high',
+                            'confidence_reason': f'KB {", ".join(kb_articles[:3])} confirmed installed by agent',
                             'notes': ' | '.join(notes_parts),
                         })
 
@@ -797,6 +867,20 @@ def _sync_debian_advisories(active_cves: Dict[str, List[dict]]) -> List[dict]:
                     if status == 'resolved' and fixed_version:
                         for product_info in debian_products:
                             if _debian_package_matches_product(pkg_name, product_info):
+                                # Compare installed version against fixed using dpkg
+                                has_distro_version = bool(product_info.get('distro_package_version'))
+                                installed_ver = product_info.get('distro_package_version') or product_info['version']
+                                if not is_version_patched(installed_ver, fixed_version, 'dpkg'):
+                                    continue  # Still vulnerable
+
+                                # Determine confidence tier
+                                if has_distro_version:
+                                    confidence = 'high'
+                                    confidence_reason = f'dpkg comparison: {installed_ver} >= {fixed_version}'
+                                else:
+                                    confidence = 'medium'
+                                    confidence_reason = f'Generic comparison (no distro package version from agent): {installed_ver} >= {fixed_version}'
+
                                 results.append({
                                     'cve_id': cve_id,
                                     'vendor': product_info['display_vendor'],
@@ -806,7 +890,9 @@ def _sync_debian_advisories(active_cves: Dict[str, List[dict]]) -> List[dict]:
                                     'source': 'debian',
                                     'advisory_id': cve_info.get('debianbug', ''),
                                     'advisory_url': f'https://security-tracker.debian.org/tracker/{cve_id}',
-                                    'notes': f'Debian {release_name}: Fixed in {pkg_name} {fixed_version}',
+                                    'confidence': confidence,
+                                    'confidence_reason': confidence_reason,
+                                    'notes': f'Debian {release_name}: {installed_ver} >= {fixed_version}',
                                 })
 
     except Exception as e:
@@ -875,6 +961,8 @@ def _create_override_records(advisories: List[dict]) -> int:
             vendor_advisory_id=advisory.get('advisory_id', ''),
             patch_identifier=advisory.get('patch_identifier', ''),
             notes=advisory.get('notes', ''),
+            confidence=advisory.get('confidence', 'medium'),
+            confidence_reason=advisory.get('confidence_reason', ''),
             status='approved',  # Auto-approved from trusted vendor feeds
             created_at=datetime.utcnow(),
             approved_at=datetime.utcnow(),
@@ -893,51 +981,101 @@ def _auto_resolve_matches() -> int:
     """
     Auto-resolve VulnerabilityMatch records that have approved VendorFixOverride.
 
-    This is the key function that removes false positives from the dashboard.
-    Resolved matches won't appear in emails or webhooks either.
+    Three-tier confidence system:
+    - HIGH confidence: Full auto-resolve (acknowledged=True, green badge, hidden from alerts).
+      These used distro-native comparison (dpkg/rpm/apk) with agent-reported package versions.
+    - MEDIUM confidence: Tag with vendor_fix info but leave UNACKNOWLEDGED (amber badge,
+      STAYS in alerts/webhooks so customer is notified to verify). These used generic
+      comparison or lacked distro_package_version from the agent.
+
+    This design protects legally: medium-confidence items remain visible as "Likely Resolved -
+    Verify" and continue triggering alerts until the customer manually confirms.
     """
     from app.models import VulnerabilityMatch, VendorFixOverride, Product, Vulnerability
     from app import db
     from sqlalchemy import func
 
-    resolved = 0
+    resolved_high = 0
+    tagged_medium = 0
 
     # Get all approved overrides
     overrides = VendorFixOverride.query.filter_by(status='approved').all()
 
     for override in overrides:
-        # Find unresolved matches for this CVE + product + version
-        matches = (
-            VulnerabilityMatch.query
-            .filter(VulnerabilityMatch.acknowledged == False)
-            .join(Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id)
-            .join(Product, VulnerabilityMatch.product_id == Product.id)
-            .filter(
-                Vulnerability.cve_id == override.cve_id,
-                db.or_(
-                    func.lower(Product.vendor) == override.vendor.lower(),
-                    func.lower(Product.cpe_vendor) == override.vendor.lower(),
-                ),
-                db.or_(
-                    func.lower(Product.product_name) == override.product.lower(),
-                    func.lower(Product.cpe_product) == override.product.lower(),
-                ),
-                Product.version == override.fixed_version,
+        confidence = getattr(override, 'confidence', 'medium') or 'medium'
+
+        if confidence == 'high':
+            # HIGH confidence: fully resolve unacknowledged matches
+            matches = (
+                VulnerabilityMatch.query
+                .filter(VulnerabilityMatch.acknowledged == False)
+                .join(Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id)
+                .join(Product, VulnerabilityMatch.product_id == Product.id)
+                .filter(
+                    Vulnerability.cve_id == override.cve_id,
+                    db.or_(
+                        func.lower(Product.vendor) == override.vendor.lower(),
+                        func.lower(Product.cpe_vendor) == override.vendor.lower(),
+                    ),
+                    db.or_(
+                        func.lower(Product.product_name) == override.product.lower(),
+                        func.lower(Product.cpe_product) == override.product.lower(),
+                    ),
+                    Product.version == override.fixed_version,
+                )
+                .all()
             )
-            .all()
+
+            for match in matches:
+                match.acknowledged = True
+                match.auto_acknowledged = True
+                match.resolution_reason = 'vendor_fix'
+                match.vendor_fix_confidence = 'high'
+                match.acknowledged_at = datetime.utcnow()
+                resolved_high += 1
+        else:
+            # MEDIUM confidence: tag with vendor_fix info but do NOT acknowledge
+            # This keeps the match visible in alerts and on the dashboard as amber
+            matches = (
+                VulnerabilityMatch.query
+                .filter(
+                    VulnerabilityMatch.acknowledged == False,
+                    # Don't re-tag if already tagged
+                    db.or_(
+                        VulnerabilityMatch.vendor_fix_confidence.is_(None),
+                        VulnerabilityMatch.vendor_fix_confidence != 'medium',
+                    ),
+                )
+                .join(Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id)
+                .join(Product, VulnerabilityMatch.product_id == Product.id)
+                .filter(
+                    Vulnerability.cve_id == override.cve_id,
+                    db.or_(
+                        func.lower(Product.vendor) == override.vendor.lower(),
+                        func.lower(Product.cpe_vendor) == override.vendor.lower(),
+                    ),
+                    db.or_(
+                        func.lower(Product.product_name) == override.product.lower(),
+                        func.lower(Product.cpe_product) == override.product.lower(),
+                    ),
+                    Product.version == override.fixed_version,
+                )
+                .all()
+            )
+
+            for match in matches:
+                # Do NOT set acknowledged=True - keep in active alerts
+                match.vendor_fix_confidence = 'medium'
+                match.resolution_reason = 'vendor_fix'
+                tagged_medium += 1
+
+    if resolved_high or tagged_medium:
+        logger.info(
+            f"Vendor advisory resolution: {resolved_high} fully resolved (high confidence), "
+            f"{tagged_medium} tagged for verification (medium confidence)"
         )
 
-        for match in matches:
-            match.acknowledged = True
-            match.auto_acknowledged = True
-            match.resolution_reason = 'vendor_fix'
-            match.acknowledged_at = datetime.utcnow()
-            resolved += 1
-
-    if resolved:
-        logger.info(f"Auto-resolved {resolved} false-positive matches via vendor advisories")
-
-    return resolved
+    return resolved_high + tagged_medium
 
 
 # ============================================================================

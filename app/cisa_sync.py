@@ -62,18 +62,26 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
             else:
                 cve_list_str = ", ".join(new_cve_ids[:5]) + f" +{new_cve_count - 5} more"
 
+            # Count amber-tier items (likely resolved, needs verification)
+            verify_count = sum(1 for m in new_matches if getattr(m, 'vendor_fix_confidence', None) == 'medium')
+            verify_note = f"\n🟡 {verify_count} likely resolved (verify fix)" if verify_count > 0 else ""
+
             # Build payload based on format - BATCHED message
             if webhook_format in ('slack', 'rocketchat'):
                 text = f"🔒 *SentriKat Alert for {org.display_name}*\n"
                 text += f"*{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:* {cve_list_str}"
                 if critical_count > 0:
                     text += f"\n⚠️ *{critical_count} critical*"
+                if verify_count > 0:
+                    text += f"\n🟡 *{verify_count} likely resolved* (vendor fix detected - verify manually)"
                 payload = {"text": text}
             elif webhook_format == 'discord':
                 content = f"🔒 **SentriKat Alert for {org.display_name}**\n"
                 content += f"**{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:** {cve_list_str}"
                 if critical_count > 0:
                     content += f"\n⚠️ **{critical_count} critical**"
+                if verify_count > 0:
+                    content += f"\n🟡 **{verify_count} likely resolved** (vendor fix detected - verify manually)"
                 payload = {"content": content}
             elif webhook_format == 'teams':
                 facts = [
@@ -81,6 +89,8 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                     {"name": "CVE IDs", "value": cve_list_str},
                     {"name": "Critical", "value": str(critical_count)}
                 ]
+                if verify_count > 0:
+                    facts.append({"name": "Likely Resolved (Verify)", "value": str(verify_count)})
                 payload = {
                     "@type": "MessageCard",
                     "themeColor": "dc2626" if critical_count > 0 else "1e40af",
@@ -96,7 +106,8 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                     "organization": org.display_name,
                     "new_cve_count": new_cve_count,
                     "cve_ids": new_cve_ids,
-                    "critical_count": critical_count
+                    "critical_count": critical_count,
+                    "verify_count": verify_count
                 }
 
             response = requests.post(webhook_url, json=payload, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)

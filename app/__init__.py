@@ -57,6 +57,10 @@ def _apply_schema_migrations(logger, db_uri):
         ('vendor_fix_overrides', 'approved_by', 'INTEGER', 'INTEGER'),
         ('vendor_fix_overrides', 'approved_at', 'DATETIME', 'TIMESTAMP'),
         ('vendor_fix_overrides', 'status', "VARCHAR(20) DEFAULT 'approved'", "VARCHAR(20) DEFAULT 'approved'"),
+        # Three-tier confidence system
+        ('vendor_fix_overrides', 'confidence', "VARCHAR(20) DEFAULT 'medium'", "VARCHAR(20) DEFAULT 'medium'"),
+        ('vendor_fix_overrides', 'confidence_reason', 'VARCHAR(255)', 'VARCHAR(255)'),
+        ('vulnerability_matches', 'vendor_fix_confidence', 'VARCHAR(20)', 'VARCHAR(20)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
