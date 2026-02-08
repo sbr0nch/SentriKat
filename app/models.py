@@ -644,8 +644,10 @@ class VulnerabilityMatch(db.Model):
 
     # Auto-acknowledge tracking
     auto_acknowledged = db.Column(db.Boolean, default=False)  # True if auto-ack'd (not manual)
-    resolution_reason = db.Column(db.String(50), nullable=True)  # manual, software_removed, version_upgraded
+    resolution_reason = db.Column(db.String(50), nullable=True)  # manual, software_removed, version_upgraded, vendor_fix
     acknowledged_at = db.Column(db.DateTime, nullable=True)  # When it was acknowledged
+    # Vendor fix confidence: 'high' = verified with distro comparison, 'medium' = needs manual verification
+    vendor_fix_confidence = db.Column(db.String(20), nullable=True)  # high, medium (only set when resolution_reason='vendor_fix')
 
     # Composite indexes for common query patterns
     __table_args__ = (
@@ -681,6 +683,7 @@ class VulnerabilityMatch(db.Model):
             'acknowledged': self.acknowledged,
             'auto_acknowledged': self.auto_acknowledged,
             'resolution_reason': self.resolution_reason,
+            'vendor_fix_confidence': self.vendor_fix_confidence,
             'acknowledged_at': self.acknowledged_at.isoformat() if self.acknowledged_at else None,
             'snoozed_until': self.snoozed_until.isoformat() if self.snoozed_until else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -721,6 +724,12 @@ class VendorFixOverride(db.Model):
     approved_at = db.Column(db.DateTime, nullable=True)
     status = db.Column(db.String(20), default='approved', nullable=False)  # pending, approved, rejected
 
+    # Confidence tier: how reliable is this override?
+    # 'high' = distro-native comparison (dpkg/rpm/apk) with agent-reported distro_package_version
+    # 'medium' = generic comparison, or no distro_package_version from agent, or vendor "not affected" statement
+    confidence = db.Column(db.String(20), default='medium', nullable=False)
+    confidence_reason = db.Column(db.String(255), nullable=True)  # Human-readable explanation
+
     # Scope
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True)
 
@@ -749,6 +758,8 @@ class VendorFixOverride(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'approved_at': self.approved_at.isoformat() if self.approved_at else None,
             'status': self.status,
+            'confidence': self.confidence or 'medium',
+            'confidence_reason': self.confidence_reason,
             'organization_id': self.organization_id,
         }
 

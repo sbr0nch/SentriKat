@@ -247,6 +247,9 @@ class EmailAlertManager:
         # Unique CVE counts (what users care about)
         unique_cve_count = len(cve_priority_seen)
 
+        # Count amber-tier (likely resolved, needs verification)
+        amber_count = sum(1 for m in matches if getattr(m, 'vendor_fix_confidence', None) == 'medium')
+
         # Group by product for executive summary
         by_product = {}
         product_cves = {}  # Track unique CVEs per product
@@ -350,8 +353,8 @@ class EmailAlertManager:
                                         <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">High</div>
                                     </td>
                                     <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
-                                        <div style="font-size: 28px; font-weight: 700; color: #374151;">{len(by_product)}</div>
-                                        <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Products</div>
+                                        <div style="font-size: 28px; font-weight: 700; color: {('#d97706' if amber_count > 0 else '#374151')};">{amber_count if amber_count > 0 else len(by_product)}</div>
+                                        <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">{'Verify' if amber_count > 0 else 'Products'}</div>
                                     </td>
                                 </tr>
                             </table>
@@ -462,6 +465,19 @@ class EmailAlertManager:
                                                     </div>
                                                 </td>'''
 
+            # Pre-compute amber-tier vendor fix notice
+            is_amber = getattr(match, 'vendor_fix_confidence', None) == 'medium'
+            amber_badge_html = '<span style="display: inline-block; background: #d97706; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">LIKELY RESOLVED - VERIFY</span>' if is_amber else ''
+            amber_notice_html = ''
+            if is_amber:
+                amber_notice_html = (
+                    '<!-- Vendor Fix Notice (Amber Tier) -->'
+                    '<div style="margin-top: 10px; padding: 8px 10px; background: #fffbeb; border-left: 3px solid #d97706; border-radius: 4px;">'
+                    '<span style="font-size: 11px; color: #92400e; text-transform: uppercase; font-weight: 600;">Vendor Fix Detected:</span>'
+                    '<span style="font-size: 12px; color: #92400e;"> A vendor patch may be applied but could not be verified with distro-native comparison. Please confirm manually.</span>'
+                    '</div>'
+                )
+
             html += f"""
                     <!-- Vulnerability Card -->
                     <tr>
@@ -504,11 +520,13 @@ class EmailAlertManager:
                                             <span style="color: #6b7280;">Affected:</span>
                                             <span style="color: #111827; font-weight: 500;">{product.vendor} - {product.product_name}</span>
                                             {f'<span style="color: #9ca3af;"> v{product.version}</span>' if product.version else ''}
+                                            {amber_badge_html}
                                         </div>
                                         <!-- Description -->
                                         <div style="margin-top: 8px; font-size: 13px; color: #4b5563; line-height: 1.4;">
                                             {vuln.short_description[:180]}{'...' if len(vuln.short_description) > 180 else ''}
                                         </div>
+                                        {amber_notice_html}
                                         <!-- Action -->
                                         <div style="margin-top: 10px; padding: 8px 10px; background: #f0fdf4; border-left: 3px solid #16a34a; border-radius: 4px;">
                                             <span style="font-size: 11px; color: #166534; text-transform: uppercase; font-weight: 600;">How to Fix:</span>

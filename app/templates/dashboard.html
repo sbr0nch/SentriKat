@@ -2500,10 +2500,24 @@
 
         // Build affected products list with assets
         const productsHtml = group.affected_products.map(prod => {
-            const ackIcon = prod.acknowledged ?
-                '<i class="bi bi-check-circle-fill text-success"></i>' :
-                '<i class="bi bi-exclamation-circle-fill text-warning"></i>';
-            const statusText = prod.acknowledged ? 'Resolved' : 'Needs Review';
+            // Three-tier confidence: red (affected) / green (verified) / amber (likely resolved)
+            let ackIcon, statusText;
+            if (prod.resolution_reason === 'vendor_fix' && prod.vendor_fix_confidence === 'medium' && !prod.acknowledged) {
+                // AMBER: medium confidence vendor fix - needs verification
+                ackIcon = '<i class="bi bi-shield-exclamation" style="color: #d97706; font-size: 1.1em;"></i>';
+                statusText = 'Likely Resolved - Verify';
+            } else if (prod.resolution_reason === 'vendor_fix' && prod.vendor_fix_confidence === 'high' && prod.acknowledged) {
+                // GREEN: high confidence vendor fix - verified
+                ackIcon = '<i class="bi bi-shield-fill-check text-success" style="font-size: 1.1em;"></i>';
+                statusText = 'Resolved - Vendor Patched';
+            } else if (prod.acknowledged) {
+                ackIcon = '<i class="bi bi-check-circle-fill text-success"></i>';
+                statusText = 'Resolved';
+            } else {
+                // RED: no vendor fix info - actively affected
+                ackIcon = '<i class="bi bi-exclamation-circle-fill text-danger"></i>';
+                statusText = 'Affected';
+            }
 
             // Show product version
             const versionBadge = prod.version ? `<span class="badge bg-secondary ms-1">v${prod.version}</span>` : '';
@@ -2542,15 +2556,21 @@
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             ${assetsCount > 0 ? `<span class="badge bg-info text-dark" title="Affected endpoints"><i class="bi bi-hdd-network me-1"></i>${assetsCount} endpoint${assetsCount > 1 ? 's' : ''}</span>` : ''}
-                            ${!prod.acknowledged ?
-                                `<button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${prod.match_id})" title="Mark as resolved">
-                                    <i class="bi bi-check-lg"></i>
-                                </button>
-` :
-                                `${prod.resolution_reason === 'vendor_fix' ? '<span class="badge bg-success" title="Resolved via vendor patch"><i class="bi bi-shield-check"></i> Vendor Fix</span>' : ''}
-                                <button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${prod.match_id})" title="Reopen">
-                                    <i class="bi bi-arrow-counterclockwise"></i>
-                                </button>`
+                            ${prod.resolution_reason === 'vendor_fix' && prod.vendor_fix_confidence === 'medium' && !prod.acknowledged
+                                ? `<span class="badge" style="background-color: #d97706; color: white;" title="Vendor fix detected but needs manual verification"><i class="bi bi-shield-exclamation"></i> Verify Fix</span>
+                                   <button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${prod.match_id})" title="Confirm fix applied">
+                                       <i class="bi bi-check-lg"></i>
+                                   </button>`
+                                : !prod.acknowledged
+                                    ? `<button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${prod.match_id})" title="Mark as resolved">
+                                           <i class="bi bi-check-lg"></i>
+                                       </button>`
+                                    : `${prod.resolution_reason === 'vendor_fix'
+                                        ? '<span class="badge bg-success" title="Verified: vendor patch confirmed via distro-native comparison"><i class="bi bi-shield-fill-check"></i> Verified Fix</span>'
+                                        : ''}
+                                       <button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${prod.match_id})" title="Reopen">
+                                           <i class="bi bi-arrow-counterclockwise"></i>
+                                       </button>`
                             }
                         </div>
                     </div>

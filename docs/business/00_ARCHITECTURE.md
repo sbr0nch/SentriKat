@@ -198,6 +198,10 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 | CISA KEV | Vulnerability catalog | None (JSON file) |
 | NVD API | CVE/CPE database | 5/30s free, 50/30s with key |
 | FIRST EPSS | Exploit scoring | None |
+| OSV.dev | Vendor advisory aggregation | None |
+| Red Hat Security Data | RHEL fix information | None |
+| Microsoft MSRC CVRF | Windows patch data | None |
+| Debian Security Tracker | Debian fix tracking | None (bulk JSON) |
 | Jira REST | Ticket creation | Per Jira limits |
 
 ## 3.5 Containerization
@@ -236,6 +240,8 @@ SentriKat/
 │   ├── saml_*.py                 # SAML modules (650+ LOC)
 │   ├── jira_integration.py       # Jira connector (400+ LOC)
 │   ├── issue_trackers.py          # Multi-tracker engine (Jira/GitHub/GitLab/YouTrack)
+│   ├── vendor_advisories.py      # Auto vendor patch detection (1000+ LOC)
+│   ├── version_utils.py          # dpkg/RPM/APK version comparison (444 LOC)
 │   ├── email_alerts.py           # Email system (626 LOC)
 │   ├── scheduler.py              # Background jobs (468 LOC)
 │   ├── encryption.py             # Fernet utils (141 LOC)
@@ -292,6 +298,7 @@ SentriKat/
 | Vulnerability Snapshot | Daily 02:00 UTC | Historical tracking |
 | Scheduled Reports | Every 15 min | Process report queue |
 | LDAP Sync | Configurable | Sync users from AD |
+| **Vendor Advisory Sync** | Daily 03:00 UTC | Sync OSV.dev, Red Hat, MSRC, Debian feeds |
 | **Maintenance** | Daily 04:00 UTC | 7-step cleanup & auto-resolution |
 
 ### 4.3.1 Maintenance Pipeline (7 Steps)
@@ -497,7 +504,7 @@ CREATE TABLE product_installation (
 |----------|--------|
 | Auth/Users | User, Organization, UserOrganization, SystemSettings |
 | Products | Product, ServiceCatalog, ProductExclusion, UserCpeMapping |
-| Vulnerabilities | Vulnerability, VulnerabilityMatch, VulnerabilitySnapshot |
+| Vulnerabilities | Vulnerability, VulnerabilityMatch, VulnerabilitySnapshot, VendorFixOverride |
 | Agents | AgentApiKey, Asset, ProductInstallation, AgentEvent, InventoryJob |
 | Integrations | Integration, ImportQueue, AgentRegistration |
 | Logging | SyncLog, AlertLog, ScheduledReport, StaleAssetNotification |
@@ -549,6 +556,8 @@ SentriKat tracks HOW a vulnerability was resolved via `resolution_reason`:
 | `manual` | User clicks Acknowledge | Admin manually reviews and marks as handled |
 | `software_removed` | Maintenance job | Product has zero installations (uninstalled from all assets) |
 | `version_upgraded` | Maintenance job | All installations upgraded past the vulnerable version range |
+| `vendor_fix` (high) | Vendor Advisory Sync | Distro-native comparison (dpkg/RPM/APK) confirmed fix applied |
+| `vendor_fix` (medium) | Vendor Advisory Sync | Generic comparison or missing agent data - needs manual verification |
 
 ### 6.3.2 Cumulative Update / Auto-Resolution Logic
 
@@ -578,6 +587,57 @@ that affected versions 100-125), SentriKat automatically detects this:
 
 **Key detail:** This only works for products with CPE data (precise NVD matching).
 Keyword-only matches are not auto-resolved since version ranges aren't available.
+
+### 6.3.3 Vendor Advisory Sync & Three-Tier Confidence System
+
+SentriKat automatically detects in-place vendor patches (backport fixes) by syncing with
+multiple vendor advisory feeds. This eliminates false positives where NVD CPE data marks a
+version as affected even though the vendor has already backported the fix.
+
+**Supported Feeds:**
+
+| Feed | Coverage | Auth Required | Comparison Method |
+|------|----------|---------------|-------------------|
+| OSV.dev | Ubuntu, Debian, Alpine, PyPI, npm, Go, Rust, Maven | No | dpkg/RPM/APK/generic |
+| Red Hat Security Data API | RHEL, CentOS, Rocky, Alma | No | RPM |
+| Microsoft MSRC CVRF | Windows, Office, Exchange, .NET | No | KB verification |
+| Debian Security Tracker | Debian | No | dpkg |
+
+**Three-Tier Confidence System:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CONFIDENCE TIERS                              │
+├─────────────────┬───────────────────┬───────────────────────────┤
+│   AFFECTED      │  LIKELY RESOLVED  │  RESOLVED                 │
+│   (Red)         │  (Amber)          │  (Green)                  │
+│                 │                   │                           │
+│ No vendor fix   │ Vendor fix found  │ Vendor fix confirmed      │
+│ data found      │ but comparison    │ via distro-native         │
+│                 │ used generic      │ comparison (dpkg/RPM/APK) │
+│                 │ algorithm or no   │ with agent-reported       │
+│                 │ agent distro pkg  │ distro_package_version    │
+│                 │ version available │                           │
+│                 │                   │                           │
+│ Stays in alerts │ STAYS IN ALERTS   │ Auto-resolved             │
+│ Full visibility │ "Verify" badge    │ Green badge               │
+│                 │ User must confirm │ Hidden from alerts        │
+└─────────────────┴───────────────────┴───────────────────────────┘
+```
+
+**Why three tiers (legal protection):** SentriKat is security software. If we suppress a
+real vulnerability and the customer gets breached, we face liability. The medium-confidence
+tier protects both us and the customer: it says "we detected a likely fix, but please verify"
+rather than silently removing the CVE from their dashboard.
+
+**Version comparison algorithms:**
+
+| Format | Algorithm | Used For |
+|--------|-----------|----------|
+| dpkg | Debian Policy Manual §5.6.12 (epoch:upstream-revision, tilde handling) | Ubuntu, Debian, Mint, Kali |
+| RPM | rpmvercmp (digit-beats-alpha, segment tokenization) | RHEL, CentOS, Rocky, Alma, Fedora, SUSE |
+| APK | Semver-like with -rN revision suffix | Alpine Linux |
+| generic | Numeric segment comparison | PyPI, npm, other ecosystems |
 
 ## 6.4 Agent API
 
@@ -1168,6 +1228,7 @@ DB_PASSWORD=change-me-to-a-secure-password
 |---------|------|--------|---------|
 | 1.0.0 | Feb 2026 | Development Team | Initial release |
 | 1.1.0 | Feb 2026 | Development Team | Added: CVE auto-resolution, in-app update check, sidebar highlighting, dashboard redesign, clickable priority cards, dark mode, multi-tracker support, XSS fixes, settings consolidation, Software Overview tab, CPE UX improvements |
+| 1.2.0 | Feb 2026 | Development Team | Added: Automatic vendor advisory sync (OSV.dev, Red Hat, MSRC, Debian), distro-native version comparison (dpkg/RPM/APK), three-tier confidence system (affected/likely resolved/resolved), license server heartbeat, agent distro_package_version support |
 
 ---
 
