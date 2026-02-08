@@ -153,14 +153,14 @@ def get_status():
     No authentication required - basic status only.
     """
     try:
-        last_sync = SyncLog.query.order_by(SyncLog.started_at.desc()).first()
+        last_sync = SyncLog.query.order_by(SyncLog.sync_date.desc()).first()
         vuln_count = Vulnerability.query.count() or 0
 
         return jsonify({
             'status': 'online',
             'version': APP_VERSION,
             'vulnerabilities_tracked': vuln_count,
-            'last_sync': last_sync.started_at.isoformat() + 'Z' if last_sync else None,
+            'last_sync': last_sync.sync_date.isoformat() + 'Z' if last_sync else None,
             'last_sync_status': last_sync.status if last_sync else None
         })
     except Exception as e:
@@ -961,7 +961,7 @@ def delete_product(product_id):
                 'products',
                 product_id,
                 old_value=product_info,
-                details=f"Super admin deleted product {product.vendor} {product.product_name} globally" + (" (excluded from future scans)" if exclude_from_scans else "")
+                details=f"Super admin deleted product {product_info['vendor']} {product_info['name']} globally" + (" (excluded from future scans)" if exclude_from_scans else "")
             )
             return jsonify({'success': True, 'message': 'Product deleted globally' + (' and excluded from future agent scans' if exclude_from_scans else '')})
 
@@ -1001,7 +1001,7 @@ def delete_product(product_id):
                     'products',
                     product_id,
                     old_value=product_info,
-                    details=f"Deleted product {product.vendor} {product.product_name}" + (" (excluded)" if exclude_from_scans else "")
+                    details=f"Deleted product {product_info['vendor']} {product_info['name']}" + (" (excluded)" if exclude_from_scans else "")
                 )
                 return jsonify({'success': True, 'message': 'Product deleted' + exclude_msg})
 
@@ -1143,7 +1143,11 @@ def remove_product_organization(product_id, org_id):
 
         # If no organizations left and confirm_delete was passed, delete the product
         if remaining_orgs == 0 and not has_remaining_legacy:
-            # Delete associated vulnerability matches first
+            # Capture name before delete (avoids DetachedInstanceError)
+            deleted_product_name = product.product_name
+
+            # Delete all related records first (foreign key constraints)
+            ProductInstallation.query.filter_by(product_id=product_id).delete()
             VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
 
             db.session.delete(product)
@@ -1151,7 +1155,7 @@ def remove_product_organization(product_id, org_id):
 
             return jsonify({
                 'success': True,
-                'message': f'Product "{product.product_name}" has been deleted.',
+                'message': f'Product "{deleted_product_name}" has been deleted.',
                 'product_deleted': True
             })
 
@@ -1816,7 +1820,7 @@ def get_aggregated_product_view():
     if current_user.is_super_admin():
         org_filter = True  # No filter
     else:
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         org_filter = Asset.organization_id.in_(user_org_ids)
 
     # Get filter parameters
@@ -1932,7 +1936,7 @@ def get_product_installations(product_id):
     current_user = User.query.get(current_user_id)
 
     if not current_user.is_super_admin():
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
             product_org_ids.append(product.organization_id)
@@ -1991,7 +1995,7 @@ def acknowledge_match(match_id):
         product_org_ids = [org.id for org in match.product.organizations.all()]
         if match.product.organization_id:
             product_org_ids.append(match.product.organization_id)
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         if not any(org_id in user_org_ids for org_id in product_org_ids):
             return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
 
@@ -2016,7 +2020,7 @@ def unacknowledge_match(match_id):
         product_org_ids = [org.id for org in match.product.organizations.all()]
         if match.product.organization_id:
             product_org_ids.append(match.product.organization_id)
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         if not any(org_id in user_org_ids for org_id in product_org_ids):
             return jsonify({'error': 'Insufficient permissions to manage this vulnerability match'}), 403
 
@@ -2053,7 +2057,7 @@ def snooze_match(match_id):
         product_org_ids = [org.id for org in match.product.organizations.all()]
         if match.product.organization_id:
             product_org_ids.append(match.product.organization_id)
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         if not any(org_id in user_org_ids for org_id in product_org_ids):
             return jsonify({'error': 'Insufficient permissions'}), 403
 
@@ -2089,7 +2093,7 @@ def unsnooze_match(match_id):
         product_org_ids = [org.id for org in match.product.organizations.all()]
         if match.product.organization_id:
             product_org_ids.append(match.product.organization_id)
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         if not any(org_id in user_org_ids for org_id in product_org_ids):
             return jsonify({'error': 'Insufficient permissions'}), 403
 
@@ -2132,7 +2136,7 @@ def acknowledge_by_cve(cve_id):
         ).all()
     else:
         # Non-admin: filter by organization membership using scalar_subquery
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
 
         # Get product IDs accessible to user's organizations
         user_product_ids = db.session.query(product_organizations.c.product_id).filter(
@@ -2206,7 +2210,7 @@ def unacknowledge_by_cve(cve_id):
         ).all()
     else:
         # Non-admin: filter by organization membership using scalar_subquery
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
 
         # Get product IDs accessible to user's organizations
         user_product_ids = db.session.query(product_organizations.c.product_id).filter(
@@ -2641,10 +2645,16 @@ def trigger_critical_cve_alerts():
         organizations = Organization.query.filter_by(active=True).all()
 
         for org in organizations:
-            # Get unacknowledged critical/high priority vulnerabilities using scalar_subquery
-            org_product_ids = db.session.query(Product.id).filter(
+            # Get unacknowledged critical/high priority vulnerabilities
+            # Include products assigned via both legacy organization_id and multi-org table
+            from app.models import product_organizations
+            legacy_product_ids = db.session.query(Product.id).filter(
                 Product.organization_id == org.id
-            ).scalar_subquery()
+            )
+            multi_org_product_ids = db.session.query(product_organizations.c.product_id).filter(
+                product_organizations.c.organization_id == org.id
+            )
+            org_product_ids = legacy_product_ids.union(multi_org_product_ids).scalar_subquery()
 
             unack_matches = (
                 VulnerabilityMatch.query
@@ -2729,9 +2739,15 @@ def trigger_webhook_alerts():
                 continue
 
             # Get unacknowledged matches for this org
-            org_product_ids = db.session.query(Product.id).filter(
+            # Include products assigned via both legacy organization_id and multi-org table
+            from app.models import product_organizations
+            legacy_pids = db.session.query(Product.id).filter(
                 Product.organization_id == org.id
-            ).scalar_subquery()
+            )
+            multi_org_pids = db.session.query(product_organizations.c.product_id).filter(
+                product_organizations.c.organization_id == org.id
+            )
+            org_product_ids = legacy_pids.union(multi_org_pids).scalar_subquery()
 
             unack_matches = (
                 VulnerabilityMatch.query
@@ -2993,7 +3009,7 @@ def create_organization():
         name=data['name'],
         display_name=data['display_name'],
         description=data.get('description'),
-        notification_emails=json.dumps(data.get('notification_emails', [])),
+        notification_emails=json.dumps(data['notification_emails']) if isinstance(data.get('notification_emails'), list) else (data.get('notification_emails') or '[]'),
         alert_on_critical=data.get('alert_on_critical', True),
         alert_on_high=data.get('alert_on_high', False),
         alert_on_new_cve=data.get('alert_on_new_cve', True),
@@ -3056,7 +3072,8 @@ def update_organization(org_id):
     if 'description' in data:
         org.description = data['description']
     if 'notification_emails' in data:
-        org.notification_emails = json.dumps(data['notification_emails'])
+        emails = data['notification_emails']
+        org.notification_emails = json.dumps(emails) if isinstance(emails, list) else (emails or '[]')
     if 'alert_on_critical' in data:
         org.alert_on_critical = data['alert_on_critical']
     if 'alert_on_high' in data:
@@ -3065,6 +3082,8 @@ def update_organization(org_id):
         org.alert_on_new_cve = data['alert_on_new_cve']
     if 'alert_on_ransomware' in data:
         org.alert_on_ransomware = data['alert_on_ransomware']
+    if 'alert_on_low_confidence' in data:
+        org.alert_on_low_confidence = data['alert_on_low_confidence']
     if 'alert_time_start' in data:
         org.alert_time_start = data['alert_time_start']
     if 'alert_time_end' in data:
@@ -3247,7 +3266,7 @@ def get_alert_logs(org_id):
 
     if not current_user.is_super_admin():
         # Check if user belongs to this organization
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         if org_id not in user_org_ids:
             return jsonify({'error': 'Insufficient permissions to view this organization\'s alert logs'}), 403
 
@@ -3404,21 +3423,27 @@ def create_user():
 
         # Org admins can only create users in their own organization
         if target_org_id:
-            user_org_ids = [org.id for org in current_user.get_all_organizations()]
+            user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
             if target_org_id not in user_org_ids:
                 return jsonify({'error': 'Cannot create users in other organizations'}), 403
+
+    # Derive is_admin from role (don't allow client to set directly - privilege escalation)
+    derived_is_admin = role in ('super_admin', 'org_admin')
+
+    # Non-super-admins cannot grant can_view_all_orgs
+    can_view_all = data.get('can_view_all_orgs', False) if current_user.is_super_admin() else False
 
     user = User(
         username=data['username'],
         email=data['email'],
-        full_name=data.get('full_name', '')[:100],  # Limit length
+        full_name=(data.get('full_name') or '')[:100],  # Limit length, handle null
         organization_id=target_org_id,
         auth_type='local',  # Force local auth for created users
         role=role,
-        is_admin=data.get('is_admin', False),
+        is_admin=derived_is_admin,
         is_active=data.get('is_active', True),
         can_manage_products=data.get('can_manage_products', True),
-        can_view_all_orgs=data.get('can_view_all_orgs', False)
+        can_view_all_orgs=can_view_all
     )
 
     # Set password for local auth

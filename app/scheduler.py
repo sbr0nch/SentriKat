@@ -290,7 +290,7 @@ def data_retention_cleanup_job(app):
     """Job to clean up old data based on retention settings"""
     with app.app_context():
         try:
-            from app.models import SystemSettings, SyncLog, AuditLog
+            from app.models import SystemSettings, SyncLog
             from app.ldap_models import LDAPAuditLog, LDAPSyncLog
             from app import db
             from datetime import datetime, timedelta
@@ -325,13 +325,8 @@ def data_retention_cleanup_job(app):
                 logger.error(f"Error cleaning LDAP sync logs: {e}")
                 deleted_counts['ldap_sync_logs'] = 0
 
-            # Clean up old audit logs
-            try:
-                deleted = AuditLog.query.filter(AuditLog.timestamp < audit_cutoff).delete()
-                deleted_counts['audit_logs'] = deleted
-            except Exception as e:
-                logger.error(f"Error cleaning audit logs: {e}")
-                deleted_counts['audit_logs'] = 0
+            # Note: Application audit logs are file-based (audit.log), managed by log rotation.
+            # Only LDAP audit logs are stored in the database.
 
             # Clean up old LDAP audit logs
             try:

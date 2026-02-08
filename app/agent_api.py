@@ -720,7 +720,8 @@ def queue_inventory_job(organization, data, api_key_id=None):
             priority=5,
             payload=json.dumps({
                 'products': products,
-                'hostname': hostname
+                'hostname': hostname,
+                'installed_kbs': data.get('installed_kbs')
             }),
             total_items=len(products)
         )
@@ -780,6 +781,12 @@ def process_inventory_job(job):
 
         logger.info(f"Job {job_id}: Asset={asset.hostname if asset else 'None'}, "
                     f"Org={organization.name if organization else 'None'}")
+
+        # Store installed KBs on asset (Windows agents report this)
+        if asset:
+            installed_kbs = payload.get('installed_kbs')
+            if installed_kbs and isinstance(installed_kbs, list):
+                asset.installed_kbs = json.dumps(installed_kbs[:500])  # Cap at 500 KBs
 
         if not asset:
             logger.error(f"Job {job_id}: Asset {asset_id} not found")
@@ -898,6 +905,7 @@ def process_inventory_job(job):
                         product_id=product.id,
                         version=version,
                         install_path=product_data.get('path'),
+                        distro_package_version=product_data.get('distro_package_version'),
                         detected_by='agent',
                         detected_on_os=platform  # Track which OS this came from
                     )
@@ -906,6 +914,7 @@ def process_inventory_job(job):
                 else:
                     installation.version = version
                     installation.install_path = product_data.get('path')
+                    installation.distro_package_version = product_data.get('distro_package_version') or installation.distro_package_version
                     installation.last_seen_at = datetime.utcnow()
                     installations_updated += 1
 
