@@ -487,8 +487,13 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50, fetch_cpe=True, cpe_limit=30
             alert_mode = alert_config['mode']
             escalation_days = alert_config['escalation_days']
 
-            # Get product IDs for this organization - fetch IDs first to avoid subquery issues
-            org_product_ids = [p.id for p in Product.query.filter_by(organization_id=org.id).all()]
+            # Get product IDs for this organization - include both legacy and multi-org table
+            from app.models import product_organizations
+            legacy_ids = [p.id for p in Product.query.filter_by(organization_id=org.id).all()]
+            multi_org_ids = [row.product_id for row in db.session.query(
+                product_organizations.c.product_id
+            ).filter(product_organizations.c.organization_id == org.id).all()]
+            org_product_ids = list(set(legacy_ids + multi_org_ids))
 
             if not org_product_ids:
                 continue  # No products for this org

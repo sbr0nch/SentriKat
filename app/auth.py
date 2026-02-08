@@ -22,7 +22,16 @@ csrf.exempt(auth_bp)
 
 # Authentication is ALWAYS enabled by default (security requirement)
 # Only disable for testing with DISABLE_AUTH=true (NOT recommended)
-AUTH_ENABLED = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
+# Production guard: DISABLE_AUTH is ignored when FLASK_ENV=production or SENTRIKAT_ENV=production
+_flask_env = os.environ.get('FLASK_ENV', '').lower()
+_sentrikat_env = os.environ.get('SENTRIKAT_ENV', '').lower()
+_is_production = _flask_env == 'production' or _sentrikat_env == 'production'
+if _is_production and os.environ.get('DISABLE_AUTH', 'false').lower() == 'true':
+    import logging as _logging
+    _logging.getLogger(__name__).critical(
+        "SECURITY: DISABLE_AUTH=true is IGNORED in production environment. Authentication remains enabled."
+    )
+AUTH_ENABLED = True if _is_production else os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
 
 
 def _safe_get_user(user_id):

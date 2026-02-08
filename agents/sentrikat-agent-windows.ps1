@@ -299,6 +299,16 @@ function Send-Inventory {
 
     $endpoint = "$($Config.ServerUrl)/api/agent/inventory"
 
+    # Collect installed Windows KBs for vulnerability confidence scoring
+    $installedKBs = @()
+    try {
+        $hotfixes = Get-HotFix -ErrorAction SilentlyContinue | Select-Object -ExpandProperty HotFixID
+        $installedKBs = @($hotfixes | Where-Object { $_ -match '^KB\d+' })
+        Write-Log "Collected $($installedKBs.Count) installed KBs"
+    } catch {
+        Write-Log "Failed to collect installed KBs: $_" -Level "WARN"
+    }
+
     $payload = @{
         hostname = $SystemInfo.hostname
         fqdn = $SystemInfo.fqdn
@@ -306,6 +316,7 @@ function Send-Inventory {
         os = $SystemInfo.os
         agent = $SystemInfo.agent
         products = @($Products)
+        installed_kbs = $installedKBs
     }
 
     $jsonPayload = $payload | ConvertTo-Json -Depth 10 -Compress

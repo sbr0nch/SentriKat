@@ -3549,7 +3549,9 @@ def update_user(user_id):
         user.role = new_role
 
     if 'is_admin' in data:
-        user.is_admin = data['is_admin']
+        # Derive is_admin from role to prevent privilege escalation
+        # (org_admin cannot grant is_admin=True to arbitrary users)
+        user.is_admin = user.role in ('super_admin', 'org_admin')
     if 'is_active' in data:
         user.is_active = data['is_active']
     if 'can_manage_products' in data:
