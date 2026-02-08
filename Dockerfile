@@ -47,6 +47,10 @@ RUN mkdir -p /app/data /app/custom-certs
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
+# Create non-root user for running the application
+RUN groupadd -r sentrikat && useradd -r -g sentrikat -d /app -s /sbin/nologin sentrikat \
+    && chown -R sentrikat:sentrikat /app/data
+
 # Expose port
 EXPOSE 5000
 
@@ -55,8 +59,10 @@ ENV FLASK_APP=run.py
 ENV PYTHONUNBUFFERED=1
 
 # Use entrypoint script to install custom CA certs before starting app
+# Note: entrypoint runs as root to install CA certs, then exec's gunicorn
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Run the application with gunicorn
 # --preload loads app once before forking workers (prevents race condition in db.create_all)
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "--preload", "run:app"]
+# --user sentrikat drops privileges after binding to port
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "--preload", "--user", "sentrikat", "--group", "sentrikat", "run:app"]

@@ -272,7 +272,8 @@ get_installed_software() {
             # Escape JSON special characters
             name=$(json_escape "$name")
             version=$(json_escape "$version")
-            products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\"}")
+            # Send full distro version as distro_package_version for confidence scoring
+            products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\", \"distro_package_version\": \"$version\"}")
             ((count++))
         done < <(dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null)
     fi
@@ -293,7 +294,8 @@ get_installed_software() {
             name=$(json_escape "$name")
             version=$(json_escape "$version")
             vendor=$(json_escape "$vendor")
-            products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\"}")
+            # Send full distro version as distro_package_version for confidence scoring
+            products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\", \"distro_package_version\": \"$version\"}")
             ((count++))
         done < <(rpm -qa --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n' 2>/dev/null)
     fi

@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+*.egg-info
+
+# Docker
+docker-compose*.yml
+Dockerfile
+
+# Documentation
+docs/
+*.md
+LICENSE
+
+# Tests
+tests/
+
+# Development
+*.log
+*.bak
+*.tmp
