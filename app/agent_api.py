@@ -1392,6 +1392,9 @@ def agent_heartbeat():
     organization = request.organization
     data = request.get_json() or {}
 
+    if not organization:
+        return jsonify({'error': 'API key not associated with an organization'}), 400
+
     hostname = data.get('hostname')
     agent_id = data.get('agent_id')
 
@@ -1414,7 +1417,12 @@ def agent_heartbeat():
     # Update checkin
     asset.last_checkin = datetime.utcnow()
     asset.status = 'online'
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to update asset checkin: {e}")
+        return jsonify({'error': 'Failed to update asset status'}), 500
 
     return jsonify({
         'status': 'ok',

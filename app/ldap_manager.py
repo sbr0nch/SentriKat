@@ -597,3 +597,101 @@ class LDAPManager:
         except Exception as e:
             logger.error(f"Error searching LDAP groups: {e}")
             return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def get_group_members(group_dn):
+        """
+        Get members of a specific LDAP group by its DN.
+
+        Args:
+            group_dn: Distinguished Name of the LDAP group
+
+        Returns:
+            dict with 'success' and either 'members' or 'error'
+        """
+        try:
+            import ldap3
+            from ldap3 import Server, Connection, ALL, SUBTREE
+
+            config = LDAPManager.get_ldap_config()
+
+            if not config['enabled']:
+                return {'success': False, 'error': 'LDAP is not enabled'}
+
+            if not config['server'] or not config['bind_dn'] or not config['bind_password']:
+                return {'success': False, 'error': 'LDAP not fully configured'}
+
+            server_host, use_ssl = _parse_ldap_server(config['server'])
+            if not server_host:
+                return {'success': False, 'error': 'LDAP server URL is empty'}
+
+            server = Server(server_host, port=config['port'], get_info=ALL, use_ssl=use_ssl or config['use_tls'])
+            conn = Connection(
+                server,
+                user=config['bind_dn'],
+                password=config['bind_password'],
+                auto_bind=True
+            )
+
+            # Read the group entry to get its member attribute
+            conn.search(
+                search_base=group_dn,
+                search_filter='(objectClass=*)',
+                search_scope=ldap3.BASE,
+                attributes=['member', 'cn']
+            )
+
+            if not conn.entries:
+                conn.unbind()
+                return {'success': False, 'error': f'Group not found: {group_dn}'}
+
+            entry = conn.entries[0]
+            members = []
+
+            if hasattr(entry, 'member') and entry.member:
+                member_dns = entry.member.values if hasattr(entry.member, 'values') else (
+                    entry.member.value if isinstance(entry.member.value, list) else [entry.member.value]
+                )
+
+                for member_dn in member_dns:
+                    member_dn = str(member_dn)
+                    # Look up each member to get their attributes
+                    try:
+                        conn.search(
+                            search_base=member_dn,
+                            search_filter='(objectClass=person)',
+                            search_scope=ldap3.BASE,
+                            attributes=[config['username_attr'], config['email_attr'], 'cn', 'displayName']
+                        )
+                        if conn.entries:
+                            m = conn.entries[0]
+                            username = str(m[config['username_attr']].value) if hasattr(m, config['username_attr']) and m[config['username_attr']] else None
+                            email = str(m[config['email_attr']].value) if hasattr(m, config['email_attr']) and m[config['email_attr']] else None
+                            display = str(m.displayName.value) if hasattr(m, 'displayName') and m.displayName else str(m.cn.value) if hasattr(m, 'cn') and m.cn else member_dn
+
+                            members.append({
+                                'dn': member_dn,
+                                'username': username,
+                                'email': email,
+                                'display_name': display
+                            })
+                    except Exception:
+                        # Member DN might be a nested group or deleted entry
+                        members.append({
+                            'dn': member_dn,
+                            'username': None,
+                            'email': None,
+                            'display_name': member_dn
+                        })
+
+            conn.unbind()
+
+            return {
+                'success': True,
+                'members': members,
+                'count': len(members)
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting group members: {e}")
+            return {'success': False, 'error': str(e)}
