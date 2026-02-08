@@ -46,5 +46,22 @@ else
     echo "No custom CA certificates found in $CUSTOM_CERTS_DIR"
 fi
 
+# Auto-generate ENCRYPTION_KEY if not set
+# Persists to /app/data/.encryption_key so it survives container rebuilds
+ENCRYPTION_KEY_FILE="/app/data/.encryption_key"
+
+if [ -z "$ENCRYPTION_KEY" ]; then
+    if [ -f "$ENCRYPTION_KEY_FILE" ]; then
+        export ENCRYPTION_KEY=$(cat "$ENCRYPTION_KEY_FILE")
+        echo "Loaded ENCRYPTION_KEY from $ENCRYPTION_KEY_FILE"
+    else
+        export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+        echo "$ENCRYPTION_KEY" > "$ENCRYPTION_KEY_FILE"
+        chmod 600 "$ENCRYPTION_KEY_FILE"
+        echo "Generated new ENCRYPTION_KEY and saved to $ENCRYPTION_KEY_FILE"
+        echo "IMPORTANT: Back up this key! Without it, encrypted data (LDAP/SMTP passwords) cannot be recovered."
+    fi
+fi
+
 # Execute the main command (gunicorn)
 exec "$@"
