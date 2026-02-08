@@ -53,6 +53,10 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                 return {'org': org.name, 'success': True, 'skipped': True, 'reason': 'No new CVEs'}
 
             # Get unique CVE IDs from new matches (batched format)
+            # Filter out orphaned matches where vulnerability was deleted
+            new_matches = [m for m in new_matches if m.vulnerability]
+            if not new_matches:
+                return {'org': org.name, 'success': True, 'skipped': True, 'reason': 'No valid new CVEs'}
             new_cve_ids = list(dict.fromkeys([m.vulnerability.cve_id for m in new_matches]))
             new_cve_count = len(new_cve_ids)
 
@@ -574,9 +578,15 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50, fetch_cpe=True, cpe_limit=30
             ).all()]
 
             if orgs_with_own_webhook:
-                excluded_product_ids = [p.id for p in Product.query.filter(
+                # Include both legacy organization_id and multi-org table products
+                from app.models import product_organizations
+                legacy_excluded = [p.id for p in Product.query.filter(
                     Product.organization_id.in_(orgs_with_own_webhook)
                 ).all()]
+                multi_org_excluded = [row.product_id for row in db.session.query(
+                    product_organizations.c.product_id
+                ).filter(product_organizations.c.organization_id.in_(orgs_with_own_webhook)).all()]
+                excluded_product_ids = list(set(legacy_excluded + multi_org_excluded))
                 if critical_vuln_ids and excluded_product_ids:
                     total_critical = VulnerabilityMatch.query.filter(
                         VulnerabilityMatch.created_at >= start_time,

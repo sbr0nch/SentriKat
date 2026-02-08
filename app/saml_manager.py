@@ -298,7 +298,11 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
 
     # Get default organization
     if default_org_id:
-        org = Organization.query.get(int(default_org_id))
+        try:
+            org = Organization.query.get(int(default_org_id))
+        except (ValueError, TypeError):
+            logger.error(f"Invalid saml_default_org_id: {default_org_id}")
+            org = None
     else:
         org = Organization.query.first()
 
@@ -315,17 +319,21 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
         username = f"{base_username}{counter}"
         counter += 1
 
+    # Build full_name from SAML attributes
+    first_name = user_data.get('first_name', '')
+    last_name = user_data.get('last_name', '')
+    display_name = user_data.get('display_name', '')
+    full_name = display_name or f"{first_name} {last_name}".strip() or username
+
     user = User(
         username=username,
         email=email,
-        first_name=user_data.get('first_name', ''),
-        last_name=user_data.get('last_name', ''),
-        display_name=user_data.get('display_name', ''),
+        full_name=full_name,
         auth_type='saml',
         role='viewer',  # Default role for SAML users
-        is_active=True
+        is_active=True,
+        organization_id=org.id
     )
-    user.organizations.append(org)
 
     db.session.add(user)
     db.session.commit()

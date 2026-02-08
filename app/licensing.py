@@ -551,7 +551,7 @@ def load_license():
             env_key = _clean_license_input(env_key)
 
         # Sync: if env has a license and DB doesn't (or has a different one), save to DB
-        if env_key and env_key != 'SENTRIKAT-DEV-PROFESSIONAL':
+        if env_key:
             if not db_key or db_key != env_key:
                 try:
                     if setting:
@@ -661,28 +661,6 @@ def validate_license(license_key):
     try:
         # Clean the input (handle common paste errors)
         license_key = _clean_license_input(license_key)
-
-        # Development key for testing - ONLY works in non-production environments
-        # Set SENTRIKAT_ENV=production to disable dev license key
-        is_production = os.environ.get('SENTRIKAT_ENV', '').lower() == 'production'
-        if license_key == 'SENTRIKAT-DEV-PROFESSIONAL':
-            if is_production:
-                logger.warning("Attempted to use development license key in production mode")
-                license_info.error = 'Development license key is disabled in production'
-                return license_info
-            license_info.edition = 'professional'
-            license_info.customer = 'Development Mode'
-            license_info.license_id = 'DEV-001'
-            license_info.is_valid = True
-            license_info.is_hardware_match = True  # Dev key works everywhere
-            license_info.max_users = -1
-            license_info.max_organizations = -1
-            license_info.max_products = -1
-            license_info.max_agents = -1  # Unlimited agents in dev mode
-            license_info.max_agent_api_keys = -1
-            license_info.features = PROFESSIONAL_FEATURES + ['push_agents']
-            logger.info("Development license activated (non-production environment)")
-            return license_info
 
         # Split license key into payload and signature
         parts = license_key.strip().split('.')
@@ -1058,10 +1036,6 @@ def license_heartbeat():
     # No heartbeat needed for community edition (no license key)
     if not license_info.is_valid or license_info.edition == 'community':
         return {'success': True, 'message': 'Community edition, no heartbeat needed'}
-
-    # Don't heartbeat dev licenses
-    if license_info.license_id and license_info.license_id.startswith('DEV-'):
-        return {'success': True, 'message': 'Dev license, no heartbeat needed'}
 
     try:
         from app.models import Asset, Product, AgentApiKey, Organization

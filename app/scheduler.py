@@ -244,9 +244,15 @@ def critical_cve_reminder_job(app):
                 try:
                     # Get unacknowledged vulnerabilities for this org
                     # Filter by match creation date to only include recent ones
-                    org_product_ids = db.session.query(Product.id).filter(
+                    # Include both legacy organization_id and multi-org table
+                    from app.models import product_organizations
+                    legacy_ids = db.session.query(Product.id).filter(
                         Product.organization_id == org.id
-                    ).scalar_subquery()
+                    )
+                    multi_org_ids = db.session.query(product_organizations.c.product_id).filter(
+                        product_organizations.c.organization_id == org.id
+                    )
+                    org_product_ids = legacy_ids.union(multi_org_ids).scalar_subquery()
 
                     unack_matches = (
                         VulnerabilityMatch.query
@@ -315,6 +321,7 @@ def data_retention_cleanup_job(app):
                 deleted_counts['sync_logs'] = deleted
             except Exception as e:
                 logger.error(f"Error cleaning sync logs: {e}")
+                db.session.rollback()
                 deleted_counts['sync_logs'] = 0
 
             # Clean up old LDAP sync logs
@@ -323,6 +330,7 @@ def data_retention_cleanup_job(app):
                 deleted_counts['ldap_sync_logs'] = deleted
             except Exception as e:
                 logger.error(f"Error cleaning LDAP sync logs: {e}")
+                db.session.rollback()
                 deleted_counts['ldap_sync_logs'] = 0
 
             # Note: Application audit logs are file-based (audit.log), managed by log rotation.
@@ -334,9 +342,14 @@ def data_retention_cleanup_job(app):
                 deleted_counts['ldap_audit_logs'] = deleted
             except Exception as e:
                 logger.error(f"Error cleaning LDAP audit logs: {e}")
+                db.session.rollback()
                 deleted_counts['ldap_audit_logs'] = 0
 
-            db.session.commit()
+            try:
+                db.session.commit()
+            except Exception as e:
+                logger.error(f"Data retention commit failed: {e}")
+                db.session.rollback()
 
             total_deleted = sum(deleted_counts.values())
             logger.info(f"Data retention cleanup completed. Deleted: {deleted_counts}, Total: {total_deleted}")
@@ -474,9 +487,14 @@ def process_scheduled_reports_job(app):
                 except Exception as e:
                     error_count += 1
                     logger.error(f"Error processing report '{report.name}': {e}", exc_info=True)
-                    report.last_status = f"error: {str(e)}"
-                    report.calculate_next_run()
-                    db.session.commit()
+                    db.session.rollback()
+                    try:
+                        report.last_status = f"error: {str(e)[:200]}"
+                        report.calculate_next_run()
+                        db.session.commit()
+                    except Exception as retry_err:
+                        logger.error(f"Failed to record error for report {report.id}: {retry_err}")
+                        db.session.rollback()
 
             logger.info(f"Scheduled reports processed: {sent_count} sent, {error_count} errors")
 
