@@ -856,7 +856,8 @@ def process_inventory_job(job):
                         active=True,
                         criticality='medium',
                         source='agent',  # Track that this was auto-added by agent
-                        last_agent_report=datetime.utcnow()
+                        last_agent_report=datetime.utcnow(),
+                        organization_id=organization.id
                     )
                     # Auto-apply CPE mapping for better vulnerability matching
                     from app.cpe_mapping import apply_cpe_to_product
@@ -1220,7 +1221,8 @@ def report_inventory():
                     active=True,
                     criticality='medium',
                     source='agent',  # Track that this was auto-added by agent
-                    last_agent_report=datetime.utcnow()
+                    last_agent_report=datetime.utcnow(),
+                    organization_id=organization.id
                 )
                 # Auto-apply CPE mapping for better vulnerability matching
                 from app.cpe_mapping import apply_cpe_to_product

@@ -6465,6 +6465,61 @@ async function activateLicense() {
     }
 }
 
+async function activateLicenseOnline() {
+    const activationCode = SK.DOM.getValue('activationCodeInput').trim();
+    const statusEl = SK.DOM.get('onlineActivateStatus');
+    const btn = SK.DOM.get('onlineActivateBtn');
+
+    if (!activationCode) {
+        showToast('Please enter an activation code', 'warning');
+        return;
+    }
+
+    // Show loading state
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Activating...';
+    if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.innerHTML = '<div class="alert alert-info mb-0 py-2"><i class="bi bi-hourglass-split me-1"></i>Contacting license server...</div>';
+    }
+
+    try {
+        const response = await fetch('/api/license/activate-online', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ activation_code: activationCode })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showToast(data.message, 'success');
+            SK.DOM.setValue('activationCodeInput', '');
+            if (statusEl) {
+                statusEl.innerHTML = '<div class="alert alert-success mb-0 py-2"><i class="bi bi-check-circle me-1"></i>' + escapeHtml(data.message) + '</div>';
+            }
+            loadLicenseInfo();
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            const errorMsg = data.error || 'Online activation failed';
+            showToast(errorMsg, 'error');
+            if (statusEl) {
+                statusEl.innerHTML = '<div class="alert alert-danger mb-0 py-2"><i class="bi bi-exclamation-triangle me-1"></i>' + escapeHtml(errorMsg) + '</div>';
+            }
+        }
+    } catch (error) {
+        console.error('Error activating license online:', error);
+        const errorMsg = 'Could not reach the server. Check your connection.';
+        showToast(errorMsg, 'error');
+        if (statusEl) {
+            statusEl.innerHTML = '<div class="alert alert-danger mb-0 py-2"><i class="bi bi-wifi-off me-1"></i>' + escapeHtml(errorMsg) + '</div>';
+        }
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-check me-1"></i>Activate Online';
+    }
+}
+
 async function removeLicense() {
     const confirmed = await showConfirm('Are you sure you want to remove the license?<br><br>This will revert to <strong>Community edition</strong>.', 'Remove License', 'Remove', 'btn-danger');
     if (!confirmed) return;

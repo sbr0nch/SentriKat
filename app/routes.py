@@ -406,8 +406,54 @@ def get_products():
 
     # If grouped mode requested, group by vendor+product_name
     if grouped:
+        from sqlalchemy import func as sa_func
         products = query.all()
         grouped_products = {}
+
+        # Batch-query vulnerability match counts to avoid N+1 lazy loading
+        all_pids = [p.id for p in products]
+        vuln_counts = {}
+        vuln_unacked = {}
+        if all_pids:
+            # Total match count per product
+            count_rows = db.session.query(
+                VulnerabilityMatch.product_id,
+                sa_func.count(VulnerabilityMatch.id)
+            ).filter(
+                VulnerabilityMatch.product_id.in_(all_pids)
+            ).group_by(VulnerabilityMatch.product_id).all()
+            for pid, cnt in count_rows:
+                vuln_counts[pid] = cnt
+
+            # Count of unacknowledged matches per product
+            unacked_rows = db.session.query(
+                VulnerabilityMatch.product_id,
+                sa_func.count(VulnerabilityMatch.id)
+            ).filter(
+                VulnerabilityMatch.product_id.in_(all_pids),
+                VulnerabilityMatch.acknowledged == False
+            ).group_by(VulnerabilityMatch.product_id).all()
+            for pid, cnt in unacked_rows:
+                vuln_unacked[pid] = cnt
+
+        # Batch-query organization info to avoid N+1 on p.organization
+        org_map = {}  # org_id -> display name
+        product_org_m2m = {}  # product_id -> set of org_ids
+        if all_pids:
+            # Get orgs from organization_id column
+            org_ids_from_col = set(p.organization_id for p in products if p.organization_id)
+            # Get orgs from many-to-many table
+            m2m_rows = db.session.query(
+                product_organizations.c.product_id, product_organizations.c.organization_id
+            ).filter(product_organizations.c.product_id.in_(all_pids)).all()
+            product_org_m2m = {}  # product_id -> set of org_ids
+            for pid, oid in m2m_rows:
+                product_org_m2m.setdefault(pid, set()).add(oid)
+                org_ids_from_col.add(oid)
+            # Fetch all org display names in one query
+            if org_ids_from_col:
+                for org in Organization.query.filter(Organization.id.in_(org_ids_from_col)).all():
+                    org_map[org.id] = org.display_name or org.name
 
         for p in products:
             # Create unique key from vendor + product_name (case-insensitive)
@@ -434,7 +480,9 @@ def get_products():
                     'has_vulnerable_version': False
                 }
 
-            # Add this version entry
+            # Add this version entry (using batch-queried counts instead of lazy p.matches)
+            vc = vuln_counts.get(p.id, 0)
+            ua = vuln_unacked.get(p.id, 0)
             version_entry = {
                 'id': p.id,
                 'version': p.version or 'Any',
@@ -442,16 +490,20 @@ def get_products():
                 'cpe_uri': p.cpe_uri,
                 'source': getattr(p, 'source', 'manual'),
                 'created_at': p.created_at.isoformat() if p.created_at else None,
-                'vulnerability_count': len(p.matches) if p.matches else 0,
-                'is_vulnerable': any(not m.acknowledged for m in p.matches) if p.matches else False
+                'vulnerability_count': vc,
+                'is_vulnerable': ua > 0
             }
             grouped_products[key]['versions'].append(version_entry)
 
-            # Aggregate organization info
+            # Aggregate organization info (from column and many-to-many, using batch data)
+            p_org_ids = set()
             if p.organization_id:
-                grouped_products[key]['organization_ids'].add(p.organization_id)
-                if p.organization:
-                    grouped_products[key]['organization_names'].add(p.organization.display_name or p.organization.name)
+                p_org_ids.add(p.organization_id)
+            p_org_ids.update(product_org_m2m.get(p.id, set()))
+            for oid in p_org_ids:
+                grouped_products[key]['organization_ids'].add(oid)
+                if oid in org_map:
+                    grouped_products[key]['organization_names'].add(org_map[oid])
 
             # Track vulnerability status
             if version_entry['is_vulnerable']:
@@ -461,7 +513,6 @@ def get_products():
         # Batch query platforms and installation counts for all products
         all_product_ids = [v['id'] for group in grouped_products.values() for v in group['versions']]
         if all_product_ids:
-            from sqlalchemy import func as sa_func
             # Get platform + count per product
             platform_counts = db.session.query(
                 ProductInstallation.product_id,

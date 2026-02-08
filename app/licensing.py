@@ -1208,6 +1208,104 @@ def activate_license():
         return jsonify({'error': message}), 400
 
 
+@license_bp.route('/api/license/activate-online', methods=['POST'])
+def activate_license_online():
+    """Activate a license online using an activation code.
+
+    The customer provides their activation code (from purchase confirmation).
+    This endpoint contacts the SentriKat license portal to exchange the code
+    for a hardware-locked license key, then saves it locally.
+
+    Requires SSL/HTTPS connectivity to portal.sentrikat.com.
+    """
+    from app.auth import get_current_user
+    from app.logging_config import log_audit_event
+    import requests as _requests
+    from config import Config
+
+    user = get_current_user()
+    if not user or not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    data = request.get_json()
+    activation_code = (data.get('activation_code') or '').strip()
+
+    if not activation_code:
+        return jsonify({'error': 'Activation code is required'}), 400
+
+    if len(activation_code) < 8:
+        return jsonify({'error': 'Invalid activation code format'}), 400
+
+    installation_id = get_installation_id()
+    proxies = Config.get_proxies()
+    verify_ssl = Config.get_verify_ssl()
+
+    try:
+        response = _requests.post(
+            f'{LICENSE_SERVER_URL}/v1/license/activate',
+            json={
+                'activation_code': activation_code,
+                'installation_id': installation_id,
+                'app_version': _get_app_version(),
+            },
+            timeout=30,
+            proxies=proxies,
+            verify=verify_ssl,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        if response.status_code == 200:
+            resp_data = response.json()
+            license_key = resp_data.get('license_key', '').strip()
+
+            if not license_key:
+                return jsonify({'error': 'Server returned empty license key'}), 502
+
+            # Validate and save the received license key
+            success, message = save_license(license_key)
+
+            if success:
+                log_audit_event('UPDATE', 'license', details=f'License activated online: {message}')
+                return jsonify({
+                    'success': True,
+                    'message': message,
+                    'license': get_license().to_dict()
+                })
+            else:
+                return jsonify({'error': f'License validation failed: {message}'}), 400
+
+        elif response.status_code == 404:
+            return jsonify({'error': 'Activation code not found. Please check the code and try again.'}), 400
+
+        elif response.status_code == 409:
+            return jsonify({'error': 'This activation code has already been used. Contact support to transfer the license.'}), 400
+
+        elif response.status_code == 410:
+            return jsonify({'error': 'This activation code has expired. Contact support for a new one.'}), 400
+
+        else:
+            error_msg = 'Unknown error'
+            try:
+                error_msg = response.json().get('error', error_msg)
+            except Exception:
+                pass
+            return jsonify({'error': f'License server error: {error_msg}'}), 502
+
+    except _requests.ConnectionError:
+        return jsonify({
+            'error': 'Cannot reach the license server (portal.sentrikat.com). '
+                     'Check your internet connection and firewall settings. '
+                     'If online activation is not possible, use offline activation instead.'
+        }), 503
+
+    except _requests.Timeout:
+        return jsonify({'error': 'License server timed out. Please try again.'}), 504
+
+    except Exception as e:
+        logger.error(f"Online license activation failed: {e}")
+        return jsonify({'error': f'Activation failed: {str(e)}'}), 500
+
+
 @license_bp.route('/api/license', methods=['DELETE'])
 def deactivate_license():
     """Remove license and revert to Demo"""
