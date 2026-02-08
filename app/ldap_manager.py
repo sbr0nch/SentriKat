@@ -98,14 +98,42 @@ class LDAPManager:
 
             # Search LDAP with paged search to handle large directories
             # Active Directory often limits results - use paged search to bypass
-            conn.search(
-                search_base=config['base_dn'],
-                search_filter=search_filter,
-                search_scope=ldap3.SUBTREE,
-                attributes=[config['username_attr'], config['email_attr'], 'cn', 'displayName', 'memberOf'],
-                paged_size=500,  # Fetch 500 at a time
-                size_limit=0  # 0 = no limit, let server decide
-            )
+            # Try with memberOf first (AD), fall back without it (OpenLDAP without overlay)
+            base_attrs = [config['username_attr'], config['email_attr'], 'cn', 'displayName']
+            search_attrs = base_attrs + ['memberOf']
+            _memberof_supported = True
+
+            def _do_search(attrs, **kwargs):
+                """Execute search, retry without memberOf if unsupported."""
+                nonlocal _memberof_supported, search_attrs
+                try:
+                    result = conn.search(
+                        search_base=config['base_dn'],
+                        search_filter=search_filter,
+                        search_scope=ldap3.SUBTREE,
+                        attributes=attrs,
+                        **kwargs
+                    )
+                    # Check conn.result for errors (ldap3 may not raise with raise_exceptions=False)
+                    result_desc = conn.result.get('description', '') if conn.result else ''
+                    if 'memberOf' in result_desc or 'undefined' in result_desc.lower():
+                        raise ldap3.core.exceptions.LDAPAttributeError(result_desc)
+                    return result
+                except Exception as e:
+                    if _memberof_supported and ('memberOf' in str(e) or 'attribute' in str(e).lower()):
+                        logger.info("LDAP server does not support memberOf attribute, searching without it")
+                        _memberof_supported = False
+                        search_attrs = base_attrs
+                        return conn.search(
+                            search_base=config['base_dn'],
+                            search_filter=search_filter,
+                            search_scope=ldap3.SUBTREE,
+                            attributes=base_attrs,
+                            **kwargs
+                        )
+                    raise
+
+            _do_search(search_attrs, paged_size=500, size_limit=0)
 
             users = []
             # Collect all results from paged search
@@ -118,7 +146,7 @@ class LDAPManager:
                     search_base=config['base_dn'],
                     search_filter=search_filter,
                     search_scope=ldap3.SUBTREE,
-                    attributes=[config['username_attr'], config['email_attr'], 'cn', 'displayName', 'memberOf'],
+                    attributes=search_attrs,
                     paged_size=500,
                     paged_cookie=cookie
                 )
@@ -136,9 +164,9 @@ class LDAPManager:
                     full_name = str(entry.displayName.value) if entry.displayName else str(entry.cn.value) if entry.cn else None
                     dn = str(entry.entry_dn)
 
-                    # Get groups
+                    # Get groups (memberOf may not be available on OpenLDAP)
                     groups = []
-                    if entry.memberOf:
+                    if hasattr(entry, 'memberOf') and entry.memberOf:
                         if isinstance(entry.memberOf.value, list):
                             groups = [str(g) for g in entry.memberOf.value]
                         else:
@@ -204,14 +232,31 @@ class LDAPManager:
             server = ldap3.Server(server_host, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)
             conn = ldap3.Connection(server, user=config['bind_dn'], password=config['bind_password'], auto_bind=True)
 
-            # Search for user
+            # Search for user - try with memberOf (AD), fall back without it (OpenLDAP)
             search_filter = config['search_filter'].replace('{username}', username)
-            conn.search(
-                search_base=config['base_dn'],
-                search_filter=search_filter,
-                search_scope=ldap3.SUBTREE,
-                attributes=['memberOf', 'cn']
-            )
+            memberof_ok = True
+            try:
+                conn.search(
+                    search_base=config['base_dn'],
+                    search_filter=search_filter,
+                    search_scope=ldap3.SUBTREE,
+                    attributes=['memberOf', 'cn']
+                )
+                result_desc = conn.result.get('description', '') if conn.result else ''
+                if 'memberOf' in result_desc or 'undefined' in result_desc.lower():
+                    raise Exception(result_desc)
+            except Exception as member_err:
+                if 'memberOf' in str(member_err) or 'attribute' in str(member_err).lower():
+                    logger.info("LDAP server does not support memberOf, searching without it")
+                    memberof_ok = False
+                    conn.search(
+                        search_base=config['base_dn'],
+                        search_filter=search_filter,
+                        search_scope=ldap3.SUBTREE,
+                        attributes=['cn']
+                    )
+                else:
+                    raise
 
             if not conn.entries:
                 return {'success': False, 'error': f'User {username} not found in LDAP'}
@@ -219,7 +264,7 @@ class LDAPManager:
             entry = conn.entries[0]
             groups = []
 
-            if entry.memberOf:
+            if hasattr(entry, 'memberOf') and entry.memberOf:
                 if isinstance(entry.memberOf.value, list):
                     groups = [str(g) for g in entry.memberOf.value]
                 else:
@@ -528,7 +573,7 @@ class LDAPManager:
                 search_base=base_dn,
                 search_filter=search_filter,
                 search_scope=SUBTREE,
-                attributes=['cn', 'distinguishedName', 'description', 'member', 'memberOf']
+                attributes=['cn', 'distinguishedName', 'description', 'member']
             )
 
             groups = []
