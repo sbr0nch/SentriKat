@@ -919,11 +919,12 @@ class User(db.Model):
         from app.models import SystemSettings
 
         # Get lockout settings
-        max_attempts_setting = SystemSettings.query.filter_by(key='failed_login_attempts').first()
+        # Note: setting key is 'max_failed_logins' (as saved by security settings API)
+        max_attempts_setting = SystemSettings.query.filter_by(key='max_failed_logins').first()
         lockout_duration_setting = SystemSettings.query.filter_by(key='lockout_duration').first()
 
         max_attempts = int(max_attempts_setting.value) if max_attempts_setting else 5
-        lockout_minutes = int(lockout_duration_setting.value) if lockout_duration_setting else 15
+        lockout_minutes = int(lockout_duration_setting.value) if lockout_duration_setting else 30
 
         # Increment failed attempts
         self.failed_login_attempts = (self.failed_login_attempts or 0) + 1

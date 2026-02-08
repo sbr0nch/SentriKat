@@ -1044,19 +1044,27 @@ def save_notification_settings():
         set_setting('slack_enabled', 'true' if data.get('slack_enabled') else 'false', 'notifications', 'Enable Slack notifications')
         if data.get('slack_webhook_url'):
             set_setting('slack_webhook_url', data['slack_webhook_url'], 'notifications', 'Slack webhook URL', is_encrypted=True)
+        elif 'slack_webhook_url' in data and not data.get('slack_webhook_url'):
+            set_setting('slack_webhook_url', '', 'notifications', 'Slack webhook URL')
 
         set_setting('teams_enabled', 'true' if data.get('teams_enabled') else 'false', 'notifications', 'Enable Teams notifications')
         if data.get('teams_webhook_url'):
             set_setting('teams_webhook_url', data['teams_webhook_url'], 'notifications', 'Microsoft Teams webhook URL', is_encrypted=True)
+        elif 'teams_webhook_url' in data and not data.get('teams_webhook_url'):
+            set_setting('teams_webhook_url', '', 'notifications', 'Microsoft Teams webhook URL')
 
         # Generic webhook settings (RocketChat, Mattermost, Discord, etc.)
         set_setting('generic_webhook_enabled', 'true' if data.get('generic_webhook_enabled') else 'false', 'notifications', 'Enable generic webhook notifications')
         if data.get('generic_webhook_url'):
             set_setting('generic_webhook_url', data['generic_webhook_url'], 'notifications', 'Generic webhook URL', is_encrypted=True)
+        elif 'generic_webhook_url' in data and not data.get('generic_webhook_url'):
+            set_setting('generic_webhook_url', '', 'notifications', 'Generic webhook URL')
         set_setting('generic_webhook_name', data.get('generic_webhook_name', 'Custom Webhook'), 'notifications', 'Generic webhook display name')
         set_setting('generic_webhook_format', data.get('generic_webhook_format', 'slack'), 'notifications', 'Generic webhook payload format')
         if data.get('generic_webhook_custom_template'):
             set_setting('generic_webhook_custom_template', data['generic_webhook_custom_template'], 'notifications', 'Custom JSON template for webhook')
+        elif 'generic_webhook_custom_template' in data and not data.get('generic_webhook_custom_template'):
+            set_setting('generic_webhook_custom_template', '', 'notifications', 'Custom JSON template for webhook')
         # Optional auth token for webhooks that require it
         if data.get('generic_webhook_token'):
             set_setting('generic_webhook_token', data['generic_webhook_token'], 'notifications', 'Webhook auth token', is_encrypted=True)
