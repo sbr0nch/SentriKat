@@ -789,12 +789,13 @@ def authenticate_ldap(user, password):
         import ldap3
         from ldap3 import Server, Connection, ALL, SIMPLE, SUBTREE
 
-        # Parse server URL - handle both "ldap://server" and "server" formats
-        if '://' in ldap_server:
-            use_ssl = ldap_server.startswith('ldaps://')
-            server_host = ldap_server.split('://', 1)[1].split(':')[0]  # Remove protocol and port
-        else:
-            server_host = ldap_server
+        # Parse server URL - handle ldap://, ldaps://, and bare hostname formats
+        from app.ldap_manager import _parse_ldap_server
+        server_host, use_ssl = _parse_ldap_server(ldap_server)
+        if not server_host:
+            raise Exception('LDAP server URL is empty after parsing')
+        # Use SSL from URL prefix or fall back to TLS setting
+        if not use_ssl:
             use_ssl = use_tls
 
         # Create server - use port and TLS from settings

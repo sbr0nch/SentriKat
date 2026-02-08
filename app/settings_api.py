@@ -400,12 +400,14 @@ def test_ldap_connection():
         if not ldap_bind_dn or not ldap_bind_password:
             return jsonify({'success': False, 'error': 'LDAP bind credentials not configured'})
 
-        # Parse server URL
-        server_url = ldap_server.replace('ldap://', '').replace('ldaps://', '').split(':')[0]
+        # Parse server URL (handles ldap://, ldaps://, and bare hostname)
+        from app.ldap_manager import _parse_ldap_server
+        server_host, use_ssl = _parse_ldap_server(ldap_server)
+        if not server_host:
+            return jsonify({'success': False, 'error': 'LDAP server URL is empty after parsing'})
 
         # Create server object
-        use_ssl = 'ldaps://' in ldap_server
-        server = ldap3.Server(server_url, port=ldap_port, use_ssl=use_ssl, get_info=ldap3.ALL)
+        server = ldap3.Server(server_host, port=ldap_port, use_ssl=use_ssl or ldap_use_tls, get_info=ldap3.ALL)
 
         # Try to bind with service account
         conn = ldap3.Connection(server, user=ldap_bind_dn, password=ldap_bind_password, auto_bind=True)
@@ -414,7 +416,7 @@ def test_ldap_connection():
             conn.unbind()
             return jsonify({
                 'success': True,
-                'message': f'✓ Successfully connected to LDAP server at {server_url}:{ldap_port}'
+                'message': f'Successfully connected to LDAP server at {server_host}:{ldap_port}'
             })
         else:
             return jsonify({'success': False, 'error': 'Failed to bind to LDAP server'})
