@@ -41,7 +41,7 @@ MAX_VENDOR_LENGTH = 200
 MAX_PRODUCT_NAME_LENGTH = 200
 MAX_VERSION_LENGTH = 100
 MAX_PATH_LENGTH = 500
-MAX_PRODUCTS_PER_REQUEST = 5000  # Absolute maximum products in single request
+MAX_PRODUCTS_PER_REQUEST = 10000  # Absolute maximum products in single request (agents send ALL)
 
 # Background worker settings
 WORKER_CHECK_INTERVAL = 5  # seconds between job checks
@@ -55,15 +55,14 @@ csrf.exempt(agent_bp)  # Agents use API keys, not CSRF
 
 
 # ============================================================================
-# Software Filtering - CONSERVATIVE approach
-# Only skip items that are CLEARLY not security-relevant
-# When in doubt, DON'T skip - better to have noise than miss a vulnerability
+# Software Filtering - Server-Side (Comprehensive)
+# Agents send ALL installed packages. The server filters out noise here.
+# CONSERVATIVE: when in doubt, DON'T skip. Better noise than missing a CVE.
 # ============================================================================
 
 # Exact product names to skip (case-insensitive) - Windows
-# These are Windows Update metadata entries, not actual software
 SKIP_PRODUCTS_WINDOWS = {
-    # Windows Update entries (not real software)
+    # Windows Update metadata entries (not actual software)
     'update for windows',
     'security update for windows',
     'cumulative update for windows',
@@ -73,82 +72,116 @@ SKIP_PRODUCTS_WINDOWS = {
     'windows sdk addendum',
     'windows sdk arm desktop libs',
     'windows sdk desktop headers',
+    'windows sdk desktop libs',
+    'windows sdk modern versioned developer tools',
     # Language/localization (no executable code)
     'windows language pack',
     'microsoft language experience pack',
 }
 
-# Exact product names to skip (case-insensitive) - Linux
-# Package suffixes that indicate non-runtime packages
+# Linux package suffixes indicating non-runtime packages
 SKIP_SUFFIXES_LINUX = [
-    '-doc',           # Documentation only
-    '-docs',          # Documentation only
-    '-man',           # Man pages only
-    '-dbg',           # Debug symbols
-    '-dbgsym',        # Debug symbols (Debian)
-    '-debuginfo',     # Debug symbols (RHEL)
-    '-debugsource',   # Debug source
-    '-locale',        # Locale data
-    '-locales',       # Locale data
-    '-l10n',          # Localization
-    '-i18n',          # Internationalization
-    '-fonts',         # Font packages
+    '-doc', '-docs', '-man',                              # Documentation
+    '-dbg', '-dbgsym', '-debug', '-debuginfo',            # Debug symbols
+    '-debugsource',                                       # Debug source
+    '-locale', '-locales', '-l10n', '-i18n',              # Locale data
+    '-lang',                                              # Language translations
+    '-fonts',                                             # Font packages
+    '-dev', '-devel',                                     # Development headers
+    '-headers',                                           # Kernel/lib headers
+    '-static',                                            # Static libraries
 ]
 
-# Patterns to skip - VERY SPECIFIC to avoid false negatives
+# Linux package prefixes that are almost always noise
+SKIP_PREFIXES_LINUX = [
+    'fonts-',           # Font packages (fonts-liberation, fonts-dejavu, etc.)
+    'xfonts-',          # X11 font packages
+    'texlive-',         # LaTeX/TeX packages (huge count, no CVE surface)
+    'gir1.2-',          # GObject introspection data (not runtime)
+    'aspell-',          # Spell check dictionaries
+    'hunspell-',        # Spell check dictionaries
+    'hyphen-',          # Hyphenation data
+    'mythes-',          # Thesaurus data
+    'manpages-',        # Manual pages
+    'language-pack-',   # Language packs
+    'libreoffice-l10n-',# LibreOffice translation packs
+    'firefox-locale-',  # Firefox locale packs
+    'thunderbird-locale-', # Thunderbird locale packs
+]
+
+# Patterns to skip (compiled once for performance)
 SKIP_PATTERNS = [
-    # Language packs with no executable code (must match full product name pattern)
+    # Windows language/input packs
     r'^(microsoft )?language (pack|experience pack|feature)',
     r'^(windows|language) (input|handwriting|ocr|speech|text.to.speech)',
-    # Font-only packages
+    # Font packages
     r'^(microsoft|windows) (fonts?|typography)',
-    r'^fonts?-',  # Linux font packages like fonts-liberation
+    r'^fonts?-',
     # Linux locale packages
     r'^locales?(-all)?$',
     r'^language-pack-',
-    r'^hunspell-',  # Spell check dictionaries
-    r'^hyphen-',    # Hyphenation dictionaries
-    r'^mythes-',    # Thesaurus data
+    # Windows Update KBs (tracked separately)
+    r'^kb\d+',
+    r'^(update|security update|hotfix|cumulative update) for',
+    # Telemetry / diagnostic (no CVE surface)
+    r'.*(telemetry|diagnostic data|customer experience improvement).*',
+    # Windows Store consumer apps
+    r'^(cortana|people app|groove music|movies & tv|mixed reality)',
+    # Games (not enterprise-relevant)
+    r'.*(solitaire|candy crush|minecraft|disney|xbox game).*',
 ]
+_SKIP_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in SKIP_PATTERNS]
+
+# Linux packages to skip by exact name (high-volume, no CVE surface)
+SKIP_EXACT_LINUX = {
+    'info', 'texinfo', 'man-db', 'manpages',
+    'lintian', 'debhelper', 'dpkg-dev', 'build-essential',
+    'dh-python', 'dh-strip-nondeterminism',
+}
 
 
 def _should_skip_software(vendor: str, product_name: str) -> bool:
     """
-    Check if software should be skipped (not added to inventory).
+    Server-side filter: skip packages that are clearly not security-relevant.
 
-    CONSERVATIVE filtering - only skips items that are clearly not security-relevant:
-    - Documentation packages
-    - Debug symbol packages
-    - Language/locale packs (no executable code)
-    - Font packages
-    - Spell-check dictionaries
+    Since agents now send ALL installed packages (no agent-side filtering),
+    this function handles the comprehensive noise reduction. It is designed
+    to be fast and run for every package in large batches (2000+ items).
 
-    Does NOT skip:
-    - Any Microsoft product that could have vulnerabilities (Office, Exchange, etc.)
-    - .NET Framework (has had CVEs)
-    - Visual C++ Redistributables (tracks deployment, rarely has own CVEs but useful)
-    - Any third-party software
-    - Drivers (some have had CVEs)
+    Skips: documentation, debug symbols, dev headers, fonts, themes, locale
+    packs, spell-check dictionaries, TeX/LaTeX, GObject introspection data,
+    Windows Update metadata, consumer games, telemetry.
 
-    Returns True if the software should be skipped.
+    Does NOT skip: any runtime library, service, framework, or tool that
+    could have a CVE. When in doubt, keeps the package.
     """
     if not vendor or not product_name:
         return True
 
     product_lower = product_name.lower().strip()
 
-    # Check Windows exact product skip list
+    # --- Fast exact match (O(1) hash lookup) ---
     if product_lower in SKIP_PRODUCTS_WINDOWS:
         return True
+    if product_lower in SKIP_EXACT_LINUX:
+        return True
 
-    # Check Linux package suffixes (documentation, debug symbols, locales)
+    # --- Suffix check (documentation, debug, dev headers, locale, fonts) ---
     for suffix in SKIP_SUFFIXES_LINUX:
         if product_lower.endswith(suffix):
+            # Exception: keep security-relevant packages that happen to
+            # end in a skip suffix (e.g. openssh-doc is noise, but
+            # libssl-dev is noise too, so no exceptions needed)
             return True
 
-    # Check regex patterns (very specific)
-    for pattern in SKIP_PATTERNS:
-        if re.match(pattern, product_lower, re.IGNORECASE):
+    # --- Prefix check (fonts, texlive, spell-check, locale packs) ---
+    for prefix in SKIP_PREFIXES_LINUX:
+        if product_lower.startswith(prefix):
+            return True
+
+    # --- Regex patterns (compiled, for Windows noise + misc) ---
+    for pattern in _SKIP_PATTERNS_COMPILED:
+        if pattern.search(product_lower):
             return True
 
     return False
