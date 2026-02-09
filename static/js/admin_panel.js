@@ -1022,6 +1022,7 @@ function showCreateUserModal() {
 
         toggleAuthFields();
         updateRoleDescription();
+        updateOrgRequirement();
 
         const modalElement = SK.DOM.get('userModal');
         if (!modalElement) {
@@ -2232,13 +2233,13 @@ function autoConfigureSmtpSecurity() {
 
 // LDAP Settings
 async function saveLDAPSettings() {
+    const bindPassword = SK.DOM.getValue('ldapBindPassword');
     const settings = {
         ldap_enabled: SK.DOM.getChecked('ldapEnabled'),
         ldap_server: SK.DOM.getValue('ldapServer'),
         ldap_port: SK.DOM.getValue('ldapPort'),
         ldap_base_dn: SK.DOM.getValue('ldapBaseDN'),
         ldap_bind_dn: SK.DOM.getValue('ldapBindDN'),
-        ldap_bind_password: SK.DOM.getValue('ldapBindPassword'),
         ldap_search_filter: SK.DOM.getValue('ldapSearchFilter'),
         ldap_username_attr: SK.DOM.getValue('ldapUsernameAttr'),
         ldap_email_attr: SK.DOM.getValue('ldapEmailAttr'),
@@ -2246,6 +2247,10 @@ async function saveLDAPSettings() {
         ldap_sync_enabled: SK.DOM.getChecked('ldapSyncEnabled'),
         ldap_sync_interval_hours: SK.DOM.getValue('ldapSyncInterval')
     };
+    // Only send password if user entered a new one (blank = keep existing)
+    if (bindPassword) {
+        settings.ldap_bind_password = bindPassword;
+    }
 
     try {
         const response = await fetch('/api/settings/ldap', {
@@ -3693,6 +3698,15 @@ async function loadAllSettings() {
                     if (ldapUseTLS) ldapUseTLS.checked = ldap.ldap_use_tls || false;
                     if (ldapSyncEnabled) ldapSyncEnabled.checked = ldap.ldap_sync_enabled || false;
                     if (ldapSyncInterval) ldapSyncInterval.value = ldap.ldap_sync_interval_hours || '24';
+
+                    // Update password field placeholder based on whether password is configured
+                    const ldapBindPassword = SK.DOM.get('ldapBindPassword');
+                    if (ldapBindPassword) {
+                        ldapBindPassword.value = '';
+                        ldapBindPassword.placeholder = ldap.ldap_bind_password_configured
+                            ? '(password saved - leave blank to keep)'
+                            : 'Enter bind password';
+                    }
 
                     // Populate Group Search Base DN with LDAP Base DN as default
                     const groupSearchBaseInline = SK.DOM.get('groupSearchBaseInline');
@@ -6702,16 +6716,16 @@ async function showCreateAgentKeyModal() {
     const orgSelect = SK.DOM.get('agentKeyOrg');
     if (orgSelect && organizations.length > 0) {
         orgSelect.innerHTML = '<option value="">Select organization...</option>' +
-            organizations.map(org => `<option value="${org.id}">${escapeHtml(org.name)}</option>`).join('');
+            organizations.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
     } else {
         // Load organizations if not loaded
         try {
             const response = await fetch('/api/organizations');
             if (response.ok) {
                 const data = await response.json();
-                organizations = data.organizations || [];
+                organizations = Array.isArray(data) ? data : (data.organizations || []);
                 orgSelect.innerHTML = '<option value="">Select organization...</option>' +
-                    organizations.map(org => `<option value="${org.id}">${escapeHtml(org.name)}</option>`).join('');
+                    organizations.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
             }
         } catch (error) {
             console.error('Error loading organizations:', error);

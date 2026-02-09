@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches=None):
+def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches=None, force=False):
     """Send webhook notification for a specific organization using org settings or global fallback
 
     Sends BATCHED notifications for NEW CVEs only (first_alerted_at IS NULL).
@@ -38,15 +38,21 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
             webhook_format = webhook_config['format'] or 'slack'
             webhook_token = webhook_config['token']
 
+            if not webhook_url or not webhook_url.startswith(('http://', 'https://')):
+                return {'org': org.name, 'success': False, 'error': 'Invalid webhook URL (may be corrupted or improperly decrypted)'}
+
             headers = {'Content-Type': 'application/json'}
             if webhook_token:
                 headers['Authorization'] = f'Bearer {webhook_token}'
                 headers['X-Auth-Token'] = webhook_token
 
-            # Filter for NEW matches only (never alerted via webhook)
+            # Filter for NEW matches only (never alerted via webhook), unless forced
             new_matches = []
             if matches:
-                new_matches = [m for m in matches if m.first_alerted_at is None]
+                if force:
+                    new_matches = list(matches)
+                else:
+                    new_matches = [m for m in matches if m.first_alerted_at is None]
 
             # If no new matches to alert, skip webhook
             if not new_matches:
