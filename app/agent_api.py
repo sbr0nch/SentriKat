@@ -712,11 +712,35 @@ def queue_inventory_job(organization, data, api_key_id=None):
             logger.debug(f"Found asset by agent_id: {asset}")
 
         if not asset:
-            asset = Asset.query.filter_by(
+            hostname_asset = Asset.query.filter_by(
                 organization_id=organization.id,
                 hostname=hostname
             ).first()
-            logger.debug(f"Found asset by org+hostname: {asset}")
+            logger.debug(f"Found asset by org+hostname: {hostname_asset}")
+
+            if hostname_asset:
+                # Hostname collision check for async path
+                if agent_id and hostname_asset.agent_id and hostname_asset.agent_id != agent_id:
+                    logger.warning(
+                        f"Hostname collision (async): {hostname} reported by agent_id={agent_id} "
+                        f"but existing asset has agent_id={hostname_asset.agent_id}"
+                    )
+                    AgentEvent.log_event(
+                        organization_id=organization.id,
+                        event_type='status_changed',
+                        asset_id=hostname_asset.id,
+                        api_key_id=api_key_id,
+                        details={
+                            'warning': 'hostname_collision',
+                            'hostname': hostname,
+                            'old_agent_id': hostname_asset.agent_id,
+                            'new_agent_id': agent_id,
+                            'new_ip': data.get('ip_address'),
+                        },
+                        source_ip=request.remote_addr if request else None,
+                        user_agent=request.headers.get('User-Agent', '')[:500] if request else None
+                    )
+                asset = hostname_asset
 
         if not asset:
             asset = Asset(
@@ -1172,10 +1196,38 @@ def report_inventory():
             asset = Asset.query.filter_by(agent_id=agent_id).first()
 
         if not asset:
-            asset = Asset.query.filter_by(
+            hostname_asset = Asset.query.filter_by(
                 organization_id=organization.id,
                 hostname=hostname
             ).first()
+
+            if hostname_asset:
+                # Hostname collision check: if the existing asset has a different
+                # agent_id, this is a DIFFERENT machine with the same hostname.
+                # Update the existing asset's agent_id to the new one (last reporter wins)
+                # and log the collision for admin awareness.
+                if agent_id and hostname_asset.agent_id and hostname_asset.agent_id != agent_id:
+                    logger.warning(
+                        f"Hostname collision: {hostname} reported by agent_id={agent_id} "
+                        f"but existing asset has agent_id={hostname_asset.agent_id}. "
+                        f"Updating to new agent (IP: {data.get('ip_address')})"
+                    )
+                    AgentEvent.log_event(
+                        organization_id=organization.id,
+                        event_type='status_changed',
+                        asset_id=hostname_asset.id,
+                        api_key_id=agent_key.id if agent_key else None,
+                        details={
+                            'warning': 'hostname_collision',
+                            'hostname': hostname,
+                            'old_agent_id': hostname_asset.agent_id,
+                            'new_agent_id': agent_id,
+                            'new_ip': data.get('ip_address'),
+                        },
+                        source_ip=source_ip,
+                        user_agent=user_agent
+                    )
+                asset = hostname_asset
 
         if not asset:
             # Create new asset
@@ -1556,13 +1608,14 @@ def trigger_job_processing():
 @login_required
 @limiter.limit("60/minute")
 def admin_list_jobs():
-    """List all inventory jobs (admin view)."""
+    """List inventory jobs (admin/org_admin view, scoped by organization)."""
     from app.auth import get_current_user
 
     user = get_current_user()
 
-    if not user.is_super_admin():
-        return jsonify({'error': 'Super admin access required'}), 403
+    # Org admins and super admins can access
+    if not (user.is_super_admin() or user.is_org_admin() or user.is_admin):
+        return jsonify({'error': 'Admin access required'}), 403
 
     status = request.args.get('status')
     org_id = request.args.get('organization_id', type=int)
@@ -1570,6 +1623,11 @@ def admin_list_jobs():
     per_page = min(request.args.get('per_page', 50, type=int), 100)
 
     query = InventoryJob.query
+
+    # Scope to user's organizations unless super_admin
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = query.filter(InventoryJob.organization_id.in_(user_org_ids))
 
     if status:
         query = query.filter_by(status=status)
@@ -1580,14 +1638,19 @@ def admin_list_jobs():
         page=page, per_page=per_page, error_out=False
     )
 
+    # Scope counts too
+    count_query = InventoryJob.query
+    if not user.is_super_admin():
+        count_query = count_query.filter(InventoryJob.organization_id.in_(user_org_ids))
+
     return jsonify({
         'jobs': [j.to_dict() for j in pagination.items],
         'total': pagination.total,
         'page': page,
         'per_page': per_page,
         'pages': pagination.pages,
-        'pending_count': InventoryJob.query.filter_by(status='pending').count(),
-        'processing_count': InventoryJob.query.filter_by(status='processing').count()
+        'pending_count': count_query.filter_by(status='pending').count(),
+        'processing_count': count_query.filter_by(status='processing').count()
     })
 
 
@@ -2241,7 +2304,7 @@ def get_integrations_summary():
 # ============================================================================
 
 @agent_bp.route('/api/admin/worker-status', methods=['GET'])
-@admin_required
+@login_required
 def get_worker_status():
     """
     Get the status of the background job worker.
@@ -2250,8 +2313,8 @@ def get_worker_status():
     from app.auth import get_current_user
 
     user = get_current_user()
-    if not user.is_super_admin():
-        return jsonify({'error': 'Super admin access required'}), 403
+    if not (user.is_super_admin() or user.is_org_admin() or user.is_admin):
+        return jsonify({'error': 'Admin access required'}), 403
 
     # Worker status
     worker_alive = _worker_thread is not None and _worker_thread.is_alive()

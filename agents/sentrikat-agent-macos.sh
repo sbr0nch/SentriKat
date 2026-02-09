@@ -464,8 +464,12 @@ scan_container_images() {
         return 0
     fi
 
+    # Write scan results directly to temp file (avoids ARG_MAX)
+    local results_file
+    results_file=$(mktemp /tmp/sentrikat-container-XXXXXX.json)
+    printf '[' > "$results_file"
+
     local image_count=0
-    local scan_results="["
     local first=true
 
     while IFS='|' read -r image_ref image_id image_size; do
@@ -473,17 +477,19 @@ scan_container_images() {
 
         log_info "Scanning container image: $image_ref"
 
-        local trivy_output
-        trivy_output=$("$TRIVY_BIN" image \
+        local trivy_tmpfile
+        trivy_tmpfile=$(mktemp)
+        "$TRIVY_BIN" image \
             --format json \
             --severity HIGH,CRITICAL \
             --cache-dir "$TRIVY_CACHE_DIR" \
             --quiet \
             --timeout 5m \
-            "$image_ref" 2>/dev/null)
+            "$image_ref" > "$trivy_tmpfile" 2>/dev/null
 
-        if [[ $? -ne 0 || -z "$trivy_output" ]]; then
+        if [[ $? -ne 0 || ! -s "$trivy_tmpfile" ]]; then
             log_warn "Trivy scan failed for $image_ref"
+            rm -f "$trivy_tmpfile"
             continue
         fi
 
@@ -495,18 +501,18 @@ scan_container_images() {
         image_tag=$(json_escape "$image_tag")
         image_id=$(json_escape "${image_id:0:12}")
 
-        local tmpfile
-        tmpfile=$(mktemp)
-        echo "$trivy_output" > "$tmpfile"
-
         if [[ "$first" == "true" ]]; then
             first=false
         else
-            scan_results+=","
+            printf ',' >> "$results_file"
         fi
 
-        scan_results+="{\"image_name\": \"$image_name\", \"image_tag\": \"$image_tag\", \"image_id\": \"$image_id\", \"trivy_output\": $(cat "$tmpfile")}"
-        rm -f "$tmpfile"
+        printf '{"image_name": "%s", "image_tag": "%s", "image_id": "%s", "trivy_output": ' \
+            "$image_name" "$image_tag" "$image_id" >> "$results_file"
+        cat "$trivy_tmpfile" >> "$results_file"
+        printf '}' >> "$results_file"
+
+        rm -f "$trivy_tmpfile"
         ((image_count++))
 
         if [[ $image_count -ge 50 ]]; then
@@ -515,23 +521,30 @@ scan_container_images() {
         fi
     done <<< "$image_list"
 
-    scan_results+="]"
+    printf ']' >> "$results_file"
 
     if [[ $image_count -eq 0 ]]; then
         log_info "No images scanned successfully"
+        rm -f "$results_file"
         return 0
     fi
 
     log_info "Scanned $image_count container images"
 
-    # Send results to SentriKat server
+    # Assemble final payload to temp file (no large bash variables)
     local endpoint="${SERVER_URL}/api/agent/container-scan"
-    local payload
-    payload="{\"agent_id\": \"${AGENT_ID}\", \"hostname\": \"$(scutil --get ComputerName 2>/dev/null || hostname)\", \"scanner\": \"trivy\", \"scanner_version\": \"$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo 'unknown')\", \"images\": ${scan_results}}"
+    local trivy_version
+    trivy_version=$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo 'unknown')
+    local my_hostname
+    my_hostname=$(scutil --get ComputerName 2>/dev/null || hostname)
 
     local tmpfile
     tmpfile=$(mktemp)
-    echo "$payload" > "$tmpfile"
+    printf '{"agent_id": "%s", "hostname": "%s", "scanner": "trivy", "scanner_version": "%s", "images": ' \
+        "$AGENT_ID" "$my_hostname" "$trivy_version" > "$tmpfile"
+    cat "$results_file" >> "$tmpfile"
+    printf '}' >> "$tmpfile"
+    rm -f "$results_file"
 
     curl -s -X POST "$endpoint" \
         -H "X-Agent-Key: $API_KEY" \

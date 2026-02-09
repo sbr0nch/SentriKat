@@ -456,8 +456,12 @@ scan_container_images() {
         return 0
     fi
 
+    # Write scan results directly to temp file (avoids ARG_MAX)
+    local results_file
+    results_file=$(mktemp /tmp/sentrikat-container-XXXXXX.json)
+    printf '[' > "$results_file"
+
     local image_count=0
-    local scan_results="["
     local first=true
 
     while IFS='|' read -r image_ref image_id image_size; do
@@ -465,81 +469,85 @@ scan_container_images() {
 
         log_info "Scanning container image: $image_ref"
 
-        # Run Trivy scan with JSON output
-        local trivy_output
-        trivy_output=$("$TRIVY_BIN" image \
+        # Run Trivy scan with JSON output directly to temp file
+        local trivy_tmpfile
+        trivy_tmpfile=$(mktemp)
+        "$TRIVY_BIN" image \
             --format json \
             --severity HIGH,CRITICAL \
             --cache-dir "$TRIVY_CACHE_DIR" \
             --quiet \
             --timeout 5m \
-            "$image_ref" 2>/dev/null)
+            "$image_ref" > "$trivy_tmpfile" 2>/dev/null
 
-        if [[ $? -ne 0 || -z "$trivy_output" ]]; then
+        if [[ $? -ne 0 || ! -s "$trivy_tmpfile" ]]; then
             log_warn "Trivy scan failed for $image_ref"
+            rm -f "$trivy_tmpfile"
             continue
         fi
 
-        # Build our scan result payload
         local image_name="${image_ref%%:*}"
         local image_tag="${image_ref#*:}"
         [[ "$image_tag" == "$image_ref" ]] && image_tag="latest"
 
-        # Escape values
         image_name=$(json_escape "$image_name")
         image_tag=$(json_escape "$image_tag")
         image_id=$(json_escape "${image_id:0:12}")
 
-        # Write trivy output to temp file for processing
-        local tmpfile
-        tmpfile=$(mktemp)
-        echo "$trivy_output" > "$tmpfile"
-
         if [[ "$first" == "true" ]]; then
             first=false
         else
-            scan_results+=","
+            printf ',' >> "$results_file"
         fi
 
-        # Wrap the raw Trivy JSON with our metadata
-        scan_results+="{\"image_name\": \"$image_name\", \"image_tag\": \"$image_tag\", \"image_id\": \"$image_id\", \"trivy_output\": $(cat "$tmpfile")}"
+        # Write metadata + trivy output directly to file (no bash variable)
+        printf '{"image_name": "%s", "image_tag": "%s", "image_id": "%s", "trivy_output": ' \
+            "$image_name" "$image_tag" "$image_id" >> "$results_file"
+        cat "$trivy_tmpfile" >> "$results_file"
+        printf '}' >> "$results_file"
 
-        rm -f "$tmpfile"
+        rm -f "$trivy_tmpfile"
         ((image_count++))
 
-        # Limit to 50 images per scan to avoid overwhelming the server
         if [[ $image_count -ge 50 ]]; then
             log_warn "Reached 50 image limit, skipping remaining images"
             break
         fi
     done <<< "$image_list"
 
-    scan_results+="]"
+    printf ']' >> "$results_file"
 
     if [[ $image_count -eq 0 ]]; then
         log_info "No images scanned successfully"
+        rm -f "$results_file"
         return 0
     fi
 
     log_info "Scanned $image_count container images"
 
     # Send results to SentriKat server
-    send_container_scan_results "$scan_results"
+    send_container_scan_results "$results_file"
 }
 
 send_container_scan_results() {
-    local scan_results="$1"
+    local results_file="$1"  # Path to temp file with JSON array of scan results
     local endpoint="${SERVER_URL}/api/agent/container-scan"
 
     log_info "Sending container scan results to $endpoint..."
 
-    local payload
-    payload="{\"agent_id\": \"${AGENT_ID}\", \"hostname\": \"$(hostname)\", \"scanner\": \"trivy\", \"scanner_version\": \"$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo 'unknown')\", \"images\": ${scan_results}}"
+    local trivy_version
+    trivy_version=$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo 'unknown')
+    local my_hostname
+    my_hostname=$(hostname)
 
-    # Write payload to temp file
+    # Assemble payload to temp file (no large bash variables)
     local tmpfile
     tmpfile=$(mktemp)
-    echo "$payload" > "$tmpfile"
+    printf '{"agent_id": "%s", "hostname": "%s", "scanner": "trivy", "scanner_version": "%s", "images": ' \
+        "$AGENT_ID" "$my_hostname" "$trivy_version" > "$tmpfile"
+    cat "$results_file" >> "$tmpfile"
+    printf '}' >> "$tmpfile"
+    rm -f "$results_file"
 
     local max_retries=3
     local retry_delay=5

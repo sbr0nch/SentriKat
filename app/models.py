@@ -1695,6 +1695,7 @@ class InventoryJob(db.Model):
             'id': self.id,
             'organization_id': self.organization_id,
             'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
             'job_type': self.job_type,
             'status': self.status,
             'priority': self.priority,

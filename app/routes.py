@@ -262,6 +262,12 @@ def admin():
     """Admin panel for managing products"""
     return render_template('admin.html')
 
+@bp.route('/agent-activity')
+@org_admin_required
+def agent_activity():
+    """Agent Activity monitoring page - job queue, worker status, events."""
+    return render_template('agent_activity.html')
+
 @bp.route('/admin-panel')
 @org_admin_required
 def admin_panel():
