@@ -1593,6 +1593,9 @@ def get_vulnerabilities_grouped():
         }
         filters = {k: v for k, v in filters.items() if v is not None and v != ''}
 
+        # Platform filter (windows/linux/macos/container) - applied post-query
+        platform_filter = request.args.get('platform', '').lower().strip()
+
         # Get all matches
         matches = get_filtered_vulnerabilities(filters)
 
@@ -1608,36 +1611,91 @@ def get_vulnerabilities_grouped():
         # Batch fetch asset counts for all products
         asset_counts = {}
         if product_ids:
-            count_results = db.session.query(
+            count_query = db.session.query(
                 ProductInstallation.product_id,
                 func.count(ProductInstallation.id).label('count')
             ).filter(
                 ProductInstallation.product_id.in_(product_ids)
-            ).group_by(ProductInstallation.product_id).all()
+            )
+
+            # Apply platform filter to counts too
+            if platform_filter:
+                count_query = count_query.join(Asset, Asset.id == ProductInstallation.asset_id).filter(Asset.active == True)
+                if platform_filter == 'container':
+                    count_query = count_query.filter(Asset.asset_type == 'container')
+                elif platform_filter == 'windows':
+                    count_query = count_query.filter(Asset.os_name.ilike('%windows%'))
+                elif platform_filter == 'linux':
+                    count_query = count_query.filter(db.or_(
+                        Asset.os_name.ilike('%linux%'), Asset.os_name.ilike('%ubuntu%'),
+                        Asset.os_name.ilike('%debian%'), Asset.os_name.ilike('%centos%'),
+                        Asset.os_name.ilike('%rhel%'), Asset.os_name.ilike('%red hat%'),
+                        Asset.os_name.ilike('%fedora%'), Asset.os_name.ilike('%suse%'),
+                        Asset.os_name.ilike('%arch%'),
+                    ))
+                elif platform_filter == 'macos':
+                    count_query = count_query.filter(db.or_(
+                        Asset.os_name.ilike('%macos%'), Asset.os_name.ilike('%mac os%'),
+                        Asset.os_name.ilike('%darwin%'),
+                    ))
+
+            count_results = count_query.group_by(ProductInstallation.product_id).all()
             asset_counts = {r.product_id: r.count for r in count_results}
 
         # Batch fetch sample assets (up to 10 per product) using window function
         # We'll get all assets and limit per product in Python for simplicity
         product_assets = defaultdict(list)
+        # Track which products have assets matching the platform filter
+        products_with_platform_match = set()
         if product_ids:
-            asset_results = db.session.query(
+            asset_query = db.session.query(
                 ProductInstallation.product_id,
                 Asset.hostname,
                 Asset.ip_address,
-                Asset.asset_type
+                Asset.asset_type,
+                Asset.os_name
             ).join(
                 Asset, Asset.id == ProductInstallation.asset_id
             ).filter(
                 ProductInstallation.product_id.in_(product_ids),
                 Asset.active == True
-            ).all()
+            )
+
+            # Apply platform filter at the DB level if specified
+            if platform_filter:
+                if platform_filter == 'container':
+                    asset_query = asset_query.filter(Asset.asset_type == 'container')
+                elif platform_filter == 'windows':
+                    asset_query = asset_query.filter(Asset.os_name.ilike('%windows%'))
+                elif platform_filter == 'linux':
+                    asset_query = asset_query.filter(db.or_(
+                        Asset.os_name.ilike('%linux%'),
+                        Asset.os_name.ilike('%ubuntu%'),
+                        Asset.os_name.ilike('%debian%'),
+                        Asset.os_name.ilike('%centos%'),
+                        Asset.os_name.ilike('%rhel%'),
+                        Asset.os_name.ilike('%red hat%'),
+                        Asset.os_name.ilike('%fedora%'),
+                        Asset.os_name.ilike('%suse%'),
+                        Asset.os_name.ilike('%arch%'),
+                    ))
+                elif platform_filter == 'macos':
+                    asset_query = asset_query.filter(db.or_(
+                        Asset.os_name.ilike('%macos%'),
+                        Asset.os_name.ilike('%mac os%'),
+                        Asset.os_name.ilike('%darwin%'),
+                    ))
+
+            asset_results = asset_query.all()
             # Group by product_id, limit to 10 per product
             for r in asset_results:
+                products_with_platform_match.add(r.product_id)
                 if len(product_assets[r.product_id]) < 10:
                     product_assets[r.product_id].append({
                         'hostname': r.hostname,
                         'ip': r.ip_address,
-                        'type': r.asset_type
+                        'type': r.asset_type,
+                        'os_name': r.os_name or ''
                     })
 
         # Group by CVE ID
@@ -1693,6 +1751,15 @@ def get_vulnerabilities_grouped():
 
         results = []
         for cve_id, group in cve_groups.items():
+            # When platform filter is active, skip CVEs with no matching assets
+            if platform_filter:
+                has_platform_match = any(
+                    p['product_id'] in products_with_platform_match
+                    for p in group['affected_products']
+                )
+                if not has_platform_match:
+                    continue
+
             # Calculate highest priority across all affected products
             max_priority_level = max(priority_order.get(p, 2) for p in group['priorities'])
             highest_priority = level_names.get(max_priority_level, 'medium')

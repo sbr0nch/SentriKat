@@ -57,7 +57,7 @@ param(
 )
 
 $ErrorActionPreference = "SilentlyContinue"
-$AgentVersion = "1.2.0"
+$AgentVersion = "1.3.0"
 $LogFile = "$env:ProgramData\SentriKat\agent.log"
 $HeartbeatIntervalMinutes = 5
 
@@ -218,10 +218,112 @@ function Get-SystemInfo {
 # Software Inventory Collection
 # ============================================================================
 
+function Test-SecurityRelevant {
+    param([string]$Name, [string]$Vendor)
+
+    $nameLower = $Name.ToLower()
+    $vendorLower = ($Vendor ?? "").ToLower()
+
+    # ---- STAGE 1: Exclude known noise ----
+
+    # Skip Windows Update packages (KBs are tracked separately)
+    if ($nameLower -match '^(kb\d|update for|security update for|hotfix for|cumulative update)') { return $false }
+
+    # Skip Visual C++ Redistributables noise (keep only the main one)
+    if ($nameLower -match 'visual c\+\+.*redistributable' -and $nameLower -notmatch '(2015|2017|2019|2022|latest)') { return $false }
+
+    # Skip .NET Framework sub-components (keep main runtime)
+    if ($nameLower -match '\.net.*(targeting pack|sdk|multi-targeting|language pack|intellisense)') { return $false }
+
+    # Skip language packs, help files, documentation
+    if ($nameLower -match '(language pack|help viewer|documentation|localization|spell check)') { return $false }
+
+    # Skip hardware drivers & tools (vendor-specific, not CVE-tracked)
+    if ($nameLower -match '(realtek|intel.*driver|nvidia.*driver|amd.*driver|broadcom.*driver|synaptics|wacom|logitech.*driver)') { return $false }
+
+    # Skip printer/scanner software
+    if ($nameLower -match '(print.*driver|scan.*driver|hp smart|canon.*print|epson.*print|brother.*print)') { return $false }
+
+    # Skip fonts
+    if ($nameLower -match '(font|typeface)' -and $nameLower -notmatch 'fontforge') { return $false }
+
+    # Skip telemetry and diagnostic tools
+    if ($nameLower -match '(telemetry|diagnostic|feedback|customer experience)') { return $false }
+
+    # Skip game-related (not enterprise-relevant)
+    if ($nameLower -match '(game bar|xbox|solitaire|candy crush|minecraft|disney)') { return $false }
+
+    # Skip Windows Store apps noise
+    if ($nameLower -match '(cortana|people app|groove music|movies & tv|tips|get help|mixed reality)') { return $false }
+
+    # ---- STAGE 2: Include security-relevant categories ----
+
+    # Microsoft core products (always relevant)
+    if ($nameLower -match '^microsoft (office|365|edge|exchange|sql server|visual studio|teams|sharepoint|iis|\.net|asp\.net|powershell|windows admin)') { return $true }
+    if ($nameLower -match '^(\.net (framework|runtime|desktop)|asp\.net|powershell)') { return $true }
+
+    # Browsers (common CVE targets)
+    if ($nameLower -match '(google chrome|firefox|mozilla firefox|microsoft edge|brave|opera|vivaldi)') { return $true }
+
+    # Security & VPN software
+    if ($nameLower -match '(antivirus|endpoint protection|security|defender|norton|mcafee|kaspersky|bitdefender|malwarebytes|crowdstrike|sentinel)') { return $true }
+    if ($nameLower -match '(vpn|wireguard|openvpn|cisco anyconnect|globalprotect|fortinet|pulse secure|tunnelblick)') { return $true }
+
+    # Remote access & administration tools
+    if ($nameLower -match '(teamviewer|anydesk|vnc|remote desktop|rdp|ssh|putty|winscp|filezilla|mremoteng|mobaxterm)') { return $true }
+
+    # Java runtime (massive CVE surface)
+    if ($nameLower -match '(java|jre|jdk|openjdk|oracle.*java|adoptium|temurin|corretto)') { return $true }
+
+    # Databases
+    if ($nameLower -match '(sql server|mysql|mariadb|postgresql|mongodb|redis|elasticsearch|oracle database|sqlite)') { return $true }
+
+    # Web servers & app servers
+    if ($nameLower -match '(apache|nginx|iis|tomcat|jetty|wildfly|node\.js|nodejs)') { return $true }
+
+    # Container & virtualization
+    if ($nameLower -match '(docker|podman|kubernetes|vmware|virtualbox|hyper-v|vagrant|wsl)') { return $true }
+
+    # Development tools (attack surface when installed)
+    if ($nameLower -match '(visual studio code|vs code|git for windows|python|node\.js|nodejs|ruby|golang|rust|php|perl)') { return $true }
+    if ($nameLower -match '(npm|yarn|pip|composer|cargo|nuget|chocolatey|scoop|winget)') { return $true }
+
+    # PDF & document processing (frequent CVE targets)
+    if ($nameLower -match '(adobe (reader|acrobat|creative|flash|air)|foxit|sumatra|nitro|pdf)') { return $true }
+
+    # Media processing (CVE targets: imagemagick, ffmpeg, etc.)
+    if ($nameLower -match '(vlc|ffmpeg|imagemagick|ghostscript|7-zip|7zip|winrar|winzip|peazip)') { return $true }
+
+    # Networking & communication
+    if ($nameLower -match '(wireshark|nmap|slack|zoom|webex|skype|thunderbird|outlook)') { return $true }
+
+    # CI/CD & DevOps
+    if ($nameLower -match '(jenkins|gitlab|terraform|ansible|puppet|chef|vagrant|packer)') { return $true }
+
+    # Crypto & certificates
+    if ($nameLower -match '(openssl|openssh|gnupg|gpg|certbot|lets.encrypt)') { return $true }
+
+    # Backup & storage
+    if ($nameLower -match '(veeam|acronis|backup|syncthing|rclone|restic)') { return $true }
+
+    # Visual C++ redistributables (keep latest/important versions)
+    if ($nameLower -match 'visual c\+\+.*(2015|2017|2019|2022|latest).*redistributable') { return $true }
+
+    # .NET Framework/Runtime (keep main installations)
+    if ($nameLower -match '^(\.net (framework|runtime|desktop runtime) \d|microsoft \.net)' -and $nameLower -notmatch '(targeting|sdk|language)') { return $true }
+
+    # If vendor is a known security-relevant vendor, include
+    if ($vendorLower -match '(microsoft|oracle|apache|mozilla|google|docker|vmware|adobe|cisco|fortinet|palo alto|elastic|hashicorp|jetbrains|atlassian|grafana|redis|postgresql|mariadb|mongodb)') { return $true }
+
+    # Default: skip unknown/unrecognized software
+    return $false
+}
+
 function Get-InstalledSoftware {
     Write-Log "Collecting software inventory..."
 
     $software = @()
+    $totalScanned = 0
 
     # Registry paths for installed software
     $registryPaths = @(
@@ -236,6 +338,7 @@ function Get-InstalledSoftware {
                      Where-Object { $_.DisplayName -and $_.DisplayName.Trim() -ne "" }
 
             foreach ($item in $items) {
+                $totalScanned++
                 $vendor = $item.Publisher
                 $name = $item.DisplayName
                 $version = $item.DisplayVersion
@@ -247,6 +350,11 @@ function Get-InstalledSoftware {
 
                 # Clean up vendor name
                 $vendor = $vendor -replace ',.*$', '' -replace '\s+Inc\.?$', '' -replace '\s+LLC\.?$', '' -replace '\s+Ltd\.?$', ''
+
+                # Filter to security-relevant software only
+                if (-not (Test-SecurityRelevant -Name $name -Vendor $vendor)) {
+                    continue
+                }
 
                 $software += @{
                     vendor = $vendor.Trim()
@@ -260,9 +368,13 @@ function Get-InstalledSoftware {
         }
     }
 
-    # Also get Windows Features/Roles (Server)
+    # Also get Windows Features/Roles (Server) - only security-relevant ones
     try {
-        $features = Get-WindowsOptionalFeature -Online | Where-Object { $_.State -eq "Enabled" }
+        $securityFeaturePatterns = @('IIS-*', 'TelnetClient', 'TelnetServer', 'SMB1Protocol*', 'TFTP', 'Microsoft-Hyper-V*', 'Containers*', 'Microsoft-Windows-Subsystem-Linux')
+        $features = Get-WindowsOptionalFeature -Online -ErrorAction SilentlyContinue | Where-Object {
+            $feat = $_
+            $feat.State -eq "Enabled" -and ($securityFeaturePatterns | Where-Object { $feat.FeatureName -like $_ })
+        }
         foreach ($feature in $features) {
             $software += @{
                 vendor = "Microsoft"
@@ -285,7 +397,7 @@ function Get-InstalledSoftware {
     }
 
     $result = $uniqueSoftware.Values | Sort-Object { $_.vendor }, { $_.product }
-    Write-Log "Found $($result.Count) unique software packages"
+    Write-Log "Scanned $totalScanned registry entries, selected $($result.Count) security-relevant packages"
 
     return $result
 }
@@ -321,12 +433,21 @@ function Send-Inventory {
 
     $jsonPayload = $payload | ConvertTo-Json -Depth 10 -Compress
 
-    Write-Log "Sending inventory to $endpoint ($($Products.Count) products)..."
+    Write-Log "Sending inventory to $endpoint ($($Products.Count) products, payload: $([math]::Round($jsonPayload.Length / 1024))KB)..."
 
     $headers = @{
         "X-Agent-Key" = $Config.ApiKey
         "Content-Type" = "application/json"
         "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
+    }
+
+    # Write payload to temp file for large inventories (avoids memory issues)
+    $tmpFile = $null
+    $useFile = $jsonPayload.Length -gt 100000  # > 100KB use file
+    if ($useFile) {
+        $tmpFile = [System.IO.Path]::GetTempFileName()
+        [System.IO.File]::WriteAllText($tmpFile, $jsonPayload, [System.Text.Encoding]::UTF8)
+        Write-Log "Large payload written to temp file"
     }
 
     $maxRetries = 3
@@ -337,7 +458,8 @@ function Send-Inventory {
             # Use TLS 1.2
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-            $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $jsonPayload -TimeoutSec 120
+            $bodyParam = if ($useFile) { Get-Content $tmpFile -Raw } else { $jsonPayload }
+            $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyParam -TimeoutSec 120
 
             Write-Log "Inventory sent successfully: $($response.status)"
 
@@ -347,6 +469,7 @@ function Send-Inventory {
                 Write-Log "Summary: Created=$($response.summary.products_created), Updated=$($response.summary.products_updated)"
             }
 
+            if ($tmpFile -and (Test-Path $tmpFile)) { Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue }
             return $true
         }
         catch {
@@ -369,6 +492,7 @@ function Send-Inventory {
         }
     }
 
+    if ($tmpFile -and (Test-Path $tmpFile)) { Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue }
     Write-Log "Failed to send inventory after $maxRetries attempts" -Level "ERROR"
     return $false
 }
