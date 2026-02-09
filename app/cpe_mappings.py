@@ -337,10 +337,14 @@ def normalize_text(text: str) -> str:
         return ''
     # Lowercase
     text = text.lower()
+    # Remove parenthetical content like (x64 de), (64-bit), (x86), etc.
+    text = re.sub(r'\s*\([^)]*\)', '', text)
     # Remove version numbers at the end (e.g., "Chrome 120.0.1234")
-    text = re.sub(r'\s+\d+[\d.]*\s*$', '', text)
-    # Remove common suffixes
-    text = re.sub(r'\s*(x64|x86|64-bit|32-bit|\(64-bit\)|\(x64\))\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s+v?\d+[\d.]*\s*$', '', text)
+    # Remove common suffixes without parentheses
+    text = re.sub(r'\s+(x64|x86|64-bit|32-bit|amd64)\s*', ' ', text, flags=re.IGNORECASE)
+    # Remove trailing "MUI" (multi-language installer)
+    text = re.sub(r'\s+mui\s*$', '', text, flags=re.IGNORECASE)
     # Normalize whitespace
     text = ' '.join(text.split())
     return text.strip()

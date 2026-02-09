@@ -240,8 +240,10 @@ def get_cpe_for_product(product_name, vendor_name=None):
     name_lower = product_name.lower().strip()
 
     # Remove common suffixes for better matching
-    name_lower = re.sub(r'\s*\([^)]*\)\s*$', '', name_lower)  # Remove (x64), (64-bit), etc.
-    name_lower = re.sub(r'\s+v?\d+\..*$', '', name_lower)     # Remove version numbers
+    name_lower = re.sub(r'\s*\([^)]*\)', '', name_lower)      # Remove all parenthetical content
+    name_lower = re.sub(r'\s+v?\d+[\d.]*\s*$', '', name_lower)  # Remove trailing version numbers
+    name_lower = re.sub(r'\s+mui\s*$', '', name_lower)        # Remove trailing MUI
+    name_lower = name_lower.strip()
 
     # Try each mapping
     for pattern_type, pattern, cpe_vendor, cpe_product in CPE_MAPPINGS:
@@ -259,6 +261,11 @@ def apply_cpe_to_product(product):
     """
     Apply CPE mapping to a single product if it doesn't have CPE set.
 
+    Uses multi-tier matching:
+    1. Regex patterns (fast, from CPE_MAPPINGS)
+    2. Curated dictionary mappings (comprehensive, from cpe_mappings.py)
+    3. User-learned mappings (from database)
+
     Args:
         product: Product model instance
 
@@ -269,7 +276,18 @@ def apply_cpe_to_product(product):
     if product.cpe_vendor and product.cpe_product:
         return False
 
+    # Tier 1: Try regex patterns (fast)
     cpe_vendor, cpe_product = get_cpe_for_product(product.product_name, product.vendor)
+
+    # Tier 2: Try curated dictionary + user mappings (comprehensive)
+    if not cpe_vendor or not cpe_product:
+        try:
+            from app.cpe_mappings import get_cpe_for_software
+            cpe_vendor, cpe_product, _ = get_cpe_for_software(
+                product.vendor, product.product_name, use_nvd_fallback=False
+            )
+        except Exception:
+            pass
 
     if cpe_vendor and cpe_product:
         product.cpe_vendor = cpe_vendor
@@ -279,17 +297,28 @@ def apply_cpe_to_product(product):
     return False
 
 
-def batch_apply_cpe_mappings(commit=True):
+def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=50):
     """
     Apply CPE mappings to all products that don't have CPE set.
 
+    Uses multi-tier matching:
+    1. Regex patterns + curated dictionary (instant, local)
+    2. NVD API search for unmatched products (slower, dynamic)
+    3. Auto-saves NVD discoveries as user-learned mappings for future use
+
     Args:
         commit: Whether to commit the changes to database
+        use_nvd: Whether to use NVD API for products not matched locally
+        max_nvd_lookups: Max NVD API queries to make per batch (rate limit protection)
 
     Returns:
         tuple: (updated_count, total_without_cpe)
     """
+    import logging
+    import time
     from app.models import Product
+
+    logger = logging.getLogger(__name__)
 
     # Get products without CPE
     products_without_cpe = Product.query.filter(
@@ -304,9 +333,78 @@ def batch_apply_cpe_mappings(commit=True):
     total_without_cpe = len(products_without_cpe)
     updated_count = 0
 
+    # Phase 1: Apply local matches (regex + curated dict + user-learned mappings)
+    still_unmatched = []
     for product in products_without_cpe:
         if apply_cpe_to_product(product):
             updated_count += 1
+        else:
+            still_unmatched.append(product)
+
+    # Phase 2: Try NVD API for remaining unmatched products
+    if use_nvd and still_unmatched:
+        nvd_lookups = 0
+        # Deduplicate by vendor+product_name to avoid redundant API calls
+        seen_keys = set()
+        unique_unmatched = []
+        for product in still_unmatched:
+            key = f"{product.vendor}|{product.product_name}".lower()
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_unmatched.append(product)
+
+        try:
+            from app.cpe_mappings import get_cpe_for_software, save_user_mapping
+        except ImportError:
+            logger.warning("cpe_mappings module not available for NVD fallback")
+            unique_unmatched = []
+
+        for product in unique_unmatched:
+            if nvd_lookups >= max_nvd_lookups:
+                logger.info(f"Reached max NVD lookups ({max_nvd_lookups}), stopping")
+                break
+
+            try:
+                cpe_vendor, cpe_product, confidence = get_cpe_for_software(
+                    product.vendor, product.product_name, use_nvd_fallback=True
+                )
+                nvd_lookups += 1
+
+                if cpe_vendor and cpe_product and confidence >= 0.5:
+                    # Apply to this product
+                    product.cpe_vendor = cpe_vendor
+                    product.cpe_product = cpe_product
+                    updated_count += 1
+
+                    # Auto-save as user-learned mapping for future use
+                    try:
+                        save_user_mapping(
+                            vendor=product.vendor,
+                            product_name=product.product_name,
+                            cpe_vendor=cpe_vendor,
+                            cpe_product=cpe_product,
+                            source='auto_nvd',
+                            notes=f'Auto-discovered via NVD API (confidence: {confidence:.0%})'
+                        )
+                    except Exception as e:
+                        logger.debug(f"Could not save auto-learned mapping: {e}")
+
+                    # Apply same CPE to all products with same vendor+product_name
+                    for other in still_unmatched:
+                        if (other.id != product.id and
+                            other.vendor == product.vendor and
+                            other.product_name == product.product_name and
+                            not other.cpe_vendor):
+                            other.cpe_vendor = cpe_vendor
+                            other.cpe_product = cpe_product
+                            updated_count += 1
+
+                # Rate limit: brief pause between NVD API calls
+                if nvd_lookups % 5 == 0:
+                    time.sleep(1)
+
+            except Exception as e:
+                logger.debug(f"NVD lookup failed for {product.vendor} {product.product_name}: {e}")
 
     if commit and updated_count > 0:
         db.session.commit()
