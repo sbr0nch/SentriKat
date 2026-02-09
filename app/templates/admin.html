@@ -34,6 +34,12 @@
                 <i class="bi bi-layers me-1"></i>Software Overview
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="import-queue-tab" data-bs-toggle="tab" data-bs-target="#importQueuePane" type="button">
+                <i class="bi bi-inbox me-1"></i>Import Queue
+                <span class="badge bg-primary ms-1" id="importQueueCount" style="display: none;">0</span>
+            </button>
+        </li>
     </ul>
 
     <div class="tab-content" id="inventoryTabContent">
@@ -270,6 +276,82 @@
             </div>
         </div>
     </div><!-- /softwareOverviewPane -->
+
+    <!-- Import Queue Tab -->
+    <div class="tab-pane" id="importQueuePane" role="tabpanel">
+        <div class="alert alert-info mb-3">
+            <i class="bi bi-info-circle me-2"></i>
+            Software discovered from agents and integrations appears here for review before being added to your product inventory.
+        </div>
+
+        <!-- Bulk Actions -->
+        <div class="mb-3 d-flex justify-content-between align-items-center">
+            <div class="btn-group">
+                <button class="btn btn-success btn-sm" onclick="bulkApproveQueue()" id="bulkApproveBtn" disabled>
+                    <i class="bi bi-check-all me-1"></i>Approve Selected
+                </button>
+                <button class="btn btn-outline-danger btn-sm" onclick="bulkRejectQueue()" id="bulkRejectBtn" disabled>
+                    <i class="bi bi-x-lg me-1"></i>Reject Selected
+                </button>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+                <select class="form-select form-select-sm d-inline-block w-auto" id="queuePerPage" onchange="loadImportQueue()">
+                    <option value="25">25 per page</option>
+                    <option value="50">50 per page</option>
+                    <option value="100">100 per page</option>
+                    <option value="200">200 per page</option>
+                </select>
+                <select class="form-select form-select-sm d-inline-block w-auto" id="queueFilterStatus" onchange="loadImportQueue()">
+                    <option value="pending">Pending</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="">All</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Import Queue Table -->
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="form-check-input" id="selectAllQueue" onchange="toggleSelectAllQueue()">
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortImportQueue('vendor')">
+                                    Software <span id="importQueueSortVendor"></span>
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortImportQueue('version')">
+                                    Version <span id="importQueueSortVersion"></span>
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortImportQueue('organization')">
+                                    Organization <span id="importQueueSortOrganization"></span>
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortImportQueue('criticality')">
+                                    Criticality <span id="importQueueSortCriticality"></span>
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortImportQueue('source')">
+                                    Source <span id="importQueueSortSource"></span>
+                                </th>
+                                <th style="width: 120px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="importQueueTable">
+                            <tr>
+                                <td colspan="7" class="text-center py-4 text-muted">
+                                    <i class="bi bi-inbox text-primary" style="font-size: 2rem;"></i>
+                                    <p class="mb-0 mt-2">Click to load import queue...</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer" id="importQueuePagination"></div>
+        </div>
+    </div><!-- /importQueuePane -->
 
     </div><!-- /inventoryTabContent -->
 
@@ -3371,7 +3453,8 @@
             const hashMap = {
                 'products-tab': '',
                 'endpoints-tab': '#endpoints',
-                'software-overview-tab': '#software-overview'
+                'software-overview-tab': '#software-overview',
+                'import-queue-tab': '#import-queue'
             };
             const hash = hashMap[e.target.id] || '';
             history.replaceState(null, '', '/admin' + hash);
@@ -3389,7 +3472,8 @@
         const hash = window.location.hash;
         const tabMap = {
             '#endpoints': 'endpoints-tab',
-            '#software-overview': 'software-overview-tab'
+            '#software-overview': 'software-overview-tab',
+            '#import-queue': 'import-queue-tab'
         };
         const tabId = tabMap[hash];
         if (tabId) {
@@ -3593,6 +3677,248 @@
         if (!softwareOverviewLoaded) loadSoftwareOverview();
     });
 
-    // Hash-based navigation for software-overview is handled by activateTabFromHash() above
+    // =========================================================================
+    // IMPORT QUEUE TAB
+    // =========================================================================
+    let importQueueLoaded = false;
+    let selectedQueueItems = new Set();
+    let importQueueData = [];
+    let importQueuePage = 1;
+    let importQueuePageSize = 25;
+    let importQueueSortField = 'vendor';
+    let importQueueSortDir = 'asc';
+    let importQueueOrganizations = [];
+
+    // Load organizations for import queue dropdowns
+    async function loadImportQueueOrgs() {
+        try {
+            const response = await fetch('/api/organizations');
+            if (response.ok) {
+                const data = await response.json();
+                importQueueOrganizations = Array.isArray(data) ? data : (data.organizations || []);
+            }
+        } catch (e) { console.error('Failed to load orgs for queue:', e); }
+    }
+
+    async function loadImportQueueCount() {
+        try {
+            const response = await fetch('/api/import/queue/count');
+            if (response.ok) {
+                const data = await response.json();
+                const count = data.pending || 0;
+                const countEl = document.getElementById('importQueueCount');
+                if (countEl) {
+                    countEl.textContent = count;
+                    countEl.style.display = count > 0 ? 'inline-block' : 'none';
+                }
+            }
+        } catch (e) { console.error('Error loading queue count:', e); }
+    }
+
+    function sortImportQueue(field) {
+        if (importQueueSortField === field) {
+            importQueueSortDir = importQueueSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            importQueueSortField = field;
+            importQueueSortDir = 'asc';
+        }
+        importQueuePage = 1;
+        renderImportQueue();
+    }
+
+    function changeImportQueuePage(newPage) {
+        importQueuePage = newPage;
+        renderImportQueue();
+    }
+
+    function renderImportQueue() {
+        const tbody = document.getElementById('importQueueTable');
+        const paginationContainer = document.getElementById('importQueuePagination');
+        if (!tbody) return;
+
+        if (importQueueData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="bi bi-inbox text-success" style="font-size: 2rem;"></i><p class="mb-0 mt-2">No items in queue</p></td></tr>';
+            if (paginationContainer) paginationContainer.innerHTML = '';
+            return;
+        }
+
+        const sortedData = [...importQueueData].sort((a, b) => {
+            let aVal, bVal;
+            switch (importQueueSortField) {
+                case 'vendor': aVal = `${a.vendor || ''} ${a.product_name || ''}`.toLowerCase(); bVal = `${b.vendor || ''} ${b.product_name || ''}`.toLowerCase(); break;
+                case 'version': aVal = (a.detected_version || '').toLowerCase(); bVal = (b.detected_version || '').toLowerCase(); break;
+                case 'organization': aVal = (a.organization_name || '').toLowerCase(); bVal = (b.organization_name || '').toLowerCase(); break;
+                case 'source': aVal = (a.integration_name || 'zzz').toLowerCase(); bVal = (b.integration_name || 'zzz').toLowerCase(); break;
+                default: aVal = ''; bVal = '';
+            }
+            if (aVal < bVal) return importQueueSortDir === 'asc' ? -1 : 1;
+            if (aVal > bVal) return importQueueSortDir === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        const totalPages = Math.ceil(sortedData.length / importQueuePageSize);
+        const startIdx = (importQueuePage - 1) * importQueuePageSize;
+        const pageData = sortedData.slice(startIdx, startIdx + importQueuePageSize);
+
+        tbody.innerHTML = pageData.map(item => {
+            const versions = item.available_versions || [];
+            const versionOptions = versions.length > 0
+                ? versions.map(v => `<option value="${escapeHtml(v)}" ${v === item.selected_version ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')
+                : `<option value="${escapeHtml(item.detected_version || '')}">${escapeHtml(item.detected_version || 'Any')}</option>`;
+
+            return `
+                <tr data-queue-id="${item.id}">
+                    <td><input type="checkbox" class="form-check-input queue-item-checkbox" data-queue-id="${item.id}" onchange="toggleQueueSelect(${item.id}, this)" ${item.status !== 'pending' ? 'disabled' : ''}></td>
+                    <td>
+                        <div class="fw-semibold">${escapeHtml(item.vendor)}
+                            ${item.cpe_vendor && item.cpe_product
+                                ? `<span class="badge bg-success-subtle text-success ms-1" title="CPE matched"><i class="bi bi-shield-check"></i></span>`
+                                : `<span class="badge bg-warning-subtle text-warning ms-1" title="No CPE match"><i class="bi bi-shield-exclamation"></i></span>`}
+                        </div>
+                        <div class="text-muted small">${escapeHtml(item.product_name)}</div>
+                    </td>
+                    <td>${item.status === 'pending' ? `<select class="form-select form-select-sm" style="width: 120px;" onchange="updateQueueItemVersion(${item.id}, this.value)"><option value="">Any version</option>${versionOptions}</select>` : `<span class="text-muted">${escapeHtml(item.selected_version || item.detected_version || 'Any')}</span>`}</td>
+                    <td>${item.status === 'pending' ? `<select class="form-select form-select-sm" style="width: 140px;" onchange="updateQueueItemOrg(${item.id}, this.value)"><option value="">Select org...</option>${importQueueOrganizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}</select>` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}</td>
+                    <td><small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small></td>
+                    <td>${item.status === 'pending' ? `<button class="btn btn-success btn-sm me-1" onclick="approveQueueItem(${item.id})" title="Approve"><i class="bi bi-check"></i></button><button class="btn btn-outline-danger btn-sm" onclick="rejectQueueItem(${item.id})" title="Reject"><i class="bi bi-x"></i></button>` : `<span class="badge bg-${item.status === 'approved' ? 'success' : 'secondary'}">${item.status}</span>`}</td>
+                </tr>`;
+        }).join('');
+
+        if (paginationContainer && totalPages > 1) {
+            paginationContainer.innerHTML = `<div class="d-flex justify-content-between align-items-center"><small class="text-muted">Showing ${startIdx + 1}-${Math.min(startIdx + importQueuePageSize, sortedData.length)} of ${sortedData.length}</small><nav><ul class="pagination pagination-sm mb-0"><li class="page-item ${importQueuePage === 1 ? 'disabled' : ''}"><a class="page-link" href="#" onclick="changeImportQueuePage(${importQueuePage - 1}); return false;">&laquo;</a></li>${Array.from({length: Math.min(5, totalPages)}, (_, i) => { let p; if (totalPages <= 5) p = i+1; else if (importQueuePage <= 3) p = i+1; else if (importQueuePage >= totalPages-2) p = totalPages-4+i; else p = importQueuePage-2+i; return `<li class="page-item ${p === importQueuePage ? 'active' : ''}"><a class="page-link" href="#" onclick="changeImportQueuePage(${p}); return false;">${p}</a></li>`; }).join('')}<li class="page-item ${importQueuePage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="changeImportQueuePage(${importQueuePage + 1}); return false;">&raquo;</a></li></ul></nav></div>`;
+        } else if (paginationContainer) {
+            paginationContainer.innerHTML = sortedData.length > 0 ? `<small class="text-muted">${sortedData.length} items</small>` : '';
+        }
+    }
+
+    async function loadImportQueue() {
+        const status = document.getElementById('queueFilterStatus')?.value || 'pending';
+        const perPage = parseInt(document.getElementById('queuePerPage')?.value) || 25;
+        const tbody = document.getElementById('importQueueTable');
+        if (!tbody) return;
+
+        importQueuePage = 1;
+        importQueuePageSize = perPage;
+
+        const selectAllCheckbox = document.getElementById('selectAllQueue');
+        if (selectAllCheckbox) selectAllCheckbox.checked = false;
+        selectedQueueItems.clear();
+        updateQueueBulkButtons();
+
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>';
+
+        try {
+            if (importQueueOrganizations.length === 0) await loadImportQueueOrgs();
+            const response = await fetch(`/api/import/queue?status=${status}`);
+            if (!response.ok) throw new Error('Failed to load queue');
+            const data = await response.json();
+            importQueueData = data.items || [];
+            renderImportQueue();
+            loadImportQueueCount();
+        } catch (error) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i><p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p></td></tr>`;
+        }
+    }
+
+    function toggleQueueSelect(itemId, checkbox) {
+        if (checkbox.checked) selectedQueueItems.add(itemId); else selectedQueueItems.delete(itemId);
+        updateQueueBulkButtons();
+    }
+
+    function toggleSelectAllQueue() {
+        const selectAll = document.getElementById('selectAllQueue');
+        document.querySelectorAll('.queue-item-checkbox:not(:disabled)').forEach(cb => {
+            cb.checked = selectAll.checked;
+            const id = parseInt(cb.dataset.queueId);
+            if (selectAll.checked) selectedQueueItems.add(id); else selectedQueueItems.delete(id);
+        });
+        updateQueueBulkButtons();
+    }
+
+    function updateQueueBulkButtons() {
+        const count = selectedQueueItems.size;
+        const approveBtn = document.getElementById('bulkApproveBtn');
+        const rejectBtn = document.getElementById('bulkRejectBtn');
+        if (approveBtn) approveBtn.disabled = count === 0;
+        if (rejectBtn) rejectBtn.disabled = count === 0;
+    }
+
+    async function updateQueueItemVersion(itemId, version) {
+        try { await fetch(`/api/import/queue/${itemId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_version: version || null }) }); } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    }
+
+    async function updateQueueItemOrg(itemId, orgId) {
+        try { await fetch(`/api/import/queue/${itemId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organization_id: orgId ? parseInt(orgId) : null }) }); } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    }
+
+    async function approveQueueItem(itemId) {
+        const item = importQueueData.find(i => i.id === itemId);
+        if (item && (!item.cpe_vendor || !item.cpe_product)) {
+            const confirmed = await showConfirm(
+                `<div class="text-start"><div class="alert alert-warning mb-3"><i class="bi bi-shield-exclamation me-2"></i><strong>No CPE mapping found</strong></div><p><strong>${escapeHtml(item.vendor)} ${escapeHtml(item.product_name)}</strong> has no CPE identifier.</p><p class="mb-0 text-muted small">Vulnerabilities will NOT be detected. You can assign CPE later in Products.</p></div>`,
+                'Approve Without CPE?', 'Approve Anyway', 'btn-warning'
+            );
+            if (!confirmed) return;
+        }
+        try {
+            const response = await fetch(`/api/import/queue/${itemId}/approve`, { method: 'POST' });
+            if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'Failed'); }
+            showToast('Product added successfully', 'success');
+            loadImportQueue();
+        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    }
+
+    async function rejectQueueItem(itemId) {
+        try {
+            const response = await fetch(`/api/import/queue/${itemId}/reject`, { method: 'POST' });
+            if (!response.ok) throw new Error('Failed to reject');
+            showToast('Item rejected', 'success');
+            loadImportQueue();
+        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    }
+
+    async function bulkApproveQueue() {
+        if (selectedQueueItems.size === 0) return;
+        const selectedItems = importQueueData.filter(i => selectedQueueItems.has(i.id));
+        const withoutCpe = selectedItems.filter(i => !i.cpe_vendor || !i.cpe_product).length;
+        const msg = withoutCpe > 0
+            ? `Approve ${selectedQueueItems.size} item(s)? ${withoutCpe} without CPE mapping.`
+            : `Approve ${selectedQueueItems.size} item(s) and add to product inventory?`;
+        const confirmed = await showConfirm(msg, 'Bulk Approve', 'Approve All', withoutCpe > 0 ? 'btn-warning' : 'btn-success');
+        if (!confirmed) return;
+        try {
+            const response = await fetch('/api/import/queue/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve', item_ids: Array.from(selectedQueueItems) }) });
+            const result = await response.json();
+            showToast(`Approved ${result.processed} items`, 'success');
+            selectedQueueItems.clear();
+            loadImportQueue();
+        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    }
+
+    async function bulkRejectQueue() {
+        if (selectedQueueItems.size === 0) return;
+        const confirmed = await showConfirm(`Reject ${selectedQueueItems.size} item(s)?`, 'Bulk Reject', 'Reject All', 'btn-danger');
+        if (!confirmed) return;
+        try {
+            const response = await fetch('/api/import/queue/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reject', item_ids: Array.from(selectedQueueItems) }) });
+            const result = await response.json();
+            showToast(`Rejected ${result.processed} items`, 'success');
+            selectedQueueItems.clear();
+            loadImportQueue();
+        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    }
+
+    // Lazy load import queue on tab show
+    document.getElementById('import-queue-tab')?.addEventListener('shown.bs.tab', function() {
+        if (!importQueueLoaded) {
+            loadImportQueue();
+            importQueueLoaded = true;
+        }
+    });
+
+    // Load import queue count on page load (for badge)
+    loadImportQueueCount();
+
+    // Hash-based navigation for all tabs is handled by activateTabFromHash() above
 </script>
 {% endblock %}

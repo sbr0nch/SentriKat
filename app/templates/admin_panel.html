@@ -696,12 +696,7 @@
                         <i class="bi bi-key-fill me-2"></i>Agent Keys
                     </button>
                 </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="import-queue-tab" data-bs-toggle="pill" data-bs-target="#importQueue" type="button">
-                        <i class="bi bi-inbox me-2"></i>Import Queue
-                        <span class="badge bg-primary ms-1" id="importQueueCount">0</span>
-                    </button>
-                </li>
+                <!-- Import Queue moved to Inventory page (/admin#import-queue) -->
                 {% if license and license.is_professional() %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="jira-integration-tab" data-bs-toggle="pill" data-bs-target="#jiraIntegration" type="button">
@@ -783,7 +778,7 @@
                             </div>
                         </div>
                         <div class="col-md-4">
-                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="document.getElementById('import-queue-tab').click()">
+                            <div class="card h-100 stat-card" style="cursor: pointer;" onclick="window.location.href='/admin#import-queue'">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between">
                                         <div>
@@ -859,81 +854,7 @@
                     </div>
                 </div>
 
-                <!-- Import Queue Sub-Tab -->
-                <div class="tab-pane fade" id="importQueue" role="tabpanel">
-                    <div class="alert alert-info mb-3">
-                        <i class="bi bi-info-circle me-2"></i>
-                        Software discovered from integrations and agents appears here for review before being added to your product inventory.
-                    </div>
-
-                    <!-- Bulk Actions -->
-                    <div class="mb-3 d-flex justify-content-between align-items-center">
-                        <div class="btn-group">
-                            <button class="btn btn-success btn-sm" onclick="bulkApproveQueue()" id="bulkApproveBtn" disabled>
-                                <i class="bi bi-check-all me-1"></i>Approve Selected
-                            </button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="bulkRejectQueue()" id="bulkRejectBtn" disabled>
-                                <i class="bi bi-x-lg me-1"></i>Reject Selected
-                            </button>
-                        </div>
-                        <div class="d-flex gap-2 align-items-center">
-                            <select class="form-select form-select-sm d-inline-block w-auto" id="queuePerPage" onchange="loadImportQueue()">
-                                <option value="25">25 per page</option>
-                                <option value="50">50 per page</option>
-                                <option value="100">100 per page</option>
-                                <option value="200">200 per page</option>
-                            </select>
-                            <select class="form-select form-select-sm d-inline-block w-auto" id="queueFilterStatus" onchange="loadImportQueue()">
-                                <option value="pending">Pending</option>
-                                <option value="approved">Approved</option>
-                                <option value="rejected">Rejected</option>
-                                <option value="">All</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Import Queue Table -->
-                    <div class="card">
-                        <div class="card-body p-0">
-                            <div class="table-responsive">
-                                <table class="table table-hover mb-0">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th style="width: 40px;">
-                                                <input type="checkbox" class="form-check-input" id="selectAllQueue" onchange="toggleSelectAllQueue()">
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortImportQueue('vendor')">
-                                                Software <span id="importQueueSortVendor"></span>
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortImportQueue('version')">
-                                                Version <span id="importQueueSortVersion"></span>
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortImportQueue('organization')">
-                                                Organization <span id="importQueueSortOrganization"></span>
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortImportQueue('criticality')">
-                                                Criticality <span id="importQueueSortCriticality"></span>
-                                            </th>
-                                            <th style="cursor: pointer;" onclick="sortImportQueue('source')">
-                                                Source <span id="importQueueSortSource"></span>
-                                            </th>
-                                            <th style="width: 120px;">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="importQueueTable">
-                                        <tr>
-                                            <td colspan="7" class="text-center py-4 text-muted">
-                                                <i class="bi bi-inbox text-primary" style="font-size: 2rem;"></i>
-                                                <p class="mb-0 mt-2">Loading import queue...</p>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="card-footer" id="importQueuePagination"></div>
-                    </div>
-                </div>
+                <!-- Import Queue moved to Inventory page (/admin#import-queue) -->
 
                 <!-- Pull Sources Sub-Tab - Coming Soon -->
                 <div class="tab-pane fade" id="pullSources" role="tabpanel">
