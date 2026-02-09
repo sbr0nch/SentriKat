@@ -2661,7 +2661,7 @@ class ContainerImage(db.Model):
     __table_args__ = (
         db.Index('idx_container_org_active', 'organization_id', 'active'),
         db.Index('idx_container_image_name', 'image_name', 'image_tag'),
-        db.UniqueConstraint('organization_id', 'asset_id', 'image_id', name='uix_org_asset_image'),
+        db.UniqueConstraint('organization_id', 'asset_id', 'image_name', 'image_tag', name='uix_org_asset_image'),
     )
 
     @property
