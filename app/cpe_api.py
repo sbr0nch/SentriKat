@@ -951,3 +951,24 @@ def apply_cpe_suggestions():
         })
     else:
         return jsonify({'error': 'Provide product_ids or set apply_all=true'}), 400
+
+
+# ============================================================================
+# Knowledge Base Sync Endpoints
+# ============================================================================
+
+@bp.route('/kb/status', methods=['GET'])
+@manager_required
+def kb_sync_status():
+    """Get KB sync configuration and status."""
+    from app.kb_sync import get_kb_sync_status
+    return jsonify(get_kb_sync_status())
+
+
+@bp.route('/kb/sync', methods=['POST'])
+@admin_required
+def kb_sync_trigger():
+    """Manually trigger a KB sync (push + pull)."""
+    from app.kb_sync import kb_sync
+    result = kb_sync()
+    return jsonify(result)

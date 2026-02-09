@@ -145,6 +145,16 @@ def start_scheduler(app):
     )
     logger.info("License heartbeat scheduled every 12 hours")
 
+    # Schedule KB sync (every 12 hours, offset by 5 minutes from license heartbeat)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('kb_sync', kb_sync_job, app),
+        trigger=IntervalTrigger(hours=12, minutes=5),
+        id='kb_sync',
+        name='SentriKat KB Sync (CPE mappings)',
+        replace_existing=True
+    )
+    logger.info("KB sync scheduled every 12 hours")
+
     scheduler.start()
     logger.info(f"Scheduler started. CISA KEV sync scheduled at {Config.SYNC_HOUR:02d}:{Config.SYNC_MINUTE:02d}")
 
@@ -556,3 +566,25 @@ def license_heartbeat_job(app):
 
         except Exception as e:
             logger.error(f"License heartbeat job failed: {str(e)}", exc_info=True)
+
+
+def kb_sync_job(app):
+    """Job to sync CPE mappings with the SentriKat Knowledge Base."""
+    with app.app_context():
+        try:
+            from app.kb_sync import kb_sync
+
+            logger.info("Starting KB sync...")
+            result = kb_sync()
+            if result.get('success'):
+                push = result.get('results', {}).get('push', {})
+                pull = result.get('results', {}).get('pull', {})
+                logger.info(
+                    f"KB sync OK: pushed {push.get('pushed', 0)}, "
+                    f"imported {pull.get('imported', 0)}"
+                )
+            else:
+                logger.warning(f"KB sync had issues: {result.get('error', 'unknown')}")
+
+        except Exception as e:
+            logger.error(f"KB sync job failed: {str(e)}", exc_info=True)

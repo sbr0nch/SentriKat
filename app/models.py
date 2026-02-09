@@ -2117,16 +2117,64 @@ class ProductVersionHistory(db.Model):
     product = db.relationship('Product', backref=db.backref('version_changes', lazy='dynamic'))
 
     @staticmethod
+    def _compare_versions(old_ver, new_ver):
+        """
+        Compare two version strings. Returns:
+          1  if new_ver > old_ver  (upgrade)
+         -1  if new_ver < old_ver  (downgrade)
+          0  if equal or unparseable
+        Handles: 1.2.3, 1.2.3-ubuntu1, 1.2.3.4, epoch:ver-release
+        """
+        import re
+
+        def normalize(v):
+            if not v:
+                return []
+            # Strip epoch (e.g. "2:1.2.3" -> "1.2.3")
+            v = re.sub(r'^\d+:', '', v)
+            # Strip release suffix after hyphen (e.g. "1.2.3-1ubuntu1" -> "1.2.3")
+            v = v.split('-')[0]
+            # Split on dots and extract numeric parts
+            parts = []
+            for segment in v.split('.'):
+                # Extract leading number from each segment
+                m = re.match(r'(\d+)', segment)
+                if m:
+                    parts.append(int(m.group(1)))
+            return parts
+
+        try:
+            old_parts = normalize(old_ver)
+            new_parts = normalize(new_ver)
+            if not old_parts or not new_parts:
+                return 0
+            # Pad shorter list with zeros
+            max_len = max(len(old_parts), len(new_parts))
+            old_parts += [0] * (max_len - len(old_parts))
+            new_parts += [0] * (max_len - len(new_parts))
+            for o, n in zip(old_parts, new_parts):
+                if n > o:
+                    return 1
+                if n < o:
+                    return -1
+            return 0
+        except Exception:
+            return 0
+
+    @staticmethod
     def record_change(installation_id, asset_id, product_id, old_version, new_version, detected_by='agent'):
-        """Record a version change."""
+        """Record a version change with upgrade/downgrade detection."""
         # Determine change type
         if not old_version:
             change_type = 'install'
         elif old_version == new_version:
             change_type = 'reinstall'
         else:
-            # Simple version comparison (could be enhanced)
-            change_type = 'update'  # Could detect downgrade with proper version parsing
+            cmp = ProductVersionHistory._compare_versions(old_version, new_version)
+            if cmp < 0:
+                change_type = 'downgrade'
+            else:
+                change_type = 'update'  # upgrade or unparseable
 
         record = ProductVersionHistory(
             installation_id=installation_id,
