@@ -459,6 +459,10 @@ function Check-Commands {
 
 $TrivyBin = "$env:ProgramData\SentriKat\trivy.exe"
 $TrivyCacheDir = "$env:ProgramData\SentriKat\trivy-cache"
+# Offline mode: set $env:TRIVY_OFFLINE = "true" to skip download attempts.
+# Pre-deploy trivy.exe to $env:ProgramData\SentriKat\trivy.exe and optionally
+# pre-download DB with: trivy.exe image --download-db-only --cache-dir <cache-dir>
+$TrivyOffline = $env:TRIVY_OFFLINE -eq "true"
 
 function Test-DockerAvailable {
     try {
@@ -472,8 +476,23 @@ function Test-DockerAvailable {
 
 function Install-Trivy {
     if (Test-Path $TrivyBin) {
-        Write-Log "Trivy already installed at $TrivyBin"
+        Write-Log "Trivy found at $TrivyBin"
         return $true
+    }
+
+    # Check if trivy is already in PATH (e.g. installed via scoop/chocolatey)
+    $existingTrivy = Get-Command trivy -ErrorAction SilentlyContinue
+    if ($existingTrivy) {
+        $script:TrivyBin = $existingTrivy.Source
+        Write-Log "Trivy found in PATH at $script:TrivyBin"
+        return $true
+    }
+
+    # Offline mode: don't attempt download
+    if ($TrivyOffline) {
+        Write-Log "Trivy not found and TRIVY_OFFLINE=true. Pre-deploy trivy.exe to $TrivyBin" -Level "WARN"
+        Write-Log "Download from: https://github.com/aquasecurity/trivy/releases" -Level "WARN"
+        return $false
     }
 
     Write-Log "Installing Trivy for container image scanning..."
@@ -485,29 +504,26 @@ function Install-Trivy {
         # Detect architecture
         $arch = if ([Environment]::Is64BitOperatingSystem) { "64bit" } else { "32bit" }
 
-        # Download latest Trivy release
-        $tmpDir = Join-Path $env:TEMP "trivy-install"
+        # Download pinned Trivy version (not "latest" to avoid surprises)
+        $trivyVersion = "0.58.2"
+        $downloadUrl = "https://github.com/aquasecurity/trivy/releases/download/v$trivyVersion/trivy_${trivyVersion}_Windows-$arch.zip"
+
+        $tmpDir = Join-Path $env:TEMP "trivy-install-$(Get-Random)"
         New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
 
-        $downloadUrl = "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_*_Windows-$arch.zip"
-
-        # Use GitHub API to get latest release URL
+        Write-Log "Downloading Trivy v$trivyVersion..."
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/aquasecurity/trivy/releases/latest" -TimeoutSec 30
-        $asset = $releases.assets | Where-Object { $_.name -match "Windows-$arch\.zip$" } | Select-Object -First 1
+        $zipPath = Join-Path $tmpDir "trivy.zip"
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -TimeoutSec 120
 
-        if ($asset) {
-            $zipPath = Join-Path $tmpDir "trivy.zip"
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -TimeoutSec 120
-            Expand-Archive -Path $zipPath -DestinationPath $tmpDir -Force
+        Expand-Archive -Path $zipPath -DestinationPath $tmpDir -Force
 
-            $trivyExe = Get-ChildItem -Path $tmpDir -Filter "trivy.exe" -Recurse | Select-Object -First 1
-            if ($trivyExe) {
-                Copy-Item $trivyExe.FullName $TrivyBin -Force
-                Write-Log "Trivy installed successfully"
-                Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
-                return $true
-            }
+        $trivyExe = Get-ChildItem -Path $tmpDir -Filter "trivy.exe" -Recurse | Select-Object -First 1
+        if ($trivyExe) {
+            Copy-Item $trivyExe.FullName $TrivyBin -Force
+            Write-Log "Trivy v$trivyVersion installed successfully"
+            Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+            return $true
         }
 
         Write-Log "Failed to install Trivy" -Level "WARN"
@@ -516,6 +532,7 @@ function Install-Trivy {
     }
     catch {
         Write-Log "Failed to install Trivy: $_" -Level "WARN"
+        Write-Log "For offline deployment, pre-install trivy.exe to $TrivyBin" -Level "WARN"
         return $false
     }
 }

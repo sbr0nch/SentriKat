@@ -381,7 +381,12 @@ get_installed_software() {
 
 TRIVY_BIN="/usr/local/bin/trivy"
 TRIVY_CACHE_DIR="/var/cache/sentrikat/trivy"
+TRIVY_DB_DIR="${TRIVY_CACHE_DIR}/db"
 CONTAINER_SCAN_ENABLED="${CONTAINER_SCAN_ENABLED:-auto}"  # auto, true, false
+# Offline mode: set TRIVY_OFFLINE=true in agent.conf to skip download attempts.
+# Pre-deploy trivy binary to /usr/local/bin/trivy and optionally
+# pre-download the DB with: trivy image --download-db-only --cache-dir /var/cache/sentrikat/trivy
+TRIVY_OFFLINE="${TRIVY_OFFLINE:-false}"
 
 check_docker_available() {
     if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
@@ -393,9 +398,24 @@ check_docker_available() {
 }
 
 install_trivy() {
+    # Check common paths: pre-deployed binary, system package, or our install location
     if [[ -x "$TRIVY_BIN" ]]; then
-        log_info "Trivy already installed at $TRIVY_BIN"
+        log_info "Trivy found at $TRIVY_BIN"
         return 0
+    fi
+
+    # Check if trivy is already in PATH (e.g. installed via package manager)
+    if command -v trivy &>/dev/null; then
+        TRIVY_BIN=$(command -v trivy)
+        log_info "Trivy found in PATH at $TRIVY_BIN"
+        return 0
+    fi
+
+    # Offline mode: don't attempt download
+    if [[ "$TRIVY_OFFLINE" == "true" ]]; then
+        log_warn "Trivy not found and TRIVY_OFFLINE=true. Pre-deploy trivy to $TRIVY_BIN"
+        log_warn "Download from: https://github.com/aquasecurity/trivy/releases"
+        return 1
     fi
 
     log_info "Installing Trivy for container image scanning..."
@@ -413,29 +433,26 @@ install_trivy() {
             ;;
     esac
 
-    # Download latest Trivy release
+    # Download Trivy release binary directly (no piping curl to sh)
     local tmpdir
     tmpdir=$(mktemp -d)
+    local trivy_version="0.58.2"
+    local download_url="https://github.com/aquasecurity/trivy/releases/download/v${trivy_version}/trivy_${trivy_version}_${arch}.tar.gz"
 
-    if curl -sfL "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_*_${arch}.tar.gz" -o "$tmpdir/trivy.tar.gz" 2>/dev/null; then
+    log_info "Downloading Trivy v${trivy_version} from GitHub..."
+    if curl -sfL --max-time 120 "$download_url" -o "$tmpdir/trivy.tar.gz" 2>/dev/null; then
         tar xzf "$tmpdir/trivy.tar.gz" -C "$tmpdir" trivy 2>/dev/null
         if [[ -f "$tmpdir/trivy" ]]; then
             mv "$tmpdir/trivy" "$TRIVY_BIN"
             chmod 755 "$TRIVY_BIN"
-            log_info "Trivy installed successfully"
+            log_info "Trivy v${trivy_version} installed successfully"
             rm -rf "$tmpdir"
             return 0
         fi
     fi
 
-    # Fallback: use install script
-    if curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin 2>/dev/null; then
-        log_info "Trivy installed via install script"
-        rm -rf "$tmpdir"
-        return 0
-    fi
-
-    log_warn "Failed to install Trivy. Container scanning will be skipped."
+    log_warn "Failed to download Trivy. Container scanning will be skipped."
+    log_warn "For offline deployment, pre-install trivy to $TRIVY_BIN"
     rm -rf "$tmpdir"
     return 1
 }
