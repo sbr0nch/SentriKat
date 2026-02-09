@@ -5899,21 +5899,10 @@ function showSettingsGroup(groupName, btn) {
         if (pane) {
             pane.style.display = '';
             pane.classList.add('show', 'active');
-            pane.style.marginTop = '';
 
-            if (index > 0) {
-                // Insert a visible separator before this pane
-                const sep = document.createElement('div');
-                sep.className = 'settings-group-separator';
-                sep.innerHTML = '<hr class="my-4" style="border-top: 2px dashed var(--bs-border-color, #dee2e6); opacity: 0.5;">';
-                pane.parentNode.insertBefore(sep, pane);
-            }
-
-            // Add a subtle left accent border to each card for group identity
+            // Clear any inline styles from previous group
             const card = pane.querySelector('.card');
-            if (card && groupPanes.length > 1) {
-                card.style.borderLeft = '3px solid var(--bs-primary, #0d6efd)';
-            } else if (card) {
+            if (card) {
                 card.style.borderLeft = '';
             }
         }

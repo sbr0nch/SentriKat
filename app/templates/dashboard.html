@@ -2010,10 +2010,8 @@
 
             if (response.ok && result.success) {
                 const issueId = result.issue_key || 'Issue';
-                showToast(`${escapeHtml(trackerName)} issue created: ${escapeHtml(issueId)}`, 'success');
-                if (result.issue_url) {
-                    window.open(result.issue_url, '_blank');
-                }
+                const toastOpts = result.issue_url ? { actionUrl: result.issue_url, actionText: issueId } : {};
+                showToast(`${escapeHtml(trackerName)} issue created:`, 'success', 8000, toastOpts);
             } else {
                 showToast(`Failed to create issue: ${escapeHtml(result.error || result.message)}`, 'danger');
             }

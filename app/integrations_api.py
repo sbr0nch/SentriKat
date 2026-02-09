@@ -243,35 +243,77 @@ def import_software():
 
 def attempt_cpe_match(vendor, product_name):
     """
-    Attempt to find matching CPE vendor/product for given software.
-    Uses a multi-tier approach:
-    1. User-learned mappings (from confirmed assignments)
-    2. Curated mapping database (fast, reliable)
-    3. NVD API search (slow, less reliable fallback)
+    Attempt to find matching CPE via NVD API search (the actual API call).
+
+    This is the NVD fallback tier - called by get_cpe_for_software() when
+    local mappings (user-learned + curated) don't match.
+
+    IMPORTANT: This function must NOT call get_cpe_for_software() to avoid
+    circular recursion. It only does the NVD API lookup.
 
     Returns (cpe_vendor, cpe_product, confidence) tuple.
     """
     try:
-        from app.cpe_mappings import get_cpe_for_software, get_user_mapping
+        from app.nvd_cpe_api import search_cpe
 
-        # First check user-learned mappings
-        user_cpe_vendor, user_cpe_product = get_user_mapping(vendor, product_name)
-        if user_cpe_vendor and user_cpe_product:
-            return user_cpe_vendor, user_cpe_product, 0.98  # High confidence for user mappings
+        # Build search query from vendor + product name
+        search_terms = []
+        if vendor:
+            search_terms.append(vendor.strip())
+        if product_name:
+            search_terms.append(product_name.strip())
 
-        # Use curated mappings with NVD fallback
-        cpe_vendor, cpe_product, confidence = get_cpe_for_software(
-            vendor, product_name, use_nvd_fallback=True
-        )
+        search_query = ' '.join(search_terms)
+        if not search_query or len(search_query) < 2:
+            return None, None, 0.0
 
-        if cpe_vendor and cpe_product:
-            return cpe_vendor, cpe_product, confidence
+        results = search_cpe(search_query, limit=10)
+
+        if not results:
+            return None, None, 0.0
+
+        # Find best match from NVD results
+        best_match = None
+        best_score = 0.0
+
+        vendor_lower = (vendor or '').lower().strip()
+        product_lower = (product_name or '').lower().strip()
+
+        for result in results:
+            nvd_vendor = (result.get('vendor') or '').lower()
+            nvd_product = (result.get('product') or '').lower()
+
+            score = 0.0
+
+            # Vendor match scoring
+            if vendor_lower and nvd_vendor:
+                if vendor_lower == nvd_vendor:
+                    score += 0.4
+                elif vendor_lower in nvd_vendor or nvd_vendor in vendor_lower:
+                    score += 0.25
+
+            # Product match scoring
+            if product_lower and nvd_product:
+                if product_lower == nvd_product:
+                    score += 0.5
+                elif product_lower in nvd_product or nvd_product in product_lower:
+                    score += 0.3
+                else:
+                    sim = calculate_similarity(product_lower, nvd_product)
+                    score += sim * 0.3
+
+            if score > best_score:
+                best_score = score
+                best_match = result
+
+        if best_match and best_score >= 0.3:
+            return best_match['vendor'], best_match['product'], min(best_score, 0.85)
 
         return None, None, 0.0
 
     except Exception as e:
         import logging
-        logging.getLogger(__name__).warning(f"CPE match failed for {vendor} {product_name}: {e}")
+        logging.getLogger(__name__).warning(f"NVD CPE match failed for {vendor} {product_name}: {e}")
         return None, None, 0.0
 
 
