@@ -443,20 +443,24 @@ get_installed_software() {
 
     log_info "Scanned $total_scanned installed packages, selected $count security-relevant packages"
 
-    # Build JSON array
-    local json_array="["
+    # Write JSON array directly to a temp file to avoid "Argument list too long"
+    # errors. With 1000+ packages the JSON string can exceed bash/kernel ARG_MAX.
+    local outfile
+    outfile=$(mktemp /tmp/sentrikat-products-XXXXXX.json)
+
+    printf '[' > "$outfile"
     local first=true
     for product in "${products[@]}"; do
         if [[ "$first" == "true" ]]; then
             first=false
         else
-            json_array+=","
+            printf ',' >> "$outfile"
         fi
-        json_array+="$product"
+        printf '%s' "$product" >> "$outfile"
     done
-    json_array+="]"
+    printf ']' >> "$outfile"
 
-    echo "$json_array"
+    echo "$outfile"
 }
 
 # ============================================================================
@@ -726,23 +730,25 @@ send_container_scan_results() {
 
 send_inventory() {
     local system_info="$1"
-    local products="$2"
+    local products_file="$2"   # Path to temp file containing JSON array
 
     local endpoint="${SERVER_URL}/api/agent/inventory"
 
     log_info "Sending inventory to $endpoint..."
 
-    # Build payload by writing to temp file incrementally.
-    # This avoids "Argument list too long" errors when $products is very large
-    # (e.g. 1000+ packages) since we never pass the full string as an argument.
+    # Build payload by assembling temp files - never pass large strings as arguments.
+    # $products_file is a path to a JSON array file written by get_installed_software.
     local tmpfile
     tmpfile=$(mktemp)
 
-    # Write system_info without closing brace, then append products, then close
+    # Write: { system_info_fields..., "products": <contents of products_file> }
     printf '%s' "$system_info" | sed 's/}$//' > "$tmpfile"
     printf ', "products": ' >> "$tmpfile"
-    printf '%s' "$products" >> "$tmpfile"
+    cat "$products_file" >> "$tmpfile"
     printf '}' >> "$tmpfile"
+
+    # Clean up the products temp file
+    rm -f "$products_file"
 
     # Retry logic
     local max_retries=3
@@ -1069,18 +1075,28 @@ main() {
     system_info=$(get_system_info)
     log_info "System: $(echo "$system_info" | grep -o '"hostname"[^,]*' | head -1)"
 
-    local products
-    products=$(get_installed_software)
+    # get_installed_software returns a temp FILE PATH (not a JSON string)
+    # to avoid bash "Argument list too long" with large inventories
+    local products_file
+    products_file=$(get_installed_software)
+
+    if [[ ! -f "$products_file" ]]; then
+        log_error "Failed to collect software inventory"
+        exit 1
+    fi
 
     local product_count
-    product_count=$(echo "$products" | grep -o '"product"' | wc -l)
+    product_count=$(grep -o '"product"' "$products_file" | wc -l)
+
+    log_info "Sending $product_count products to server..."
 
     if [[ $product_count -eq 0 ]]; then
         log_warn "No software found to report"
+        rm -f "$products_file"
         exit 0
     fi
 
-    if send_inventory "$system_info" "$products"; then
+    if send_inventory "$system_info" "$products_file"; then
         log_info "Inventory report completed successfully"
     else
         log_error "Inventory report failed"
