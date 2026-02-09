@@ -1644,6 +1644,11 @@ def get_vulnerabilities_grouped():
             if not match.acknowledged:
                 group['unacknowledged_count'] += 1
 
+            # Skip duplicate product entries for the same CVE (can happen if match was created twice)
+            existing_product_ids = {p['product_id'] for p in group['affected_products']}
+            if match.product.id in existing_product_ids:
+                continue
+
             # Get pre-fetched asset data for this product
             asset_list = product_assets.get(match.product.id, [])
             asset_count = asset_counts.get(match.product.id, 0)
