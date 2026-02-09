@@ -109,24 +109,39 @@ def get_version():
 def check_for_updates():
     """Check GitHub for the latest SentriKat release."""
     try:
+        # First try /releases/latest (excludes pre-releases)
         resp = http_requests.get(
             f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest',
             timeout=5,
             headers={'Accept': 'application/vnd.github.v3+json'}
         )
+        # If no stable release exists, fall back to the most recent release (including pre-releases)
         if resp.status_code != 200:
-            return jsonify({'error': 'Could not reach update server', 'update_available': False}), 200
+            resp = http_requests.get(
+                f'https://api.github.com/repos/{GITHUB_REPO}/releases',
+                timeout=5,
+                headers={'Accept': 'application/vnd.github.v3+json'}
+            )
+            if resp.status_code != 200 or not resp.json():
+                return jsonify({'error': 'Could not reach update server', 'update_available': False}), 200
+            data = resp.json()[0]  # Most recent release
+        else:
+            data = resp.json()
 
-        data = resp.json()
         latest_tag = data.get('tag_name', '').lstrip('v')
         current = APP_VERSION
 
-        # Simple tuple-based version comparison
+        # Version comparison that handles pre-release tags (e.g., 1.0.0-beta.1)
         def parse_ver(v):
             try:
-                return tuple(int(x) for x in v.split('.'))
+                # Split off pre-release suffix: "1.0.0-beta.1" -> ("1.0.0", "beta.1")
+                base = v.split('-', 1)[0]
+                parts = tuple(int(x) for x in base.split('.'))
+                # Pre-release versions sort lower than the same version without suffix
+                is_prerelease = '-' in v
+                return (parts, 0 if is_prerelease else 1)
             except (ValueError, AttributeError):
-                return (0, 0, 0)
+                return ((0, 0, 0), 0)
 
         update_available = parse_ver(latest_tag) > parse_ver(current)
 
