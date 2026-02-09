@@ -41,12 +41,9 @@ INSTALLATION_ID_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
 # Environment variable for fixed installation ID (recommended for Docker)
 INSTALLATION_ID_ENV_VAR = 'SENTRIKAT_INSTALLATION_ID'
 
-# Public key file path (shared with generate_license.py)
-PUBLIC_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools', '.license_keys', 'public_key.pem')
-
 # Default RSA Public Key - matches the SentriKat-web license server (RSA-4096)
 # This is the PUBLIC key used to verify license signatures from portal.sentrikat.com
-# Can be overridden via SENTRIKAT_LICENSE_PUBLIC_KEY env var or key file
+# Can be overridden via SENTRIKAT_LICENSE_PUBLIC_KEY or SENTRIKAT_LICENSE_PUBLIC_KEY_FILE env vars
 _DEFAULT_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
 MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAoby7pyKHNUhXAx4FRoqt
 s390fyo/krmgYU2XwxgRm7U9W/kXA+1vEaHPYtehmi0sggefUu4zMaNtr/8dPOS6
@@ -68,8 +65,7 @@ def get_license_public_key():
     Priority:
     1. SENTRIKAT_LICENSE_PUBLIC_KEY env var (PEM content directly)
     2. SENTRIKAT_LICENSE_PUBLIC_KEY_FILE env var (path to PEM file)
-    3. tools/.license_keys/public_key.pem file
-    4. Default embedded key (fallback)
+    3. Default embedded key (matches portal.sentrikat.com)
     """
     # Priority 1: Direct PEM from environment variable
     env_key = os.environ.get('SENTRIKAT_LICENSE_PUBLIC_KEY', '').strip()
@@ -89,18 +85,7 @@ def get_license_public_key():
         except Exception as e:
             logger.warning(f"Could not read public key from SENTRIKAT_LICENSE_PUBLIC_KEY_FILE: {e}")
 
-    # Priority 3: Default key file (shared with generate_license.py)
-    if os.path.exists(PUBLIC_KEY_FILE):
-        try:
-            with open(PUBLIC_KEY_FILE, 'r') as f:
-                key = f.read().strip()
-                if key and '-----BEGIN PUBLIC KEY-----' in key:
-                    logger.debug(f"Using public key from file: {PUBLIC_KEY_FILE}")
-                    return key
-        except Exception as e:
-            logger.warning(f"Could not read public key file: {e}")
-
-    # Priority 4: Default embedded key
+    # Priority 3: Default embedded key (matches the portal's signing key)
     logger.debug("Using default embedded public key")
     return _DEFAULT_PUBLIC_KEY
 
