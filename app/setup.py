@@ -432,6 +432,88 @@ def run_initial_sync():
             error_msg += '. Check your internet connection and proxy settings.'
         return jsonify({'error': error_msg}), 500
 
+@setup_bp.route('/api/setup/installation-id', methods=['GET'])
+def setup_installation_id():
+    """Get installation ID during setup (no auth required)."""
+    from app.licensing import get_installation_id
+    try:
+        installation_id = get_installation_id()
+        return jsonify({'installation_id': installation_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@setup_bp.route('/api/setup/activate-license', methods=['POST'])
+def setup_activate_license():
+    """Activate a license during setup (no auth required since setup is pre-auth)."""
+    import re
+    import requests as _requests
+    from app.licensing import get_installation_id, save_license
+    from config import Config
+
+    try:
+
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+
+        activation_code = (data.get('activation_code') or '').strip()
+        if not activation_code:
+            return jsonify({'error': 'Activation code is required'}), 400
+
+        if len(activation_code) < 8 or len(activation_code) > 128:
+            return jsonify({'error': 'Invalid activation code format'}), 400
+
+        if not re.match(r'^[A-Za-z0-9\-]+$', activation_code):
+            return jsonify({'error': 'Invalid activation code format'}), 400
+
+        installation_id = get_installation_id()
+        proxies = Config.get_proxies()
+        license_server_url = os.environ.get('SENTRIKAT_LICENSE_SERVER', 'https://portal.sentrikat.com/api')
+
+        response = _requests.post(
+            f'{license_server_url}/v1/license/activate',
+            json={
+                'activation_code': activation_code,
+                'installation_id': installation_id,
+            },
+            timeout=30,
+            proxies=proxies,
+            verify=True,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        if response.status_code == 200:
+            try:
+                resp_data = response.json()
+            except (json.JSONDecodeError, ValueError):
+                return jsonify({'error': 'Invalid response from license server'}), 502
+
+            license_key = (resp_data.get('license_key') or '').strip()
+            if not license_key:
+                return jsonify({'error': 'No license key in server response'}), 502
+
+            success, message = save_license(license_key)
+            if success:
+                return jsonify({'success': True, 'message': message})
+            else:
+                return jsonify({'error': message}), 400
+
+        elif response.status_code == 404:
+            return jsonify({'error': 'Invalid activation code'}), 400
+        elif response.status_code == 409:
+            return jsonify({'error': 'This activation code has already been used'}), 400
+        elif response.status_code == 410:
+            return jsonify({'error': 'This activation code has expired'}), 400
+        else:
+            return jsonify({'error': f'License server error (HTTP {response.status_code})'}), 502
+
+    except _requests.exceptions.ConnectionError:
+        return jsonify({'error': 'Cannot reach license server. Check internet/proxy settings.'}), 502
+    except _requests.exceptions.Timeout:
+        return jsonify({'error': 'License server timed out. Try again.'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @setup_bp.route('/api/setup/complete', methods=['POST'])
 def complete_setup():
     """Mark setup as complete"""

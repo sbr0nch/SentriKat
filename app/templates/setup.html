@@ -257,10 +257,12 @@
                 <div class="step-dot" id="dot-4">4</div>
                 <div class="step-dot" id="dot-5">5</div>
                 <div class="step-dot" id="dot-6">6</div>
+                <div class="step-dot" id="dot-7">7</div>
                 {% else %}
                 <div class="step-dot" id="dot-3">3</div>
                 <div class="step-dot" id="dot-4">4</div>
                 <div class="step-dot" id="dot-5">5</div>
+                <div class="step-dot" id="dot-6">6</div>
                 {% endif %}
             </div>
 
@@ -485,8 +487,48 @@
                 </div>
             </div>
 
-            <!-- Step 6: Complete -->
+            <!-- Step 6: License Activation -->
             <div class="step" id="step-{% if auth_enabled %}6{% else %}5{% endif %}">
+                <h2 class="mb-4"><i class="bi bi-key"></i> License</h2>
+                <p>Activate your license to unlock all features. You can also do this later from Administration.</p>
+
+                <div class="card mb-3" style="border: 1px solid var(--gray-200);">
+                    <div class="card-body">
+                        <label class="form-label fw-semibold">Installation ID</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control font-monospace" id="installationIdDisplay" readonly>
+                            <button class="btn btn-outline-secondary" type="button" onclick="copyInstallationId()" id="copyInstIdBtn">
+                                <i class="bi bi-clipboard"></i>
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">Use this ID when binding your license on the portal.</small>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="setupActivationCode" class="form-label fw-semibold">Activation Code</label>
+                    <input type="text" class="form-control font-monospace" id="setupActivationCode"
+                           placeholder="e.g. SK-XXXX-XXXX-XXXX-XXXX">
+                    <small class="form-text text-muted">From your purchase confirmation or portal account.</small>
+                </div>
+
+                <div id="setupActivationStatus" class="mb-3" style="display: none;"></div>
+
+                <div class="text-center mt-4">
+                    <button type="button" class="btn btn-secondary me-2" onclick="previousStep()">
+                        <i class="bi bi-arrow-left"></i> Back
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary me-2" onclick="nextStep()">
+                        Skip for now
+                    </button>
+                    <button type="button" class="btn btn-setup" onclick="setupActivateLicense()" id="setupActivateBtn">
+                        Activate <i class="bi bi-key"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 7: Complete -->
+            <div class="step" id="step-{% if auth_enabled %}7{% else %}6{% endif %}">
                 <div class="text-center">
                     <div class="success-icon">
                         <i class="bi bi-check-circle-fill"></i>
@@ -507,7 +549,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const authEnabled = {{ 'true' if auth_enabled else 'false' }};
-        const totalSteps = authEnabled ? 6 : 5;
+        const totalSteps = authEnabled ? 7 : 6;
         let currentStep = 1;
 
         function updateProgress() {
@@ -790,6 +832,84 @@
                 btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
             }
         }
+
+        // License activation step
+        function loadInstallationId() {
+            fetch('/api/setup/installation-id')
+                .then(r => r.json())
+                .then(data => {
+                    const el = document.getElementById('installationIdDisplay');
+                    if (el && data.installation_id) {
+                        el.value = data.installation_id;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function copyInstallationId() {
+            const el = document.getElementById('installationIdDisplay');
+            if (el && el.value) {
+                navigator.clipboard.writeText(el.value).then(() => {
+                    const btn = document.getElementById('copyInstIdBtn');
+                    btn.innerHTML = '<i class="bi bi-check"></i>';
+                    setTimeout(() => { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 2000);
+                });
+            }
+        }
+
+        async function setupActivateLicense() {
+            clearAlert();
+            const code = document.getElementById('setupActivationCode').value.trim();
+            const statusEl = document.getElementById('setupActivationStatus');
+            const btn = document.getElementById('setupActivateBtn');
+
+            if (!code) {
+                showAlert('Please enter an activation code', 'warning');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Activating...';
+            statusEl.style.display = 'block';
+            statusEl.innerHTML = '<div class="alert alert-info mb-0 py-2"><i class="bi bi-hourglass-split me-1"></i>Contacting license server...</div>';
+
+            try {
+                const response = await fetch('/api/setup/activate-license', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ activation_code: code })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    statusEl.innerHTML = '<div class="alert alert-success mb-0 py-2"><i class="bi bi-check-circle me-1"></i>' + (data.message || 'License activated!') + '</div>';
+                    showAlert('License activated!', 'success');
+                    setTimeout(() => {
+                        clearAlert();
+                        nextStep();
+                    }, 2000);
+                } else {
+                    statusEl.innerHTML = '<div class="alert alert-danger mb-0 py-2"><i class="bi bi-exclamation-triangle me-1"></i>' + (data.error || 'Activation failed') + '</div>';
+                    btn.disabled = false;
+                    btn.innerHTML = 'Activate <i class="bi bi-key"></i>';
+                }
+            } catch (error) {
+                statusEl.innerHTML = '<div class="alert alert-danger mb-0 py-2"><i class="bi bi-exclamation-triangle me-1"></i>Network error: ' + error.message + '</div>';
+                btn.disabled = false;
+                btn.innerHTML = 'Activate <i class="bi bi-key"></i>';
+            }
+        }
+
+        // Load installation ID when reaching the license step
+        const origShowStep = showStep;
+        showStep = function(step) {
+            origShowStep(step);
+            const licenseStep = authEnabled ? 6 : 5;
+            if (step === licenseStep) {
+                loadInstallationId();
+            }
+        };
 
         // Initialize
         updateProgress();
