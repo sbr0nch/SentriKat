@@ -532,7 +532,7 @@ class LDAPManager:
             return {'success': False, 'error': str(e)}
 
     @staticmethod
-    def search_groups(search_base='', search_filter='(objectClass=group)'):
+    def search_groups(search_base='', search_filter='(|(objectClass=group)(objectClass=posixGroup)(objectClass=groupOfNames)(objectClass=groupOfUniqueNames))'):
         """
         Search LDAP directory for groups
 

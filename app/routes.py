@@ -2793,13 +2793,14 @@ def trigger_webhook_alerts():
             # Count critical
             critical_count = sum(1 for m in priority_matches if m.calculate_effective_priority() == 'critical')
 
-            # Send webhook
+            # Send webhook (force=True bypasses first_alerted_at filter for manual triggers)
             result = send_org_webhook(
                 org=org,
                 new_cves_count=len(priority_matches),
                 critical_count=critical_count,
                 matches_count=len(priority_matches),
-                matches=priority_matches
+                matches=priority_matches,
+                force=True
             )
 
             if result:

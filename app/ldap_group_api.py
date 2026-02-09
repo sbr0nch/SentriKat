@@ -299,7 +299,7 @@ def discover_ldap_groups():
     """Discover available LDAP groups from directory"""
     data = request.get_json()
     search_base = data.get('search_base', '')
-    search_filter = data.get('search_filter', '(objectClass=group)')
+    search_filter = data.get('search_filter', '(|(objectClass=group)(objectClass=posixGroup)(objectClass=groupOfNames)(objectClass=groupOfUniqueNames))')
 
     try:
         result = LDAPManager.search_groups(search_base=search_base, search_filter=search_filter)

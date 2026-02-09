@@ -324,12 +324,17 @@ def save_batch_settings():
 @requires_professional('LDAP')
 def get_ldap_settings():
     """Get LDAP configuration settings"""
+    # Check if bind password is configured (don't return the actual value)
+    bind_password = get_setting('ldap_bind_password', '')
+    password_configured = bool(bind_password)
+
     settings = {
         'ldap_enabled': get_setting('ldap_enabled', 'false') == 'true',
         'ldap_server': get_setting('ldap_server', ''),
         'ldap_port': int(get_setting('ldap_port', '389')),
         'ldap_base_dn': get_setting('ldap_base_dn', ''),
         'ldap_bind_dn': get_setting('ldap_bind_dn', ''),
+        'ldap_bind_password_configured': password_configured,
         'ldap_search_filter': get_setting('ldap_search_filter', '(sAMAccountName={username})'),
         'ldap_username_attr': get_setting('ldap_username_attr', 'sAMAccountName'),
         'ldap_email_attr': get_setting('ldap_email_attr', 'mail'),
