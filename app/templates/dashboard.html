@@ -258,32 +258,49 @@
             </div>
         </div>
 
-        <!-- Right Column: Trends Chart -->
+        <!-- Right Column: Dual Charts -->
         <div class="col-lg-7 col-xl-8">
-            <div class="card h-100" id="trendChartCard">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-graph-up me-2"></i>Vulnerability Trends (30 Days)</span>
-                    <div>
-                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="loadTrendChart()" title="Refresh">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-bs-toggle="collapse" data-bs-target="#trendChartBody">
-                            <i class="bi bi-chevron-down"></i>
-                        </button>
+            <div class="row g-3 h-100">
+                <!-- Severity Breakdown Donut -->
+                <div class="col-md-5">
+                    <div class="card h-100" id="severityChartCard">
+                        <div class="card-header py-2">
+                            <span><i class="bi bi-pie-chart me-2"></i>Severity Breakdown</span>
+                        </div>
+                        <div class="card-body py-2 d-flex align-items-center justify-content-center">
+                            <div id="severityChartContainer" style="position: relative; width: 100%; max-height: 200px;">
+                                <canvas id="severityChart"></canvas>
+                            </div>
+                            <div id="severityNoData" class="text-center text-muted py-3 d-none">
+                                <i class="bi bi-pie-chart fs-2 opacity-50"></i>
+                                <p class="mt-1 mb-0 small">No data yet</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="card-body py-3 collapse show" id="trendChartBody">
-                    <div id="trendChartContainer" style="position: relative; height: 220px;">
-                        <canvas id="trendChart"></canvas>
-                    </div>
-                    <div id="trendNoData" class="text-center text-muted py-4 d-none">
-                        <i class="bi bi-bar-chart fs-1 opacity-50"></i>
-                        <p class="mt-2 mb-0">No trend data available yet. Snapshots are taken daily at 2 AM.</p>
-                        {% if session.get('is_admin') %}
-                        <button class="btn btn-sm btn-outline-primary mt-2" onclick="takeManualSnapshot()">
-                            <i class="bi bi-camera"></i> Take Snapshot Now
-                        </button>
-                        {% endif %}
+                <!-- Trend Line -->
+                <div class="col-md-7">
+                    <div class="card h-100" id="trendChartCard">
+                        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-graph-up me-2"></i>30-Day Trend</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="loadTrendChart()" title="Refresh">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                        <div class="card-body py-2">
+                            <div id="trendChartContainer" style="position: relative; height: 200px;">
+                                <canvas id="trendChart"></canvas>
+                            </div>
+                            <div id="trendNoData" class="text-center text-muted py-3 d-none">
+                                <i class="bi bi-bar-chart fs-2 opacity-50"></i>
+                                <p class="mt-1 mb-0 small">No trend data yet. Snapshots taken daily.</p>
+                                {% if session.get('is_admin') %}
+                                <button class="btn btn-sm btn-outline-primary mt-1" onclick="takeManualSnapshot()">
+                                    <i class="bi bi-camera"></i> Take Snapshot
+                                </button>
+                                {% endif %}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -994,8 +1011,9 @@
         }
     }
 
-    // Trend chart instance
+    // Chart instances
     let trendChartInstance = null;
+    let severityChartInstance = null;
 
     async function loadTrendChart() {
         try {
@@ -1007,7 +1025,99 @@
             const data = await response.json();
             const trends = data.trends;
 
-            // Check if we have data
+            // Dark mode aware colors
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+            const tickColor = isDark ? '#9ca3af' : '#6b7280';
+            const legendColor = isDark ? '#d1d5db' : undefined;
+            const tooltipBg = isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)';
+
+            // Severity colors
+            const colors = {
+                critical: { bg: '#dc2626', bgAlpha: 'rgba(220, 38, 38, 0.8)' },
+                high:     { bg: '#f59e0b', bgAlpha: 'rgba(245, 158, 11, 0.8)' },
+                medium:   { bg: '#3b82f6', bgAlpha: 'rgba(59, 130, 246, 0.8)' },
+                low:      { bg: '#22c55e', bgAlpha: 'rgba(34, 197, 94, 0.8)' }
+            };
+
+            // --- Severity Donut Chart ---
+            const hasSeverityData = trends.critical || trends.high || trends.medium || trends.low;
+            if (hasSeverityData) {
+                // Use latest snapshot (last element in each array)
+                const latestCritical = (trends.critical && trends.critical.length) ? trends.critical[trends.critical.length - 1] : 0;
+                const latestHigh = (trends.high && trends.high.length) ? trends.high[trends.high.length - 1] : 0;
+                const latestMedium = (trends.medium && trends.medium.length) ? trends.medium[trends.medium.length - 1] : 0;
+                const latestLow = (trends.low && trends.low.length) ? trends.low[trends.low.length - 1] : 0;
+                const total = latestCritical + latestHigh + latestMedium + latestLow;
+
+                if (total > 0) {
+                    document.getElementById('severityChartContainer').classList.remove('d-none');
+                    document.getElementById('severityNoData').classList.add('d-none');
+
+                    if (severityChartInstance) severityChartInstance.destroy();
+
+                    const sCtx = document.getElementById('severityChart').getContext('2d');
+                    severityChartInstance = new Chart(sCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Critical', 'High', 'Medium', 'Low'],
+                            datasets: [{
+                                data: [latestCritical, latestHigh, latestMedium, latestLow],
+                                backgroundColor: [colors.critical.bgAlpha, colors.high.bgAlpha, colors.medium.bgAlpha, colors.low.bgAlpha],
+                                borderColor: isDark ? '#1e1e1e' : '#ffffff',
+                                borderWidth: 2,
+                                hoverOffset: 6
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: true,
+                            cutout: '60%',
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        usePointStyle: true,
+                                        padding: 10,
+                                        font: { size: 10 },
+                                        color: legendColor,
+                                        generateLabels: function(chart) {
+                                            const data = chart.data;
+                                            return data.labels.map((label, i) => ({
+                                                text: label + ' (' + data.datasets[0].data[i] + ')',
+                                                fillStyle: data.datasets[0].backgroundColor[i],
+                                                strokeStyle: data.datasets[0].backgroundColor[i],
+                                                pointStyle: 'circle',
+                                                hidden: false,
+                                                index: i
+                                            }));
+                                        }
+                                    }
+                                },
+                                tooltip: {
+                                    backgroundColor: tooltipBg,
+                                    titleColor: '#fff',
+                                    bodyColor: '#e5e7eb',
+                                    callbacks: {
+                                        label: function(context) {
+                                            const pct = ((context.parsed / total) * 100).toFixed(1);
+                                            return context.label + ': ' + context.parsed + ' (' + pct + '%)';
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    document.getElementById('severityChartContainer').classList.add('d-none');
+                    document.getElementById('severityNoData').classList.remove('d-none');
+                }
+            } else {
+                document.getElementById('severityChartContainer').classList.add('d-none');
+                document.getElementById('severityNoData').classList.remove('d-none');
+            }
+
+            // --- Trend Line Chart ---
             if (!trends.dates || trends.dates.length === 0) {
                 document.getElementById('trendChartContainer').classList.add('d-none');
                 document.getElementById('trendNoData').classList.remove('d-none');
@@ -1019,7 +1129,6 @@
 
             const ctx = document.getElementById('trendChart').getContext('2d');
 
-            // Destroy existing chart if any
             if (trendChartInstance) {
                 trendChartInstance.destroy();
             }
@@ -1030,81 +1139,67 @@
                 return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             });
 
-            // Compute smart Y-axis formatting
             function formatAxisValue(value) {
                 if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
                 if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
                 return value;
             }
 
-            // Check if severity data is dwarfed by unacknowledged (>5x difference)
-            const allSeverity = [...(trends.critical || []), ...(trends.high || []), ...(trends.medium || [])];
-            const maxSeverity = Math.max(0, ...allSeverity);
-            const maxUnack = Math.max(0, ...(trends.unacknowledged || []));
-            const needsDualAxis = maxUnack > maxSeverity * 5 && maxSeverity > 0;
+            // Build datasets - severity lines + total unacknowledged
+            const datasets = [
+                {
+                    label: 'Critical',
+                    data: trends.critical,
+                    borderColor: colors.critical.bg,
+                    backgroundColor: 'rgba(220, 38, 38, 0.05)',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 5,
+                    borderWidth: 2.5
+                },
+                {
+                    label: 'High',
+                    data: trends.high,
+                    borderColor: colors.high.bg,
+                    backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 5,
+                    borderWidth: 2
+                },
+                {
+                    label: 'Medium',
+                    data: trends.medium,
+                    borderColor: colors.medium.bg,
+                    backgroundColor: 'rgba(59, 130, 246, 0.05)',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 5,
+                    borderWidth: 2
+                }
+            ];
 
-            // Dark mode aware colors
-            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-            const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
-            const tickColor = isDark ? '#9ca3af' : '#6b7280';
-            const legendColor = isDark ? '#d1d5db' : undefined;
-            const tooltipBg = isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)';
+            // Add Low line if there's data
+            if (trends.low && trends.low.some(v => v > 0)) {
+                datasets.push({
+                    label: 'Low',
+                    data: trends.low,
+                    borderColor: colors.low.bg,
+                    backgroundColor: 'rgba(34, 197, 94, 0.05)',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 5,
+                    borderWidth: 1.5
+                });
+            }
 
             trendChartInstance = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'Critical',
-                            data: trends.critical,
-                            borderColor: '#dc2626',
-                            backgroundColor: 'rgba(220, 38, 38, 0.1)',
-                            fill: true,
-                            tension: 0.3,
-                            pointRadius: 2,
-                            pointHoverRadius: 5,
-                            borderWidth: 2,
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'High',
-                            data: trends.high,
-                            borderColor: '#f59e0b',
-                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                            fill: true,
-                            tension: 0.3,
-                            pointRadius: 2,
-                            pointHoverRadius: 5,
-                            borderWidth: 2,
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'Medium',
-                            data: trends.medium,
-                            borderColor: '#3b82f6',
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            fill: true,
-                            tension: 0.3,
-                            pointRadius: 2,
-                            pointHoverRadius: 5,
-                            borderWidth: 2,
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'Unacknowledged',
-                            data: trends.unacknowledged,
-                            borderColor: isDark ? '#9ca3af' : '#6b7280',
-                            borderDash: [5, 5],
-                            fill: false,
-                            tension: 0.3,
-                            pointRadius: 2,
-                            pointHoverRadius: 5,
-                            borderWidth: 2,
-                            yAxisID: needsDualAxis ? 'y1' : 'y'
-                        }
-                    ]
-                },
+                data: { labels: labels, datasets: datasets },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
@@ -1117,25 +1212,26 @@
                             position: 'top',
                             labels: {
                                 usePointStyle: true,
-                                padding: 15,
-                                font: { size: 11 },
-                                color: legendColor
+                                padding: 12,
+                                font: { size: 10 },
+                                color: legendColor,
+                                boxWidth: 8
                             }
                         },
                         tooltip: {
                             backgroundColor: tooltipBg,
                             titleColor: '#fff',
                             bodyColor: '#e5e7eb',
-                            padding: 12,
-                            titleFont: { size: 13 },
-                            bodyFont: { size: 12 },
+                            padding: 10,
+                            titleFont: { size: 12 },
+                            bodyFont: { size: 11 },
                             callbacks: {
                                 title: function(context) {
                                     const idx = context[0].dataIndex;
                                     return trends.dates[idx];
                                 },
                                 label: function(context) {
-                                    return context.dataset.label + ': ' + formatAxisValue(context.parsed.y);
+                                    return ' ' + context.dataset.label + ': ' + formatAxisValue(context.parsed.y);
                                 }
                             }
                         }
@@ -1143,18 +1239,18 @@
                     scales: {
                         x: {
                             grid: { display: false },
-                            ticks: { font: { size: 10 }, color: tickColor }
+                            ticks: {
+                                font: { size: 9 },
+                                color: tickColor,
+                                maxRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            }
                         },
                         y: {
                             type: 'linear',
                             position: 'left',
                             beginAtZero: true,
-                            title: {
-                                display: needsDualAxis,
-                                text: 'By Severity',
-                                font: { size: 10, weight: 'bold' },
-                                color: tickColor
-                            },
                             grid: { color: gridColor },
                             ticks: {
                                 font: { size: 10 },
@@ -1162,27 +1258,7 @@
                                 precision: 0,
                                 callback: formatAxisValue
                             }
-                        },
-                        ...(needsDualAxis ? {
-                            y1: {
-                                type: 'linear',
-                                position: 'right',
-                                beginAtZero: true,
-                                title: {
-                                    display: true,
-                                    text: 'Unacknowledged',
-                                    font: { size: 10, weight: 'bold' },
-                                    color: tickColor
-                                },
-                                grid: { drawOnChartArea: false },
-                                ticks: {
-                                    font: { size: 10 },
-                                    precision: 0,
-                                    color: tickColor,
-                                    callback: formatAxisValue
-                                }
-                            }
-                        } : {})
+                        }
                     }
                 }
             });
