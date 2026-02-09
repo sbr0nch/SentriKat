@@ -41,25 +41,22 @@ INSTALLATION_ID_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
 # Environment variable for fixed installation ID (recommended for Docker)
 INSTALLATION_ID_ENV_VAR = 'SENTRIKAT_INSTALLATION_ID'
 
-# Public key file path (shared with generate_license.py)
-PUBLIC_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools', '.license_keys', 'public_key.pem')
-
 # Default RSA Public Key - matches the SentriKat-web license server (RSA-4096)
 # This is the PUBLIC key used to verify license signatures from portal.sentrikat.com
-# Can be overridden via SENTRIKAT_LICENSE_PUBLIC_KEY env var or key file
+# Can be overridden via SENTRIKAT_LICENSE_PUBLIC_KEY or SENTRIKAT_LICENSE_PUBLIC_KEY_FILE env vars
 _DEFAULT_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAzRWZLd3WBTlBt+eb6dmU
-19EflrCuAP9dBq9uYjG1gbgE4oi5b3hqpH9Rcqt00uyhGdNSFyD40Vb3eA0CSe6q
-+Pw5yYP7Sp5rqe7O1WNPO16yfVBsWTIA3+bGhbGtbhLFQvANynBP69n9YinFmc+c
-tW6RgUwQhNUXEd5I5ebSxWvPryQCPHdpuI8tH9ms149zFxmQ/jd0MVdHvrHQ2Yd7
-fGEYaWAAijJzVhqxXtrX6ExM2UZn8e9vB2GZl567pPhf81HIUCkM1b7ycrEN1BYd
-7uEA5KYe3T1RZFwO6MuFNQqEfLvvzTRjv58htHh0RklwDzFrCrOydtyHU7F4pXEN
-wr0zXQHxODgMsF5UiaRn7ULew+F8Ku0k1+L+VT+3wnGUxB9vZ7GU1wFOJGGGLg6W
-IEzFOG+OSXV4+EsWhgJfqDc3+XckSy+5lI2eEKsSWDjJ3Scv7rHMQTUJNjA16+Mw
-PNe/8GjwEIbDe1tFRunp/a/1Dr7hu047UN9hQTj9pepR41R7PF6B2Gfv5jyNEr0U
-fvI2UG3mitwIXbictDfAJaMP9FJX9gn9lN4cFpmAjrpXhBi/ARpOlUtDTrKMCgT3
-7dh4mZUlOlY+HO4vdoHBUok8JDayqf0LSDdme3ZZgzX65VWNoOnqn6lytxw8hRAF
-IY94kykxxPz0CLuSxoJbzkUCAwEAAQ==
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAoby7pyKHNUhXAx4FRoqt
+s390fyo/krmgYU2XwxgRm7U9W/kXA+1vEaHPYtehmi0sggefUu4zMaNtr/8dPOS6
+XpGZxjPns/+CzpR+mehrjw1ABdEOgFkhnzyAW21ZgT2rHnKSpeCXCrxXz4o65xTr
+d5twLQU/dVvK11FvvGbTRxaoPrSLGojAvQ+b3577ym3QGmx716KGjRVxGxXPtl6K
+DWu4jLegdNu90NvrJ7lj8yiqPTCbDhwB7JVPBSoIpjegYEZIf5vXhldqNnid7rT3
+EL/J/iR+z7rhlss9I2LYioYnCG3qCzMDAjp8wsfPgHmECaexqGY/lzOXtxZyVFnW
+fnw/WrMIzuOMDNoG8pGHEq1rz2L2butGd6JOB2u8R4wmUII7lAiCGHMvzWu58770
+pQQKasa53nmHo/yAppVtWabJOPHeSdKclyNEThFqXNgjKOUIHLz6fxiMmP22vmAK
+mVuNdHbTrgL/59wXdyEMcvN+WQwN1O2sty+VVsCtAjQzyfnFpWJLgQJYFaPZI1e0
+nrHoJc31qnCCbbFlBgtzZ8t0WDg9zH/jybZPNJryUXWohLstIoOdbOXn3mxvfCa4
+PL86ajCxxRNUMfIkUUuGWBMCT7AvuQ2P5CBccex+u1unbTIca95pbt6Rvv0u81TS
+UAClDkq78Bh8tLHSPl9s/nkCAwEAAQ==
 -----END PUBLIC KEY-----"""
 
 def get_license_public_key():
@@ -68,8 +65,7 @@ def get_license_public_key():
     Priority:
     1. SENTRIKAT_LICENSE_PUBLIC_KEY env var (PEM content directly)
     2. SENTRIKAT_LICENSE_PUBLIC_KEY_FILE env var (path to PEM file)
-    3. tools/.license_keys/public_key.pem file
-    4. Default embedded key (fallback)
+    3. Default embedded key (matches portal.sentrikat.com)
     """
     # Priority 1: Direct PEM from environment variable
     env_key = os.environ.get('SENTRIKAT_LICENSE_PUBLIC_KEY', '').strip()
@@ -89,18 +85,7 @@ def get_license_public_key():
         except Exception as e:
             logger.warning(f"Could not read public key from SENTRIKAT_LICENSE_PUBLIC_KEY_FILE: {e}")
 
-    # Priority 3: Default key file (shared with generate_license.py)
-    if os.path.exists(PUBLIC_KEY_FILE):
-        try:
-            with open(PUBLIC_KEY_FILE, 'r') as f:
-                key = f.read().strip()
-                if key and '-----BEGIN PUBLIC KEY-----' in key:
-                    logger.debug(f"Using public key from file: {PUBLIC_KEY_FILE}")
-                    return key
-        except Exception as e:
-            logger.warning(f"Could not read public key file: {e}")
-
-    # Priority 4: Default embedded key
+    # Priority 3: Default embedded key (matches the portal's signing key)
     logger.debug("Using default embedded public key")
     return _DEFAULT_PUBLIC_KEY
 
