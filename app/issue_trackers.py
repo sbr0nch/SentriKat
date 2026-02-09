@@ -1101,23 +1101,28 @@ def get_issue_tracker_config() -> Dict[str, Any]:
             'project_key': get_setting('jira_project_key', ''),
             'issue_type': get_setting('jira_issue_type', 'Task'),
             'use_pat': get_setting('jira_use_pat', 'false') == 'true',
-            'custom_fields': get_setting('jira_custom_fields', '')
+            'custom_fields': get_setting('jira_custom_fields', ''),
+            'api_token_configured': bool(get_setting('jira_api_token', ''))
         },
         'youtrack': {
             'url': get_setting('youtrack_url', ''),
-            'project_id': get_setting('youtrack_project_id', '')
+            'project_id': get_setting('youtrack_project_id', ''),
+            'token_configured': bool(get_setting('youtrack_token', ''))
         },
         'github': {
             'owner': get_setting('github_owner', ''),
-            'repo': get_setting('github_repo', '')
+            'repo': get_setting('github_repo', ''),
+            'token_configured': bool(get_setting('github_token', ''))
         },
         'gitlab': {
             'url': get_setting('gitlab_url', 'https://gitlab.com'),
-            'project_id': get_setting('gitlab_project_id', '')
+            'project_id': get_setting('gitlab_project_id', ''),
+            'token_configured': bool(get_setting('gitlab_token', ''))
         },
         'webhook': {
             'url': get_setting('webhook_url', ''),
-            'method': get_setting('webhook_method', 'POST')
+            'method': get_setting('webhook_method', 'POST'),
+            'auth_value_configured': bool(get_setting('webhook_auth_value', ''))
         }
     }
 

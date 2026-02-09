@@ -2948,10 +2948,25 @@
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Integrations</div>
-                    <a href="/admin-panel#integrations" class="sidebar-link" data-tooltip="Integrations" data-hash="integrations">
+                    <a href="#" class="sidebar-link" onclick="toggleSubmenu(this, event)" data-tooltip="Integrations" data-admin-panel-hashes="integrations">
                         <i class="bi bi-plug-fill"></i>
                         <span class="link-text">Integrations</span>
+                        <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
+                    <div class="sidebar-submenu">
+                        <a href="/admin-panel#integrations" class="sidebar-sublink" data-hash="integrations" onclick="switchIntegrationTab('pushAgents')">
+                            <i class="bi bi-key"></i>
+                            Agent Keys
+                        </a>
+                        <a href="/admin-panel#integrations" class="sidebar-sublink" data-hash="integrations" onclick="switchIntegrationTab('importQueue')">
+                            <i class="bi bi-inbox"></i>
+                            Import Queue
+                        </a>
+                        <a href="/admin-panel#integrations" class="sidebar-sublink" data-hash="integrations" onclick="switchIntegrationTab('jiraIntegration')">
+                            <i class="bi bi-kanban"></i>
+                            Issue Trackers
+                        </a>
+                    </div>
                 </div>
                 {% endif %}
                 {% endif %}
@@ -2960,10 +2975,41 @@
                 {% if current_user and current_user.is_super_admin() %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">System</div>
-                    <a href="/admin-panel#settings" class="sidebar-link" data-tooltip="Settings" data-hash="settings">
+                    <a href="#" class="sidebar-link" onclick="toggleSubmenu(this, event)" data-tooltip="Settings" data-admin-panel-hashes="settings">
                         <i class="bi bi-gear-fill"></i>
                         <span class="link-text">Settings</span>
+                        <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
+                    <div class="sidebar-submenu">
+                        {% if license and license.is_professional() %}
+                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('auth')">
+                            <i class="bi bi-shield-lock"></i>
+                            Authentication
+                        </a>
+                        {% endif %}
+                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('email')">
+                            <i class="bi bi-envelope"></i>
+                            Email & Alerts
+                        </a>
+                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('system')">
+                            <i class="bi bi-gear"></i>
+                            System
+                        </a>
+                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('compliance')">
+                            <i class="bi bi-clipboard-check"></i>
+                            Compliance
+                        </a>
+                        {% if license and license.is_professional() %}
+                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('appearance')">
+                            <i class="bi bi-palette"></i>
+                            Appearance
+                        </a>
+                        {% endif %}
+                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('license')">
+                            <i class="bi bi-key"></i>
+                            License
+                        </a>
+                    </div>
                 </div>
                 {% endif %}
             </nav>
@@ -3721,6 +3767,40 @@
                 submenuStates[submenuId] = !isOpen;
                 localStorage.setItem('submenuStates', JSON.stringify(submenuStates));
             }
+        }
+
+        // Switch to a specific Settings group from sidebar navigation
+        function switchSettingsGroup(groupName) {
+            // Navigate to admin panel settings tab first
+            const settingsTab = document.getElementById('settings-tab');
+            if (settingsTab) settingsTab.click();
+            // Then switch to the specific group after a brief delay for tab rendering
+            setTimeout(() => {
+                const btn = document.getElementById(groupName === 'auth' ? 'auth-settings-tab' :
+                    groupName === 'email' ? 'email-settings-tab' :
+                    groupName === 'system' ? 'system-settings-tab' :
+                    groupName === 'compliance' ? 'compliance-settings-tab' :
+                    groupName === 'appearance' ? 'appearance-settings-tab' :
+                    groupName === 'license' ? 'license-tab' : null);
+                if (typeof showSettingsGroup === 'function') {
+                    showSettingsGroup(groupName, btn);
+                }
+            }, 100);
+        }
+
+        // Switch to a specific Integration sub-tab from sidebar navigation
+        function switchIntegrationTab(tabPaneId) {
+            const integrationsTab = document.getElementById('integrations-tab');
+            if (integrationsTab) integrationsTab.click();
+            setTimeout(() => {
+                const mapping = {
+                    'pushAgents': 'push-agents-tab',
+                    'importQueue': 'import-queue-tab',
+                    'jiraIntegration': 'jira-integration-tab'
+                };
+                const tabBtn = document.getElementById(mapping[tabPaneId]);
+                if (tabBtn) tabBtn.click();
+            }, 100);
         }
 
         // Navigate to an inventory tab (Products/Endpoints/Software Overview)
