@@ -514,6 +514,29 @@ def setup_activate_license():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@setup_bp.route('/api/setup/manual-license', methods=['POST'])
+def setup_manual_license():
+    """Activate a license manually during setup (paste license key directly)."""
+    from app.licensing import save_license
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+
+        license_key = (data.get('license_key') or '').strip()
+        if not license_key:
+            return jsonify({'error': 'License key is required'}), 400
+
+        success, message = save_license(license_key)
+        if success:
+            return jsonify({'success': True, 'message': message})
+        else:
+            return jsonify({'error': message}), 400
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @setup_bp.route('/api/setup/complete', methods=['POST'])
 def complete_setup():
     """Mark setup as complete"""

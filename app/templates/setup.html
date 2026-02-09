@@ -505,24 +505,60 @@
                     </div>
                 </div>
 
-                <div class="mb-3">
-                    <label for="setupActivationCode" class="form-label fw-semibold">Activation Code</label>
-                    <input type="text" class="form-control font-monospace" id="setupActivationCode"
-                           placeholder="e.g. SK-XXXX-XXXX-XXXX-XXXX">
-                    <small class="form-text text-muted">From your purchase confirmation or portal account.</small>
-                </div>
+                <!-- Tab toggle: Online vs Manual -->
+                <ul class="nav nav-tabs mb-3" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="online-tab" data-bs-toggle="tab" data-bs-target="#onlineActivation" type="button" role="tab">
+                            <i class="bi bi-cloud-check me-1"></i>Online Activation
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manualActivation" type="button" role="tab">
+                            <i class="bi bi-file-earmark-text me-1"></i>Manual / Offline
+                        </button>
+                    </li>
+                </ul>
 
-                <div id="setupActivationStatus" class="mb-3" style="display: none;"></div>
+                <div class="tab-content">
+                    <!-- Online Activation Tab -->
+                    <div class="tab-pane fade show active" id="onlineActivation" role="tabpanel">
+                        <div class="mb-3">
+                            <label for="setupActivationCode" class="form-label fw-semibold">Activation Code</label>
+                            <input type="text" class="form-control font-monospace" id="setupActivationCode"
+                                   placeholder="e.g. SK-XXXX-XXXX-XXXX-XXXX">
+                            <small class="form-text text-muted">From your purchase confirmation or portal account.</small>
+                        </div>
+                        <div id="setupActivationStatus" class="mb-3" style="display: none;"></div>
+                        <div class="text-center mt-3">
+                            <button type="button" class="btn btn-setup" onclick="setupActivateLicense()" id="setupActivateBtn">
+                                <i class="bi bi-cloud-check me-1"></i>Activate Online
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Manual Activation Tab -->
+                    <div class="tab-pane fade" id="manualActivation" role="tabpanel">
+                        <p class="text-muted small">For air-gapped or offline environments. Download your license key from the portal, then paste it here.</p>
+                        <div class="mb-3">
+                            <label for="setupManualLicenseKey" class="form-label fw-semibold">License Key</label>
+                            <textarea class="form-control font-monospace" id="setupManualLicenseKey" rows="4"
+                                      placeholder="Paste your license key here..."></textarea>
+                        </div>
+                        <div id="setupManualStatus" class="mb-3" style="display: none;"></div>
+                        <div class="text-center mt-3">
+                            <button type="button" class="btn btn-setup" onclick="setupManualActivate()" id="setupManualBtn">
+                                <i class="bi bi-check-circle me-1"></i>Activate License
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="text-center mt-4">
                     <button type="button" class="btn btn-secondary me-2" onclick="previousStep()">
                         <i class="bi bi-arrow-left"></i> Back
                     </button>
-                    <button type="button" class="btn btn-outline-secondary me-2" onclick="nextStep()">
-                        Skip for now
-                    </button>
-                    <button type="button" class="btn btn-setup" onclick="setupActivateLicense()" id="setupActivateBtn">
-                        Activate <i class="bi bi-key"></i>
+                    <button type="button" class="btn btn-outline-secondary" onclick="nextStep()">
+                        Skip for now <i class="bi bi-arrow-right"></i>
                     </button>
                 </div>
             </div>
@@ -898,6 +934,50 @@
                 statusEl.innerHTML = '<div class="alert alert-danger mb-0 py-2"><i class="bi bi-exclamation-triangle me-1"></i>Network error: ' + error.message + '</div>';
                 btn.disabled = false;
                 btn.innerHTML = 'Activate <i class="bi bi-key"></i>';
+            }
+        }
+
+        async function setupManualActivate() {
+            clearAlert();
+            const key = document.getElementById('setupManualLicenseKey').value.trim();
+            const statusEl = document.getElementById('setupManualStatus');
+            const btn = document.getElementById('setupManualBtn');
+
+            if (!key) {
+                showAlert('Please paste your license key', 'warning');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Validating...';
+            statusEl.style.display = 'block';
+            statusEl.innerHTML = '<div class="alert alert-info mb-0 py-2"><i class="bi bi-hourglass-split me-1"></i>Validating license...</div>';
+
+            try {
+                const response = await fetch('/api/setup/manual-license', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ license_key: key })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    statusEl.innerHTML = '<div class="alert alert-success mb-0 py-2"><i class="bi bi-check-circle me-1"></i>' + (data.message || 'License activated!') + '</div>';
+                    showAlert('License activated!', 'success');
+                    setTimeout(() => {
+                        clearAlert();
+                        nextStep();
+                    }, 2000);
+                } else {
+                    statusEl.innerHTML = '<div class="alert alert-danger mb-0 py-2"><i class="bi bi-exclamation-triangle me-1"></i>' + (data.error || 'Invalid license key') + '</div>';
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Activate License';
+                }
+            } catch (error) {
+                statusEl.innerHTML = '<div class="alert alert-danger mb-0 py-2"><i class="bi bi-exclamation-triangle me-1"></i>Error: ' + error.message + '</div>';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Activate License';
             }
         }
 
