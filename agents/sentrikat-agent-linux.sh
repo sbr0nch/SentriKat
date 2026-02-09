@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.1.0"
+AGENT_VERSION="1.2.0"
 CONFIG_DIR="/etc/sentrikat"
 CONFIG_FILE="${CONFIG_DIR}/agent.conf"
 LOG_FILE="/var/log/sentrikat-agent.log"
@@ -373,6 +373,250 @@ get_installed_software() {
     json_array+="]"
 
     echo "$json_array"
+}
+
+# ============================================================================
+# Container Image Scanning (Trivy Integration)
+# ============================================================================
+
+TRIVY_BIN="/usr/local/bin/trivy"
+TRIVY_CACHE_DIR="/var/cache/sentrikat/trivy"
+CONTAINER_SCAN_ENABLED="${CONTAINER_SCAN_ENABLED:-auto}"  # auto, true, false
+
+check_docker_available() {
+    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+        return 0
+    elif command -v podman &>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+install_trivy() {
+    if [[ -x "$TRIVY_BIN" ]]; then
+        log_info "Trivy already installed at $TRIVY_BIN"
+        return 0
+    fi
+
+    log_info "Installing Trivy for container image scanning..."
+    mkdir -p "$TRIVY_CACHE_DIR" 2>/dev/null || true
+
+    # Detect architecture
+    local arch
+    case "$(uname -m)" in
+        x86_64)  arch="Linux-64bit" ;;
+        aarch64) arch="Linux-ARM64" ;;
+        armv7l)  arch="Linux-ARM" ;;
+        *)
+            log_warn "Unsupported architecture $(uname -m) for Trivy"
+            return 1
+            ;;
+    esac
+
+    # Download latest Trivy release
+    local tmpdir
+    tmpdir=$(mktemp -d)
+
+    if curl -sfL "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_*_${arch}.tar.gz" -o "$tmpdir/trivy.tar.gz" 2>/dev/null; then
+        tar xzf "$tmpdir/trivy.tar.gz" -C "$tmpdir" trivy 2>/dev/null
+        if [[ -f "$tmpdir/trivy" ]]; then
+            mv "$tmpdir/trivy" "$TRIVY_BIN"
+            chmod 755 "$TRIVY_BIN"
+            log_info "Trivy installed successfully"
+            rm -rf "$tmpdir"
+            return 0
+        fi
+    fi
+
+    # Fallback: use install script
+    if curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin 2>/dev/null; then
+        log_info "Trivy installed via install script"
+        rm -rf "$tmpdir"
+        return 0
+    fi
+
+    log_warn "Failed to install Trivy. Container scanning will be skipped."
+    rm -rf "$tmpdir"
+    return 1
+}
+
+get_container_images() {
+    local images=()
+
+    # Docker images
+    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+        while IFS= read -r line; do
+            [[ -z "$line" || "$line" == "<none>:<none>" ]] && continue
+            images+=("$line")
+        done < <(docker images --format "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}" 2>/dev/null | grep -v '<none>')
+    fi
+
+    # Podman images (if docker not available)
+    if [[ ${#images[@]} -eq 0 ]] && command -v podman &>/dev/null; then
+        while IFS= read -r line; do
+            [[ -z "$line" || "$line" == "<none>:<none>" ]] && continue
+            images+=("$line")
+        done < <(podman images --format "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}" 2>/dev/null | grep -v '<none>')
+    fi
+
+    printf '%s\n' "${images[@]}"
+}
+
+scan_container_images() {
+    # Check if container scanning should run
+    if [[ "$CONTAINER_SCAN_ENABLED" == "false" ]]; then
+        log_info "Container scanning disabled by configuration"
+        return 0
+    fi
+
+    # Auto-detect Docker/Podman
+    if ! check_docker_available; then
+        if [[ "$CONTAINER_SCAN_ENABLED" == "auto" ]]; then
+            log_info "No container runtime detected, skipping container scan"
+            return 0
+        else
+            log_warn "Container scanning enabled but no container runtime found"
+            return 1
+        fi
+    fi
+
+    log_info "Starting container image scan..."
+
+    # Install Trivy if needed
+    if ! install_trivy; then
+        log_warn "Trivy not available, skipping container scan"
+        return 1
+    fi
+
+    # Get list of images
+    local image_list
+    image_list=$(get_container_images)
+
+    if [[ -z "$image_list" ]]; then
+        log_info "No container images found"
+        return 0
+    fi
+
+    local image_count=0
+    local scan_results="["
+    local first=true
+
+    while IFS='|' read -r image_ref image_id image_size; do
+        [[ -z "$image_ref" ]] && continue
+
+        log_info "Scanning container image: $image_ref"
+
+        # Run Trivy scan with JSON output
+        local trivy_output
+        trivy_output=$("$TRIVY_BIN" image \
+            --format json \
+            --severity HIGH,CRITICAL \
+            --cache-dir "$TRIVY_CACHE_DIR" \
+            --quiet \
+            --timeout 5m \
+            "$image_ref" 2>/dev/null)
+
+        if [[ $? -ne 0 || -z "$trivy_output" ]]; then
+            log_warn "Trivy scan failed for $image_ref"
+            continue
+        fi
+
+        # Build our scan result payload
+        local image_name="${image_ref%%:*}"
+        local image_tag="${image_ref#*:}"
+        [[ "$image_tag" == "$image_ref" ]] && image_tag="latest"
+
+        # Escape values
+        image_name=$(json_escape "$image_name")
+        image_tag=$(json_escape "$image_tag")
+        image_id=$(json_escape "${image_id:0:12}")
+
+        # Write trivy output to temp file for processing
+        local tmpfile
+        tmpfile=$(mktemp)
+        echo "$trivy_output" > "$tmpfile"
+
+        if [[ "$first" == "true" ]]; then
+            first=false
+        else
+            scan_results+=","
+        fi
+
+        # Wrap the raw Trivy JSON with our metadata
+        scan_results+="{\"image_name\": \"$image_name\", \"image_tag\": \"$image_tag\", \"image_id\": \"$image_id\", \"trivy_output\": $(cat "$tmpfile")}"
+
+        rm -f "$tmpfile"
+        ((image_count++))
+
+        # Limit to 50 images per scan to avoid overwhelming the server
+        if [[ $image_count -ge 50 ]]; then
+            log_warn "Reached 50 image limit, skipping remaining images"
+            break
+        fi
+    done <<< "$image_list"
+
+    scan_results+="]"
+
+    if [[ $image_count -eq 0 ]]; then
+        log_info "No images scanned successfully"
+        return 0
+    fi
+
+    log_info "Scanned $image_count container images"
+
+    # Send results to SentriKat server
+    send_container_scan_results "$scan_results"
+}
+
+send_container_scan_results() {
+    local scan_results="$1"
+    local endpoint="${SERVER_URL}/api/agent/container-scan"
+
+    log_info "Sending container scan results to $endpoint..."
+
+    local payload
+    payload="{\"agent_id\": \"${AGENT_ID}\", \"hostname\": \"$(hostname)\", \"scanner\": \"trivy\", \"scanner_version\": \"$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo 'unknown')\", \"images\": ${scan_results}}"
+
+    # Write payload to temp file
+    local tmpfile
+    tmpfile=$(mktemp)
+    echo "$payload" > "$tmpfile"
+
+    local max_retries=3
+    local retry_delay=5
+
+    for ((i=1; i<=max_retries; i++)); do
+        local response
+        local http_code
+
+        response=$(curl -s -w "\n%{http_code}" -X POST "$endpoint" \
+            -H "X-Agent-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
+            --data-binary "@${tmpfile}" \
+            --max-time 120 \
+            2>&1) || true
+
+        http_code=$(echo "$response" | tail -n1)
+        local body
+        body=$(echo "$response" | sed '$d')
+
+        if [[ "$http_code" == "200" || "$http_code" == "202" ]]; then
+            log_info "Container scan results sent successfully (HTTP $http_code)"
+            rm -f "$tmpfile"
+            return 0
+        else
+            log_warn "Container scan upload attempt $i failed: HTTP $http_code - $body"
+            if [[ $i -lt $max_retries ]]; then
+                sleep $retry_delay
+                retry_delay=$((retry_delay * 2))
+            fi
+        fi
+    done
+
+    rm -f "$tmpfile"
+    log_error "Failed to send container scan results after $max_retries attempts"
+    return 1
 }
 
 # ============================================================================
@@ -740,6 +984,9 @@ main() {
         log_error "Inventory report failed"
         exit 1
     fi
+
+    # Run container image scan (if Docker/Podman detected)
+    scan_container_images || log_warn "Container scanning encountered issues (non-fatal)"
 }
 
 # Parse arguments

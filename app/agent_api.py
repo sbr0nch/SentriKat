@@ -24,7 +24,8 @@ import ipaddress
 from app import db, csrf, limiter
 from app.models import (
     Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob,
-    AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification
+    AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification,
+    ContainerImage, ContainerVulnerability
 )
 from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
 from app.auth import login_required, admin_required, org_admin_required
@@ -2981,4 +2982,350 @@ def trigger_all_assets_scan():
         'status': 'success',
         'message': f'Scan requested for {count} agents',
         'agents_triggered': count
+    })
+
+
+# ============================================================================
+# Container Image Scanning Endpoints (Trivy Integration)
+# ============================================================================
+
+MAX_IMAGES_PER_REQUEST = 50
+MAX_VULNS_PER_IMAGE = 5000
+
+@agent_bp.route('/api/agent/container-scan', methods=['POST'])
+@limiter.limit("30/minute", key_func=get_agent_key_for_limit)
+@agent_auth_required
+def report_container_scan():
+    """
+    Receive container image scan results from an agent running Trivy.
+
+    Expected JSON body:
+    {
+        "agent_id": "unique-agent-id",
+        "hostname": "server-1",
+        "scanner": "trivy",
+        "scanner_version": "0.58.0",
+        "images": [
+            {
+                "image_name": "nginx",
+                "image_tag": "1.25-alpine",
+                "image_id": "abc123def456",
+                "trivy_output": { ... raw Trivy JSON ... }
+            }
+        ]
+    }
+    """
+    organization = request.organization
+    agent_key = request.agent_key
+
+    if not organization:
+        return jsonify({'error': 'API key not associated with an organization'}), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    hostname = data.get('hostname', '').strip()
+    agent_id = data.get('agent_id', '').strip()
+    scanner = data.get('scanner', 'trivy')
+    scanner_version = data.get('scanner_version', 'unknown')
+    images = data.get('images', [])
+
+    if not hostname and not agent_id:
+        return jsonify({'error': 'hostname or agent_id required'}), 400
+
+    if not images:
+        return jsonify({'status': 'ok', 'message': 'No images to process'}), 200
+
+    if len(images) > MAX_IMAGES_PER_REQUEST:
+        return jsonify({'error': f'Maximum {MAX_IMAGES_PER_REQUEST} images per request'}), 400
+
+    # Find the asset
+    asset = None
+    if agent_id:
+        asset = Asset.query.filter_by(agent_id=agent_id).first()
+    if not asset and hostname:
+        asset = Asset.query.filter_by(
+            organization_id=organization.id,
+            hostname=hostname[:MAX_HOSTNAME_LENGTH]
+        ).first()
+
+    if not asset:
+        return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
+
+    # Process each image
+    images_processed = 0
+    images_created = 0
+    images_updated = 0
+    total_vulns_found = 0
+
+    try:
+        for image_data in images:
+            image_name = (image_data.get('image_name') or '').strip()[:500]
+            image_tag = (image_data.get('image_tag') or 'latest').strip()[:200]
+            image_id = (image_data.get('image_id') or '').strip()[:100]
+            trivy_output = image_data.get('trivy_output', {})
+
+            if not image_name:
+                continue
+
+            # Parse Trivy output metadata
+            os_family = None
+            os_version = None
+            if isinstance(trivy_output, dict):
+                metadata = trivy_output.get('Metadata', {}) or {}
+                os_info = metadata.get('OS', {}) or {}
+                os_family = (os_info.get('Family') or '')[:50] or None
+                os_version = (os_info.get('Name') or '')[:100] or None
+
+            # Find or create container image record
+            container_image = ContainerImage.query.filter_by(
+                organization_id=organization.id,
+                asset_id=asset.id,
+                image_name=image_name,
+                image_tag=image_tag
+            ).first()
+
+            if container_image:
+                images_updated += 1
+            else:
+                container_image = ContainerImage(
+                    organization_id=organization.id,
+                    asset_id=asset.id,
+                    image_name=image_name,
+                    image_tag=image_tag,
+                )
+                db.session.add(container_image)
+                images_created += 1
+
+            # Update image metadata
+            container_image.image_id = image_id or container_image.image_id
+            container_image.os_family = os_family or container_image.os_family
+            container_image.os_version = os_version or container_image.os_version
+            container_image.last_scan_at = datetime.utcnow()
+            container_image.last_seen_at = datetime.utcnow()
+            container_image.scanner_version = f"{scanner} {scanner_version}"
+            container_image.active = True
+            container_image.running = True
+
+            # Clear old vulnerabilities for this image
+            ContainerVulnerability.query.filter_by(
+                container_image_id=container_image.id
+            ).delete() if container_image.id else None
+
+            # Flush to get the container_image.id if new
+            db.session.flush()
+
+            # Parse Trivy results
+            critical_count = 0
+            high_count = 0
+            medium_count = 0
+            low_count = 0
+            fixed_count = 0
+            unfixed_count = 0
+            vuln_count = 0
+
+            results = []
+            if isinstance(trivy_output, dict):
+                results = trivy_output.get('Results', []) or []
+
+            for result in results:
+                target = result.get('Target', '')
+                target_type = result.get('Type', '')
+                vulns = result.get('Vulnerabilities') or []
+
+                for vuln in vulns[:MAX_VULNS_PER_IMAGE]:
+                    vuln_id = (vuln.get('VulnerabilityID') or '').strip()[:50]
+                    if not vuln_id:
+                        continue
+
+                    severity = (vuln.get('Severity') or 'UNKNOWN').upper()[:20]
+                    pkg_name = (vuln.get('PkgName') or '')[:200]
+                    pkg_version = (vuln.get('InstalledVersion') or '')[:100]
+                    fixed_ver = (vuln.get('FixedVersion') or '')[:100]
+                    title = (vuln.get('Title') or '')[:500]
+                    description = vuln.get('Description') or ''
+                    cvss_score = None
+                    primary_url = (vuln.get('PrimaryURL') or '')[:500]
+
+                    # Extract CVSS score from Trivy's CVSS data
+                    cvss_data = vuln.get('CVSS') or {}
+                    for source in ['nvd', 'redhat', 'ghsa']:
+                        if source in cvss_data and 'V3Score' in cvss_data[source]:
+                            cvss_score = cvss_data[source]['V3Score']
+                            break
+
+                    # Determine fix status
+                    fix_status = 'not_fixed'
+                    if fixed_ver:
+                        fix_status = 'fixed'
+                        fixed_count += 1
+                    else:
+                        unfixed_count += 1
+
+                    # Count by severity
+                    if severity == 'CRITICAL':
+                        critical_count += 1
+                    elif severity == 'HIGH':
+                        high_count += 1
+                    elif severity == 'MEDIUM':
+                        medium_count += 1
+                    elif severity == 'LOW':
+                        low_count += 1
+
+                    # Create vulnerability record
+                    container_vuln = ContainerVulnerability(
+                        container_image_id=container_image.id,
+                        vuln_id=vuln_id,
+                        severity=severity,
+                        title=title,
+                        description=description[:2000] if description else None,
+                        pkg_name=pkg_name,
+                        pkg_version=pkg_version,
+                        pkg_type=target_type[:50] if target_type else None,
+                        pkg_path=target[:500] if target else None,
+                        fixed_version=fixed_ver or None,
+                        fix_status=fix_status,
+                        cvss_score=cvss_score,
+                        data_source=vuln.get('DataSource', {}).get('Name', '')[:200] if isinstance(vuln.get('DataSource'), dict) else None,
+                        primary_url=primary_url or None,
+                    )
+                    db.session.add(container_vuln)
+                    vuln_count += 1
+
+            # Update cached counts on the image
+            container_image.total_vulnerabilities = vuln_count
+            container_image.critical_count = critical_count
+            container_image.high_count = high_count
+            container_image.medium_count = medium_count
+            container_image.low_count = low_count
+            container_image.fixed_count = fixed_count
+            container_image.unfixed_count = unfixed_count
+
+            total_vulns_found += vuln_count
+            images_processed += 1
+
+        # Update agent API key usage
+        agent_key.last_used_at = datetime.utcnow()
+        agent_key.usage_count = (agent_key.usage_count or 0) + 1
+
+        db.session.commit()
+
+        logger.info(
+            f"Container scan from {hostname}: {images_processed} images, "
+            f"{total_vulns_found} vulnerabilities found"
+        )
+
+        return jsonify({
+            'status': 'success',
+            'summary': {
+                'images_processed': images_processed,
+                'images_created': images_created,
+                'images_updated': images_updated,
+                'total_vulnerabilities': total_vulns_found,
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Container scan processing error: {e}")
+        return jsonify({'error': 'Failed to process container scan results'}), 500
+
+
+@agent_bp.route('/api/containers', methods=['GET'])
+@login_required
+def list_container_images():
+    """List all container images for the user's organizations."""
+    from app.auth import get_current_user
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Get user's organizations
+    if user.is_super_admin():
+        org_ids = [o.id for o in Organization.query.filter_by(active=True).all()]
+    else:
+        org_ids = [m.organization_id for m in user.org_memberships.all()]
+
+    # Query parameters
+    org_id = request.args.get('organization_id', type=int)
+    severity = request.args.get('severity')  # critical, high, medium, low
+    search = request.args.get('search', '').strip()
+
+    query = ContainerImage.query.filter(
+        ContainerImage.organization_id.in_(org_ids),
+        ContainerImage.active == True
+    )
+
+    if org_id and org_id in org_ids:
+        query = query.filter(ContainerImage.organization_id == org_id)
+
+    if severity:
+        severity = severity.lower()
+        if severity == 'critical':
+            query = query.filter(ContainerImage.critical_count > 0)
+        elif severity == 'high':
+            query = query.filter(ContainerImage.high_count > 0)
+
+    if search:
+        query = query.filter(ContainerImage.image_name.ilike(f'%{search}%'))
+
+    images = query.order_by(
+        ContainerImage.critical_count.desc(),
+        ContainerImage.high_count.desc(),
+        ContainerImage.last_scan_at.desc()
+    ).limit(500).all()
+
+    # Aggregate stats
+    total_images = len(images)
+    total_critical = sum(i.critical_count or 0 for i in images)
+    total_high = sum(i.high_count or 0 for i in images)
+    total_vulns = sum(i.total_vulnerabilities or 0 for i in images)
+
+    return jsonify({
+        'images': [img.to_dict() for img in images],
+        'stats': {
+            'total_images': total_images,
+            'total_vulnerabilities': total_vulns,
+            'total_critical': total_critical,
+            'total_high': total_high,
+        }
+    })
+
+
+@agent_bp.route('/api/containers/<int:image_id>', methods=['GET'])
+@login_required
+def get_container_image_detail(image_id):
+    """Get detailed info for a container image including all vulnerabilities."""
+    from app.auth import get_current_user
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    image = ContainerImage.query.get_or_404(image_id)
+
+    # Authorization check
+    if not user.is_super_admin():
+        org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if image.organization_id not in org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    # Get vulnerabilities for this image
+    vulns = ContainerVulnerability.query.filter_by(
+        container_image_id=image.id
+    ).order_by(
+        db.case(
+            (ContainerVulnerability.severity == 'CRITICAL', 0),
+            (ContainerVulnerability.severity == 'HIGH', 1),
+            (ContainerVulnerability.severity == 'MEDIUM', 2),
+            (ContainerVulnerability.severity == 'LOW', 3),
+            else_=4
+        ),
+        ContainerVulnerability.cvss_score.desc().nullslast()
+    ).all()
+
+    return jsonify({
+        'image': image.to_dict(),
+        'vulnerabilities': [v.to_dict() for v in vulns],
+        'vulnerability_count': len(vulns),
     })
