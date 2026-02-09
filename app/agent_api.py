@@ -3040,10 +3040,18 @@ def report_container_scan():
     if len(images) > MAX_IMAGES_PER_REQUEST:
         return jsonify({'error': f'Maximum {MAX_IMAGES_PER_REQUEST} images per request'}), 400
 
-    # Find the asset
+    # Validate scanner field against allowlist
+    if scanner not in ('trivy', 'grype', 'syft'):
+        scanner = 'unknown'
+    scanner_version = scanner_version[:50]  # Truncate version string
+
+    # Find the asset (must belong to the API key's organization)
     asset = None
     if agent_id:
-        asset = Asset.query.filter_by(agent_id=agent_id).first()
+        asset = Asset.query.filter_by(
+            agent_id=agent_id,
+            organization_id=organization.id
+        ).first()
     if not asset and hostname:
         asset = Asset.query.filter_by(
             organization_id=organization.id,
@@ -3052,6 +3060,19 @@ def report_container_scan():
 
     if not asset:
         return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
+
+    # Verify asset belongs to the API key's organization (defense in depth)
+    if asset.organization_id != organization.id:
+        logger.warning(
+            f"Container scan rejected: asset org {asset.organization_id} != "
+            f"API key org {organization.id}"
+        )
+        return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
+
+    # Check request payload size (limit to 10MB to prevent memory exhaustion)
+    content_length = request.content_length or 0
+    if content_length > 10 * 1024 * 1024:
+        return jsonify({'error': 'Request too large (max 10MB)'}), 413
 
     # Process each image
     images_processed = 0
@@ -3108,13 +3129,14 @@ def report_container_scan():
             container_image.active = True
             container_image.running = True
 
-            # Clear old vulnerabilities for this image
-            ContainerVulnerability.query.filter_by(
-                container_image_id=container_image.id
-            ).delete() if container_image.id else None
-
             # Flush to get the container_image.id if new
             db.session.flush()
+
+            # Clear old vulnerabilities for this image (replace with fresh scan)
+            if container_image.id:
+                ContainerVulnerability.query.filter_by(
+                    container_image_id=container_image.id
+                ).delete()
 
             # Parse Trivy results
             critical_count = 0
@@ -3148,12 +3170,19 @@ def report_container_scan():
                     cvss_score = None
                     primary_url = (vuln.get('PrimaryURL') or '')[:500]
 
-                    # Extract CVSS score from Trivy's CVSS data
+                    # Extract and validate CVSS score from Trivy's CVSS data
                     cvss_data = vuln.get('CVSS') or {}
-                    for source in ['nvd', 'redhat', 'ghsa']:
-                        if source in cvss_data and 'V3Score' in cvss_data[source]:
-                            cvss_score = cvss_data[source]['V3Score']
-                            break
+                    if isinstance(cvss_data, dict):
+                        for source in ['nvd', 'redhat', 'ghsa']:
+                            source_data = cvss_data.get(source)
+                            if isinstance(source_data, dict) and 'V3Score' in source_data:
+                                try:
+                                    score = float(source_data['V3Score'])
+                                    if 0.0 <= score <= 10.0:
+                                        cvss_score = score
+                                        break
+                                except (ValueError, TypeError):
+                                    pass
 
                     # Determine fix status
                     fix_status = 'not_fixed'
