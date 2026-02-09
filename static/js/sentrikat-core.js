@@ -383,8 +383,9 @@
          * @param {string} message - Message to display
          * @param {string} type - Type: 'success', 'danger', 'warning', 'info'
          * @param {number} duration - Duration in ms (default: 5000)
+         * @param {Object} [options] - Optional: { actionUrl, actionText }
          */
-        show: function(message, type = 'info', duration = 5000) {
+        show: function(message, type = 'info', duration = 5000, options = {}) {
             if (!this.container) this.init();
 
             const icons = {
@@ -395,12 +396,18 @@
             };
 
             const toastId = 'toast-' + Date.now();
+            let actionHtml = '';
+            if (options.actionUrl) {
+                const linkText = this.escapeHtml(options.actionText || 'Open');
+                actionHtml = ` <a href="${this.escapeHtml(options.actionUrl)}" target="_blank" rel="noopener" class="text-white fw-bold text-decoration-underline ms-1">${linkText} <i class="bi bi-box-arrow-up-right" style="font-size: 0.75em;"></i></a>`;
+            }
+
             const toastHtml = `
                 <div id="${toastId}" class="toast align-items-center text-white bg-${type} border-0" role="alert">
                     <div class="d-flex">
                         <div class="toast-body">
                             <i class="bi ${icons[type] || icons.info} me-2"></i>
-                            ${this.escapeHtml(message)}
+                            ${this.escapeHtml(message)}${actionHtml}
                         </div>
                         <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
                     </div>
@@ -976,7 +983,7 @@
     // These maintain compatibility with existing code
     window.showLoading = function() { SK.Loading.show(); };
     window.hideLoading = function() { SK.Loading.hide(); };
-    window.showToast = function(message, type) { SK.Toast.show(message, type); };
+    window.showToast = function(message, type, duration, options) { SK.Toast.show(message, type, duration || 5000, options); };
 
     // ========================================================================
     // EXPORT
