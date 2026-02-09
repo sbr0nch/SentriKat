@@ -3749,19 +3749,11 @@
             if (submenu && submenu.classList.contains('sidebar-submenu')) {
                 const isOpen = submenu.classList.contains('open');
 
-                // Close other submenus (accordion behavior)
-                document.querySelectorAll('.sidebar-submenu.open').forEach(other => {
-                    if (other !== submenu) {
-                        other.classList.remove('open');
-                        other.previousElementSibling?.classList.remove('expanded');
-                    }
-                });
-
-                // Toggle current submenu
+                // Toggle current submenu (no accordion - keep others open)
                 submenu.classList.toggle('open');
                 linkElement.classList.toggle('expanded');
 
-                // Save submenu state
+                // Save all submenu states independently
                 const submenuStates = JSON.parse(localStorage.getItem('submenuStates') || '{}');
                 const submenuId = linkElement.getAttribute('data-tooltip') || linkElement.textContent.trim();
                 submenuStates[submenuId] = !isOpen;
@@ -3850,18 +3842,41 @@
                 wrapper.classList.add('sidebar-collapsed');
             }
 
-            // Restore submenu states
+            // Restore submenu states from localStorage
             const submenuStates = JSON.parse(localStorage.getItem('submenuStates') || '{}');
-            document.querySelectorAll('.sidebar-link[data-tooltip]').forEach(link => {
-                const submenu = link.nextElementSibling;
-                if (submenu && submenu.classList.contains('sidebar-submenu')) {
-                    const submenuId = link.getAttribute('data-tooltip');
-                    if (submenuStates[submenuId] && !isCollapsed) {
-                        submenu.classList.add('open');
-                        link.classList.add('expanded');
+            if (!isCollapsed) {
+                document.querySelectorAll('.sidebar-link[data-tooltip]').forEach(link => {
+                    const submenu = link.nextElementSibling;
+                    if (submenu && submenu.classList.contains('sidebar-submenu')) {
+                        const submenuId = link.getAttribute('data-tooltip');
+                        if (submenuStates[submenuId]) {
+                            submenu.classList.add('open');
+                            link.classList.add('expanded');
+                        }
                     }
-                }
-            });
+                });
+
+                // Auto-open submenu containing the active page link
+                const currentPath = window.location.pathname;
+                const currentHash = window.location.hash;
+                document.querySelectorAll('.sidebar-submenu .sidebar-sublink').forEach(sublink => {
+                    const href = sublink.getAttribute('href') || '';
+                    if (href && (href === currentPath || href === currentPath + currentHash)) {
+                        const submenu = sublink.closest('.sidebar-submenu');
+                        if (submenu && !submenu.classList.contains('open')) {
+                            submenu.classList.add('open');
+                            const parentLink = submenu.previousElementSibling;
+                            if (parentLink) parentLink.classList.add('expanded');
+                            // Save this state so it persists
+                            const id = parentLink?.getAttribute('data-tooltip');
+                            if (id) {
+                                submenuStates[id] = true;
+                                localStorage.setItem('submenuStates', JSON.stringify(submenuStates));
+                            }
+                        }
+                    }
+                });
+            }
 
             // Handle window resize
             window.addEventListener('resize', function() {

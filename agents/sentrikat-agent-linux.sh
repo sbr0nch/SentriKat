@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.2.0"
+AGENT_VERSION="1.3.0"
 CONFIG_DIR="/etc/sentrikat"
 CONFIG_FILE="${CONFIG_DIR}/agent.conf"
 LOG_FILE="/var/log/sentrikat-agent.log"
@@ -193,45 +193,125 @@ get_installed_software() {
 
     local products=()
     local count=0
+    local total_scanned=0
 
-    # Security-relevant package patterns to include (case-insensitive matching)
-    # These are packages commonly tracked for CVEs
+    # ---------------------------------------------------------------------------
+    # Smart inventory filter: include only packages that matter for CVE matching
+    # Strategy: explicit EXCLUDE of known noise first, then INCLUDE by category.
+    # This keeps the inventory focused (typically 100-300 packages) instead of
+    # sending every dpkg/rpm entry (often 1500-3000 on a full server).
+    # ---------------------------------------------------------------------------
     is_security_relevant() {
         local pkg="$1"
         local pkg_lower="${pkg,,}"  # Convert to lowercase
 
-        # Include these important package categories
+        # ---- STAGE 1: Exclude known noise (fast reject) ----
         case "$pkg_lower" in
-            # Web servers & proxies
-            apache*|httpd*|nginx*|haproxy*|traefik*|caddy*|lighttpd*) return 0 ;;
+            # Documentation, manpages, locales, translations
+            *-doc|*-docs|*-man|*-locale*|*-l10n*|*-i18n*|*-lang|*-lang-*) return 1 ;;
+            manpages*|man-db*|info|texinfo*) return 1 ;;
+            # Development headers & debug symbols (not runtime-vulnerable)
+            *-dev|*-devel|*-dbg|*-dbgsym|*-debug|*-debuginfo) return 1 ;;
+            *-headers) return 1 ;;
+            # Static libraries (not used at runtime)
+            *-static) return 1 ;;
+            # Fonts, themes, icons, wallpapers
+            fonts-*|*-fonts|*-icon*|*-theme*|*-wallpaper*|adwaita-*|hicolor-*) return 1 ;;
+            # Python2/3 pure-data modules (not services, no CVE surface)
+            python3-*|python-*)
+                # EXCEPT: python3 runtime itself, crypto, http, and security libs
+                case "$pkg_lower" in
+                    python3|python3.*|python3-openssl*|python3-cryptography*|python3-jwt*|python3-django*|python3-flask*|python3-requests*|python3-urllib3*|python3-paramiko*|python3-twisted*|python3-tornado*|python3-aiohttp*) return 0 ;;
+                    *) return 1 ;;
+                esac
+                ;;
+            # Perl modules (rarely CVE-tracked individually)
+            perl-*|libperl*) return 1 ;;
+            # Ruby gems (rarely CVE-tracked via distro)
+            ruby-*) return 1 ;;
+            # Texlive and LaTeX (not security relevant)
+            texlive*|latex*) return 1 ;;
+            # X11/Wayland display libraries (huge count, low CVE)
+            libx11-*|libxcb*|libxext*|libxfixes*|libxi-*|libxkb*|libxrandr*|libxrender*|libxshmfence*|libxtst*|libxcomposite*|libxcursor*|libxdamage*|libxinerama*) return 1 ;;
+            xserver-*|xfonts-*|x11-*) return 1 ;;
+            # GLib/GTK/GNOME/KDE desktop noise
+            libglib2.0-*|libgtk*|libgdk*|libpango*|libcairo*|libatk*|libgdk-pixbuf*|libharfbuzz*|libfontconfig*|libfreetype*) return 1 ;;
+            gnome-*|kde-*|plasma-*|gir1.2-*) return 1 ;;
+            # Systemd sub-packages (noise - we only care about systemd itself)
+            systemd-*|libsystemd*|libudev*) return 1 ;;
+            # Low-level libc/compiler runtime (matched by kernel/glibc instead)
+            libc6*|libc-*|libstdc++*|libgcc*|gcc-*-base|cpp-*) return 1 ;;
+            # Misc low-CVE noise
+            *-data|*-common|*-base)
+                case "$pkg_lower" in
+                    ca-certificates-*|openssh-*|openssl-*) return 0 ;;  # Keep security-related -base/-common
+                    *) return 1 ;;
+                esac
+                ;;
+        esac
+
+        # ---- STAGE 2: Include by category (explicit allow) ----
+        case "$pkg_lower" in
+            # Web servers & reverse proxies
+            apache2|httpd|nginx|nginx-*|haproxy|traefik|caddy|lighttpd|varnish*) return 0 ;;
             # Databases
-            mysql*|mariadb*|postgres*|mongodb*|redis*|memcached*|sqlite*|elasticsearch*) return 0 ;;
-            # Programming languages & runtimes
-            php*|python3|ruby*|nodejs*|node|npm|java*|openjdk*|golang*|dotnet*|mono*) return 0 ;;
-            # Security & crypto
-            openssl*|openssh*|gnupg*|gpg*|libssl*|libcrypto*|ca-certificates*) return 0 ;;
-            # Container & virtualization
-            docker*|containerd*|podman*|kubernetes*|kubectl*|helm*|vagrant*|virtualbox*|qemu*) return 0 ;;
-            # System services
-            systemd*|dbus*|polkit*|sudo*|cron*) return 0 ;;
-            # Network services
-            bind9*|named*|dnsmasq*|postfix*|dovecot*|exim*|sendmail*|samba*|nfs*|vsftpd*|proftpd*) return 0 ;;
-            # Monitoring & logging
-            prometheus*|grafana*|zabbix*|nagios*|rsyslog*|syslog*|logrotate*) return 0 ;;
-            # Security tools
-            fail2ban*|iptables*|nftables*|ufw*|firewalld*|selinux*|apparmor*|aide*|tripwire*|clamav*) return 0 ;;
-            # Version control
-            git|git-core|subversion*|mercurial*) return 0 ;;
-            # Message queues
-            rabbitmq*|kafka*|activemq*|zeromq*) return 0 ;;
-            # Common vulnerable software
-            log4j*|struts*|tomcat*|jetty*|wildfly*|jboss*|spring*) return 0 ;;
-            # Kernel & boot
-            linux-image*|linux-headers*|grub*|kernel*) return 0 ;;
-            # Package managers (for tracking)
-            apt|dpkg|rpm|yum|dnf|pip*|gem*|composer*|cargo*) return 0 ;;
-            # Common utilities with CVE history
-            curl|wget|tar|gzip|bzip2|xz*|unzip*|bash|zsh|vim*|tmux*) return 0 ;;
+            mysql-server*|mysql-client*|mariadb-server*|mariadb-client*|postgresql*|postgres*|mongodb*|redis-server|redis-tools|memcached|sqlite3|elasticsearch*|couchdb*|neo4j*) return 0 ;;
+            # Programming language runtimes (not -dev, not lib wrappers)
+            php|php[0-9]*|php[0-9]*-*) return 0 ;;
+            python3|python3.[0-9]*|python2|python2.[0-9]*) return 0 ;;
+            ruby|ruby[0-9]*) return 0 ;;
+            nodejs|node|npm|yarn) return 0 ;;
+            java*-runtime*|openjdk*-jre*|openjdk*-jdk*|default-jre*|default-jdk*) return 0 ;;
+            golang*|go|dotnet*|mono-runtime*|erlang*|elixir*) return 0 ;;
+            # Core crypto & TLS libraries
+            openssl|libssl[0-9]*|libcrypto[0-9]*|gnutls*|libnss3|nss|nss-*) return 0 ;;
+            ca-certificates) return 0 ;;
+            # SSH & remote access
+            openssh-server|openssh-client|openssh|libssh*|dropbear*) return 0 ;;
+            # Container & orchestration
+            docker-ce*|docker.io|containerd*|podman|buildah|skopeo|cri-o*) return 0 ;;
+            kubernetes*|kubectl|kubelet|kubeadm|helm|k3s|minikube) return 0 ;;
+            # Virtualization
+            qemu*|libvirt*|virtualbox*|vagrant*) return 0 ;;
+            # Core system services
+            systemd|sudo|polkit|policykit*|cron|at) return 0 ;;
+            dbus|avahi*|cups*|sane*) return 0 ;;
+            # Networking services
+            bind9|named|dnsmasq|unbound|nsd) return 0 ;;
+            postfix|dovecot*|exim*|sendmail*|cyrus*) return 0 ;;
+            samba*|nfs-kernel-server|nfs-common|vsftpd|proftpd*|openvpn*|wireguard*|strongswan*|ipsec*) return 0 ;;
+            # Monitoring, logging, observability
+            prometheus|grafana*|zabbix*|nagios*|icinga*|telegraf|collectd|datadog*) return 0 ;;
+            rsyslog|syslog-ng|journald|fluentd|logstash|filebeat*) return 0 ;;
+            # Security tools & firewalling
+            fail2ban|iptables|nftables|ufw|firewalld) return 0 ;;
+            apparmor|selinux*|aide|tripwire|clamav*|rkhunter|chkrootkit) return 0 ;;
+            # Version control (servers can expose git/svn)
+            git|git-core|subversion|mercurial) return 0 ;;
+            # Message queues & middleware
+            rabbitmq*|kafka*|activemq*|mosquitto*|nats-server) return 0 ;;
+            # App servers & frameworks
+            tomcat*|jetty*|wildfly*|jboss*|gunicorn|uwsgi|unicorn|puma) return 0 ;;
+            # CI/CD tools
+            jenkins*|gitlab-*|drone*) return 0 ;;
+            # Known CVE-prone software
+            log4j*|struts*|spring*|jackson*|fastjson*) return 0 ;;
+            imagemagick*|ghostscript*|ffmpeg*|libav*|poppler*) return 0 ;;
+            # Kernel & bootloader
+            linux-image-[0-9]*|kernel|kernel-core|grub2*|grub-*) return 0 ;;
+            # Core libraries with frequent CVEs
+            glibc|libc-bin|zlib*|libxml2|libxslt*|expat|libexpat*|pcre*|icu*|libicu*) return 0 ;;
+            libcurl[0-9]*|curl|wget) return 0 ;;
+            libjpeg*|libpng*|libtiff*|libwebp*) return 0 ;;
+            # Package managers (track their version for supply-chain)
+            apt|dpkg|rpm|yum|dnf|pip|pip3|gem|composer|cargo|snap*|flatpak) return 0 ;;
+            # Shells & common CLI tools with CVE history
+            bash|zsh|dash|ksh|vim|vim-*|screen|tmux) return 0 ;;
+            tar|gzip|bzip2|xz-utils|unzip|p7zip*|cpio|rsync) return 0 ;;
+            # Proxies & load balancers
+            squid*|dante*|tinyproxy|privoxy) return 0 ;;
+            # DNS resolvers
+            resolvconf|systemd-resolved) return 0 ;;
             *) return 1 ;;
         esac
     }
@@ -240,6 +320,7 @@ get_installed_software() {
     if command -v dpkg &>/dev/null; then
         while IFS=$'\t' read -r name version; do
             [[ -z "$name" ]] && continue
+            ((total_scanned++))
 
             # Filter to security-relevant packages only
             if ! is_security_relevant "$name"; then
@@ -282,6 +363,7 @@ get_installed_software() {
     if command -v rpm &>/dev/null && [[ ! -f /etc/debian_version ]]; then
         while IFS=$'\t' read -r name version vendor; do
             [[ -z "$name" ]] && continue
+            ((total_scanned++))
 
             # Filter to security-relevant packages only
             if ! is_security_relevant "$name"; then
@@ -304,6 +386,7 @@ get_installed_software() {
     if command -v apk &>/dev/null; then
         while IFS='-' read -r name version; do
             [[ -z "$name" ]] && continue
+            ((total_scanned++))
 
             # Filter to security-relevant packages only
             if ! is_security_relevant "$name"; then
@@ -321,6 +404,7 @@ get_installed_software() {
     if command -v pacman &>/dev/null; then
         while IFS=' ' read -r name version; do
             [[ -z "$name" ]] && continue
+            ((total_scanned++))
 
             # Filter to security-relevant packages only
             if ! is_security_relevant "$name"; then
@@ -357,7 +441,7 @@ get_installed_software() {
         done < <(flatpak list --columns=name,version,origin 2>/dev/null)
     fi
 
-    log_info "Found $count software packages"
+    log_info "Scanned $total_scanned installed packages, selected $count security-relevant packages"
 
     # Build JSON array
     local json_array="["
@@ -648,16 +732,17 @@ send_inventory() {
 
     log_info "Sending inventory to $endpoint..."
 
-    # Build payload by inserting products into system_info JSON
-    # The system_info ends with "}" - we replace it with ", "products": [...] }"
-    local payload
-    payload=$(echo "$system_info" | sed 's/}$//')
-    payload="${payload}, \"products\": ${products}}"
-
-    # Write payload to temp file to avoid "Argument list too long" error
+    # Build payload by writing to temp file incrementally.
+    # This avoids "Argument list too long" errors when $products is very large
+    # (e.g. 1000+ packages) since we never pass the full string as an argument.
     local tmpfile
     tmpfile=$(mktemp)
-    echo "$payload" > "$tmpfile"
+
+    # Write system_info without closing brace, then append products, then close
+    printf '%s' "$system_info" | sed 's/}$//' > "$tmpfile"
+    printf ', "products": ' >> "$tmpfile"
+    printf '%s' "$products" >> "$tmpfile"
+    printf '}' >> "$tmpfile"
 
     # Retry logic
     local max_retries=3
