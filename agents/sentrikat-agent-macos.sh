@@ -1,30 +1,33 @@
 #!/bin/bash
 #
-# SentriKat Linux Agent - Software Inventory Collector
+# SentriKat macOS Agent - Software Inventory Collector
 #
-# Silent daemon agent that collects software inventory from Linux endpoints
-# and reports to a SentriKat server. Designed to run as a systemd service.
+# Silent daemon agent that collects software inventory from macOS endpoints
+# and reports to a SentriKat server. Designed to run as a LaunchDaemon.
 #
-# Version: 1.0.0
-# Requires: bash, curl, jq (optional for JSON parsing)
+# Version: 1.4.0
+# Requires: bash, curl
+#
+# Software sources:
+#   - system_profiler SPApplicationsDataType (GUI apps)
+#   - pkgutil (system packages)
+#   - Homebrew (brew list)
+#   - MacPorts (port installed) [if available]
 #
 # Usage:
-#   ./sentrikat-agent-linux.sh --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
-#   ./sentrikat-agent-linux.sh --install --server-url "https://..." --api-key "..."
-#   ./sentrikat-agent-linux.sh --uninstall
+#   ./sentrikat-agent-macos.sh --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
+#   ./sentrikat-agent-macos.sh --install --server-url "https://..." --api-key "..."
+#   ./sentrikat-agent-macos.sh --uninstall
 #
 
 set -euo pipefail
 
 AGENT_VERSION="1.4.0"
-CONFIG_DIR="/etc/sentrikat"
+CONFIG_DIR="/Library/Application Support/SentriKat"
 CONFIG_FILE="${CONFIG_DIR}/agent.conf"
-LOG_FILE="/var/log/sentrikat-agent.log"
-PID_FILE="/var/run/sentrikat-agent.pid"
-SYSTEMD_SERVICE="/etc/systemd/system/sentrikat-agent.service"
-SYSTEMD_TIMER="/etc/systemd/system/sentrikat-agent.timer"
-HEARTBEAT_SERVICE="/etc/systemd/system/sentrikat-heartbeat.service"
-HEARTBEAT_TIMER="/etc/systemd/system/sentrikat-heartbeat.timer"
+LOG_FILE="/Library/Logs/sentrikat-agent.log"
+LAUNCHDAEMON_PLIST="/Library/LaunchDaemons/com.sentrikat.agent.plist"
+HEARTBEAT_PLIST="/Library/LaunchDaemons/com.sentrikat.heartbeat.plist"
 
 # Default settings
 SERVER_URL=""
@@ -37,16 +40,13 @@ AGENT_ID=""
 # Logging Functions
 # ============================================================================
 
-# JSON string escaping function
 json_escape() {
     local str="$1"
-    # Escape backslashes first, then quotes, then control characters
-    str="${str//\\/\\\\}"      # Backslash
-    str="${str//\"/\\\"}"      # Double quote
-    str="${str//$'\n'/\\n}"    # Newline
-    str="${str//$'\r'/\\r}"    # Carriage return
-    str="${str//$'\t'/\\t}"    # Tab
-    # Remove other control characters
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    str="${str//$'\n'/\\n}"
+    str="${str//$'\r'/\\r}"
+    str="${str//$'\t'/\\t}"
     str=$(echo "$str" | tr -d '\000-\011\013-\037')
     echo "$str"
 }
@@ -57,7 +57,6 @@ log() {
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
-    # Ensure log directory exists
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 
     # Rotate log if > 10MB
@@ -90,19 +89,14 @@ load_config() {
         source "$CONFIG_FILE"
     fi
 
-    # Command line args override config file
     [[ -n "${ARG_SERVER_URL:-}" ]] && SERVER_URL="$ARG_SERVER_URL"
     [[ -n "${ARG_API_KEY:-}" ]] && API_KEY="$ARG_API_KEY"
 
-    # Generate agent ID if not set
     if [[ -z "$AGENT_ID" ]]; then
-        # Try to get machine ID
-        if [[ -f /etc/machine-id ]]; then
-            AGENT_ID=$(cat /etc/machine-id)
-        elif [[ -f /var/lib/dbus/machine-id ]]; then
-            AGENT_ID=$(cat /var/lib/dbus/machine-id)
-        else
-            AGENT_ID=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
+        # macOS hardware UUID
+        AGENT_ID=$(ioreg -d2 -c IOPlatformExpertDevice 2>/dev/null | awk -F'"' '/IOPlatformUUID/{print $4}')
+        if [[ -z "$AGENT_ID" ]]; then
+            AGENT_ID=$(uuidgen)
         fi
         save_config
     fi
@@ -136,34 +130,31 @@ get_system_info() {
     local os_version
     local kernel
 
-    hostname=$(hostname -s 2>/dev/null || hostname)
-    fqdn=$(hostname -f 2>/dev/null || hostname)
+    hostname=$(scutil --get ComputerName 2>/dev/null || hostname -s 2>/dev/null || hostname)
+    fqdn=$(hostname -f 2>/dev/null || scutil --get HostName 2>/dev/null || hostname)
 
-    # Get primary IP address
-    ip_address=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}')
-
-    # Detect OS
-    if [[ -f /etc/os-release ]]; then
-        # shellcheck source=/dev/null
-        source /etc/os-release
-        os_name="${NAME:-Linux}"
-        os_version="${VERSION:-${VERSION_ID:-unknown}}"
-    elif [[ -f /etc/redhat-release ]]; then
-        os_name="Red Hat"
-        os_version=$(cat /etc/redhat-release)
-    else
-        os_name="Linux"
-        os_version=$(uname -r)
+    # Get primary IP address (route to external)
+    ip_address=$(route get 1.1.1.1 2>/dev/null | awk '/interface:/{intf=$2} /gateway:/{gw=$2} END{if(intf) system("ipconfig getifaddr " intf)}' 2>/dev/null)
+    if [[ -z "$ip_address" ]]; then
+        ip_address=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "unknown")
     fi
 
+    os_name="macOS"
+    os_version=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
     kernel=$(uname -r)
 
-    # Escape all values for JSON safety
+    # Get macOS marketing name (e.g. "Ventura", "Sonoma")
+    local build
+    build=$(sw_vers -buildVersion 2>/dev/null || echo "")
+    local full_version="macOS ${os_version}"
+    if [[ -n "$build" ]]; then
+        full_version="${full_version} (${build})"
+    fi
+
     hostname=$(json_escape "$hostname")
     fqdn=$(json_escape "$fqdn")
     ip_address=$(json_escape "$ip_address")
-    os_name=$(json_escape "$os_name")
-    os_version=$(json_escape "$os_version")
+    os_version=$(json_escape "$full_version")
     kernel=$(json_escape "$kernel")
 
     cat << EOF
@@ -172,7 +163,7 @@ get_system_info() {
     "fqdn": "${fqdn}",
     "ip_address": "${ip_address}",
     "os": {
-        "name": "${os_name}",
+        "name": "macOS",
         "version": "${os_version}",
         "kernel": "${kernel}"
     },
@@ -194,111 +185,166 @@ get_installed_software() {
     local products=()
     local count=0
 
-    # Debian/Ubuntu: dpkg
-    if command -v dpkg &>/dev/null; then
-        while IFS=$'\t' read -r name version; do
-            [[ -z "$name" ]] && continue
+    # -----------------------------------------------------------------------
+    # 1. GUI Applications via system_profiler
+    # -----------------------------------------------------------------------
+    log_info "Scanning installed applications (system_profiler)..."
 
-            # Extract vendor from package name or use "Debian" as fallback
-            local vendor="Debian"
-            case "$name" in
-                apache*|httpd*) vendor="Apache" ;;
-                nginx*) vendor="Nginx" ;;
-                mysql*|mariadb*) vendor="Oracle/MariaDB" ;;
-                postgresql*|postgres*) vendor="PostgreSQL" ;;
-                redis*) vendor="Redis" ;;
-                docker*) vendor="Docker" ;;
-                openssl*|openssh*) vendor="OpenSSL/OpenSSH" ;;
-                curl*) vendor="Curl" ;;
-                git|git-core) vendor="Git" ;;
-                linux-*|kernel-*) vendor="Linux" ;;
-                php*) vendor="PHP" ;;
-                python*) vendor="Python" ;;
-                nodejs*|node|npm) vendor="Node.js" ;;
-                java*|openjdk*) vendor="Oracle/OpenJDK" ;;
-                mongodb*) vendor="MongoDB" ;;
-                elasticsearch*) vendor="Elastic" ;;
-                prometheus*) vendor="Prometheus" ;;
-                grafana*) vendor="Grafana" ;;
-            esac
+    # system_profiler outputs XML-like text; parse with awk for speed
+    local app_data
+    app_data=$(system_profiler SPApplicationsDataType -detailLevel mini 2>/dev/null || true)
 
-            # Escape JSON special characters
-            name=$(json_escape "$name")
-            version=$(json_escape "$version")
-            # Send full distro version as distro_package_version for confidence scoring
-            products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\", \"distro_package_version\": \"$version\"}")
+    if [[ -n "$app_data" ]]; then
+        local current_name="" current_version="" current_vendor="" current_path=""
+
+        while IFS= read -r line; do
+            # Application name (indented header ending with :)
+            if [[ "$line" =~ ^[[:space:]]{4}[^[:space:]] && "$line" =~ :$ ]]; then
+                # Save previous entry
+                if [[ -n "$current_name" ]]; then
+                    local esc_name esc_version esc_vendor esc_path
+                    esc_name=$(json_escape "$current_name")
+                    esc_version=$(json_escape "${current_version:-unknown}")
+                    esc_vendor=$(json_escape "${current_vendor:-Unknown}")
+                    esc_path=$(json_escape "${current_path:-}")
+                    products+=("{\"vendor\": \"$esc_vendor\", \"product\": \"$esc_name\", \"version\": \"$esc_version\", \"path\": \"$esc_path\"}")
+                    ((count++))
+                fi
+                current_name="${line%%:*}"
+                current_name="${current_name#"${current_name%%[![:space:]]*}"}"  # Trim leading whitespace
+                current_version=""
+                current_vendor=""
+                current_path=""
+            elif [[ "$line" =~ Version: ]]; then
+                current_version="${line#*: }"
+            elif [[ "$line" =~ "Obtained from:" ]]; then
+                current_vendor="${line#*: }"
+                # Map "Apple" / "Identified Developer" etc.
+                case "$current_vendor" in
+                    Apple) current_vendor="Apple" ;;
+                    "Identified Developer"|"Mac App Store") current_vendor="${current_vendor}" ;;
+                    *) current_vendor="${current_vendor:-Unknown}" ;;
+                esac
+            elif [[ "$line" =~ Location: ]]; then
+                current_path="${line#*: }"
+            fi
+        done <<< "$app_data"
+
+        # Don't forget the last entry
+        if [[ -n "$current_name" ]]; then
+            local esc_name esc_version esc_vendor esc_path
+            esc_name=$(json_escape "$current_name")
+            esc_version=$(json_escape "${current_version:-unknown}")
+            esc_vendor=$(json_escape "${current_vendor:-Unknown}")
+            esc_path=$(json_escape "${current_path:-}")
+            products+=("{\"vendor\": \"$esc_vendor\", \"product\": \"$esc_name\", \"version\": \"$esc_version\", \"path\": \"$esc_path\"}")
             ((count++))
-        done < <(dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null)
+        fi
     fi
 
-    # RHEL/CentOS/Fedora: rpm
-    if command -v rpm &>/dev/null && [[ ! -f /etc/debian_version ]]; then
-        while IFS=$'\t' read -r name version vendor; do
-            [[ -z "$name" ]] && continue
+    log_info "Found $count applications via system_profiler"
 
-            [[ "$vendor" == "(none)" ]] && vendor="Community"
+    # -----------------------------------------------------------------------
+    # 2. System packages via pkgutil (receipts)
+    # -----------------------------------------------------------------------
+    log_info "Scanning system packages (pkgutil)..."
 
-            # Escape JSON special characters
-            name=$(json_escape "$name")
-            version=$(json_escape "$version")
-            vendor=$(json_escape "$vendor")
-            # Send full distro version as distro_package_version for confidence scoring
-            products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\", \"distro_package_version\": \"$version\"}")
-            ((count++))
-        done < <(rpm -qa --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n' 2>/dev/null)
-    fi
+    local pkg_count=0
+    while IFS= read -r pkg_id; do
+        [[ -z "$pkg_id" ]] && continue
 
-    # Alpine: apk
-    if command -v apk &>/dev/null; then
-        while IFS='-' read -r name version; do
-            [[ -z "$name" ]] && continue
+        local pkg_version
+        pkg_version=$(pkgutil --pkg-info "$pkg_id" 2>/dev/null | awk -F': ' '/version:/{print $2}')
 
-            name=$(json_escape "$name")
-            version=$(json_escape "$version")
-            products+=("{\"vendor\": \"Alpine\", \"product\": \"$name\", \"version\": \"$version\"}")
-            ((count++))
-        done < <(apk info -v 2>/dev/null | sed 's/-[0-9].*/-&/' | sed 's/--/-/')
-    fi
+        # Extract a human-friendly name from the package ID
+        local pkg_name="${pkg_id##*.}"
+        local pkg_vendor="${pkg_id%%.*}"
 
-    # Arch: pacman
-    if command -v pacman &>/dev/null; then
+        # Map common vendors
+        case "$pkg_id" in
+            com.apple.*) pkg_vendor="Apple" ;;
+            com.microsoft.*) pkg_vendor="Microsoft" ;;
+            com.google.*) pkg_vendor="Google" ;;
+            org.mozilla.*) pkg_vendor="Mozilla" ;;
+            com.docker.*) pkg_vendor="Docker" ;;
+            com.oracle.*) pkg_vendor="Oracle" ;;
+            org.postgresql.*) pkg_vendor="PostgreSQL" ;;
+            io.homebrew.*) continue ;;  # Skip - handled by brew list below
+            *) pkg_vendor="${pkg_vendor:-Unknown}" ;;
+        esac
+
+        pkg_name=$(json_escape "$pkg_name")
+        pkg_version=$(json_escape "${pkg_version:-unknown}")
+        pkg_vendor=$(json_escape "$pkg_vendor")
+
+        products+=("{\"vendor\": \"$pkg_vendor\", \"product\": \"$pkg_name\", \"version\": \"$pkg_version\"}")
+        ((count++))
+        ((pkg_count++))
+    done < <(pkgutil --pkgs 2>/dev/null | grep -v '^com\.apple\.' || true)
+    # Note: we skip com.apple.* system packages to avoid massive noise (500+ entries)
+    # Apple OS vulnerabilities are tracked by macOS version, not individual pkg receipts
+
+    log_info "Found $pkg_count third-party system packages"
+
+    # -----------------------------------------------------------------------
+    # 3. Homebrew packages
+    # -----------------------------------------------------------------------
+    if command -v brew &>/dev/null; then
+        log_info "Scanning Homebrew packages..."
+        local brew_count=0
+
+        # Formulae (CLI tools)
         while IFS=' ' read -r name version; do
             [[ -z "$name" ]] && continue
-
             name=$(json_escape "$name")
             version=$(json_escape "$version")
-            products+=("{\"vendor\": \"Arch\", \"product\": \"$name\", \"version\": \"$version\"}")
+            products+=("{\"vendor\": \"Homebrew\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
-        done < <(pacman -Q 2>/dev/null)
-    fi
+            ((brew_count++))
+        done < <(brew list --formula --versions 2>/dev/null || true)
 
-    # Snap packages (include all - typically user-installed apps)
-    if command -v snap &>/dev/null; then
-        while read -r name version; do
-            [[ -z "$name" || "$name" == "Name" ]] && continue
+        # Casks (GUI apps installed via Homebrew)
+        while IFS=' ' read -r name version; do
+            [[ -z "$name" ]] && continue
             name=$(json_escape "$name")
             version=$(json_escape "$version")
-            products+=("{\"vendor\": \"Snap\", \"product\": \"$name\", \"version\": \"$version\"}")
+            products+=("{\"vendor\": \"Homebrew Cask\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
-        done < <(snap list 2>/dev/null | awk 'NR>1 {print $1, $2}')
+            ((brew_count++))
+        done < <(brew list --cask --versions 2>/dev/null || true)
+
+        log_info "Found $brew_count Homebrew packages"
     fi
 
-    # Flatpak packages (include all - typically user-installed apps)
-    if command -v flatpak &>/dev/null; then
-        while IFS=$'\t' read -r name version origin; do
-            [[ -z "$name" || "$name" == "Name" ]] && continue
+    # -----------------------------------------------------------------------
+    # 4. MacPorts packages (if installed)
+    # -----------------------------------------------------------------------
+    if command -v port &>/dev/null; then
+        log_info "Scanning MacPorts packages..."
+        local port_count=0
+
+        while read -r line; do
+            [[ -z "$line" ]] && continue
+            # Format: "  name @version_revision+variants (active)"
+            local name version
+            name=$(echo "$line" | awk '{print $1}')
+            version=$(echo "$line" | awk '{print $2}' | sed 's/^@//' | sed 's/_/ /')
+
+            [[ -z "$name" ]] && continue
             name=$(json_escape "$name")
-            version=$(json_escape "$version")
-            origin=$(json_escape "${origin:-Flatpak}")
-            products+=("{\"vendor\": \"$origin\", \"product\": \"$name\", \"version\": \"$version\"}")
+            version=$(json_escape "${version:-unknown}")
+
+            products+=("{\"vendor\": \"MacPorts\", \"product\": \"$name\", \"version\": \"$version\"}")
             ((count++))
-        done < <(flatpak list --columns=name,version,origin 2>/dev/null)
+            ((port_count++))
+        done < <(port installed 2>/dev/null | tail -n +2 || true)
+
+        log_info "Found $port_count MacPorts packages"
     fi
 
-    log_info "Collected $count installed packages (server-side filtering)"
+    log_info "Collected $count installed packages total (server-side filtering)"
 
-    # Write JSON array directly to a temp file to avoid "Argument list too long"
-    # errors. With 1000+ packages the JSON string can exceed bash/kernel ARG_MAX.
+    # Write JSON array to temp file (avoids ARG_MAX issues)
     local outfile
     outfile=$(mktemp /tmp/sentrikat-products-XXXXXX.json)
 
@@ -322,12 +368,8 @@ get_installed_software() {
 # ============================================================================
 
 TRIVY_BIN="/usr/local/bin/trivy"
-TRIVY_CACHE_DIR="/var/cache/sentrikat/trivy"
-TRIVY_DB_DIR="${TRIVY_CACHE_DIR}/db"
-CONTAINER_SCAN_ENABLED="${CONTAINER_SCAN_ENABLED:-auto}"  # auto, true, false
-# Offline mode: set TRIVY_OFFLINE=true in agent.conf to skip download attempts.
-# Pre-deploy trivy binary to /usr/local/bin/trivy and optionally
-# pre-download the DB with: trivy image --download-db-only --cache-dir /var/cache/sentrikat/trivy
+TRIVY_CACHE_DIR="/Library/Caches/SentriKat/trivy"
+CONTAINER_SCAN_ENABLED="${CONTAINER_SCAN_ENABLED:-auto}"
 TRIVY_OFFLINE="${TRIVY_OFFLINE:-false}"
 
 check_docker_available() {
@@ -340,48 +382,41 @@ check_docker_available() {
 }
 
 install_trivy() {
-    # Check common paths: pre-deployed binary, system package, or our install location
     if [[ -x "$TRIVY_BIN" ]]; then
         log_info "Trivy found at $TRIVY_BIN"
         return 0
     fi
 
-    # Check if trivy is already in PATH (e.g. installed via package manager)
     if command -v trivy &>/dev/null; then
         TRIVY_BIN=$(command -v trivy)
         log_info "Trivy found in PATH at $TRIVY_BIN"
         return 0
     fi
 
-    # Offline mode: don't attempt download
     if [[ "$TRIVY_OFFLINE" == "true" ]]; then
         log_warn "Trivy not found and TRIVY_OFFLINE=true. Pre-deploy trivy to $TRIVY_BIN"
-        log_warn "Download from: https://github.com/aquasecurity/trivy/releases"
         return 1
     fi
 
     log_info "Installing Trivy for container image scanning..."
     mkdir -p "$TRIVY_CACHE_DIR" 2>/dev/null || true
 
-    # Detect architecture
     local arch
     case "$(uname -m)" in
-        x86_64)  arch="Linux-64bit" ;;
-        aarch64) arch="Linux-ARM64" ;;
-        armv7l)  arch="Linux-ARM" ;;
+        x86_64)  arch="macOS-64bit" ;;
+        arm64)   arch="macOS-ARM64" ;;
         *)
             log_warn "Unsupported architecture $(uname -m) for Trivy"
             return 1
             ;;
     esac
 
-    # Download Trivy release binary directly (no piping curl to sh)
     local tmpdir
     tmpdir=$(mktemp -d)
     local trivy_version="0.58.2"
     local download_url="https://github.com/aquasecurity/trivy/releases/download/v${trivy_version}/trivy_${trivy_version}_${arch}.tar.gz"
 
-    log_info "Downloading Trivy v${trivy_version} from GitHub..."
+    log_info "Downloading Trivy v${trivy_version}..."
     if curl -sfL --max-time 120 "$download_url" -o "$tmpdir/trivy.tar.gz" 2>/dev/null; then
         tar xzf "$tmpdir/trivy.tar.gz" -C "$tmpdir" trivy 2>/dev/null
         if [[ -f "$tmpdir/trivy" ]]; then
@@ -394,41 +429,16 @@ install_trivy() {
     fi
 
     log_warn "Failed to download Trivy. Container scanning will be skipped."
-    log_warn "For offline deployment, pre-install trivy to $TRIVY_BIN"
     rm -rf "$tmpdir"
     return 1
 }
 
-get_container_images() {
-    local images=()
-
-    # Docker images
-    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
-        while IFS= read -r line; do
-            [[ -z "$line" || "$line" == "<none>:<none>" ]] && continue
-            images+=("$line")
-        done < <(docker images --format "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}" 2>/dev/null | grep -v '<none>')
-    fi
-
-    # Podman images (if docker not available)
-    if [[ ${#images[@]} -eq 0 ]] && command -v podman &>/dev/null; then
-        while IFS= read -r line; do
-            [[ -z "$line" || "$line" == "<none>:<none>" ]] && continue
-            images+=("$line")
-        done < <(podman images --format "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}" 2>/dev/null | grep -v '<none>')
-    fi
-
-    printf '%s\n' "${images[@]}"
-}
-
 scan_container_images() {
-    # Check if container scanning should run
     if [[ "$CONTAINER_SCAN_ENABLED" == "false" ]]; then
         log_info "Container scanning disabled by configuration"
         return 0
     fi
 
-    # Auto-detect Docker/Podman
     if ! check_docker_available; then
         if [[ "$CONTAINER_SCAN_ENABLED" == "auto" ]]; then
             log_info "No container runtime detected, skipping container scan"
@@ -441,15 +451,13 @@ scan_container_images() {
 
     log_info "Starting container image scan..."
 
-    # Install Trivy if needed
     if ! install_trivy; then
         log_warn "Trivy not available, skipping container scan"
         return 1
     fi
 
-    # Get list of images
     local image_list
-    image_list=$(get_container_images)
+    image_list=$(docker images --format "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}" 2>/dev/null | grep -v '<none>' || true)
 
     if [[ -z "$image_list" ]]; then
         log_info "No container images found"
@@ -469,7 +477,6 @@ scan_container_images() {
 
         log_info "Scanning container image: $image_ref"
 
-        # Run Trivy scan with JSON output directly to temp file
         local trivy_tmpfile
         trivy_tmpfile=$(mktemp)
         "$TRIVY_BIN" image \
@@ -500,7 +507,6 @@ scan_container_images() {
             printf ',' >> "$results_file"
         fi
 
-        # Write metadata + trivy output directly to file (no bash variable)
         printf '{"image_name": "%s", "image_tag": "%s", "image_id": "%s", "trivy_output": ' \
             "$image_name" "$image_tag" "$image_id" >> "$results_file"
         cat "$trivy_tmpfile" >> "$results_file"
@@ -525,22 +531,13 @@ scan_container_images() {
 
     log_info "Scanned $image_count container images"
 
-    # Send results to SentriKat server
-    send_container_scan_results "$results_file"
-}
-
-send_container_scan_results() {
-    local results_file="$1"  # Path to temp file with JSON array of scan results
+    # Assemble final payload to temp file (no large bash variables)
     local endpoint="${SERVER_URL}/api/agent/container-scan"
-
-    log_info "Sending container scan results to $endpoint..."
-
     local trivy_version
     trivy_version=$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo 'unknown')
     local my_hostname
-    my_hostname=$(hostname)
+    my_hostname=$(scutil --get ComputerName 2>/dev/null || hostname)
 
-    # Assemble payload to temp file (no large bash variables)
     local tmpfile
     tmpfile=$(mktemp)
     printf '{"agent_id": "%s", "hostname": "%s", "scanner": "trivy", "scanner_version": "%s", "images": ' \
@@ -549,41 +546,14 @@ send_container_scan_results() {
     printf '}' >> "$tmpfile"
     rm -f "$results_file"
 
-    local max_retries=3
-    local retry_delay=5
-
-    for ((i=1; i<=max_retries; i++)); do
-        local response
-        local http_code
-
-        response=$(curl -s -w "\n%{http_code}" -X POST "$endpoint" \
-            -H "X-Agent-Key: $API_KEY" \
-            -H "Content-Type: application/json" \
-            -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
-            --data-binary "@${tmpfile}" \
-            --max-time 120 \
-            2>&1) || true
-
-        http_code=$(echo "$response" | tail -n1)
-        local body
-        body=$(echo "$response" | sed '$d')
-
-        if [[ "$http_code" == "200" || "$http_code" == "202" ]]; then
-            log_info "Container scan results sent successfully (HTTP $http_code)"
-            rm -f "$tmpfile"
-            return 0
-        else
-            log_warn "Container scan upload attempt $i failed: HTTP $http_code - $body"
-            if [[ $i -lt $max_retries ]]; then
-                sleep $retry_delay
-                retry_delay=$((retry_delay * 2))
-            fi
-        fi
-    done
+    curl -s -X POST "$endpoint" \
+        -H "X-Agent-Key: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (macOS)" \
+        --data-binary "@${tmpfile}" \
+        --max-time 120 >/dev/null 2>&1 || log_warn "Failed to send container scan results"
 
     rm -f "$tmpfile"
-    log_error "Failed to send container scan results after $max_retries attempts"
-    return 1
 }
 
 # ============================================================================
@@ -592,27 +562,22 @@ send_container_scan_results() {
 
 send_inventory() {
     local system_info="$1"
-    local products_file="$2"   # Path to temp file containing JSON array
+    local products_file="$2"
 
     local endpoint="${SERVER_URL}/api/agent/inventory"
 
     log_info "Sending inventory to $endpoint..."
 
-    # Build payload by assembling temp files - never pass large strings as arguments.
-    # $products_file is a path to a JSON array file written by get_installed_software.
     local tmpfile
     tmpfile=$(mktemp)
 
-    # Write: { system_info_fields..., "products": <contents of products_file> }
     printf '%s' "$system_info" | sed 's/}$//' > "$tmpfile"
     printf ', "products": ' >> "$tmpfile"
     cat "$products_file" >> "$tmpfile"
     printf '}' >> "$tmpfile"
 
-    # Clean up the products temp file
     rm -f "$products_file"
 
-    # Retry logic
     local max_retries=3
     local retry_delay=5
 
@@ -620,11 +585,10 @@ send_inventory() {
         local response
         local http_code
 
-        # Use --data-binary @file to avoid argument list limits
         response=$(curl -s -w "\n%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
-            -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
+            -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (macOS)" \
             --data-binary "@${tmpfile}" \
             --max-time 120 \
             2>&1) || true
@@ -660,13 +624,14 @@ send_heartbeat() {
     curl -s -X POST "$endpoint" \
         -H "X-Agent-Key: $API_KEY" \
         -H "Content-Type: application/json" \
-        -d "{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\"}" \
+        -d "{\"hostname\": \"$(scutil --get ComputerName 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\"}" \
         --max-time 30 >/dev/null 2>&1
 }
 
 check_commands() {
-    # Poll the server for pending commands (heartbeat with command check)
-    local endpoint="${SERVER_URL}/api/agent/commands?agent_id=${AGENT_ID}&hostname=$(hostname)&version=${AGENT_VERSION}&platform=linux"
+    local hostname
+    hostname=$(scutil --get ComputerName 2>/dev/null || hostname)
+    local endpoint="${SERVER_URL}/api/agent/commands?agent_id=${AGENT_ID}&hostname=${hostname}&version=${AGENT_VERSION}&platform=macos"
 
     log_info "Checking for commands from server..."
 
@@ -679,57 +644,19 @@ check_commands() {
         return 1
     }
 
-    # Parse commands (basic parsing without jq dependency)
     if echo "$response" | grep -q '"command": "scan_now"'; then
         log_info "Received scan_now command - triggering immediate inventory scan"
-        return 0  # Return 0 to trigger scan
-    fi
-
-    if echo "$response" | grep -q '"command": "update_config"'; then
-        log_info "Received config update command"
-        # Extract new interval if present
-        local new_interval
-        new_interval=$(echo "$response" | grep -o '"scan_interval_minutes": [0-9]*' | grep -o '[0-9]*' | head -1)
-        if [[ -n "$new_interval" && "$new_interval" -ge 15 ]]; then
-            local new_hours=$((new_interval / 60))
-            if [[ $new_hours -gt 0 && $new_hours != "$INTERVAL_HOURS" ]]; then
-                log_info "Updating scan interval from ${INTERVAL_HOURS}h to ${new_hours}h"
-                INTERVAL_HOURS=$new_hours
-                save_config
-                # Update systemd timer if installed
-                if [[ -f "$SYSTEMD_TIMER" ]]; then
-                    update_systemd_timer
-                fi
-            fi
-        fi
+        return 0
     fi
 
     if echo "$response" | grep -q '"command": "update_available"'; then
         local latest_version
         latest_version=$(echo "$response" | grep -o '"latest_version": "[^"]*"' | cut -d'"' -f4)
         log_warn "Agent update available: ${AGENT_VERSION} -> ${latest_version}"
-        log_info "Download from: ${SERVER_URL}/api/agent/download/linux"
+        log_info "Download from: ${SERVER_URL}/api/agent/download/macos"
     fi
 
-    return 1  # No scan needed
-}
-
-update_systemd_timer() {
-    # Update the systemd timer with new interval
-    cat > "$SYSTEMD_TIMER" << EOF
-[Unit]
-Description=Run SentriKat Agent periodically
-
-[Timer]
-OnBootSec=5min
-OnUnitActiveSec=${INTERVAL_HOURS}h
-RandomizedDelaySec=10min
-
-[Install]
-WantedBy=timers.target
-EOF
-    systemctl daemon-reload 2>/dev/null || true
-    log_info "Updated systemd timer to ${INTERVAL_HOURS}h interval"
+    return 1
 }
 
 # ============================================================================
@@ -739,13 +666,11 @@ EOF
 install_agent() {
     log_info "Installing SentriKat agent..."
 
-    # Check for root
     if [[ $EUID -ne 0 ]]; then
-        echo "ERROR: Installation requires root privileges"
+        echo "ERROR: Installation requires root privileges (use sudo)"
         exit 1
     fi
 
-    # Save configuration
     save_config
 
     # Copy script to system location
@@ -753,116 +678,90 @@ install_agent() {
     cp "$0" "$script_dest"
     chmod 755 "$script_dest"
 
-    # Create systemd service for full inventory scan
-    cat > "$SYSTEMD_SERVICE" << EOF
-[Unit]
-Description=SentriKat Software Inventory Agent
-After=network-online.target
-Wants=network-online.target
+    # Calculate interval in seconds
+    local interval_seconds=$((INTERVAL_HOURS * 3600))
+    local heartbeat_seconds=$((HEARTBEAT_MINUTES * 60))
 
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/sentrikat-agent --run-once
-User=root
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
+    # Create LaunchDaemon for full inventory scan
+    cat > "$LAUNCHDAEMON_PLIST" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sentrikat.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/sentrikat-agent</string>
+        <string>--run-once</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>${interval_seconds}</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Library/Logs/sentrikat-agent-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/sentrikat-agent-stderr.log</string>
+</dict>
+</plist>
 EOF
 
-    # Create systemd timer for full inventory scan
-    cat > "$SYSTEMD_TIMER" << EOF
-[Unit]
-Description=Run SentriKat Agent periodically
-
-[Timer]
-OnBootSec=5min
-OnUnitActiveSec=${INTERVAL_HOURS}h
-RandomizedDelaySec=10min
-
-[Install]
-WantedBy=timers.target
+    # Create LaunchDaemon for heartbeat/command polling
+    cat > "$HEARTBEAT_PLIST" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sentrikat.heartbeat</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/sentrikat-agent</string>
+        <string>--heartbeat</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>${heartbeat_seconds}</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Library/Logs/sentrikat-heartbeat-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/sentrikat-heartbeat-stderr.log</string>
+</dict>
+</plist>
 EOF
 
-    # Create systemd service for heartbeat/command polling
-    cat > "$HEARTBEAT_SERVICE" << EOF
-[Unit]
-Description=SentriKat Agent Heartbeat
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/sentrikat-agent --heartbeat
-User=root
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    # Create systemd timer for heartbeat (every 5 minutes)
-    cat > "$HEARTBEAT_TIMER" << EOF
-[Unit]
-Description=SentriKat Agent Heartbeat Timer
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=${HEARTBEAT_MINUTES}min
-RandomizedDelaySec=30s
-
-[Install]
-WantedBy=timers.target
-EOF
-
-    # Enable and start timers
-    systemctl daemon-reload
-    systemctl enable --now sentrikat-agent.timer
-    systemctl enable --now sentrikat-heartbeat.timer
+    # Load the daemons
+    launchctl load "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+    launchctl load "$HEARTBEAT_PLIST" 2>/dev/null || true
 
     log_info "Agent installed successfully"
     echo "SentriKat Agent installed:"
     echo "  - Full scan: every ${INTERVAL_HOURS} hours"
     echo "  - Heartbeat: every ${HEARTBEAT_MINUTES} minutes (checks for commands)"
-    echo "Run 'systemctl status sentrikat-agent.timer' to check scan status"
-    echo "Run 'systemctl status sentrikat-heartbeat.timer' to check heartbeat status"
+    echo "Run 'sudo launchctl list | grep sentrikat' to check status"
 }
 
 uninstall_agent() {
     log_info "Uninstalling SentriKat agent..."
 
     if [[ $EUID -ne 0 ]]; then
-        echo "ERROR: Uninstallation requires root privileges"
+        echo "ERROR: Uninstallation requires root privileges (use sudo)"
         exit 1
     fi
 
-    # Stop and disable scan timer
-    systemctl stop sentrikat-agent.timer 2>/dev/null || true
-    systemctl disable sentrikat-agent.timer 2>/dev/null || true
+    launchctl unload "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+    launchctl unload "$HEARTBEAT_PLIST" 2>/dev/null || true
 
-    # Stop and disable heartbeat timer
-    systemctl stop sentrikat-heartbeat.timer 2>/dev/null || true
-    systemctl disable sentrikat-heartbeat.timer 2>/dev/null || true
-
-    # Remove systemd files
-    rm -f "$SYSTEMD_SERVICE" "$SYSTEMD_TIMER"
-    rm -f "$HEARTBEAT_SERVICE" "$HEARTBEAT_TIMER"
-    systemctl daemon-reload
-
-    # Remove script
+    rm -f "$LAUNCHDAEMON_PLIST" "$HEARTBEAT_PLIST"
     rm -f /usr/local/bin/sentrikat-agent
-
-    # Optionally remove config (commented out by default)
-    # rm -rf "$CONFIG_DIR"
 
     log_info "Agent uninstalled"
     echo "SentriKat Agent uninstalled"
 }
 
 heartbeat_mode() {
-    # Heartbeat mode: check for commands and trigger scan if requested
     log_info "Running heartbeat check..."
 
     load_config
@@ -872,9 +771,7 @@ heartbeat_mode() {
         exit 1
     fi
 
-    # Check for commands from server
     if check_commands; then
-        # scan_now command received - run full inventory
         log_info "Executing requested scan..."
         main
     else
@@ -888,7 +785,7 @@ heartbeat_mode() {
 
 show_help() {
     cat << EOF
-SentriKat Linux Agent v${AGENT_VERSION}
+SentriKat macOS Agent v${AGENT_VERSION}
 
 Usage: $0 [OPTIONS]
 
@@ -896,7 +793,7 @@ Options:
   --server-url URL     SentriKat server URL (required)
   --api-key KEY        Agent API key (required)
   --interval HOURS     Scan interval in hours (default: 4)
-  --install            Install as systemd service (includes heartbeat timer)
+  --install            Install as LaunchDaemon (includes heartbeat)
   --uninstall          Uninstall agent
   --run-once           Run inventory collection once and exit
   --heartbeat          Run heartbeat check (polls for commands)
@@ -907,11 +804,8 @@ Examples:
   # Run once for testing
   $0 --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx" --verbose
 
-  # Install as service (includes heartbeat every 5 min)
+  # Install as LaunchDaemon (includes heartbeat every 5 min)
   sudo $0 --install --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
-
-  # Check for commands (used by heartbeat timer)
-  $0 --heartbeat
 
   # Uninstall
   sudo $0 --uninstall
@@ -919,12 +813,10 @@ EOF
 }
 
 main() {
-    log_info "SentriKat Agent v${AGENT_VERSION} starting..."
+    log_info "SentriKat Agent v${AGENT_VERSION} (macOS) starting..."
 
-    # Load configuration
     load_config
 
-    # Validate configuration
     if [[ -z "$SERVER_URL" || -z "$API_KEY" ]]; then
         log_error "SERVER_URL and API_KEY are required"
         echo "ERROR: --server-url and --api-key are required"
@@ -932,13 +824,10 @@ main() {
         exit 1
     fi
 
-    # Collect and send inventory
     local system_info
     system_info=$(get_system_info)
     log_info "System: $(echo "$system_info" | grep -o '"hostname"[^,]*' | head -1)"
 
-    # get_installed_software returns a temp FILE PATH (not a JSON string)
-    # to avoid bash "Argument list too long" with large inventories
     local products_file
     products_file=$(get_installed_software)
 
@@ -965,7 +854,7 @@ main() {
         exit 1
     fi
 
-    # Run container image scan (if Docker/Podman detected)
+    # Run container image scan (if Docker detected)
     scan_container_images || log_warn "Container scanning encountered issues (non-fatal)"
 }
 

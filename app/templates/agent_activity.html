@@ -1,0 +1,572 @@
+{% extends 'base.html' %}
+
+{% block title %}Agent Activity - SentriKat{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item active" aria-current="page"><i class="bi bi-activity me-1"></i>Agent Activity</li>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Worker status card */
+    .worker-status-card {
+        border-left: 4px solid var(--success-color);
+        transition: border-color 0.3s ease;
+    }
+    .worker-status-card.worker-stopped {
+        border-left-color: var(--danger-color);
+    }
+
+    /* Queue stat boxes */
+    .queue-stat {
+        text-align: center;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        background: var(--gray-50);
+        border: 1px solid var(--border-color);
+        min-width: 100px;
+    }
+    .queue-stat .stat-number {
+        font-size: 1.75rem;
+        font-weight: 700;
+        line-height: 1;
+        margin-bottom: 0.25rem;
+    }
+    .queue-stat .stat-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+    .queue-stat.stat-pending .stat-number { color: var(--warning-color); }
+    .queue-stat.stat-processing .stat-number { color: var(--info-color); }
+    .queue-stat.stat-completed .stat-number { color: var(--success-color); }
+    .queue-stat.stat-failed .stat-number { color: var(--danger-color); }
+
+    [data-theme="dark"] .queue-stat {
+        background: rgba(255,255,255,0.03);
+    }
+
+    /* Job progress bar */
+    .job-progress {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--gray-200);
+        overflow: hidden;
+    }
+    .job-progress .bar {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.5s ease;
+    }
+    .job-progress .bar.processing { background: var(--info-color); }
+    .job-progress .bar.completed { background: var(--success-color); }
+    .job-progress .bar.failed { background: var(--danger-color); }
+
+    /* Event timeline */
+    .event-item {
+        padding: 0.6rem 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+        transition: background 0.15s ease;
+    }
+    .event-item:hover {
+        background: var(--gray-50);
+    }
+    .event-item:last-child {
+        border-bottom: none;
+    }
+    .event-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        flex-shrink: 0;
+    }
+    .event-icon.registered { background: rgba(16, 185, 129, 0.12); color: var(--success-color); }
+    .event-icon.inventory { background: rgba(59, 130, 246, 0.12); color: var(--info-color); }
+    .event-icon.heartbeat { background: rgba(156, 163, 175, 0.15); color: var(--text-muted); }
+    .event-icon.warning { background: rgba(245, 158, 11, 0.12); color: var(--warning-color); }
+    .event-icon.error { background: rgba(239, 68, 68, 0.12); color: var(--danger-color); }
+    .event-icon.blocked { background: rgba(239, 68, 68, 0.12); color: var(--danger-color); }
+
+    .event-time {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        white-space: nowrap;
+    }
+
+    /* Status led */
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .status-dot.online { background: var(--success-color); box-shadow: 0 0 6px rgba(16,185,129,0.4); }
+    .status-dot.processing { background: var(--info-color); animation: pulse 1.5s infinite; }
+    .status-dot.stopped { background: var(--danger-color); }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
+
+    /* Job status badges */
+    .badge-pending { background: var(--warning-color); color: #fff; }
+    .badge-processing { background: var(--info-color); color: #fff; }
+    .badge-completed { background: var(--success-color); color: #fff; }
+    .badge-failed { background: var(--danger-color); color: #fff; }
+
+    /* Auto-refresh indicator */
+    .refresh-indicator {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+    }
+    .refresh-indicator .bi-arrow-clockwise {
+        transition: transform 0.5s ease;
+    }
+    .refresh-indicator.refreshing .bi-arrow-clockwise {
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
+    /* Dark mode adjustments */
+    [data-theme="dark"] .event-item:hover {
+        background: rgba(255,255,255,0.03);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 py-3">
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="fw-bold mb-1"><i class="bi bi-activity me-2"></i>Agent Activity</h4>
+            <p class="text-muted small mb-0">Monitor agent processing, job queue, and events in real time</p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span id="refreshIndicator" class="refresh-indicator">
+                <i class="bi bi-arrow-clockwise me-1"></i>
+                <span id="refreshTimer">Auto-refresh: 10s</span>
+            </span>
+            <button class="btn btn-outline-secondary btn-sm" onclick="refreshAll()" title="Refresh now">
+                <i class="bi bi-arrow-repeat me-1"></i>Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Worker Status + Queue Stats Row -->
+    <div class="row g-3 mb-3">
+        <!-- Worker Status -->
+        <div class="col-lg-4">
+            <div class="card worker-status-card" id="workerCard">
+                <div class="card-body py-3">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="fw-semibold"><i class="bi bi-cpu me-2"></i>Background Worker</span>
+                        <span id="workerStatusBadge">
+                            <span class="status-dot processing me-1"></span>
+                            <span class="small fw-semibold text-success">Running</span>
+                        </span>
+                    </div>
+                    <div class="small text-muted" id="workerDetails">
+                        <div>Check interval: <span id="workerInterval">5s</span></div>
+                        <div>Async threshold: <span id="asyncThreshold">100</span> products</div>
+                        <div>Max per request: <span id="maxProducts">10000</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Queue Stats -->
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-body py-3">
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="fw-semibold"><i class="bi bi-collection me-2"></i>Job Queue</span>
+                    </div>
+                    <div class="d-flex gap-3 flex-wrap" id="queueStats">
+                        <div class="queue-stat stat-pending">
+                            <div class="stat-number" id="pendingCount">-</div>
+                            <div class="stat-label">Pending</div>
+                        </div>
+                        <div class="queue-stat stat-processing">
+                            <div class="stat-number" id="processingCount">-</div>
+                            <div class="stat-label">Processing</div>
+                        </div>
+                        <div class="queue-stat stat-completed">
+                            <div class="stat-number" id="completedCount">-</div>
+                            <div class="stat-label">Completed Today</div>
+                        </div>
+                        <div class="queue-stat stat-failed">
+                            <div class="stat-number" id="failedCount">-</div>
+                            <div class="stat-label">Failed Today</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active/Recent Jobs + Events Row -->
+    <div class="row g-3">
+        <!-- Jobs Table -->
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-list-task me-2"></i>Recent Jobs</span>
+                    <div>
+                        <select class="form-select form-select-sm" id="jobStatusFilter" onchange="loadJobs()" style="width: auto; display: inline-block;">
+                            <option value="">All statuses</option>
+                            <option value="processing">Processing</option>
+                            <option value="pending">Pending</option>
+                            <option value="completed">Completed</option>
+                            <option value="failed">Failed</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width: 90px;">Status</th>
+                                    <th>Hostname</th>
+                                    <th style="width: 80px;">Items</th>
+                                    <th style="width: 120px;">Progress</th>
+                                    <th style="width: 100px;">Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="jobsTableBody">
+                                <tr>
+                                    <td colspan="5" class="text-center py-4">
+                                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                        <span class="text-muted ms-2 small">Loading jobs...</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Event Timeline -->
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-clock-history me-2"></i>Agent Events</span>
+                    <select class="form-select form-select-sm" id="eventTypeFilter" onchange="loadEvents()" style="width: auto; display: inline-block;">
+                        <option value="">All events</option>
+                        <option value="registered">Registered</option>
+                        <option value="inventory_reported">Inventory</option>
+                        <option value="heartbeat">Heartbeat</option>
+                        <option value="license_exceeded">License Exceeded</option>
+                        <option value="ip_blocked">IP Blocked</option>
+                        <option value="auth_failed">Auth Failed</option>
+                        <option value="status_changed">Status Changed</option>
+                    </select>
+                </div>
+                <div class="card-body p-0" id="eventsContainer" style="max-height: 500px; overflow-y: auto;">
+                    <div class="text-center py-4">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                        <span class="text-muted ms-2 small">Loading events...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-refresh interval
+let refreshIntervalId = null;
+const REFRESH_INTERVAL = 10000; // 10 seconds
+let countdown = 10;
+
+// ============================================================================
+// Data Loading Functions
+// ============================================================================
+
+async function loadWorkerStatus() {
+    try {
+        const response = await fetch('/api/admin/worker-status');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        // Update worker status
+        const isAlive = data.worker?.is_alive;
+        const card = document.getElementById('workerCard');
+        const badge = document.getElementById('workerStatusBadge');
+
+        if (isAlive) {
+            card.classList.remove('worker-stopped');
+            badge.innerHTML = '<span class="status-dot online me-1"></span><span class="small fw-semibold text-success">Running</span>';
+        } else {
+            card.classList.add('worker-stopped');
+            badge.innerHTML = '<span class="status-dot stopped me-1"></span><span class="small fw-semibold text-danger">Stopped</span>';
+        }
+
+        // Update config info
+        document.getElementById('workerInterval').textContent = (data.worker?.check_interval_seconds || 5) + 's';
+        document.getElementById('asyncThreshold').textContent = data.config?.async_threshold || 100;
+        document.getElementById('maxProducts').textContent = (data.config?.max_products_per_request || 10000).toLocaleString();
+
+        // Update queue stats
+        document.getElementById('pendingCount').textContent = data.queue?.pending ?? '-';
+        document.getElementById('processingCount').textContent = data.queue?.processing ?? '-';
+        document.getElementById('completedCount').textContent = data.queue?.completed_today ?? '-';
+        document.getElementById('failedCount').textContent = data.queue?.failed_today ?? '-';
+
+    } catch (err) {
+        console.error('Failed to load worker status:', err);
+    }
+}
+
+async function loadJobs() {
+    try {
+        const statusFilter = document.getElementById('jobStatusFilter').value;
+        let url = '/api/admin/jobs?per_page=20';
+        if (statusFilter) url += `&status=${statusFilter}`;
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        const tbody = document.getElementById('jobsTableBody');
+
+        if (!data.jobs || data.jobs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center py-4 text-muted small">
+                        <i class="bi bi-inbox me-1"></i>No jobs found
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = data.jobs.map(job => {
+            const statusBadge = getJobStatusBadge(job.status);
+            const progress = job.progress_percent || 0;
+            const progressBar = job.status === 'processing' || job.status === 'completed' || job.status === 'failed'
+                ? `<div class="job-progress"><div class="bar ${job.status}" style="width: ${progress}%"></div></div>
+                   <span class="small text-muted">${progress}%</span>`
+                : '<span class="small text-muted">-</span>';
+
+            const hostname = job.hostname || job.asset_hostname || 'Unknown';
+            const totalItems = job.total_items || 0;
+            const timeAgo = formatTimeAgo(job.created_at);
+
+            return `
+                <tr>
+                    <td>${statusBadge}</td>
+                    <td class="small fw-semibold">${escapeHtml(hostname)}</td>
+                    <td class="small">${totalItems.toLocaleString()}</td>
+                    <td>${progressBar}</td>
+                    <td class="event-time">${timeAgo}</td>
+                </tr>`;
+        }).join('');
+
+    } catch (err) {
+        console.error('Failed to load jobs:', err);
+        document.getElementById('jobsTableBody').innerHTML = `
+            <tr><td colspan="5" class="text-center py-3 text-danger small">
+                <i class="bi bi-exclamation-triangle me-1"></i>Failed to load jobs
+            </td></tr>`;
+    }
+}
+
+async function loadEvents() {
+    try {
+        const typeFilter = document.getElementById('eventTypeFilter').value;
+        let url = '/api/admin/events?per_page=30&days=1';
+        if (typeFilter) url += `&event_type=${typeFilter}`;
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        const container = document.getElementById('eventsContainer');
+
+        if (!data.events || data.events.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-4 text-muted small">
+                    <i class="bi bi-clock me-1"></i>No events in the last 24 hours
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = data.events.map(event => {
+            const { icon, iconClass } = getEventIcon(event.event_type);
+            const timeAgo = formatTimeAgo(event.created_at);
+            const hostname = event.asset_hostname || 'Unknown';
+            const description = getEventDescription(event);
+            const sourceIp = event.source_ip ? `<span class="text-muted">(${event.source_ip})</span>` : '';
+
+            return `
+                <div class="event-item d-flex align-items-start gap-2">
+                    <div class="event-icon ${iconClass}">
+                        <i class="bi ${icon}"></i>
+                    </div>
+                    <div class="flex-grow-1 small">
+                        <div class="fw-semibold">${escapeHtml(hostname)} ${sourceIp}</div>
+                        <div class="text-muted">${description}</div>
+                    </div>
+                    <div class="event-time">${timeAgo}</div>
+                </div>`;
+        }).join('');
+
+    } catch (err) {
+        console.error('Failed to load events:', err);
+        document.getElementById('eventsContainer').innerHTML = `
+            <div class="text-center py-3 text-danger small">
+                <i class="bi bi-exclamation-triangle me-1"></i>Failed to load events
+            </div>`;
+    }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+function getJobStatusBadge(status) {
+    const map = {
+        pending: '<span class="badge badge-pending"><i class="bi bi-clock me-1"></i>Pending</span>',
+        processing: '<span class="badge badge-processing"><i class="bi bi-gear-fill me-1 spin-slow"></i>Processing</span>',
+        completed: '<span class="badge badge-completed"><i class="bi bi-check-circle me-1"></i>Done</span>',
+        failed: '<span class="badge badge-failed"><i class="bi bi-x-circle me-1"></i>Failed</span>',
+    };
+    return map[status] || `<span class="badge bg-secondary">${status}</span>`;
+}
+
+function getEventIcon(eventType) {
+    const map = {
+        registered: { icon: 'bi-plus-circle-fill', iconClass: 'registered' },
+        inventory_reported: { icon: 'bi-box-seam-fill', iconClass: 'inventory' },
+        heartbeat: { icon: 'bi-heart-pulse-fill', iconClass: 'heartbeat' },
+        status_changed: { icon: 'bi-arrow-left-right', iconClass: 'warning' },
+        license_exceeded: { icon: 'bi-exclamation-triangle-fill', iconClass: 'error' },
+        license_warning: { icon: 'bi-exclamation-circle-fill', iconClass: 'warning' },
+        ip_blocked: { icon: 'bi-shield-x', iconClass: 'blocked' },
+        auth_failed: { icon: 'bi-lock-fill', iconClass: 'error' },
+        decommissioned: { icon: 'bi-trash3-fill', iconClass: 'error' },
+    };
+    return map[eventType] || { icon: 'bi-circle-fill', iconClass: 'heartbeat' };
+}
+
+function getEventDescription(event) {
+    const details = event.details || {};
+    switch (event.event_type) {
+        case 'registered':
+            return `New agent registered (${details.products_count || 0} products)`;
+        case 'inventory_reported':
+            const created = details.products_created || 0;
+            const installs = details.installations_created || 0;
+            return `Inventory reported: ${details.products_count || 0} products (${created} new, ${installs} installations)`;
+        case 'heartbeat':
+            return 'Heartbeat received';
+        case 'status_changed':
+            if (details.warning === 'hostname_collision') {
+                return `Hostname collision detected! Old agent: ${(details.old_agent_id || '').substring(0, 8)}... New: ${(details.new_agent_id || '').substring(0, 8)}...`;
+            }
+            return `Status: ${event.old_value || '?'} → ${event.new_value || '?'}`;
+        case 'license_exceeded':
+            return `License limit exceeded: ${details.message || 'Agent limit reached'}`;
+        case 'license_warning':
+            return `License warning: ${details.message || ''}`;
+        case 'ip_blocked':
+            return `Connection blocked from ${details.blocked_ip || 'unknown IP'}`;
+        case 'auth_failed':
+            return `Authentication failed: ${details.reason || 'invalid key'}`;
+        case 'decommissioned':
+            return 'Agent decommissioned';
+        default:
+            return event.event_type.replace(/_/g, ' ');
+    }
+}
+
+function formatTimeAgo(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr + (dateStr.endsWith('Z') ? '' : 'Z'));
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffSec < 10) return 'just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHour < 24) return `${diffHour}h ago`;
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return date.toLocaleDateString();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ============================================================================
+// Refresh Logic
+// ============================================================================
+
+async function refreshAll() {
+    const indicator = document.getElementById('refreshIndicator');
+    indicator.classList.add('refreshing');
+
+    await Promise.all([
+        loadWorkerStatus(),
+        loadJobs(),
+        loadEvents()
+    ]);
+
+    indicator.classList.remove('refreshing');
+    countdown = 10;
+}
+
+function startAutoRefresh() {
+    // Initial load
+    refreshAll();
+
+    // Countdown timer
+    refreshIntervalId = setInterval(() => {
+        countdown--;
+        if (countdown <= 0) {
+            refreshAll();
+        }
+        document.getElementById('refreshTimer').textContent = `Auto-refresh: ${countdown}s`;
+    }, 1000);
+}
+
+function stopAutoRefresh() {
+    if (refreshIntervalId) {
+        clearInterval(refreshIntervalId);
+        refreshIntervalId = null;
+    }
+}
+
+// Start on page load
+document.addEventListener('DOMContentLoaded', startAutoRefresh);
+
+// Pause when tab is hidden to save resources
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        stopAutoRefresh();
+    } else {
+        startAutoRefresh();
+    }
+});
+</script>
+{% endblock %}
