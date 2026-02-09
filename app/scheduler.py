@@ -202,6 +202,18 @@ def cisa_sync_job(app):
             except Exception as epss_error:
                 logger.warning(f"EPSS sync failed (non-critical): {epss_error}")
 
+            # Rebuild local CPE dictionary from updated vulnerability data
+            try:
+                from app.cpe_dictionary import build_cpe_dictionary
+                logger.info("Rebuilding local CPE dictionary...")
+                dict_stats = build_cpe_dictionary()
+                logger.info(
+                    f"CPE dictionary rebuilt: {dict_stats.get('added', 0)} added, "
+                    f"{dict_stats.get('total', 0)} total entries"
+                )
+            except Exception as cpe_dict_error:
+                logger.warning(f"CPE dictionary rebuild failed (non-critical): {cpe_dict_error}")
+
         except Exception as e:
             logger.error(f"CISA KEV sync job failed: {str(e)}")
 

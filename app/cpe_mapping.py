@@ -289,6 +289,16 @@ def apply_cpe_to_product(product):
         except Exception:
             pass
 
+    # Tier 3: Try local CPE dictionary (extracted from vulnerability data)
+    if not cpe_vendor or not cpe_product:
+        try:
+            from app.cpe_dictionary import lookup_cpe_dictionary
+            cpe_vendor, cpe_product, _ = lookup_cpe_dictionary(
+                product.vendor, product.product_name
+            )
+        except Exception:
+            pass
+
     if cpe_vendor and cpe_product:
         product.cpe_vendor = cpe_vendor
         product.cpe_product = cpe_product
