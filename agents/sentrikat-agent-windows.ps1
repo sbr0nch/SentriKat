@@ -57,7 +57,7 @@ param(
 )
 
 $ErrorActionPreference = "SilentlyContinue"
-$AgentVersion = "1.1.0"
+$AgentVersion = "1.2.0"
 $LogFile = "$env:ProgramData\SentriKat\agent.log"
 $HeartbeatIntervalMinutes = 5
 
@@ -454,6 +454,201 @@ function Check-Commands {
 }
 
 # ============================================================================
+# Container Image Scanning (Trivy Integration)
+# ============================================================================
+
+$TrivyBin = "$env:ProgramData\SentriKat\trivy.exe"
+$TrivyCacheDir = "$env:ProgramData\SentriKat\trivy-cache"
+
+function Test-DockerAvailable {
+    try {
+        $null = Get-Command docker -ErrorAction Stop
+        $info = docker info 2>&1
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Install-Trivy {
+    if (Test-Path $TrivyBin) {
+        Write-Log "Trivy already installed at $TrivyBin"
+        return $true
+    }
+
+    Write-Log "Installing Trivy for container image scanning..."
+
+    # Create cache directory
+    New-Item -ItemType Directory -Path $TrivyCacheDir -Force -ErrorAction SilentlyContinue | Out-Null
+
+    try {
+        # Detect architecture
+        $arch = if ([Environment]::Is64BitOperatingSystem) { "64bit" } else { "32bit" }
+
+        # Download latest Trivy release
+        $tmpDir = Join-Path $env:TEMP "trivy-install"
+        New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+
+        $downloadUrl = "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_*_Windows-$arch.zip"
+
+        # Use GitHub API to get latest release URL
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/aquasecurity/trivy/releases/latest" -TimeoutSec 30
+        $asset = $releases.assets | Where-Object { $_.name -match "Windows-$arch\.zip$" } | Select-Object -First 1
+
+        if ($asset) {
+            $zipPath = Join-Path $tmpDir "trivy.zip"
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -TimeoutSec 120
+            Expand-Archive -Path $zipPath -DestinationPath $tmpDir -Force
+
+            $trivyExe = Get-ChildItem -Path $tmpDir -Filter "trivy.exe" -Recurse | Select-Object -First 1
+            if ($trivyExe) {
+                Copy-Item $trivyExe.FullName $TrivyBin -Force
+                Write-Log "Trivy installed successfully"
+                Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+                return $true
+            }
+        }
+
+        Write-Log "Failed to install Trivy" -Level "WARN"
+        Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    catch {
+        Write-Log "Failed to install Trivy: $_" -Level "WARN"
+        return $false
+    }
+}
+
+function Get-ContainerImages {
+    $images = @()
+
+    if (Test-DockerAvailable) {
+        $dockerImages = docker images --format "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}" 2>&1
+        foreach ($line in $dockerImages) {
+            if ($line -and $line -notmatch '<none>' -and $line -match '\|') {
+                $images += $line
+            }
+        }
+    }
+
+    return $images
+}
+
+function Invoke-ContainerScan {
+    param($Config, $SystemInfo)
+
+    # Check if Docker is available
+    if (-not (Test-DockerAvailable)) {
+        Write-Log "No container runtime detected, skipping container scan"
+        return
+    }
+
+    Write-Log "Starting container image scan..."
+
+    # Install Trivy if needed
+    if (-not (Install-Trivy)) {
+        Write-Log "Trivy not available, skipping container scan" -Level "WARN"
+        return
+    }
+
+    # Get list of images
+    $imageList = Get-ContainerImages
+    if ($imageList.Count -eq 0) {
+        Write-Log "No container images found"
+        return
+    }
+
+    $scanResults = @()
+    $imageCount = 0
+
+    foreach ($imageLine in $imageList) {
+        $parts = $imageLine -split '\|'
+        $imageRef = $parts[0]
+        $imageId = if ($parts.Count -gt 1) { $parts[1].Substring(0, [Math]::Min(12, $parts[1].Length)) } else { "" }
+
+        Write-Log "Scanning container image: $imageRef"
+
+        try {
+            # Run Trivy scan
+            $trivyOutput = & $TrivyBin image --format json --severity HIGH,CRITICAL --cache-dir $TrivyCacheDir --quiet --timeout 5m $imageRef 2>&1
+
+            if ($LASTEXITCODE -ne 0) {
+                Write-Log "Trivy scan failed for $imageRef" -Level "WARN"
+                continue
+            }
+
+            $imageName = ($imageRef -split ':')[0]
+            $imageTag = if ($imageRef -match ':(.+)$') { $Matches[1] } else { "latest" }
+
+            # Parse Trivy JSON output
+            $trivyJson = $trivyOutput | ConvertFrom-Json
+
+            $scanResults += @{
+                image_name = $imageName
+                image_tag = $imageTag
+                image_id = $imageId
+                trivy_output = $trivyJson
+            }
+
+            $imageCount++
+
+            # Limit to 50 images
+            if ($imageCount -ge 50) {
+                Write-Log "Reached 50 image limit, skipping remaining" -Level "WARN"
+                break
+            }
+        }
+        catch {
+            Write-Log "Error scanning $imageRef : $_" -Level "WARN"
+        }
+    }
+
+    if ($imageCount -eq 0) {
+        Write-Log "No images scanned successfully"
+        return
+    }
+
+    Write-Log "Scanned $imageCount container images"
+
+    # Get Trivy version
+    $trivyVersion = "unknown"
+    try {
+        $versionOutput = & $TrivyBin --version 2>&1
+        if ($versionOutput -match '(\d+\.\d+\.\d+)') {
+            $trivyVersion = $Matches[1]
+        }
+    } catch {}
+
+    # Send results to server
+    $payload = @{
+        agent_id = $SystemInfo.agent.id
+        hostname = $SystemInfo.hostname
+        scanner = "trivy"
+        scanner_version = $trivyVersion
+        images = $scanResults
+    }
+
+    $jsonPayload = $payload | ConvertTo-Json -Depth 20 -Compress
+    $endpoint = "$($Config.ServerUrl)/api/agent/container-scan"
+
+    $headers = @{
+        "X-Agent-Key" = $Config.ApiKey
+        "Content-Type" = "application/json"
+        "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
+    }
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $jsonPayload -TimeoutSec 120
+        Write-Log "Container scan results sent successfully"
+    }
+    catch {
+        Write-Log "Failed to send container scan results: $_" -Level "WARN"
+    }
+}
+
+# ============================================================================
 # Installation Functions
 # ============================================================================
 
@@ -569,6 +764,13 @@ function Main {
         } else {
             Write-Log "Inventory report failed" -Level "ERROR"
             exit 1
+        }
+
+        # Run container image scan (if Docker available)
+        try {
+            Invoke-ContainerScan $config $systemInfo
+        } catch {
+            Write-Log "Container scanning encountered issues (non-fatal): $_" -Level "WARN"
         }
     }
     catch {

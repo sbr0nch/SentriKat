@@ -3,7 +3,7 @@ from app import db, csrf, limiter
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 import os
-from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory
+from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory, ContainerImage, ContainerVulnerability
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
@@ -1403,6 +1403,21 @@ def get_vulnerability_stats():
 
     total_cves = len(cve_priorities)  # Unique CVE count
 
+    # Container image stats
+    container_stats = {'total_images': 0, 'total_container_vulns': 0, 'container_critical': 0, 'container_high': 0}
+    try:
+        if org_id:
+            container_images = ContainerImage.query.filter_by(organization_id=org_id, active=True)
+        else:
+            container_images = ContainerImage.query.filter_by(active=True)
+        container_list = container_images.all()
+        container_stats['total_images'] = len(container_list)
+        container_stats['total_container_vulns'] = sum(i.total_vulnerabilities or 0 for i in container_list)
+        container_stats['container_critical'] = sum(i.critical_count or 0 for i in container_list)
+        container_stats['container_high'] = sum(i.high_count or 0 for i in container_list)
+    except Exception:
+        pass  # Container tables may not exist yet
+
     return jsonify({
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
@@ -1421,7 +1436,9 @@ def get_vulnerability_stats():
         'critical_cves': cve_priority_counts['critical'],
         'high_cves': cve_priority_counts['high'],
         'medium_cves': cve_priority_counts['medium'],
-        'low_cves': cve_priority_counts['low']
+        'low_cves': cve_priority_counts['low'],
+        # Container image scanning stats
+        'container': container_stats,
     })
 
 

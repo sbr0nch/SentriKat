@@ -2600,3 +2600,178 @@ class ScheduledReport(db.Model):
                         emails.add(user.email)
 
         return list(emails)
+
+
+# =============================================================================
+# Container Image Scanning Models (Trivy Integration)
+# =============================================================================
+
+class ContainerImage(db.Model):
+    """
+    Represents a Docker/OCI container image discovered on an asset.
+    Tracks image metadata, scan results, and vulnerability counts.
+    """
+    __tablename__ = 'container_images'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+
+    # Image identification
+    image_name = db.Column(db.String(500), nullable=False, index=True)  # e.g. "nginx", "myapp"
+    image_tag = db.Column(db.String(200), nullable=True)  # e.g. "latest", "1.25-alpine"
+    image_id = db.Column(db.String(100), nullable=True, index=True)  # SHA256 digest
+    image_digest = db.Column(db.String(200), nullable=True)  # Registry digest (sha256:abc...)
+    registry = db.Column(db.String(300), nullable=True)  # e.g. "docker.io", "ghcr.io"
+    repository = db.Column(db.String(500), nullable=True)  # Full repository path
+
+    # Image metadata
+    os_family = db.Column(db.String(50), nullable=True)  # alpine, debian, ubuntu, centos, etc.
+    os_version = db.Column(db.String(100), nullable=True)
+    architecture = db.Column(db.String(20), nullable=True)  # amd64, arm64
+    size_bytes = db.Column(db.BigInteger, nullable=True)
+    created_at_image = db.Column(db.DateTime, nullable=True)  # When the image was built
+
+    # Scan results (cached aggregates)
+    last_scan_at = db.Column(db.DateTime, nullable=True)
+    scanner_version = db.Column(db.String(50), nullable=True)  # e.g. "trivy 0.58.0"
+    total_vulnerabilities = db.Column(db.Integer, default=0)
+    critical_count = db.Column(db.Integer, default=0)
+    high_count = db.Column(db.Integer, default=0)
+    medium_count = db.Column(db.Integer, default=0)
+    low_count = db.Column(db.Integer, default=0)
+    fixed_count = db.Column(db.Integer, default=0)  # Vulns with known fix
+    unfixed_count = db.Column(db.Integer, default=0)  # No fix available yet
+
+    # Status
+    active = db.Column(db.Boolean, default=True, index=True)
+    running = db.Column(db.Boolean, default=False)  # Currently running on the asset
+
+    # Timestamps
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('container_images', lazy='dynamic'))
+    asset = db.relationship('Asset', backref=db.backref('container_images', lazy='dynamic'))
+    vulnerabilities = db.relationship('ContainerVulnerability', backref='container_image', cascade='all, delete-orphan', lazy='dynamic')
+
+    __table_args__ = (
+        db.Index('idx_container_org_active', 'organization_id', 'active'),
+        db.Index('idx_container_image_name', 'image_name', 'image_tag'),
+        db.UniqueConstraint('organization_id', 'asset_id', 'image_id', name='uix_org_asset_image'),
+    )
+
+    @property
+    def full_name(self):
+        """Return full image reference like 'nginx:1.25-alpine'"""
+        if self.image_tag:
+            return f"{self.image_name}:{self.image_tag}"
+        return self.image_name
+
+    @property
+    def severity_summary(self):
+        """Return severity breakdown dict"""
+        return {
+            'critical': self.critical_count or 0,
+            'high': self.high_count or 0,
+            'medium': self.medium_count or 0,
+            'low': self.low_count or 0,
+        }
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'image_name': self.image_name,
+            'image_tag': self.image_tag,
+            'image_id': self.image_id,
+            'image_digest': self.image_digest,
+            'registry': self.registry,
+            'full_name': self.full_name,
+            'os_family': self.os_family,
+            'os_version': self.os_version,
+            'architecture': self.architecture,
+            'size_bytes': self.size_bytes,
+            'last_scan_at': self.last_scan_at.isoformat() if self.last_scan_at else None,
+            'scanner_version': self.scanner_version,
+            'total_vulnerabilities': self.total_vulnerabilities,
+            'severity': self.severity_summary,
+            'fixed_count': self.fixed_count,
+            'unfixed_count': self.unfixed_count,
+            'active': self.active,
+            'running': self.running,
+            'first_seen_at': self.first_seen_at.isoformat() if self.first_seen_at else None,
+            'last_seen_at': self.last_seen_at.isoformat() if self.last_seen_at else None,
+        }
+
+
+class ContainerVulnerability(db.Model):
+    """
+    Individual vulnerability found in a container image scan.
+    Each record maps a CVE to a specific package within a container image.
+    """
+    __tablename__ = 'container_vulnerabilities'
+
+    id = db.Column(db.Integer, primary_key=True)
+    container_image_id = db.Column(db.Integer, db.ForeignKey('container_images.id'), nullable=False, index=True)
+
+    # Vulnerability identification
+    vuln_id = db.Column(db.String(50), nullable=False, index=True)  # CVE-2024-1234 or GHSA-xxx
+    severity = db.Column(db.String(20), nullable=True, index=True)  # CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN
+    title = db.Column(db.String(500), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+
+    # Affected package
+    pkg_name = db.Column(db.String(200), nullable=False)  # e.g. "libssl3"
+    pkg_version = db.Column(db.String(100), nullable=True)  # Installed version
+    pkg_type = db.Column(db.String(50), nullable=True)  # os, library, etc.
+    pkg_path = db.Column(db.String(500), nullable=True)  # File path in image
+
+    # Fix information
+    fixed_version = db.Column(db.String(100), nullable=True)  # Version that fixes this CVE
+    fix_status = db.Column(db.String(30), default='unknown')  # fixed, not_fixed, end_of_life, unknown
+
+    # Scoring
+    cvss_score = db.Column(db.Float, nullable=True)
+    cvss_vector = db.Column(db.String(200), nullable=True)
+
+    # Source
+    data_source = db.Column(db.String(200), nullable=True)  # e.g. "ubuntu", "nvd", "ghsa"
+    primary_url = db.Column(db.String(500), nullable=True)  # Link to advisory
+
+    # Status tracking
+    acknowledged = db.Column(db.Boolean, default=False)
+    acknowledged_at = db.Column(db.DateTime, nullable=True)
+    acknowledged_by = db.Column(db.String(100), nullable=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('idx_container_vuln_severity', 'container_image_id', 'severity'),
+        db.Index('idx_container_vuln_id', 'vuln_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'container_image_id': self.container_image_id,
+            'vuln_id': self.vuln_id,
+            'severity': self.severity,
+            'title': self.title,
+            'pkg_name': self.pkg_name,
+            'pkg_version': self.pkg_version,
+            'pkg_type': self.pkg_type,
+            'fixed_version': self.fixed_version,
+            'fix_status': self.fix_status,
+            'cvss_score': self.cvss_score,
+            'data_source': self.data_source,
+            'primary_url': self.primary_url,
+            'acknowledged': self.acknowledged,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
