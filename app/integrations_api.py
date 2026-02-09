@@ -1600,12 +1600,16 @@ def test_issue_tracker():
     # Get SSL verification setting
     verify_ssl = get_setting('verify_ssl', 'true') == 'true'
 
+    use_saved = data.get('use_saved_token', False)
+
     try:
         if tracker_type == 'jira':
             url = data.get('url', '').strip()
             email = data.get('email', '').strip()
             api_token = data.get('api_token', '').strip()
-            use_pat = data.get('use_pat', False)  # Use Personal Access Token (Bearer auth)
+            if not api_token and use_saved:
+                api_token = get_setting('jira_api_token', '')
+            use_pat = data.get('use_pat', False)
             if not all([url, email, api_token]):
                 return jsonify({'success': False, 'error': 'URL, email, and API token required'}), 400
             tracker = JiraTracker(url, email, api_token, verify_ssl=verify_ssl, use_pat=use_pat)
@@ -1613,12 +1617,16 @@ def test_issue_tracker():
         elif tracker_type == 'youtrack':
             url = data.get('url', '').strip()
             token = data.get('token', '').strip()
+            if not token and use_saved:
+                token = get_setting('youtrack_token', '')
             if not all([url, token]):
                 return jsonify({'success': False, 'error': 'URL and token required'}), 400
             tracker = YouTrackTracker(url, token)
 
         elif tracker_type == 'github':
             token = data.get('token', '').strip()
+            if not token and use_saved:
+                token = get_setting('github_token', '')
             owner = data.get('owner', '').strip()
             repo = data.get('repo', '').strip()
             if not all([token, owner, repo]):
@@ -1628,6 +1636,8 @@ def test_issue_tracker():
         elif tracker_type == 'gitlab':
             url = data.get('url', 'https://gitlab.com').strip()
             token = data.get('token', '').strip()
+            if not token and use_saved:
+                token = get_setting('gitlab_token', '')
             project_id = data.get('project_id', '').strip()
             if not all([token, project_id]):
                 return jsonify({'success': False, 'error': 'Token and project ID required'}), 400

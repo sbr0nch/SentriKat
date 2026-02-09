@@ -1025,7 +1025,7 @@ def get_notification_settings():
         'generic_webhook_name': get_setting('generic_webhook_name', 'Custom Webhook'),
         'generic_webhook_format': get_setting('generic_webhook_format', 'slack'),  # slack, discord, or custom
         'generic_webhook_custom_template': get_setting('generic_webhook_custom_template', ''),
-        'generic_webhook_token': get_setting('generic_webhook_token', ''),  # Optional auth token
+        'generic_webhook_token_configured': bool(get_setting('generic_webhook_token', '')),  # Don't expose token value
         'critical_email_enabled': get_setting('critical_email_enabled', 'true') == 'true',
         'critical_email_time': get_setting('critical_email_time', '09:00'),
         'critical_email_max_age_days': int(get_setting('critical_email_max_age_days', '30')),

@@ -3311,16 +3311,12 @@ async function deleteLogo() {
 async function saveNotificationSettings() {
     const settings = {
         slack_enabled: SK.DOM.getChecked('slackEnabled'),
-        slack_webhook_url: SK.DOM.getValue('slackWebhookUrl') || '',
         teams_enabled: SK.DOM.getChecked('teamsEnabled'),
-        teams_webhook_url: SK.DOM.getValue('teamsWebhookUrl') || '',
         // Generic webhook settings
         generic_webhook_enabled: SK.DOM.getChecked('genericWebhookEnabled'),
-        generic_webhook_url: SK.DOM.getValue('genericWebhookUrl') || '',
         generic_webhook_name: SK.DOM.getValue('genericWebhookName') || 'Custom Webhook',
         generic_webhook_format: SK.DOM.getValue('genericWebhookFormat') || 'slack',
         generic_webhook_custom_template: SK.DOM.getValue('genericWebhookTemplate') || '',
-        generic_webhook_token: SK.DOM.getValue('genericWebhookToken') || '',
         // Email settings
         critical_email_enabled: SK.DOM.getChecked('criticalEmailEnabled'),
         critical_email_time: SK.DOM.getValue('criticalEmailTime') || '09:00',
@@ -3329,6 +3325,16 @@ async function saveNotificationSettings() {
         default_alert_mode: SK.DOM.getValue('defaultAlertMode') || 'daily_reminder',
         default_escalation_days: parseInt(SK.DOM.getValue('defaultEscalationDays')) || 3
     };
+
+    // Only include webhook URLs/tokens if user entered a value (prevent clearing saved values)
+    const slackUrl = SK.DOM.getValue('slackWebhookUrl');
+    if (slackUrl) settings.slack_webhook_url = slackUrl;
+    const teamsUrl = SK.DOM.getValue('teamsWebhookUrl');
+    if (teamsUrl) settings.teams_webhook_url = teamsUrl;
+    const genericUrl = SK.DOM.getValue('genericWebhookUrl');
+    if (genericUrl) settings.generic_webhook_url = genericUrl;
+    const genericToken = SK.DOM.getValue('genericWebhookToken');
+    if (genericToken) settings.generic_webhook_token = genericToken;
 
     try {
         const response = await fetch('/api/settings/notifications', {
@@ -3385,7 +3391,11 @@ async function loadNotificationSettings() {
                 }
             }
             if (genericWebhookTemplate) genericWebhookTemplate.value = settings.generic_webhook_custom_template || '';
-            if (genericWebhookToken) genericWebhookToken.value = settings.generic_webhook_token || '';
+            if (genericWebhookToken) {
+                genericWebhookToken.value = '';
+                genericWebhookToken.placeholder = settings.generic_webhook_token_configured
+                    ? '(token saved \u2014 leave blank to keep)' : 'Optional auth token';
+            }
 
             if (criticalEmailEnabled) criticalEmailEnabled.checked = settings.critical_email_enabled !== false;
             if (criticalEmailTime) criticalEmailTime.value = settings.critical_email_time || '09:00';
@@ -8488,21 +8498,53 @@ async function loadIssueTrackerSettings() {
         window._savedJiraIssueType = jira.issue_type || '';
         if (jira.custom_fields) SK.DOM.setValue('jiraCustomFields', jira.custom_fields);
 
+        // Show placeholder on token fields when token is already saved
+        const jiraTokenEl = SK.DOM.get('jiraApiToken');
+        if (jiraTokenEl) {
+            jiraTokenEl.value = '';
+            jiraTokenEl.placeholder = jira.api_token_configured
+                ? '(token saved \u2014 leave blank to keep)' : 'Enter API token or PAT';
+        }
+
         const yt = settings.youtrack || {};
         SK.DOM.setValue('youtrackUrl', yt.url || '');
         SK.DOM.setValue('youtrackProjectId', yt.project_id || '');
+        const ytTokenEl = SK.DOM.get('youtrackToken');
+        if (ytTokenEl) {
+            ytTokenEl.value = '';
+            ytTokenEl.placeholder = yt.token_configured
+                ? '(token saved \u2014 leave blank to keep)' : 'Enter permanent token';
+        }
 
         const gh = settings.github || {};
         SK.DOM.setValue('githubOwner', gh.owner || '');
         SK.DOM.setValue('githubRepo', gh.repo || '');
+        const ghTokenEl = SK.DOM.get('githubToken');
+        if (ghTokenEl) {
+            ghTokenEl.value = '';
+            ghTokenEl.placeholder = gh.token_configured
+                ? '(token saved \u2014 leave blank to keep)' : 'Enter personal access token';
+        }
 
         const gl = settings.gitlab || {};
         SK.DOM.setValue('gitlabUrl', gl.url || 'https://gitlab.com');
         SK.DOM.setValue('gitlabProjectId', gl.project_id || '');
+        const glTokenEl = SK.DOM.get('gitlabToken');
+        if (glTokenEl) {
+            glTokenEl.value = '';
+            glTokenEl.placeholder = gl.token_configured
+                ? '(token saved \u2014 leave blank to keep)' : 'Enter personal access token';
+        }
 
         const wh = settings.webhook || {};
         SK.DOM.setValue('webhookUrl', wh.url || '');
         SK.DOM.setValue('webhookMethod', wh.method || 'POST');
+        const whAuthEl = SK.DOM.get('webhookAuthValue');
+        if (whAuthEl) {
+            whAuthEl.value = '';
+            whAuthEl.placeholder = wh.auth_value_configured
+                ? '(token saved \u2014 leave blank to keep)' : 'Enter auth value';
+        }
 
         // Show config sections for enabled trackers
         toggleTrackerConfig();
@@ -8634,33 +8676,37 @@ async function testIssueTrackerConnection() {
             testData.url = SK.DOM.getValue('jiraUrl');
             testData.email = SK.DOM.getValue('jiraEmail');
             testData.api_token = SK.DOM.getValue('jiraApiToken');
+            testData.use_saved_token = !testData.api_token;  // Use saved token if field is blank
             const patCheckbox = SK.DOM.get('jiraUsePat');
             testData.use_pat = patCheckbox && patCheckbox.checked;
-            if (!testData.url || !testData.email || !testData.api_token) {
-                results.push({ type: 'jira', success: false, message: 'Missing URL, username, or token' });
+            if (!testData.url || !testData.email) {
+                results.push({ type: 'jira', success: false, message: 'Missing URL or username' });
                 continue;
             }
         } else if (trackerType === 'youtrack') {
             testData.url = SK.DOM.getValue('youtrackUrl');
             testData.token = SK.DOM.getValue('youtrackToken');
-            if (!testData.url || !testData.token) {
-                results.push({ type: 'youtrack', success: false, message: 'Missing URL or token' });
+            testData.use_saved_token = !testData.token;
+            if (!testData.url) {
+                results.push({ type: 'youtrack', success: false, message: 'Missing URL' });
                 continue;
             }
         } else if (trackerType === 'github') {
             testData.token = SK.DOM.getValue('githubToken');
+            testData.use_saved_token = !testData.token;
             testData.owner = SK.DOM.getValue('githubOwner');
             testData.repo = SK.DOM.getValue('githubRepo');
-            if (!testData.token || !testData.owner || !testData.repo) {
-                results.push({ type: 'github', success: false, message: 'Missing token, owner, or repo' });
+            if (!testData.owner || !testData.repo) {
+                results.push({ type: 'github', success: false, message: 'Missing owner or repo' });
                 continue;
             }
         } else if (trackerType === 'gitlab') {
             testData.url = SK.DOM.getValue('gitlabUrl');
             testData.token = SK.DOM.getValue('gitlabToken');
+            testData.use_saved_token = !testData.token;
             testData.project_id = SK.DOM.getValue('gitlabProjectId');
-            if (!testData.token || !testData.project_id) {
-                results.push({ type: 'gitlab', success: false, message: 'Missing token or project ID' });
+            if (!testData.project_id) {
+                results.push({ type: 'gitlab', success: false, message: 'Missing project ID' });
                 continue;
             }
         } else if (trackerType === 'webhook') {
@@ -8668,6 +8714,7 @@ async function testIssueTrackerConnection() {
             testData.method = SK.DOM.getValue('webhookMethod');
             testData.auth_type = SK.DOM.getValue('webhookAuthType');
             testData.auth_value = SK.DOM.getValue('webhookAuthValue');
+            testData.use_saved_token = !testData.auth_value;
             if (!testData.url) {
                 results.push({ type: 'webhook', success: false, message: 'Missing webhook URL' });
                 continue;
@@ -8748,9 +8795,9 @@ async function loadComplianceData() {
         const data = await response.json();
 
         // Update overview cards
-        SK.DOM.setText('complianceTotalMatches', data.summary.total_matches);
-        SK.DOM.setText('complianceAcknowledged', data.summary.acknowledged);
-        SK.DOM.setText('compliancePending', data.summary.pending);
+        SK.DOM.setText('complianceTotalMatches', data.summary.total_kev_matches);
+        SK.DOM.setText('complianceAcknowledged', data.summary.remediated);
+        SK.DOM.setText('compliancePending', data.summary.pending_remediation);
         SK.DOM.setText('complianceOverdue', data.summary.overdue_count);
 
         // Update compliance percentage

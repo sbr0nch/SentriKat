@@ -556,7 +556,18 @@ class JiraTracker(IssueTrackerBase):
             )
 
             if response.status_code in (200, 201):
-                result = response.json()
+                try:
+                    result = response.json()
+                except (ValueError, json.JSONDecodeError):
+                    # Jira returned HTML instead of JSON (SSO redirect, login page, proxy interception)
+                    snippet = response.text[:200].strip()
+                    if '<!doctype' in snippet.lower() or '<html' in snippet.lower():
+                        return False, (
+                            "Jira returned an HTML page instead of JSON. "
+                            "This usually means SSO/login is intercepting the request, "
+                            "or the Jira URL is incorrect. Check your Jira URL and credentials."
+                        ), None, None
+                    return False, f"Jira returned invalid JSON (HTTP {response.status_code})", None, None
                 issue_key = result.get('key')
                 issue_url = f"{self.base_url}/browse/{issue_key}"
                 return True, f"Created issue {issue_key}", issue_key, issue_url
@@ -1090,23 +1101,28 @@ def get_issue_tracker_config() -> Dict[str, Any]:
             'project_key': get_setting('jira_project_key', ''),
             'issue_type': get_setting('jira_issue_type', 'Task'),
             'use_pat': get_setting('jira_use_pat', 'false') == 'true',
-            'custom_fields': get_setting('jira_custom_fields', '')
+            'custom_fields': get_setting('jira_custom_fields', ''),
+            'api_token_configured': bool(get_setting('jira_api_token', ''))
         },
         'youtrack': {
             'url': get_setting('youtrack_url', ''),
-            'project_id': get_setting('youtrack_project_id', '')
+            'project_id': get_setting('youtrack_project_id', ''),
+            'token_configured': bool(get_setting('youtrack_token', ''))
         },
         'github': {
             'owner': get_setting('github_owner', ''),
-            'repo': get_setting('github_repo', '')
+            'repo': get_setting('github_repo', ''),
+            'token_configured': bool(get_setting('github_token', ''))
         },
         'gitlab': {
             'url': get_setting('gitlab_url', 'https://gitlab.com'),
-            'project_id': get_setting('gitlab_project_id', '')
+            'project_id': get_setting('gitlab_project_id', ''),
+            'token_configured': bool(get_setting('gitlab_token', ''))
         },
         'webhook': {
             'url': get_setting('webhook_url', ''),
-            'method': get_setting('webhook_method', 'POST')
+            'method': get_setting('webhook_method', 'POST'),
+            'auth_value_configured': bool(get_setting('webhook_auth_value', ''))
         }
     }
 
