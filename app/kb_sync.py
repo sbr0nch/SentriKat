@@ -1,22 +1,32 @@
 """
 SentriKat Knowledge Base Sync
 
-Syncs CPE mappings and vulnerability intelligence between on-premise
-SentriKat instances and the central SentriKat Knowledge Base API.
+Syncs CPE mappings between on-premise SentriKat instances and the
+central SentriKat Knowledge Base API.
 
-How it works:
-1. PUSH: Send locally-learned CPE mappings to the KB server
-   - User-created mappings (source='user')
-   - Auto-discovered NVD mappings (source='auto_nvd')
-   - Only mappings with usage_count > 0 are pushed (proven useful)
+Security model (3 layers of protection against bad data):
 
-2. PULL: Receive community-curated CPE mappings from the KB server
-   - Mappings validated by SentriKat team + community
-   - Higher confidence than auto-discovered mappings
-   - Won't overwrite user-created local mappings
+  PUSH SIDE (what we send):
+  - Only human-created mappings (source='user') are pushed
+  - auto_nvd mappings are EXCLUDED (fuzzy matching can be wrong)
+  - Minimum usage_count >= 5 (must be proven useful, not accidental)
+  - Max 500 mappings per push
 
-The KB grows with every SentriKat deployment. After months of use,
-the local database becomes self-sufficient even without NVD access.
+  SERVER SIDE (portal.sentrikat.com must implement):
+  - Store with is_published=FALSE by default
+  - Only publish when contribution_count >= 3 (3+ independent instances agree)
+  - OR: SentriKat team manually verifies and sets is_verified=TRUE
+  - Cap stored confidence at 0.90
+
+  PULL SIDE (what we accept):
+  - Community mappings imported with confidence capped at 0.85
+  - Local user mappings (confidence=0.95) ALWAYS take priority
+  - overwrite=False: never replaces existing local mappings
+  - source='community' tag for easy identification and cleanup
+
+Result: A mapping must be (1) created by a human, (2) used 5+ times locally,
+(3) confirmed by 3+ independent installations OR SentriKat team, and (4) still
+won't override any local mapping the customer already has.
 
 Configuration:
     SENTRIKAT_KB_SERVER: KB server URL (default: portal.sentrikat.com/api)
@@ -69,16 +79,22 @@ def get_local_mappings_for_sync():
     Get locally-learned CPE mappings that should be synced to the KB.
 
     Only includes mappings that:
-    - Have been used at least once (usage_count > 0)
-    - Were created by users or auto-discovered via NVD
+    - Were created manually by a human user (source='user')
+    - Have been used at least 5 times (proven useful, not accidental)
     - Are not imported from community (to avoid echo)
+
+    SECURITY: We intentionally exclude 'auto_nvd' mappings because they are
+    created by fuzzy matching heuristics and may be incorrect. Pushing
+    unverified auto-mappings to the community KB could cause false negatives
+    (missed vulnerabilities) across all installations that pull them.
+    Only human-verified mappings are trusted enough to share.
     """
     from app.models import UserCpeMapping
 
     try:
         mappings = UserCpeMapping.query.filter(
-            UserCpeMapping.usage_count > 0,
-            UserCpeMapping.source.in_(['user', 'auto_nvd'])
+            UserCpeMapping.usage_count >= 5,  # Must be proven useful, not accidental
+            UserCpeMapping.source == 'user'   # Only human-verified mappings
         ).order_by(
             UserCpeMapping.usage_count.desc()
         ).limit(500).all()
@@ -208,9 +224,12 @@ def pull_mappings():
             # Import with community source (won't overwrite user mappings)
             from app.cpe_mappings import import_user_mappings
 
-            # Tag all as community source
+            # Tag all as community source with capped confidence
             for m in community_mappings:
                 m['source'] = 'community'
+                # Cap confidence at 0.85 so local user mappings (0.95) always win
+                if m.get('confidence', 0) > 0.85:
+                    m['confidence'] = 0.85
                 m['notes'] = f"SentriKat KB community mapping (synced {datetime.utcnow().strftime('%Y-%m-%d')})"
 
             result = import_user_mappings(
