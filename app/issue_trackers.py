@@ -556,7 +556,18 @@ class JiraTracker(IssueTrackerBase):
             )
 
             if response.status_code in (200, 201):
-                result = response.json()
+                try:
+                    result = response.json()
+                except (ValueError, json.JSONDecodeError):
+                    # Jira returned HTML instead of JSON (SSO redirect, login page, proxy interception)
+                    snippet = response.text[:200].strip()
+                    if '<!doctype' in snippet.lower() or '<html' in snippet.lower():
+                        return False, (
+                            "Jira returned an HTML page instead of JSON. "
+                            "This usually means SSO/login is intercepting the request, "
+                            "or the Jira URL is incorrect. Check your Jira URL and credentials."
+                        ), None, None
+                    return False, f"Jira returned invalid JSON (HTTP {response.status_code})", None, None
                 issue_key = result.get('key')
                 issue_url = f"{self.base_url}/browse/{issue_key}"
                 return True, f"Created issue {issue_key}", issue_key, issue_url
