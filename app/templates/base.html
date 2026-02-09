@@ -2902,6 +2902,10 @@
                             <i class="bi bi-layers"></i>
                             Software Overview
                         </a>
+                        <a href="/admin#import-queue" class="sidebar-sublink" onclick="navigateInventoryTab('import-queue', event)" data-tooltip="Import Queue">
+                            <i class="bi bi-inbox"></i>
+                            Import Queue
+                        </a>
                     </div>
                 </div>
 
@@ -2957,10 +2961,6 @@
                         <a href="/admin-panel#integrations" class="sidebar-sublink" data-hash="integrations" onclick="switchIntegrationTab('pushAgents')">
                             <i class="bi bi-key"></i>
                             Agent Keys
-                        </a>
-                        <a href="/admin-panel#integrations" class="sidebar-sublink" data-hash="integrations" onclick="switchIntegrationTab('importQueue')">
-                            <i class="bi bi-inbox"></i>
-                            Import Queue
                         </a>
                         <a href="/admin-panel#integrations" class="sidebar-sublink" data-hash="integrations" onclick="switchIntegrationTab('jiraIntegration')">
                             <i class="bi bi-kanban"></i>
@@ -3795,7 +3795,6 @@
             setTimeout(() => {
                 const mapping = {
                     'pushAgents': 'push-agents-tab',
-                    'importQueue': 'import-queue-tab',
                     'jiraIntegration': 'jira-integration-tab'
                 };
                 const tabBtn = document.getElementById(mapping[tabPaneId]);
@@ -3813,7 +3812,8 @@
                 const tabMap = {
                     'products': 'products-tab',
                     'endpoints': 'endpoints-tab',
-                    'software-overview': 'software-overview-tab'
+                    'software-overview': 'software-overview-tab',
+                    'import-queue': 'import-queue-tab'
                 };
                 const tabId = tabMap[tabName];
                 const tabEl = document.getElementById(tabId);
