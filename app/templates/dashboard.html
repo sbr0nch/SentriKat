@@ -265,9 +265,10 @@
                 <div class="col-md-5">
                     <div class="card h-100" id="severityChartCard">
                         <div class="card-header py-2">
-                            <span><i class="bi bi-pie-chart me-2"></i>Severity Breakdown</span>
+                            <span><i class="bi bi-pie-chart me-2"></i>Priority Breakdown</span>
                         </div>
-                        <div class="card-body py-2 d-flex align-items-center justify-content-center">
+                        <div class="card-body py-2 d-flex flex-column align-items-center justify-content-center">
+                            <p class="text-muted mb-1 small" style="font-size: 0.7rem;">Unacknowledged matches by effective priority</p>
                             <div id="severityChartContainer" style="position: relative; width: 100%; max-height: 200px;">
                                 <canvas id="severityChart"></canvas>
                             </div>
@@ -288,7 +289,8 @@
                             </button>
                         </div>
                         <div class="card-body py-2">
-                            <div id="trendChartContainer" style="position: relative; height: 200px;">
+                            <p class="text-muted mb-1 small" style="font-size: 0.7rem;">Daily snapshots of unacknowledged vulnerabilities by CVSS severity</p>
+                            <div id="trendChartContainer" style="position: relative; height: 190px;">
                                 <canvas id="trendChart"></canvas>
                             </div>
                             <div id="trendNoData" class="text-center text-muted py-3 d-none">
@@ -992,6 +994,9 @@
             document.getElementById('mediumCount').textContent = formatNumber(stats.medium_count || 0);
             document.getElementById('lowCves').textContent = formatNumber(stats.low_cves || 0);
             document.getElementById('lowCount').textContent = formatNumber(stats.low_count || 0);
+
+            // Update severity donut chart with real-time priority data
+            updateSeverityDonut(stats);
         } catch (error) {
             console.error('Error loading stats:', error);
             // Show error in cards instead of just toast
@@ -1015,6 +1020,87 @@
     let trendChartInstance = null;
     let severityChartInstance = null;
 
+    function updateSeverityDonut(stats) {
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const legendColor = isDark ? '#d1d5db' : undefined;
+        const tooltipBg = isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)';
+
+        const critical = stats.critical_count || 0;
+        const high = stats.high_count || 0;
+        const medium = stats.medium_count || 0;
+        const low = stats.low_count || 0;
+        const total = critical + high + medium + low;
+
+        if (total === 0) {
+            document.getElementById('severityChartContainer').classList.add('d-none');
+            document.getElementById('severityNoData').classList.remove('d-none');
+            return;
+        }
+
+        document.getElementById('severityChartContainer').classList.remove('d-none');
+        document.getElementById('severityNoData').classList.add('d-none');
+
+        if (severityChartInstance) severityChartInstance.destroy();
+
+        const sCtx = document.getElementById('severityChart').getContext('2d');
+        severityChartInstance = new Chart(sCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Critical', 'High', 'Medium', 'Low'],
+                datasets: [{
+                    data: [critical, high, medium, low],
+                    backgroundColor: [
+                        'rgba(220, 38, 38, 0.8)',
+                        'rgba(245, 158, 11, 0.8)',
+                        'rgba(59, 130, 246, 0.8)',
+                        'rgba(34, 197, 94, 0.8)'
+                    ],
+                    borderColor: isDark ? '#1e1e1e' : '#ffffff',
+                    borderWidth: 2,
+                    hoverOffset: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                cutout: '60%',
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 10,
+                            font: { size: 10 },
+                            color: legendColor,
+                            generateLabels: function(chart) {
+                                const data = chart.data;
+                                return data.labels.map((label, i) => ({
+                                    text: label + ' (' + data.datasets[0].data[i] + ')',
+                                    fillStyle: data.datasets[0].backgroundColor[i],
+                                    strokeStyle: data.datasets[0].backgroundColor[i],
+                                    pointStyle: 'circle',
+                                    hidden: false,
+                                    index: i
+                                }));
+                            }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: tooltipBg,
+                        titleColor: '#fff',
+                        bodyColor: '#e5e7eb',
+                        callbacks: {
+                            label: function(context) {
+                                const pct = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ' + context.parsed + ' (' + pct + '%)';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     async function loadTrendChart() {
         try {
             const response = await fetch('/api/vulnerabilities/trends?days=30');
@@ -1034,88 +1120,11 @@
 
             // Severity colors
             const colors = {
-                critical: { bg: '#dc2626', bgAlpha: 'rgba(220, 38, 38, 0.8)' },
-                high:     { bg: '#f59e0b', bgAlpha: 'rgba(245, 158, 11, 0.8)' },
-                medium:   { bg: '#3b82f6', bgAlpha: 'rgba(59, 130, 246, 0.8)' },
-                low:      { bg: '#22c55e', bgAlpha: 'rgba(34, 197, 94, 0.8)' }
+                critical: { bg: '#dc2626' },
+                high:     { bg: '#f59e0b' },
+                medium:   { bg: '#3b82f6' },
+                low:      { bg: '#22c55e' }
             };
-
-            // --- Severity Donut Chart ---
-            const hasSeverityData = trends.critical || trends.high || trends.medium || trends.low;
-            if (hasSeverityData) {
-                // Use latest snapshot (last element in each array)
-                const latestCritical = (trends.critical && trends.critical.length) ? trends.critical[trends.critical.length - 1] : 0;
-                const latestHigh = (trends.high && trends.high.length) ? trends.high[trends.high.length - 1] : 0;
-                const latestMedium = (trends.medium && trends.medium.length) ? trends.medium[trends.medium.length - 1] : 0;
-                const latestLow = (trends.low && trends.low.length) ? trends.low[trends.low.length - 1] : 0;
-                const total = latestCritical + latestHigh + latestMedium + latestLow;
-
-                if (total > 0) {
-                    document.getElementById('severityChartContainer').classList.remove('d-none');
-                    document.getElementById('severityNoData').classList.add('d-none');
-
-                    if (severityChartInstance) severityChartInstance.destroy();
-
-                    const sCtx = document.getElementById('severityChart').getContext('2d');
-                    severityChartInstance = new Chart(sCtx, {
-                        type: 'doughnut',
-                        data: {
-                            labels: ['Critical', 'High', 'Medium', 'Low'],
-                            datasets: [{
-                                data: [latestCritical, latestHigh, latestMedium, latestLow],
-                                backgroundColor: [colors.critical.bgAlpha, colors.high.bgAlpha, colors.medium.bgAlpha, colors.low.bgAlpha],
-                                borderColor: isDark ? '#1e1e1e' : '#ffffff',
-                                borderWidth: 2,
-                                hoverOffset: 6
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: true,
-                            cutout: '60%',
-                            plugins: {
-                                legend: {
-                                    position: 'bottom',
-                                    labels: {
-                                        usePointStyle: true,
-                                        padding: 10,
-                                        font: { size: 10 },
-                                        color: legendColor,
-                                        generateLabels: function(chart) {
-                                            const data = chart.data;
-                                            return data.labels.map((label, i) => ({
-                                                text: label + ' (' + data.datasets[0].data[i] + ')',
-                                                fillStyle: data.datasets[0].backgroundColor[i],
-                                                strokeStyle: data.datasets[0].backgroundColor[i],
-                                                pointStyle: 'circle',
-                                                hidden: false,
-                                                index: i
-                                            }));
-                                        }
-                                    }
-                                },
-                                tooltip: {
-                                    backgroundColor: tooltipBg,
-                                    titleColor: '#fff',
-                                    bodyColor: '#e5e7eb',
-                                    callbacks: {
-                                        label: function(context) {
-                                            const pct = ((context.parsed / total) * 100).toFixed(1);
-                                            return context.label + ': ' + context.parsed + ' (' + pct + '%)';
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                } else {
-                    document.getElementById('severityChartContainer').classList.add('d-none');
-                    document.getElementById('severityNoData').classList.remove('d-none');
-                }
-            } else {
-                document.getElementById('severityChartContainer').classList.add('d-none');
-                document.getElementById('severityNoData').classList.remove('d-none');
-            }
 
             // --- Trend Line Chart ---
             if (!trends.dates || trends.dates.length === 0) {
