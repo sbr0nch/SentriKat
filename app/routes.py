@@ -2606,7 +2606,8 @@ def rematch_products():
 def apply_cpe_mappings():
     """
     Apply CPE auto-mappings to products that don't have CPE identifiers.
-    This enables more precise vulnerability matching.
+    Uses multi-tier matching: local patterns, curated mappings, and NVD API.
+    Auto-saves NVD discoveries as learned mappings for future use.
 
     Permissions:
     - Super Admin only: Can apply CPE mappings
@@ -2614,7 +2615,13 @@ def apply_cpe_mappings():
     from app.cpe_mapping import batch_apply_cpe_mappings, get_cpe_coverage_stats
 
     try:
-        updated, total_without = batch_apply_cpe_mappings(commit=True)
+        data = request.get_json(silent=True) or {}
+        use_nvd = data.get('use_nvd', True)  # Enable NVD API by default
+        max_nvd = data.get('max_nvd_lookups', 50)  # Cap NVD API calls
+
+        updated, total_without = batch_apply_cpe_mappings(
+            commit=True, use_nvd=use_nvd, max_nvd_lookups=max_nvd
+        )
         stats = get_cpe_coverage_stats()
         return jsonify({
             'status': 'success',
