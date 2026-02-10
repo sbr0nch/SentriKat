@@ -87,8 +87,16 @@ SKIP_PRODUCTS_WINDOWS = {
     'kits configuration installer',
     'toolkit documentation',
     'windows pe x86 x64 wims',
+    'windows pe x86 x64',
     'mxax64',
     'wptx64',
+    # More ADK/deployment tools
+    'volume activation management tool',
+    'imaging and configuration designer',
+    'windows system image manager',
+    'normal client',
+    # Driver uninstall/management tools (not the drivers themselves)
+    'sharp driver uninstall tool',
     # Language/localization (no executable code)
     'windows language pack',
     'microsoft language experience pack',
@@ -145,9 +153,11 @@ SKIP_PATTERNS = [
     # Games (not enterprise-relevant)
     r'.*(solitaire|candy crush|minecraft|disney|xbox game).*',
     # Windows ADK / Assessment & Deployment Kit components
-    r'^windows (assessment|deployment|phone common)',
-    r'(assessment and deployment kit|imaging designer|imaging tools)',
+    r'^windows (assessment|deployment|phone common|system image manager|pe x86)',
+    r'(assessment and deployment kit|imaging designer|imaging tools|imaging and configuration)',
     r'^(kits configuration|toolkit documentation)',
+    # Driver management utilities (not the drivers themselves)
+    r'driver uninstall tool',
 ]
 _SKIP_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in SKIP_PATTERNS]
 

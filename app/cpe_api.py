@@ -1020,23 +1020,37 @@ def cpe_dictionary_sync_nvd():
     Manually trigger NVD CPE dictionary sync.
     Phase 1: Bulk CSV download (~40-50K pairs, seconds).
     Phase 2: Incremental NVD API sync (recent changes only).
+    Pass force=true to force a fresh re-download (clears existing entries).
     """
+    from flask import current_app
     from app.cpe_dictionary import sync_nvd_cpe_dictionary
     import threading
 
+    data = request.get_json(silent=True) or {}
+    force = data.get('force', False)
+
+    app = current_app._get_current_object()
+
     def _run_sync():
-        from app import create_app
-        app = create_app()
         with app.app_context():
+            if force:
+                # Clear existing entries and force fresh bulk download
+                from app.models import CpeDictionaryEntry, SystemSettings
+                from app import db
+                CpeDictionaryEntry.query.delete()
+                setting = SystemSettings.query.filter_by(key='cpe_dict_last_bulk_download').first()
+                if setting:
+                    setting.value = ''
+                db.session.commit()
             sync_nvd_cpe_dictionary()
 
-    # Run in background thread to avoid HTTP timeout
     t = threading.Thread(target=_run_sync, daemon=True, name='NvdCpeDictSync')
     t.start()
 
+    msg = 'NVD CPE dictionary fresh re-download started.' if force else 'NVD CPE dictionary sync started.'
     return jsonify({
         'status': 'started',
-        'message': 'NVD CPE dictionary sync started (bulk CSV + incremental API). Check logs for progress.'
+        'message': msg + ' Check logs for progress.'
     }), 202
 
 

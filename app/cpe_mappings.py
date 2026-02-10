@@ -239,6 +239,24 @@ SOFTWARE_TO_CPE_MAPPINGS: Dict[str, Tuple[str, str, float]] = {
     'realtek card reader': ('realtek', 'pcie_card_reader', 0.90),
     'realtek high definition audio': ('realtek', 'high_definition_audio_codec', 0.90),
 
+    'realtek usb ethernet controller': ('realtek', 'usb_10_100_1000_ethernet_controller', 0.85),
+
+    # ---------------------------------------------------------------------
+    # MICROSOFT RUNTIMES & TOOLS
+    # ---------------------------------------------------------------------
+    'microsoft visual c++': ('microsoft', 'visual_c%2b%2b', 0.90),
+    'visual c++ redistributable': ('microsoft', 'visual_c%2b%2b', 0.90),
+    'microsoft windows desktop runtime': ('microsoft', '.net_runtime', 0.90),
+    'microsoft .net runtime': ('microsoft', '.net_runtime', 0.90),
+    'microsoft .net sdk': ('microsoft', '.net', 0.90),
+    'microsoft asp.net': ('microsoft', 'asp.net_core', 0.90),
+    'powertoys': ('microsoft', 'powertoys', 0.95),
+
+    # ---------------------------------------------------------------------
+    # XCP-ng (Xen-based hypervisor)
+    # ---------------------------------------------------------------------
+    'xcp-ng center': ('xcp-ng', 'xcp-ng', 0.85),
+
     # ---------------------------------------------------------------------
     # KEYSTORE EXPLORER
     # ---------------------------------------------------------------------
@@ -299,6 +317,17 @@ SOFTWARE_TO_CPE_MAPPINGS: Dict[str, Tuple[str, str, float]] = {
     'bash': ('gnu', 'bash', 0.90),
     'sudo': ('sudo_project', 'sudo', 0.95),
     'systemd': ('systemd_project', 'systemd', 0.95),
+
+    # ---------------------------------------------------------------------
+    # LANCOM (German router/network vendor)
+    # ---------------------------------------------------------------------
+    'lanconfig': ('lancom', 'lanconfig', 0.85),
+    'lancapi': ('lancom', 'lancapi', 0.85),
+
+    # ---------------------------------------------------------------------
+    # SEO/WEB TOOLS
+    # ---------------------------------------------------------------------
+    'screaming frog seo spider': ('screaming_frog', 'seo_spider', 0.85),
 }
 
 # =============================================================================
