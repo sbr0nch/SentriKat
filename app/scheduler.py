@@ -224,6 +224,17 @@ def cisa_sync_job(app):
             except Exception as cpe_dict_error:
                 logger.warning(f"CPE dictionary rebuild failed (non-critical): {cpe_dict_error}")
 
+            # Auto-remap unmapped products after dictionary rebuild
+            try:
+                from app.cpe_mapping import batch_apply_cpe_mappings
+                updated, total_unmapped = batch_apply_cpe_mappings(
+                    commit=True, use_nvd=False, max_nvd_lookups=0
+                )
+                if updated > 0:
+                    logger.info(f"Auto-remapped {updated}/{total_unmapped} products after KEV sync")
+            except Exception as remap_err:
+                logger.warning(f"Auto-remap after KEV sync failed: {remap_err}")
+
         except Exception as e:
             logger.error(f"CISA KEV sync job failed: {str(e)}")
 
@@ -591,7 +602,7 @@ def license_heartbeat_job(app):
 
 
 def nvd_cpe_dict_sync_job(app):
-    """Job to sync NVD CPE dictionary (bulk CSV download + incremental API)."""
+    """Job to sync NVD CPE dictionary, then auto-remap unmapped products."""
     with app.app_context():
         try:
             from app.cpe_dictionary import sync_nvd_cpe_dictionary
@@ -604,6 +615,31 @@ def nvd_cpe_dict_sync_job(app):
                 f"incremental({result.get('incremental_added', 0)} new), "
                 f"{result.get('total', 0)} total entries"
             )
+
+            # Auto-remap unmapped products using the updated dictionary
+            # This is the key step - without it, new dictionary entries sit unused
+            try:
+                from app.cpe_mapping import batch_apply_cpe_mappings
+                updated, total_unmapped = batch_apply_cpe_mappings(
+                    commit=True, use_nvd=True, max_nvd_lookups=100
+                )
+                if updated > 0:
+                    logger.info(
+                        f"Auto-remapped {updated}/{total_unmapped} unmapped products "
+                        f"after dictionary sync"
+                    )
+            except Exception as remap_err:
+                logger.warning(f"Auto-remap after dictionary sync failed: {remap_err}")
+
+            # Promote proven auto_nvd mappings to KB-eligible
+            try:
+                from app.kb_sync import promote_proven_auto_mappings
+                promoted = promote_proven_auto_mappings()
+                if promoted > 0:
+                    logger.info(f"Promoted {promoted} proven auto_nvd mappings to KB-eligible")
+            except Exception as promo_err:
+                logger.warning(f"Auto-promote failed: {promo_err}")
+
         except Exception as e:
             logger.error(f"NVD CPE dictionary sync failed: {str(e)}", exc_info=True)
 

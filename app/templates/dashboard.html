@@ -2443,9 +2443,23 @@
         }
         try {
             const response = await fetch('/api/products/apply-cpe', { method: 'POST' });
-            if (!response.ok) throw new Error(`Server error: ${response.status}`);
+            if (!response.ok && response.status !== 202) throw new Error(`Server error: ${response.status}`);
             const data = await response.json();
-            if (data.updated > 0) {
+            if (data.status === 'started') {
+                // Background job - poll for results
+                showToast('CPE auto-detection started. This may take a minute if downloading the CPE dictionary...', 'info');
+                // Poll stats after delay to show updated results
+                setTimeout(() => { loadStats(); }, 15000);
+                setTimeout(() => { loadStats(); }, 45000);
+                setTimeout(() => {
+                    loadStats();
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-magic me-1"></i>Auto-Detect CPE';
+                    }
+                }, 90000);
+                return;
+            } else if (data.updated > 0) {
                 showToast(`CPE mapped for ${data.updated} products. Coverage: ${data.coverage?.coverage_percent || '?'}%`, 'success');
                 loadStats();
             } else {
@@ -2454,7 +2468,8 @@
         } catch (error) {
             showToast(`Error: ${escapeHtml(error.message)}`, 'danger');
         } finally {
-            if (btn) {
+            if (btn && !btn.disabled) {
+                // Only reset if not in background polling mode
                 btn.disabled = false;
                 btn.innerHTML = '<i class="bi bi-magic me-1"></i>Auto-Detect CPE';
             }
