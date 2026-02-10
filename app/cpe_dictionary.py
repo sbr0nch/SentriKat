@@ -493,6 +493,12 @@ def _bulk_download_cpe_csv():
         vendor = row[0].strip().strip('"').lower()
         product = row[1].strip().strip('"').lower()
 
+        # Strip CPE 2.3 backslash escaping: \+ → +, \| → |, \# → #, etc.
+        # The CSV uses NVD CPE convention (e.g. visual_c\+\+, command_\|_update)
+        # but we need plain values for matching against agent-reported names.
+        vendor = re.sub(r'\\(.)', r'\1', vendor)
+        product = re.sub(r'\\(.)', r'\1', product)
+
         if not vendor or not product:
             continue
 
@@ -674,8 +680,8 @@ def _incremental_nvd_sync():
                 if len(parts) < 5:
                     continue
 
-                vendor = parts[3].lower()
-                product = parts[4].lower()
+                vendor = re.sub(r'\\(.)', r'\1', parts[3].lower())
+                product = re.sub(r'\\(.)', r'\1', parts[4].lower())
 
                 if not vendor or not product or vendor == '*' or product == '*':
                     continue
