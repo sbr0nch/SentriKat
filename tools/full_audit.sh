@@ -776,6 +776,911 @@ if [ -n "$HTTP_PROXY" ] || [ -n "$HTTPS_PROXY" ]; then
 fi
 
 # ============================================================================
+# 16. CORE API ENDPOINT TESTING (curl)
+# ============================================================================
+section "16. Core API Endpoint Tests"
+
+# --- Unauthenticated endpoints ---
+log "  --- Public Endpoints ---"
+
+# Health endpoint
+HEALTH_RESP=$(curl $CURL_OPTS "$BASE_URL/api/health" 2>&1)
+HEALTH_CODE=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" "$BASE_URL/api/health" 2>&1)
+if [ "$HEALTH_CODE" = "200" ]; then
+    pass "GET /api/health → HTTP 200"
+    HEALTH_DB=$(echo "$HEALTH_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('checks',{}).get('database','?'))" 2>/dev/null)
+    info "Health DB check: $HEALTH_DB"
+else
+    fail "GET /api/health → HTTP $HEALTH_CODE"
+fi
+
+# Version endpoint
+VERSION_RESP=$(curl $CURL_OPTS "$BASE_URL/api/version" 2>&1)
+VERSION_CODE=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" "$BASE_URL/api/version" 2>&1)
+if [ "$VERSION_CODE" = "200" ]; then
+    APP_VER=$(echo "$VERSION_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version','?'))" 2>/dev/null)
+    pass "GET /api/version → HTTP 200 (v$APP_VER)"
+else
+    fail "GET /api/version → HTTP $VERSION_CODE"
+fi
+
+# Status endpoint (may or may not require auth)
+STATUS_CODE=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" "$BASE_URL/api/status" 2>&1)
+info "GET /api/status → HTTP $STATUS_CODE"
+
+# --- Authenticate for protected endpoints ---
+log ""
+log "  --- Authenticated Endpoint Tests ---"
+
+# Try to login and get session cookie
+COOKIE_JAR="/tmp/sentrikat-audit-cookies.txt"
+rm -f "$COOKIE_JAR"
+
+# Get admin credentials from environment or use defaults
+AUDIT_USER="${SENTRIKAT_AUDIT_USER:-admin}"
+AUDIT_PASS="${SENTRIKAT_AUDIT_PASS:-}"
+
+AUTH_OK=false
+if [ -n "$AUDIT_PASS" ]; then
+    LOGIN_CODE=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" \
+        -c "$COOKIE_JAR" \
+        -X POST "$BASE_URL/api/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"$AUDIT_USER\",\"password\":\"$AUDIT_PASS\"}" 2>&1)
+
+    if [ "$LOGIN_CODE" = "200" ]; then
+        pass "API login successful (user: $AUDIT_USER)"
+        AUTH_OK=true
+    else
+        warn "API login failed: HTTP $LOGIN_CODE (set SENTRIKAT_AUDIT_USER/SENTRIKAT_AUDIT_PASS env vars)"
+    fi
+else
+    # Check if auth is disabled (common in dev)
+    AUTH_CHECK_CODE=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" "$BASE_URL/api/license" 2>&1)
+    if [ "$AUTH_CHECK_CODE" = "200" ]; then
+        info "Auth appears disabled - API accessible without login"
+        AUTH_OK=true
+    else
+        warn "No SENTRIKAT_AUDIT_PASS set. Skipping authenticated tests."
+        info "Set SENTRIKAT_AUDIT_PASS=<admin-password> to enable full API testing"
+    fi
+fi
+
+if [ "$AUTH_OK" = "true" ]; then
+    AUTH_CURL="curl $CURL_OPTS -b $COOKIE_JAR"
+
+    # License info
+    LIC_RESP=$($AUTH_CURL "$BASE_URL/api/license" 2>&1)
+    LIC_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/license" 2>&1)
+    if [ "$LIC_CODE" = "200" ]; then
+        LIC_EDITION=$(echo "$LIC_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('edition','?'))" 2>/dev/null)
+        LIC_STATUS=$(echo "$LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','?'))" 2>/dev/null)
+        LIC_PRO=$(echo "$LIC_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('is_professional',False))" 2>/dev/null)
+        pass "GET /api/license → HTTP 200 (edition=$LIC_EDITION, professional=$LIC_PRO, status=$LIC_STATUS)"
+    else
+        fail "GET /api/license → HTTP $LIC_CODE"
+    fi
+
+    # Installation ID
+    INSTALL_RESP=$($AUTH_CURL "$BASE_URL/api/license/installation-id" 2>&1)
+    INSTALL_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/license/installation-id" 2>&1)
+    if [ "$INSTALL_CODE" = "200" ]; then
+        INSTALL_ID=$(echo "$INSTALL_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('installation_id','?'))" 2>/dev/null)
+        pass "Installation ID: ${INSTALL_ID:0:12}..."
+    else
+        warn "GET /api/license/installation-id → HTTP $INSTALL_CODE"
+    fi
+
+    # Sync status
+    SYNC_RESP=$($AUTH_CURL "$BASE_URL/api/sync/status" 2>&1)
+    SYNC_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/sync/status" 2>&1)
+    if [ "$SYNC_CODE" = "200" ]; then
+        pass "GET /api/sync/status → HTTP 200"
+    else
+        warn "GET /api/sync/status → HTTP $SYNC_CODE"
+    fi
+
+    # Products list
+    PROD_RESP=$($AUTH_CURL "$BASE_URL/api/products?limit=1" 2>&1)
+    PROD_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/products?limit=1" 2>&1)
+    if [ "$PROD_CODE" = "200" ]; then
+        pass "GET /api/products → HTTP 200"
+    else
+        fail "GET /api/products → HTTP $PROD_CODE"
+    fi
+
+    # Vulnerabilities stats
+    VULN_RESP=$($AUTH_CURL "$BASE_URL/api/vulnerabilities/stats" 2>&1)
+    VULN_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/vulnerabilities/stats" 2>&1)
+    if [ "$VULN_CODE" = "200" ]; then
+        pass "GET /api/vulnerabilities/stats → HTTP 200"
+    else
+        fail "GET /api/vulnerabilities/stats → HTTP $VULN_CODE"
+    fi
+
+    # System notifications
+    NOTIF_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/system/notifications" 2>&1)
+    if [ "$NOTIF_CODE" = "200" ]; then
+        NOTIF_COUNT=$($AUTH_CURL "$BASE_URL/api/system/notifications" 2>&1 | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('notifications',[])))" 2>/dev/null)
+        pass "GET /api/system/notifications → HTTP 200 ($NOTIF_COUNT active notifications)"
+    else
+        warn "GET /api/system/notifications → HTTP $NOTIF_CODE"
+    fi
+
+    # Organizations
+    ORG_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/organizations" 2>&1)
+    if [ "$ORG_CODE" = "200" ]; then
+        pass "GET /api/organizations → HTTP 200"
+    else
+        warn "GET /api/organizations → HTTP $ORG_CODE"
+    fi
+
+    # Users
+    USR_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/users" 2>&1)
+    if [ "$USR_CODE" = "200" ]; then
+        pass "GET /api/users → HTTP 200"
+    else
+        warn "GET /api/users → HTTP $USR_CODE"
+    fi
+
+    # CPE Dictionary status
+    CPE_CODE=$($AUTH_CURL -o /dev/null -w "%{http_code}" "$BASE_URL/api/cpe/dictionary/status" 2>&1)
+    if [ "$CPE_CODE" = "200" ]; then
+        CPE_RESP=$($AUTH_CURL "$BASE_URL/api/cpe/dictionary/status" 2>&1)
+        CPE_COUNT=$(echo "$CPE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total_mappings',0))" 2>/dev/null)
+        pass "GET /api/cpe/dictionary/status → HTTP 200 ($CPE_COUNT CPE mappings)"
+    else
+        info "GET /api/cpe/dictionary/status → HTTP $CPE_CODE"
+    fi
+fi
+
+# Cleanup
+rm -f "$COOKIE_JAR"
+
+# ============================================================================
+# 17. LICENSE SERVER & PORTAL CONNECTIVITY
+# ============================================================================
+section "17. License Server & Portal Connectivity"
+
+# Get license server URL from container
+LICENSE_SERVER=$(docker exec sentrikat printenv SENTRIKAT_LICENSE_SERVER 2>/dev/null)
+if [ -z "$LICENSE_SERVER" ]; then
+    LICENSE_SERVER="https://portal.sentrikat.com/api"
+fi
+info "License server URL: $LICENSE_SERVER"
+
+# DNS resolution
+LICENSE_HOST=$(echo "$LICENSE_SERVER" | sed 's|https\?://||' | sed 's|/.*||')
+if docker exec sentrikat python3 -c "import socket; socket.getaddrinfo('$LICENSE_HOST', 443)" &>/dev/null; then
+    pass "DNS resolves: $LICENSE_HOST"
+else
+    fail "Cannot resolve DNS: $LICENSE_HOST"
+fi
+
+# TCP connectivity to license server
+if docker exec sentrikat python3 -c "
+import socket, ssl
+s = socket.create_connection(('$LICENSE_HOST', 443), timeout=10)
+ctx = ssl.create_default_context()
+ss = ctx.wrap_socket(s, server_hostname='$LICENSE_HOST')
+ss.close()
+print('ok')
+" &>/dev/null; then
+    pass "TLS connection to $LICENSE_HOST:443 successful"
+else
+    warn "Cannot establish TLS to $LICENSE_HOST:443 (may be behind proxy)"
+fi
+
+# HTTP connectivity test - try to reach the license server health/root
+PORTAL_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl, json
+ctx = ssl.create_default_context()
+req = urllib.request.Request('$LICENSE_SERVER/v1/health', method='GET')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+
+case "$PORTAL_CODE" in
+    200|204)
+        pass "License server health: HTTP $PORTAL_CODE (reachable)"
+        ;;
+    404|405)
+        pass "License server reachable (HTTP $PORTAL_CODE on health endpoint)"
+        ;;
+    ERR:*)
+        fail "License server unreachable: $PORTAL_CODE"
+        ;;
+    *)
+        warn "License server returned HTTP $PORTAL_CODE"
+        ;;
+esac
+
+# Test heartbeat endpoint connectivity (POST with empty body to verify routing)
+HEARTBEAT_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl, json
+ctx = ssl.create_default_context()
+data = json.dumps({'test': True}).encode()
+req = urllib.request.Request('$LICENSE_SERVER/v1/heartbeat', data=data, method='POST')
+req.add_header('Content-Type', 'application/json')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+
+case "$HEARTBEAT_CODE" in
+    200)
+        pass "Heartbeat endpoint: HTTP $HEARTBEAT_CODE (functional)"
+        ;;
+    400|401|403|422)
+        pass "Heartbeat endpoint reachable (HTTP $HEARTBEAT_CODE - auth/validation expected)"
+        ;;
+    ERR:*)
+        fail "Heartbeat endpoint unreachable: $HEARTBEAT_CODE"
+        ;;
+    *)
+        info "Heartbeat endpoint: HTTP $HEARTBEAT_CODE"
+        ;;
+esac
+
+# Test activation endpoint connectivity
+ACTIVATE_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl, json
+ctx = ssl.create_default_context()
+data = json.dumps({'test': True}).encode()
+req = urllib.request.Request('$LICENSE_SERVER/v1/license/activate', data=data, method='POST')
+req.add_header('Content-Type', 'application/json')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+
+case "$ACTIVATE_CODE" in
+    200)
+        pass "Activation endpoint: HTTP $ACTIVATE_CODE"
+        ;;
+    400|401|403|422)
+        pass "Activation endpoint reachable (HTTP $ACTIVATE_CODE - validation expected)"
+        ;;
+    ERR:*)
+        fail "Activation endpoint unreachable: $ACTIVATE_CODE"
+        ;;
+    *)
+        info "Activation endpoint: HTTP $ACTIVATE_CODE"
+        ;;
+esac
+
+# Check last heartbeat from app logs
+LAST_HB=$(docker logs sentrikat --since 24h 2>&1 | grep -i "heartbeat" | tail -3)
+if [ -n "$LAST_HB" ]; then
+    log "  Recent heartbeat activity:"
+    echo "$LAST_HB" | while IFS= read -r line; do
+        info "  $line"
+    done
+else
+    warn "No heartbeat activity in last 24h"
+fi
+
+# ============================================================================
+# 18. KB (KNOWLEDGE BASE) SYNC CONNECTIVITY
+# ============================================================================
+section "18. Knowledge Base (KB) Sync"
+
+# Get KB server URL from container
+KB_SERVER=$(docker exec sentrikat printenv SENTRIKAT_KB_SERVER 2>/dev/null)
+if [ -z "$KB_SERVER" ]; then
+    KB_SERVER="$LICENSE_SERVER"
+fi
+info "KB server URL: $KB_SERVER"
+
+# Check KB sync enabled
+KB_ENABLED=$(docker exec sentrikat printenv SENTRIKAT_KB_SYNC_ENABLED 2>/dev/null)
+KB_SHARE=$(docker exec sentrikat printenv SENTRIKAT_KB_SHARE_MAPPINGS 2>/dev/null)
+info "KB sync enabled: ${KB_ENABLED:-true (default)}"
+info "KB share mappings: ${KB_SHARE:-true (default)}"
+
+# Test KB pull endpoint
+KB_PULL_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl
+ctx = ssl.create_default_context()
+req = urllib.request.Request('$KB_SERVER/v1/kb/mappings/pull?since=2020-01-01T00:00:00Z', method='GET')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+    import json
+    data = json.loads(resp.read())
+    count = len(data.get('mappings', []))
+    print(f'{resp.status}:{count}')
+except urllib.error.HTTPError as e:
+    print(f'{e.code}:0')
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+
+KB_PULL_STATUS=$(echo "$KB_PULL_CODE" | cut -d: -f1)
+KB_PULL_COUNT=$(echo "$KB_PULL_CODE" | cut -d: -f2)
+
+case "$KB_PULL_STATUS" in
+    200)
+        pass "KB pull endpoint: HTTP 200 ($KB_PULL_COUNT community mappings available)"
+        ;;
+    401|403)
+        pass "KB pull endpoint reachable (HTTP $KB_PULL_STATUS - auth required)"
+        ;;
+    ERR:*)
+        warn "KB pull endpoint unreachable: $KB_PULL_STATUS"
+        ;;
+    *)
+        info "KB pull endpoint: HTTP $KB_PULL_STATUS"
+        ;;
+esac
+
+# Test KB push endpoint
+KB_PUSH_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl, json
+ctx = ssl.create_default_context()
+data = json.dumps({'mappings': [], 'timestamp': '2024-01-01T00:00:00Z'}).encode()
+req = urllib.request.Request('$KB_SERVER/v1/kb/mappings/push', data=data, method='POST')
+req.add_header('Content-Type', 'application/json')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+
+case "$KB_PUSH_CODE" in
+    200|201)
+        pass "KB push endpoint: HTTP $KB_PUSH_CODE (functional)"
+        ;;
+    400|401|403|422)
+        pass "KB push endpoint reachable (HTTP $KB_PUSH_CODE - validation expected)"
+        ;;
+    ERR:*)
+        warn "KB push endpoint unreachable: $KB_PUSH_CODE"
+        ;;
+    *)
+        info "KB push endpoint: HTTP $KB_PUSH_CODE"
+        ;;
+esac
+
+# Check local CPE mapping stats
+CPE_STATS=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
+    "SELECT
+        COUNT(*) AS total,
+        COUNT(CASE WHEN source = 'user' THEN 1 END) AS user_created,
+        COUNT(CASE WHEN source = 'community' THEN 1 END) AS community,
+        COUNT(CASE WHEN source LIKE 'auto%' THEN 1 END) AS auto_mapped
+    FROM cpe_mappings;" 2>&1 | xargs)
+if [ -n "$CPE_STATS" ] && ! echo "$CPE_STATS" | grep -qi "error\|does not exist"; then
+    info "CPE mappings: $CPE_STATS (total | user | community | auto)"
+else
+    info "CPE mappings table: not available or empty"
+fi
+
+# Check recent KB sync logs
+KB_LOGS=$(docker logs sentrikat --since 24h 2>&1 | grep -i "kb.sync\|knowledge.base\|kb_sync" | tail -5)
+if [ -n "$KB_LOGS" ]; then
+    log "  Recent KB sync activity:"
+    echo "$KB_LOGS" | while IFS= read -r line; do
+        info "  $line"
+    done
+else
+    info "No KB sync activity in last 24h"
+fi
+
+# ============================================================================
+# 19. UPDATE CHECKER VERIFICATION
+# ============================================================================
+section "19. Software Update Checker"
+
+# Test GitHub releases API directly (same as the app uses)
+GITHUB_REPO="sbr0nch/SentriKat"
+info "GitHub repo: $GITHUB_REPO"
+
+# Check GitHub API connectivity
+GH_RESP=$(docker exec sentrikat python3 -c "
+import urllib.request, json, ssl
+ctx = ssl.create_default_context()
+req = urllib.request.Request('https://api.github.com/repos/$GITHUB_REPO/releases/latest')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+    data = json.loads(resp.read())
+    tag = data.get('tag_name', '?')
+    name = data.get('name', '?')
+    published = data.get('published_at', '?')
+    print(f'200|{tag}|{name}|{published}')
+except urllib.error.HTTPError as e:
+    print(f'{e.code}|||')
+except Exception as e:
+    print(f'ERR:{type(e).__name__}|||')
+" 2>&1)
+
+GH_STATUS=$(echo "$GH_RESP" | cut -d'|' -f1)
+GH_TAG=$(echo "$GH_RESP" | cut -d'|' -f2)
+GH_NAME=$(echo "$GH_RESP" | cut -d'|' -f3)
+GH_DATE=$(echo "$GH_RESP" | cut -d'|' -f4)
+
+case "$GH_STATUS" in
+    200)
+        pass "GitHub releases API reachable"
+        info "Latest release: $GH_TAG ($GH_NAME)"
+        info "Published: $GH_DATE"
+
+        # Compare with current version
+        CURRENT_VER=$(docker exec sentrikat python3 -c "
+import os, sys
+sys.path.insert(0, '/app')
+try:
+    from app import APP_VERSION
+    print(APP_VERSION)
+except:
+    print('unknown')
+" 2>&1)
+        info "Current installed version: $CURRENT_VER"
+
+        # Strip 'v' prefix for comparison
+        LATEST_CLEAN=$(echo "$GH_TAG" | sed 's/^v//')
+        if [ "$CURRENT_VER" = "$LATEST_CLEAN" ]; then
+            pass "Running latest version ($CURRENT_VER)"
+        elif [ "$CURRENT_VER" != "unknown" ]; then
+            warn "Update available: $CURRENT_VER → $LATEST_CLEAN"
+        fi
+        ;;
+    404)
+        info "No releases found on GitHub (HTTP 404)"
+        ;;
+    403)
+        warn "GitHub API rate limited (HTTP 403) - try again later"
+        ;;
+    ERR:*)
+        fail "Cannot reach GitHub API: $GH_STATUS"
+        ;;
+    *)
+        warn "GitHub API returned HTTP $GH_STATUS"
+        ;;
+esac
+
+# Also check fallback endpoint (all releases including pre-releases)
+GH_ALL_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl
+ctx = ssl.create_default_context()
+req = urllib.request.Request('https://api.github.com/repos/$GITHUB_REPO/releases')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+    import json
+    data = json.loads(resp.read())
+    print(f'{resp.status}:{len(data)}')
+except urllib.error.HTTPError as e:
+    print(f'{e.code}:0')
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+GH_ALL_STATUS=$(echo "$GH_ALL_CODE" | cut -d: -f1)
+GH_ALL_COUNT=$(echo "$GH_ALL_CODE" | cut -d: -f2)
+info "Total GitHub releases (incl. pre-release): $GH_ALL_COUNT"
+
+# Test the actual /api/updates/check endpoint if authenticated
+if [ "$AUTH_OK" = "true" ]; then
+    COOKIE_JAR="/tmp/sentrikat-audit-cookies.txt"
+    if [ -n "$AUDIT_PASS" ]; then
+        # Re-login (cookie may have expired)
+        curl $CURL_OPTS -o /dev/null -c "$COOKIE_JAR" \
+            -X POST "$BASE_URL/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"$AUDIT_USER\",\"password\":\"$AUDIT_PASS\"}" 2>/dev/null
+    fi
+    UPDATE_RESP=$(curl $CURL_OPTS -b "$COOKIE_JAR" "$BASE_URL/api/updates/check" 2>&1)
+    UPDATE_CODE=$(curl $CURL_OPTS -b "$COOKIE_JAR" -o /dev/null -w "%{http_code}" "$BASE_URL/api/updates/check" 2>&1)
+    if [ "$UPDATE_CODE" = "200" ]; then
+        UPDATE_AVAIL=$(echo "$UPDATE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('update_available',False))" 2>/dev/null)
+        UPDATE_LATEST=$(echo "$UPDATE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('latest_version','?'))" 2>/dev/null)
+        UPDATE_ERR=$(echo "$UPDATE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error',''))" 2>/dev/null)
+        if [ -n "$UPDATE_ERR" ] && [ "$UPDATE_ERR" != "" ] && [ "$UPDATE_ERR" != "None" ]; then
+            warn "Update check endpoint returned error: $UPDATE_ERR"
+        else
+            pass "GET /api/updates/check → HTTP 200 (update_available=$UPDATE_AVAIL, latest=$UPDATE_LATEST)"
+        fi
+    else
+        warn "GET /api/updates/check → HTTP $UPDATE_CODE"
+    fi
+    rm -f "$COOKIE_JAR"
+fi
+
+# ============================================================================
+# 20. CVE MATCHING ALGORITHM VERIFICATION
+# ============================================================================
+section "20. Core CVE Matching Algorithm"
+
+# Check if matching data exists
+MATCH_COUNT=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
+    "SELECT COUNT(*) FROM vulnerability_matches;" 2>&1 | xargs)
+MATCH_ACTIVE=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
+    "SELECT COUNT(*) FROM vulnerability_matches WHERE is_acknowledged = false;" 2>&1 | xargs)
+MATCH_ACK=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
+    "SELECT COUNT(*) FROM vulnerability_matches WHERE is_acknowledged = true;" 2>&1 | xargs)
+
+if echo "$MATCH_COUNT" | grep -qE '^[0-9]+$'; then
+    info "Total vulnerability matches: $MATCH_COUNT (active: $MATCH_ACTIVE, acknowledged: $MATCH_ACK)"
+else
+    warn "Could not query vulnerability_matches table"
+fi
+
+# Check match types distribution (CPE vs keyword)
+MATCH_TYPES=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
+    "SELECT
+        COUNT(CASE WHEN match_type = 'cpe' THEN 1 END) AS cpe_matches,
+        COUNT(CASE WHEN match_type = 'keyword' THEN 1 END) AS keyword_matches,
+        COUNT(CASE WHEN match_type = 'both' THEN 1 END) AS both_matches,
+        COUNT(CASE WHEN match_type IS NULL OR match_type NOT IN ('cpe','keyword','both') THEN 1 END) AS other
+    FROM vulnerability_matches;" 2>&1 | xargs)
+if ! echo "$MATCH_TYPES" | grep -qi "error"; then
+    info "Match types: $MATCH_TYPES (cpe | keyword | both | other)"
+fi
+
+# Check confidence distribution
+CONFIDENCE_DIST=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
+    "SELECT
+        COUNT(CASE WHEN confidence = 'HIGH' THEN 1 END) AS high,
+        COUNT(CASE WHEN confidence = 'MEDIUM' THEN 1 END) AS medium,
+        COUNT(CASE WHEN confidence = 'LOW' THEN 1 END) AS low
+    FROM vulnerability_matches;" 2>&1 | xargs)
+if ! echo "$CONFIDENCE_DIST" | grep -qi "error"; then
+    info "Match confidence: $CONFIDENCE_DIST (HIGH | MEDIUM | LOW)"
+fi
+
+# Verify matching algorithm via Python inside the container
+log ""
+log "  --- Algorithm Integrity Test ---"
+ALGO_TEST=$(docker exec sentrikat python3 -c "
+import os, sys
+sys.path.insert(0, '/app')
+os.environ.setdefault('FLASK_APP', 'app')
+
+results = []
+
+# Test 1: Import core matching functions
+try:
+    from app.filters import match_vulnerabilities_to_products, check_cpe_match, check_keyword_match
+    results.append('PASS:Core matching functions importable')
+except Exception as e:
+    results.append(f'FAIL:Cannot import matching functions: {e}')
+
+# Test 2: Keyword matching logic with known patterns
+try:
+    from app.filters import check_keyword_match
+
+    class MockVuln:
+        vendor_project = 'microsoft'
+        product = 'windows'
+        cve_id = 'CVE-2024-0001'
+        short_description = 'Microsoft Windows vulnerability in kernel'
+        notes = ''
+        cpe_entries = []
+
+    class MockProd:
+        vendor = 'Microsoft'
+        name = 'Windows 10'
+        version = '10.0'
+        match_type = 'keyword'
+        effective_cpe_vendor = None
+        effective_cpe_product = None
+
+    match = check_keyword_match(MockVuln(), MockProd())
+    if match and match.get('matched'):
+        results.append(f'PASS:Keyword match working (confidence={match.get(\"confidence\",\"?\")})')
+    else:
+        results.append('WARN:Keyword match returned no match for obvious Microsoft Windows test')
+except Exception as e:
+    results.append(f'FAIL:Keyword match test error: {e}')
+
+# Test 3: Version comparison utilities
+try:
+    from app.version_utils import compare_versions
+    # 1.0 < 2.0
+    cmp = compare_versions('1.0', '2.0')
+    if cmp < 0:
+        results.append('PASS:Version comparison working (1.0 < 2.0)')
+    else:
+        results.append(f'FAIL:Version comparison wrong: compare_versions(1.0, 2.0) = {cmp}')
+except ImportError:
+    results.append('INFO:version_utils not available')
+except Exception as e:
+    results.append(f'FAIL:Version comparison error: {e}')
+
+# Test 4: CPE mapping module
+try:
+    from app.cpe_mapping import get_cpe_suggestions
+    results.append('PASS:CPE mapping module importable')
+except ImportError:
+    results.append('INFO:CPE mapping module not available')
+except Exception as e:
+    results.append(f'WARN:CPE mapping import issue: {e}')
+
+# Test 5: Encryption roundtrip
+try:
+    from app.encryption import encrypt_value, decrypt_value, clear_cache
+    clear_cache()
+    test_val = 'audit-test-secret-12345'
+    encrypted = encrypt_value(test_val)
+    decrypted = decrypt_value(encrypted)
+    if decrypted == test_val:
+        results.append('PASS:Encryption roundtrip working')
+    else:
+        results.append('FAIL:Encryption roundtrip mismatch')
+    clear_cache()
+except Exception as e:
+    results.append(f'FAIL:Encryption test error: {e}')
+
+for r in results:
+    print(r)
+" 2>&1)
+
+echo "$ALGO_TEST" | while IFS= read -r line; do
+    if echo "$line" | grep -q "^PASS:"; then
+        MSG=$(echo "$line" | sed 's/^PASS://')
+        pass "$MSG"
+    elif echo "$line" | grep -q "^FAIL:"; then
+        MSG=$(echo "$line" | sed 's/^FAIL://')
+        fail "$MSG"
+    elif echo "$line" | grep -q "^WARN:"; then
+        MSG=$(echo "$line" | sed 's/^WARN://')
+        warn "$MSG"
+    elif echo "$line" | grep -q "^INFO:"; then
+        MSG=$(echo "$line" | sed 's/^INFO://')
+        info "$MSG"
+    elif [ -n "$line" ]; then
+        info "$line"
+    fi
+done
+
+# Vendor fix overrides
+VFO_COUNT=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
+    "SELECT COUNT(*) FROM vendor_fix_overrides WHERE status = 'approved';" 2>&1 | xargs)
+if echo "$VFO_COUNT" | grep -qE '^[0-9]+$'; then
+    info "Vendor fix overrides (approved): $VFO_COUNT"
+fi
+
+# ============================================================================
+# 21. EXTERNAL SERVICE CONNECTIVITY
+# ============================================================================
+section "21. External Service Connectivity"
+
+# NVD API (for CPE/CVE data)
+NVD_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl
+ctx = ssl.create_default_context()
+req = urllib.request.Request('https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+if [ "$NVD_CODE" = "200" ]; then
+    pass "NVD API (services.nvd.nist.gov) reachable"
+else
+    warn "NVD API connectivity: $NVD_CODE"
+fi
+
+# CISA KEV catalog
+CISA_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl
+ctx = ssl.create_default_context()
+req = urllib.request.Request('https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+if [ "$CISA_CODE" = "200" ]; then
+    pass "CISA KEV feed (cisa.gov) reachable"
+else
+    warn "CISA KEV connectivity: $CISA_CODE"
+fi
+
+# EPSS API
+EPSS_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl
+ctx = ssl.create_default_context()
+req = urllib.request.Request('https://api.first.org/data/v1/epss?cve=CVE-2024-0001')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+if [ "$EPSS_CODE" = "200" ]; then
+    pass "EPSS API (api.first.org) reachable"
+else
+    warn "EPSS API connectivity: $EPSS_CODE"
+fi
+
+# OSV API
+OSV_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl, json
+ctx = ssl.create_default_context()
+data = json.dumps({'package': {'name': 'test', 'ecosystem': 'PyPI'}}).encode()
+req = urllib.request.Request('https://api.osv.dev/v1/query', data=data, method='POST')
+req.add_header('Content-Type', 'application/json')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+if [ "$OSV_CODE" = "200" ]; then
+    pass "OSV API (api.osv.dev) reachable"
+else
+    warn "OSV API connectivity: $OSV_CODE"
+fi
+
+# GitHub API (for updates)
+GH_API_CODE=$(docker exec sentrikat python3 -c "
+import urllib.request, ssl
+ctx = ssl.create_default_context()
+req = urllib.request.Request('https://api.github.com/rate_limit')
+req.add_header('User-Agent', 'SentriKat-Audit/1.0')
+try:
+    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+    import json
+    data = json.loads(resp.read())
+    remaining = data.get('rate',{}).get('remaining',0)
+    limit = data.get('rate',{}).get('limit',0)
+    print(f'{resp.status}:{remaining}/{limit}')
+except urllib.error.HTTPError as e:
+    print(f'{e.code}:0/0')
+except Exception as e:
+    print(f'ERR:{type(e).__name__}')
+" 2>&1)
+GH_API_STATUS=$(echo "$GH_API_CODE" | cut -d: -f1)
+GH_API_RATE=$(echo "$GH_API_CODE" | cut -d: -f2)
+if [ "$GH_API_STATUS" = "200" ]; then
+    pass "GitHub API (api.github.com) reachable (rate limit: $GH_API_RATE)"
+else
+    warn "GitHub API connectivity: $GH_API_STATUS"
+fi
+
+# ============================================================================
+# 22. SECURITY CONFIGURATION CHECK
+# ============================================================================
+section "22. Security Configuration"
+
+# Check if running with default SECRET_KEY
+SECRET_KEY=$(docker exec sentrikat printenv SECRET_KEY 2>/dev/null)
+if [ "$SECRET_KEY" = "dev-secret-key-change-in-production" ] || [ -z "$SECRET_KEY" ]; then
+    fail "Using DEFAULT SECRET_KEY - sessions are insecure! Set a unique SECRET_KEY in .env"
+else
+    pass "SECRET_KEY is set (not default)"
+fi
+
+# Check ENCRYPTION_KEY
+ENC_KEY=$(docker exec sentrikat printenv ENCRYPTION_KEY 2>/dev/null)
+if [ -z "$ENC_KEY" ]; then
+    warn "ENCRYPTION_KEY not set (deriving from SECRET_KEY)"
+else
+    pass "ENCRYPTION_KEY is set explicitly"
+fi
+
+# Check FLASK_ENV
+FLASK_ENV=$(docker exec sentrikat printenv FLASK_ENV 2>/dev/null)
+if [ "$FLASK_ENV" = "development" ]; then
+    warn "FLASK_ENV=development (debug mode may be enabled)"
+elif [ "$FLASK_ENV" = "production" ]; then
+    pass "FLASK_ENV=production"
+else
+    info "FLASK_ENV=${FLASK_ENV:-not set}"
+fi
+
+# Check if debug mode is off
+DEBUG_MODE=$(docker exec sentrikat printenv FLASK_DEBUG 2>/dev/null)
+if [ "$DEBUG_MODE" = "1" ] || [ "$DEBUG_MODE" = "true" ]; then
+    fail "FLASK_DEBUG is ON - must be disabled in production!"
+else
+    pass "Debug mode is OFF"
+fi
+
+# SSL/TLS on nginx
+SSL_CERT=$(docker exec sentrikat-nginx ls -la /etc/nginx/ssl/ 2>/dev/null)
+if [ -n "$SSL_CERT" ]; then
+    pass "SSL certificates present in nginx"
+    # Check cert expiry
+    CERT_EXPIRY=$(docker exec sentrikat-nginx openssl x509 -enddate -noout -in /etc/nginx/ssl/cert.pem 2>/dev/null | cut -d= -f2)
+    if [ -n "$CERT_EXPIRY" ]; then
+        info "SSL cert expires: $CERT_EXPIRY"
+        # Check if expiring within 30 days
+        CERT_EPOCH=$(date -d "$CERT_EXPIRY" +%s 2>/dev/null)
+        NOW_EPOCH=$(date +%s)
+        if [ -n "$CERT_EPOCH" ]; then
+            DAYS_LEFT=$(( (CERT_EPOCH - NOW_EPOCH) / 86400 ))
+            if [ "$DAYS_LEFT" -lt 0 ]; then
+                fail "SSL certificate EXPIRED ($DAYS_LEFT days ago)"
+            elif [ "$DAYS_LEFT" -lt 30 ]; then
+                warn "SSL certificate expires in $DAYS_LEFT days"
+            else
+                pass "SSL certificate valid ($DAYS_LEFT days remaining)"
+            fi
+        fi
+    fi
+else
+    warn "No SSL certificates found in nginx"
+fi
+
+# Check HTTP → HTTPS redirect
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "http://localhost/" 2>&1)
+if [ "$HTTP_CODE" = "301" ] || [ "$HTTP_CODE" = "308" ]; then
+    pass "HTTP → HTTPS redirect active (HTTP $HTTP_CODE)"
+elif [ "$HTTP_CODE" = "000" ]; then
+    info "HTTP port not exposed (HTTPS-only)"
+else
+    warn "HTTP not redirecting to HTTPS (HTTP $HTTP_CODE)"
+fi
+
+# Check security headers
+SEC_HEADERS=$(curl $CURL_OPTS -I "$BASE_URL/" 2>&1)
+if echo "$SEC_HEADERS" | grep -qi "Strict-Transport-Security"; then
+    pass "HSTS header present"
+else
+    warn "HSTS header missing"
+fi
+if echo "$SEC_HEADERS" | grep -qi "X-Content-Type-Options"; then
+    pass "X-Content-Type-Options header present"
+else
+    warn "X-Content-Type-Options header missing"
+fi
+if echo "$SEC_HEADERS" | grep -qi "X-Frame-Options"; then
+    pass "X-Frame-Options header present"
+else
+    info "X-Frame-Options header not found (may use CSP frame-ancestors)"
+fi
+
+# Check session cookie security
+SESSION_COOKIE=$(curl $CURL_OPTS -c - "$BASE_URL/" 2>&1 | grep -i "session")
+if echo "$SESSION_COOKIE" | grep -qi "Secure"; then
+    pass "Session cookie has Secure flag"
+else
+    info "Session cookie Secure flag not detected in initial response"
+fi
+if echo "$SESSION_COOKIE" | grep -qi "HttpOnly"; then
+    pass "Session cookie has HttpOnly flag"
+else
+    info "Session cookie HttpOnly flag not detected in initial response"
+fi
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 section "AUDIT SUMMARY"
