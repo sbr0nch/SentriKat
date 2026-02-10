@@ -84,3 +84,28 @@ tmp_upload_dir = None
 # Server header
 forwarded_allow_ips = '*'  # Trust X-Forwarded-For from nginx
 proxy_protocol = False
+
+
+# =============================================================================
+# Server Hooks
+# =============================================================================
+
+def post_fork(server, worker):
+    """Dispose inherited DB connections after fork.
+
+    With preload_app=True, the master process creates the app (and its
+    SQLAlchemy engine/pool) before forking workers. Forked children inherit
+    the master's open DB connections via file descriptors, but PostgreSQL
+    connections are not fork-safe — sharing them across processes corrupts
+    the wire protocol (symptoms: 'lost synchronization with server',
+    'got message type "a"', PGRES_TUPLES_OK errors).
+
+    Calling engine.dispose() closes all inherited connections so each worker
+    creates its own fresh pool on first use.
+    """
+    try:
+        from app import db
+        db.engine.dispose()
+        server.log.info("Worker %s: disposed inherited DB connections", worker.pid)
+    except Exception as e:
+        server.log.warning("Worker %s: failed to dispose DB pool: %s", worker.pid, e)
