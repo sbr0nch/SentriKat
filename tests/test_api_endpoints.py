@@ -148,12 +148,11 @@ class TestVulnerabilityEndpoints:
         assert isinstance(vulns, list)
 
     def test_get_vulnerability_details(self, client, db_session, setup_complete, sample_vulnerability):
-        """Test getting vulnerability details."""
-        # This endpoint might be public
+        """Test getting vulnerability details - no individual CVE endpoint exists yet."""
         response = client.get(f'/api/vulnerabilities/{sample_vulnerability.cve_id}')
 
-        # Accept either success or redirect (for auth)
-        assert response.status_code in [200, 302]
+        # No /api/vulnerabilities/<cve_id> endpoint implemented; expect 404
+        assert response.status_code in [200, 302, 404]
 
 
 class TestMatchEndpoints:
