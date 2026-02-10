@@ -456,7 +456,7 @@ def enrich_with_cvss_data(limit=50):
     logger.info(f"Enriched {enriched_count} vulnerabilities with CVSS data")
     return enriched_count
 
-def sync_cisa_kev(enrich_cvss=False, cvss_limit=50, fetch_cpe=True, cpe_limit=30):
+def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=100):
     """Main sync function to download and process CISA KEV"""
     start_time = datetime.utcnow()
     sync_log = SyncLog()
