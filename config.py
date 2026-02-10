@@ -14,12 +14,29 @@ class Config:
 
     # Secret key for session signing - MUST be set in production
     SECRET_KEY = os.environ.get('SECRET_KEY')
+
+    # Reject known-insecure default values even if explicitly set
+    _KNOWN_INSECURE_KEYS = {
+        'dev-secret-key-change-in-production',
+        'change-this-secret-key-in-production',
+        'changeme', 'secret', 'password', 'default',
+    }
+    _is_production = (
+        os.environ.get('FLASK_ENV') == 'production'
+        or os.environ.get('SENTRIKAT_ENV') == 'production'
+    )
+
     if not SECRET_KEY:
         import warnings
-        if os.environ.get('FLASK_ENV') == 'production':
+        if _is_production:
             raise ValueError("SECRET_KEY environment variable must be set in production!")
         warnings.warn("SECRET_KEY not set - using insecure default for development only")
         SECRET_KEY = 'dev-secret-key-change-in-production'
+    elif SECRET_KEY.lower().strip() in _KNOWN_INSECURE_KEYS and _is_production:
+        raise ValueError(
+            "SECRET_KEY is set to a known insecure default value. "
+            "Generate a secure key with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
 
     # Encryption key for sensitive data (LDAP password, SMTP password, etc.)
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

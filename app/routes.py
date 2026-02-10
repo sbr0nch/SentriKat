@@ -936,8 +936,20 @@ def create_product():
 @bp.route('/api/products/<int:product_id>', methods=['GET'])
 @login_required
 def get_product(product_id):
-    """Get a specific product"""
+    """Get a specific product (organization-scoped)"""
     product = Product.query.get_or_404(product_id)
+
+    # Organization isolation: verify user has access to this product's org
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    if current_user and current_user.role != 'super_admin':
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if not any(oid in user_org_ids for oid in product_org_ids):
+            return jsonify({'error': 'Product not found'}), 404
+
     return jsonify(product.to_dict())
 
 @bp.route('/api/products/<int:product_id>', methods=['PUT'])
@@ -1335,8 +1347,19 @@ def purge_products():
 @bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
 @login_required
 def get_product_organizations(product_id):
-    """Get organizations assigned to a product"""
+    """Get organizations assigned to a product (organization-scoped)"""
     product = Product.query.get_or_404(product_id)
+
+    # Organization isolation: verify user has access to this product
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    if current_user and current_user.role != 'super_admin':
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if not any(oid in user_org_ids for oid in product_org_ids):
+            return jsonify({'error': 'Product not found'}), 404
 
     # Get assigned organizations from many-to-many relationship
     assigned_orgs = [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
@@ -1355,10 +1378,22 @@ def get_product_organizations(product_id):
 @bp.route('/api/products/<int:product_id>/organizations', methods=['POST'])
 @org_admin_required
 def assign_product_organizations(product_id):
-    """Assign product to multiple organizations"""
+    """Assign product to multiple organizations (org-admin scoped)"""
     from app.email_service import send_product_assignment_notification
 
     product = Product.query.get_or_404(product_id)
+
+    # Organization isolation: verify user has access to this product
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    if current_user and current_user.role != 'super_admin':
+        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if not any(oid in user_org_ids for oid in product_org_ids):
+            return jsonify({'error': 'Product not found'}), 404
+
     data = request.get_json()
     org_ids = data.get('organization_ids', [])
 
@@ -1402,11 +1437,19 @@ def assign_product_organizations(product_id):
 @bp.route('/api/products/<int:product_id>/organizations/<int:org_id>', methods=['DELETE'])
 @org_admin_required
 def remove_product_organization(product_id, org_id):
-    """Remove an organization from a product"""
+    """Remove an organization from a product (org-admin scoped)"""
     from app.email_service import send_product_assignment_notification
 
     product = Product.query.get_or_404(product_id)
     org = Organization.query.get_or_404(org_id)
+
+    # Organization isolation: verify user is admin for the org being removed
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    if current_user and current_user.role != 'super_admin':
+        user_org_ids = [o.id for o in current_user.get_all_organizations()]
+        if org_id not in user_org_ids:
+            return jsonify({'error': 'You can only manage organizations you belong to'}), 403
 
     # Check if confirm_delete parameter is passed (for deleting product with last org)
     confirm_delete = request.args.get('confirm_delete', 'false').lower() == 'true'
@@ -4133,28 +4176,6 @@ def get_current_user():
         'can_access_ldap': (current_user.role in ['org_admin', 'super_admin'] or current_user.is_admin == True)
     }
     return jsonify(user_dict)
-
-@bp.route('/api/fix-admin-role', methods=['POST'])
-@login_required
-def fix_admin_role():
-    """Temporary endpoint to fix legacy admin users - sets role to super_admin if is_admin=True"""
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
-
-    if not current_user or not current_user.is_admin:
-        return jsonify({'error': 'Only admin users can use this endpoint'}), 403
-
-    # Update role to super_admin
-    old_role = current_user.role
-    current_user.role = 'super_admin'
-    db.session.commit()
-
-    return jsonify({
-        'success': True,
-        'message': 'Role updated successfully',
-        'old_role': old_role,
-        'new_role': 'super_admin'
-    })
 
 @bp.route('/api/users', methods=['GET'])
 @org_admin_required

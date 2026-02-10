@@ -661,6 +661,13 @@ def match_cve_to_cpe(cve_id: str) -> List[Dict]:
                             cpe_uri = match.get('criteria', '')
                             parsed = parse_cpe_uri(cpe_uri)
 
+                            # Extract exact version from CPE URI when no range fields exist.
+                            # NVD uses exact-version CPE entries (e.g., cpe:2.3:a:vendor:product:1.2.3:...)
+                            # to indicate only that specific version is affected.
+                            cpe_version = parsed.get('version', '*')
+                            has_range = (match.get('versionStartIncluding') or match.get('versionStartExcluding')
+                                        or match.get('versionEndIncluding') or match.get('versionEndExcluding'))
+
                             affected_cpes.append({
                                 'cpe_uri': cpe_uri,
                                 'vendor': parsed['vendor'],
@@ -668,7 +675,8 @@ def match_cve_to_cpe(cve_id: str) -> List[Dict]:
                                 'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),
                                 'version_end': match.get('versionEndIncluding') or match.get('versionEndExcluding'),
                                 'version_start_type': 'including' if match.get('versionStartIncluding') else 'excluding' if match.get('versionStartExcluding') else None,
-                                'version_end_type': 'including' if match.get('versionEndIncluding') else 'excluding' if match.get('versionEndExcluding') else None
+                                'version_end_type': 'including' if match.get('versionEndIncluding') else 'excluding' if match.get('versionEndExcluding') else None,
+                                'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
                             })
 
             _set_cached_result(cache_key, affected_cpes)

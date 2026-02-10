@@ -103,7 +103,7 @@ STRUCTURAL_SKIP_SUFFIXES = [
 STRUCTURAL_SKIP_PREFIXES = [
     'fonts-',           # Font packages (fonts-liberation, fonts-dejavu, etc.)
     'xfonts-',          # X11 font packages
-    'texlive-',         # LaTeX/TeX packages (huge count, no CVE surface)
+    # NOTE: texlive- moved to Phase 3 noise patterns (texlive-bin has had CVEs)
     'gir1.2-',          # GObject introspection data (not runtime bindings)
     'aspell-',          # Spell check dictionaries (data files, not code)
     'hunspell-',        # Spell check dictionaries
@@ -121,6 +121,8 @@ STRUCTURAL_SKIP_PREFIXES = [
 # Because Phase 2 (CVE history guard) runs first, these can NEVER
 # accidentally skip a package that has had CVEs.
 NOISE_PATTERNS = [
+    # TeX/LaTeX data packages (huge count, but NOT texlive-bin which has had CVEs)
+    r'^texlive-(?!bin)',
     # Windows language/input packs (never had their own CVEs)
     r'^(microsoft )?language (pack|experience pack|feature)',
     r'^(windows|language) (input|handwriting|ocr|speech|text.to.speech)',

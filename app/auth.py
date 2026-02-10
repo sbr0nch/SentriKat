@@ -455,22 +455,23 @@ def api_login():
         logger.error(f"Login failed: unknown auth_type '{user.auth_type}' for user {username}")
         return jsonify({'error': 'Invalid authentication type'}), 500
 
-    # Reset failed login attempts on successful login (for local users)
-    if user.auth_type == 'local' and (user.failed_login_attempts or 0) > 0:
-        user.reset_failed_login_attempts()
-        logger.info(f"Reset failed login attempts for {username}")
-
-    # Check if 2FA is required
+    # Check if 2FA is required BEFORE resetting failed attempts.
+    # Failed attempt counters should only be reset after FULL authentication.
     if user.totp_enabled:
         totp_code = data.get('totp_code')
         if not totp_code:
-            # 2FA required but not provided - return partial auth
+            # 2FA required but not provided - return partial auth.
+            # Do NOT reset failed attempts yet (2FA not completed).
+            # Do NOT leak user_id - use a temporary token instead.
+            import secrets
+            totp_session_token = secrets.token_urlsafe(32)
+            session['_2fa_pending_user'] = user.id
+            session['_2fa_pending_token'] = totp_session_token
             logger.info(f"2FA required for {username}")
-            db.session.commit()  # Save failed attempts reset
             return jsonify({
                 'success': False,
                 'requires_2fa': True,
-                'user_id': user.id,
+                'totp_token': totp_session_token,
                 'message': 'Two-factor authentication required'
             })
 
@@ -480,6 +481,11 @@ def api_login():
             return jsonify({'error': 'Invalid two-factor authentication code'}), 401
 
         logger.info(f"2FA verified for {username}")
+
+    # Reset failed login attempts on successful FULL authentication (password + 2FA)
+    if user.auth_type == 'local' and (user.failed_login_attempts or 0) > 0:
+        user.reset_failed_login_attempts()
+        logger.info(f"Reset failed login attempts for {username}")
 
     # Check if user must set up 2FA (admin required it but not yet enabled)
     must_setup_2fa = False
