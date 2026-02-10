@@ -165,6 +165,26 @@ def start_scheduler(app):
     )
     logger.info("NVD CPE dictionary sync scheduled weekly (Sundays 04:00)")
 
+    # Schedule CVE known products cache refresh (every 12 hours)
+    # This keeps the _should_skip_software() CVE history guard up to date
+    # with newly synced vulnerabilities from CISA KEV and vendor advisories.
+    scheduler.add_job(
+        func=lambda: _run_with_lock('cve_known_products_refresh', cve_known_products_refresh_job, app),
+        trigger=IntervalTrigger(hours=12),
+        id='cve_known_products_refresh',
+        name='CVE Known Products Cache Refresh',
+        replace_existing=True
+    )
+
+    # Warm up the CVE known products cache on startup
+    try:
+        from app.cve_known_products import refresh_known_cve_products
+        with app.app_context():
+            count = refresh_known_cve_products()
+            logger.info(f"CVE known products cache warmed up: {count} entries")
+    except Exception as e:
+        logger.warning(f"CVE known products cache warmup failed (will retry on first use): {e}")
+
     scheduler.start()
     logger.info(f"Scheduler started. CISA KEV sync scheduled at {Config.SYNC_HOUR:02d}:{Config.SYNC_MINUTE:02d}")
 
@@ -664,3 +684,20 @@ def kb_sync_job(app):
 
         except Exception as e:
             logger.error(f"KB sync job failed: {str(e)}", exc_info=True)
+
+
+def cve_known_products_refresh_job(app):
+    """
+    Refresh the CVE known products cache.
+
+    This keeps the _should_skip_software() CVE history guard up to date
+    with newly synced vulnerability data from CISA KEV and vendor advisories.
+    Runs every 12 hours (after CISA sync has completed).
+    """
+    with app.app_context():
+        try:
+            from app.cve_known_products import refresh_known_cve_products
+            count = refresh_known_cve_products()
+            logger.info(f"CVE known products cache refreshed: {count} entries")
+        except Exception as e:
+            logger.error(f"CVE known products refresh failed: {str(e)}", exc_info=True)
