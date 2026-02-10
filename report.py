@@ -2,11 +2,15 @@
 """
 SentriKat Vulnerability Verification Report
 ============================================
-Generates a report of all active products, their CPE identifiers,
+Generates a report of all active products with CVEs, their CPE identifiers,
 matched CVEs, and severity breakdown - for external verification.
+
+Skips products with 0 active and 0 acknowledged CVEs.
+Saves to /tmp/sentrikat-report.txt for easy download.
 
 Usage:
   docker compose exec sentrikat python report.py
+  Then download: docker compose cp sentrikat:/tmp/sentrikat-report.txt ./
 """
 import sys
 import os
@@ -18,14 +22,21 @@ from app.models import Product, Vulnerability, VulnerabilityMatch, Organization,
 from sqlalchemy import func, select
 from datetime import datetime
 
+OUTPUT_PATH = '/tmp/sentrikat-report.txt'
+
 def generate_report():
+    lines = []
+
+    def out(text=''):
+        lines.append(text)
+
     with app.app_context():
         # Header
-        print("=" * 80)
-        print("  SENTRIKAT VULNERABILITY VERIFICATION REPORT")
-        print(f"  Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
-        print("=" * 80)
-        print()
+        out("=" * 80)
+        out("  SENTRIKAT VULNERABILITY VERIFICATION REPORT")
+        out(f"  Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        out("=" * 80)
+        out()
 
         # Overall stats
         total_products = Product.query.filter_by(active=True).count()
@@ -33,12 +44,12 @@ def generate_report():
         total_matches = VulnerabilityMatch.query.count()
         unacked = VulnerabilityMatch.query.filter_by(acknowledged=False).count()
 
-        print(f"SUMMARY")
-        print(f"  Active Products:        {total_products}")
-        print(f"  Total CVEs in DB:       {total_vulns}")
-        print(f"  Total Matches:          {total_matches}")
-        print(f"  Unacknowledged Matches: {unacked}")
-        print()
+        out("SUMMARY")
+        out(f"  Active Products:        {total_products}")
+        out(f"  Total CVEs in DB:       {total_vulns}")
+        out(f"  Total Matches:          {total_matches}")
+        out(f"  Unacknowledged Matches: {unacked}")
+        out()
 
         # Severity breakdown of all matched CVEs
         severity_counts = db.session.query(
@@ -54,14 +65,14 @@ def generate_report():
         for sev, cnt in severity_counts:
             severity_map[sev or 'UNKNOWN'] = cnt
 
-        print(f"SEVERITY BREAKDOWN (unacknowledged matches)")
+        out("SEVERITY BREAKDOWN (unacknowledged matches)")
         for level in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']:
             count = severity_map.get(level, 0)
             if count > 0:
-                print(f"  {level:<12} {count}")
+                out(f"  {level:<12} {count}")
         if not severity_map:
-            print("  (no unacknowledged matches)")
-        print()
+            out("  (no unacknowledged matches)")
+        out()
 
         # Per-product detail
         products = Product.query.filter_by(active=True).order_by(
@@ -69,8 +80,13 @@ def generate_report():
         ).all()
 
         if not products:
-            print("NO ACTIVE PRODUCTS FOUND")
-            print("=" * 80)
+            out("NO ACTIVE PRODUCTS FOUND")
+            out("=" * 80)
+            report_text = '\n'.join(lines)
+            with open(OUTPUT_PATH, 'w') as f:
+                f.write(report_text)
+            print(report_text)
+            print(f"\nReport saved to: {OUTPUT_PATH}")
             return
 
         # Batch-query all matches with vulnerability data
@@ -117,13 +133,14 @@ def generate_report():
         for pid, name in org_rows:
             product_orgs.setdefault(pid, []).append(name)
 
-        print("-" * 80)
-        print("PRODUCT DETAILS")
-        print("-" * 80)
-        print()
+        out("-" * 80)
+        out("PRODUCTS WITH CVEs (skipping 0-match products)")
+        out("-" * 80)
+        out()
 
         products_with_cves = 0
         products_without_cpe = 0
+        products_clean = 0
 
         for p in products:
             cpe_str = f"cpe:2.3:a:{p.cpe_vendor}:{p.cpe_product}" if p.cpe_vendor and p.cpe_product else "NO CPE"
@@ -137,16 +154,21 @@ def generate_report():
             unacked_matches = [m for m in pmatches if not m['acknowledged']]
             acked_matches = [m for m in pmatches if m['acknowledged']]
 
+            # Skip products with no CVEs at all
+            if len(unacked_matches) == 0 and len(acked_matches) == 0:
+                products_clean += 1
+                continue
+
             if unacked_matches:
                 products_with_cves += 1
 
             # Product header
-            print(f"PRODUCT: {p.vendor} / {p.product_name}")
-            print(f"  Version:      {p.version or '(any)'}")
-            print(f"  CPE:          {cpe_str}")
-            print(f"  Organization: {org_str}")
-            print(f"  Source:       {p.source or 'manual'}")
-            print(f"  CVEs:         {len(unacked_matches)} active, {len(acked_matches)} acknowledged")
+            out(f"PRODUCT: {p.vendor} / {p.product_name}")
+            out(f"  Version:      {p.version or '(any)'}")
+            out(f"  CPE:          {cpe_str}")
+            out(f"  Organization: {org_str}")
+            out(f"  Source:       {p.source or 'manual'}")
+            out(f"  CVEs:         {len(unacked_matches)} active, {len(acked_matches)} acknowledged")
 
             if unacked_matches:
                 # Per-severity count for this product
@@ -158,32 +180,47 @@ def generate_report():
                 for level in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']:
                     if level in prod_sev:
                         sev_parts.append(f"{prod_sev[level]} {level}")
-                print(f"  Breakdown:    {', '.join(sev_parts)}")
+                out(f"  Breakdown:    {', '.join(sev_parts)}")
 
-                # List CVEs (max 20 per product for readability)
-                print(f"  CVE List:")
-                for i, m in enumerate(unacked_matches[:20]):
+                # List all CVEs
+                out(f"  CVE List:")
+                for m in unacked_matches:
                     cvss_str = f"CVSS {m['cvss']:.1f}" if m['cvss'] else "no score"
-                    print(f"    - {m['cve_id']} ({m['severity']}, {cvss_str}) [{m['method']}/{m['confidence']}]")
-                if len(unacked_matches) > 20:
-                    print(f"    ... and {len(unacked_matches) - 20} more")
+                    out(f"    - {m['cve_id']} ({m['severity']}, {cvss_str}) [{m['method']}/{m['confidence']}]")
 
-            print()
+            if acked_matches:
+                out(f"  Acknowledged ({len(acked_matches)}):")
+                for m in acked_matches[:10]:
+                    cvss_str = f"CVSS {m['cvss']:.1f}" if m['cvss'] else "no score"
+                    out(f"    ~ {m['cve_id']} ({m['severity']}, {cvss_str})")
+                if len(acked_matches) > 10:
+                    out(f"    ... and {len(acked_matches) - 10} more acknowledged")
+
+            out()
 
         # Footer summary
-        print("-" * 80)
-        print("VERIFICATION SUMMARY")
-        print("-" * 80)
-        print(f"  Products with active CVEs:   {products_with_cves} / {total_products}")
-        print(f"  Products without CPE:        {products_without_cpe} (cannot detect CVEs)")
-        print(f"  Total unacknowledged CVEs:   {unacked}")
-        print()
-        print("HOW TO VERIFY:")
-        print("  For each product with a CPE, search NVD:")
-        print("  https://nvd.nist.gov/vuln/search/results?cpe_version=cpe:2.3:a:VENDOR:PRODUCT")
-        print("  Compare the CVE IDs listed above against NVD results.")
-        print("  Note: SentriKat only tracks CISA KEV catalog CVEs, not ALL NVD CVEs.")
-        print("=" * 80)
+        out("-" * 80)
+        out("VERIFICATION SUMMARY")
+        out("-" * 80)
+        out(f"  Products with active CVEs:   {products_with_cves} / {total_products}")
+        out(f"  Products clean (0 CVEs):     {products_clean}")
+        out(f"  Products without CPE:        {products_without_cpe} (cannot detect CVEs)")
+        out(f"  Total unacknowledged CVEs:   {unacked}")
+        out()
+        out("HOW TO VERIFY:")
+        out("  For each product with a CPE, search NVD:")
+        out("  https://nvd.nist.gov/vuln/search/results?cpe_version=cpe:2.3:a:VENDOR:PRODUCT")
+        out("  Compare the CVE IDs listed above against NVD results.")
+        out("  Note: SentriKat only tracks CISA KEV catalog CVEs, not ALL NVD CVEs.")
+        out("=" * 80)
+
+    # Write to file and print
+    report_text = '\n'.join(lines)
+    with open(OUTPUT_PATH, 'w') as f:
+        f.write(report_text)
+    print(report_text)
+    print(f"\n>>> Report saved to: {OUTPUT_PATH}")
+    print(f">>> Download with: docker compose cp sentrikat:{OUTPUT_PATH} ./sentrikat-report.txt")
 
 if __name__ == '__main__':
     generate_report()
