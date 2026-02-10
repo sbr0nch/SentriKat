@@ -918,6 +918,10 @@
 
         try {
             const response = await fetch(`/api/products?${params.toString()}`);
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Server error (${response.status}). Try refreshing the page.`);
+            }
             const data = await response.json();
 
             // Handle paginated response
@@ -2365,6 +2369,8 @@
                 showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
             }
             clearSelection();
+            // Brief delay before reloading to let cascade deletes finish on the server
+            await new Promise(resolve => setTimeout(resolve, 500));
             loadProducts();
         } catch (error) {
             showToast(`Error: ${error.message}`, 'danger');
