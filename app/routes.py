@@ -2809,29 +2809,52 @@ def apply_cpe_mappings():
     Uses multi-tier matching: local patterns, curated mappings, and NVD API.
     Auto-saves NVD discoveries as learned mappings for future use.
 
+    Runs in background thread to avoid Gunicorn worker timeout.
+    If the CPE dictionary is empty, triggers a bulk download first.
+
     Permissions:
     - Super Admin only: Can apply CPE mappings
     """
-    from app.cpe_mapping import batch_apply_cpe_mappings, get_cpe_coverage_stats
+    import threading
+    from app.cpe_mapping import get_cpe_coverage_stats
 
     try:
         data = request.get_json(silent=True) or {}
-        use_nvd = data.get('use_nvd', True)  # Enable NVD API by default
-        max_nvd = data.get('max_nvd_lookups', 50)  # Cap NVD API calls
+        use_nvd = data.get('use_nvd', True)
+        max_nvd = data.get('max_nvd_lookups', 50)
 
-        updated, total_without = batch_apply_cpe_mappings(
-            commit=True, use_nvd=use_nvd, max_nvd_lookups=max_nvd
-        )
+        def _run_cpe_apply():
+            from app import create_app
+            app = create_app()
+            with app.app_context():
+                try:
+                    # If dictionary is empty, do bulk download first
+                    from app.models import CpeDictionaryEntry
+                    dict_count = CpeDictionaryEntry.query.count()
+                    if dict_count < 1000:
+                        logger.info(f"CPE dictionary has only {dict_count} entries, running bulk download first...")
+                        from app.cpe_dictionary import sync_nvd_cpe_dictionary
+                        sync_nvd_cpe_dictionary()
+
+                    from app.cpe_mapping import batch_apply_cpe_mappings
+                    updated, total_without = batch_apply_cpe_mappings(
+                        commit=True, use_nvd=use_nvd, max_nvd_lookups=max_nvd
+                    )
+                    logger.info(f"CPE auto-apply complete: {updated}/{total_without} products mapped")
+                except Exception as e:
+                    logger.error(f"CPE auto-apply failed: {e}")
+
+        t = threading.Thread(target=_run_cpe_apply, daemon=True, name='CpeAutoApply')
+        t.start()
+
         stats = get_cpe_coverage_stats()
         return jsonify({
-            'status': 'success',
-            'updated': updated,
-            'total_without_cpe_before': total_without,
+            'status': 'started',
             'coverage': stats,
-            'message': f'Applied CPE to {updated} products. Coverage: {stats["coverage_percent"]}%'
-        })
+            'message': 'CPE auto-mapping started in background. Refresh in a minute to see results.'
+        }), 202
     except Exception as e:
-        logger.exception("Error applying CPE mappings")
+        logger.exception("Error starting CPE auto-apply")
         return jsonify({'status': 'error', 'message': ERROR_MSGS['internal']}), 500
 
 
