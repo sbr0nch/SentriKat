@@ -189,8 +189,9 @@ def lookup_cpe_dictionary(vendor, product_name):
 
     Tries multiple matching strategies:
     1. Exact vendor + product match
-    2. Product-only match (ignoring vendor)
-    3. Alias match (from vulnerability metadata)
+    2. Product with vendor prefix stripped (e.g. "Google Chrome" → "chrome")
+    3. Product-only match (ignoring vendor)
+    4. Alias match (from vulnerability metadata)
 
     Args:
         vendor: Agent-reported vendor name (e.g., "Google LLC")
@@ -208,34 +209,51 @@ def lookup_cpe_dictionary(vendor, product_name):
         if not norm_product:
             return None, None, 0.0
 
+        # Build candidate product names to try:
+        # e.g. "Google Chrome" with vendor "Google" → try ["google_chrome", "chrome"]
+        product_candidates = [norm_product]
+        if norm_vendor:
+            # Strip vendor name prefix from product (very common pattern)
+            # "google_chrome" with vendor "google" → "chrome"
+            vendor_prefix = norm_vendor + '_'
+            if norm_product.startswith(vendor_prefix) and len(norm_product) > len(vendor_prefix):
+                stripped = norm_product[len(vendor_prefix):]
+                product_candidates.append(stripped)
+            # Also try: "microsoft_visual_studio" → "visual_studio"
+            # Handle multi-word vendors like "adobe_systems" → strip "adobe_" too
+            vendor_first_word = norm_vendor.split('_')[0] + '_'
+            if vendor_first_word != vendor_prefix and norm_product.startswith(vendor_first_word):
+                stripped2 = norm_product[len(vendor_first_word):]
+                if stripped2 not in product_candidates:
+                    product_candidates.append(stripped2)
+
         # Strategy 1: Exact vendor + product match (highest confidence)
         if norm_vendor:
-            entry = CpeDictionaryEntry.query.filter_by(
-                cpe_vendor=norm_vendor,
-                cpe_product=norm_product
-            ).first()
-            if entry:
-                _increment_usage(entry)
-                return entry.cpe_vendor, entry.cpe_product, 0.92
+            for candidate in product_candidates:
+                entry = CpeDictionaryEntry.query.filter_by(
+                    cpe_vendor=norm_vendor,
+                    cpe_product=candidate
+                ).first()
+                if entry:
+                    _increment_usage(entry)
+                    return entry.cpe_vendor, entry.cpe_product, 0.92
 
         # Strategy 2: Product-only match (may be ambiguous)
-        entries = CpeDictionaryEntry.query.filter_by(
-            cpe_product=norm_product
-        ).order_by(CpeDictionaryEntry.cve_count.desc()).all()
+        for candidate in product_candidates:
+            entries = CpeDictionaryEntry.query.filter_by(
+                cpe_product=candidate
+            ).order_by(CpeDictionaryEntry.cve_count.desc()).all()
 
-        if len(entries) == 1:
-            # Unambiguous: only one vendor has this product name
-            _increment_usage(entries[0])
-            return entries[0].cpe_vendor, entries[0].cpe_product, 0.88
-        elif len(entries) > 1 and norm_vendor:
-            # Multiple vendors have this product - try partial vendor match
-            for entry in entries:
-                if norm_vendor in entry.cpe_vendor or entry.cpe_vendor in norm_vendor:
-                    _increment_usage(entry)
-                    return entry.cpe_vendor, entry.cpe_product, 0.85
+            if len(entries) == 1:
+                _increment_usage(entries[0])
+                return entries[0].cpe_vendor, entries[0].cpe_product, 0.88
+            elif len(entries) > 1 and norm_vendor:
+                for entry in entries:
+                    if norm_vendor in entry.cpe_vendor or entry.cpe_vendor in norm_vendor:
+                        _increment_usage(entry)
+                        return entry.cpe_vendor, entry.cpe_product, 0.85
 
         # Strategy 3: Search aliases (from vulnerability human-readable names)
-        # Build a search term from the original product name
         search_term = product_name.lower().strip()
         all_entries = CpeDictionaryEntry.query.filter(
             CpeDictionaryEntry.search_aliases.isnot(None)
@@ -275,12 +293,17 @@ def lookup_cpe_dictionary(vendor, product_name):
 
 
 def _increment_usage(entry):
-    """Increment usage count for a dictionary entry (non-blocking)."""
+    """Increment usage count for a dictionary entry (non-blocking).
+
+    Uses raw SQL to avoid dirtying the ORM session, which can cause
+    autoflush timeouts that roll back the caller's transaction.
+    """
     try:
         from app import db
-        entry.usage_count = (entry.usage_count or 0) + 1
-        db.session.add(entry)
-        # Don't commit here - let the caller's transaction handle it
+        db.session.execute(
+            db.text("UPDATE cpe_dictionary_entries SET usage_count = COALESCE(usage_count, 0) + 1 WHERE id = :id"),
+            {'id': entry.id}
+        )
     except Exception:
         pass
 

@@ -2435,29 +2435,22 @@
         localStorage.setItem('unmappedWarningDismissedCount', count);
     }
 
+    let _cpeApplyPollTimer = null;
+
     async function autoFixCpe() {
         const btn = document.getElementById('autoFixCpeBtn');
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Detecting...';
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
         }
         try {
             const response = await fetch('/api/products/apply-cpe', { method: 'POST' });
             if (!response.ok && response.status !== 202) throw new Error(`Server error: ${response.status}`);
             const data = await response.json();
             if (data.status === 'started') {
-                // Background job - poll for results
-                showToast('CPE auto-detection started. This may take a minute if downloading the CPE dictionary...', 'info');
-                // Poll stats after delay to show updated results
-                setTimeout(() => { loadStats(); }, 15000);
-                setTimeout(() => { loadStats(); }, 45000);
-                setTimeout(() => {
-                    loadStats();
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="bi bi-magic me-1"></i>Auto-Detect CPE';
-                    }
-                }, 90000);
+                showToast('CPE auto-detection started in background...', 'info');
+                // Start polling for status
+                _pollCpeApplyStatus();
                 return;
             } else if (data.updated > 0) {
                 showToast(`CPE mapped for ${data.updated} products. Coverage: ${data.coverage?.coverage_percent || '?'}%`, 'success');
@@ -2469,10 +2462,39 @@
             showToast(`Error: ${escapeHtml(error.message)}`, 'danger');
         } finally {
             if (btn && !btn.disabled) {
-                // Only reset if not in background polling mode
                 btn.disabled = false;
                 btn.innerHTML = '<i class="bi bi-magic me-1"></i>Auto-Detect CPE';
             }
+        }
+    }
+
+    async function _pollCpeApplyStatus() {
+        const btn = document.getElementById('autoFixCpeBtn');
+        try {
+            const resp = await fetch('/api/products/cpe-apply-status');
+            if (!resp.ok) return;
+            const data = await resp.json();
+
+            if (data.status === 'downloading') {
+                if (btn) btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Downloading CPE dictionary...';
+                _cpeApplyPollTimer = setTimeout(_pollCpeApplyStatus, 5000);
+            } else if (data.status === 'mapping') {
+                if (btn) btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Mapping products...';
+                _cpeApplyPollTimer = setTimeout(_pollCpeApplyStatus, 5000);
+            } else if (data.status === 'complete') {
+                showToast(data.message || 'CPE auto-detection complete!', 'success');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Auto-Detect CPE'; }
+                loadStats();
+            } else if (data.status === 'error') {
+                showToast('CPE auto-detection failed: ' + (data.message || 'Unknown error'), 'danger');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Auto-Detect CPE'; }
+            } else {
+                // started or unknown - keep polling
+                _cpeApplyPollTimer = setTimeout(_pollCpeApplyStatus, 5000);
+            }
+        } catch (e) {
+            // Network error - retry
+            _cpeApplyPollTimer = setTimeout(_pollCpeApplyStatus, 10000);
         }
     }
 

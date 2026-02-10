@@ -344,12 +344,14 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=50):
     updated_count = 0
 
     # Phase 1: Apply local matches (regex + curated dict + user-learned mappings)
+    # Use no_autoflush to prevent mid-query flushes that can cause statement timeouts
     still_unmatched = []
-    for product in products_without_cpe:
-        if apply_cpe_to_product(product):
-            updated_count += 1
-        else:
-            still_unmatched.append(product)
+    with db.session.no_autoflush:
+        for product in products_without_cpe:
+            if apply_cpe_to_product(product):
+                updated_count += 1
+            else:
+                still_unmatched.append(product)
 
     # Phase 2: Try NVD API for remaining unmatched products
     if use_nvd and still_unmatched:

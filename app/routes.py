@@ -2825,6 +2825,19 @@ def apply_cpe_mappings():
 
         app = current_app._get_current_object()
 
+        def _save_job_status(status, message='', updated=0, total=0):
+            """Save CPE apply job status to SystemSettings."""
+            import json
+            from app.models import SystemSettings
+            val = json.dumps({'status': status, 'message': message, 'updated': updated, 'total': total, 'ts': datetime.utcnow().isoformat()})
+            setting = SystemSettings.query.filter_by(key='cpe_apply_job_status').first()
+            if setting:
+                setting.value = val
+            else:
+                setting = SystemSettings(key='cpe_apply_job_status', value=val, category='sync')
+                db.session.add(setting)
+            db.session.commit()
+
         def _run_cpe_apply():
             with app.app_context():
                 try:
@@ -2832,17 +2845,21 @@ def apply_cpe_mappings():
                     from app.models import CpeDictionaryEntry
                     dict_count = CpeDictionaryEntry.query.count()
                     if dict_count < 1000:
+                        _save_job_status('downloading', f'Downloading CPE dictionary ({dict_count} entries currently)...')
                         logger.info(f"CPE dictionary has only {dict_count} entries, running bulk download first...")
                         from app.cpe_dictionary import sync_nvd_cpe_dictionary
                         sync_nvd_cpe_dictionary()
 
+                    _save_job_status('mapping', 'Applying CPE mappings to products...')
                     from app.cpe_mapping import batch_apply_cpe_mappings
                     updated, total_without = batch_apply_cpe_mappings(
                         commit=True, use_nvd=use_nvd, max_nvd_lookups=max_nvd
                     )
                     logger.info(f"CPE auto-apply complete: {updated}/{total_without} products mapped")
+                    _save_job_status('complete', f'Mapped {updated} of {total_without} unmapped products', updated, total_without)
                 except Exception as e:
                     logger.error(f"CPE auto-apply failed: {e}")
+                    _save_job_status('error', str(e))
 
         t = threading.Thread(target=_run_cpe_apply, daemon=True, name='CpeAutoApply')
         t.start()
@@ -2856,6 +2873,22 @@ def apply_cpe_mappings():
     except Exception as e:
         logger.exception("Error starting CPE auto-apply")
         return jsonify({'status': 'error', 'message': ERROR_MSGS['internal']}), 500
+
+
+@bp.route('/api/products/cpe-apply-status', methods=['GET'])
+@admin_required
+def cpe_apply_status():
+    """Get the status of the background CPE auto-apply job."""
+    import json
+    from app.models import SystemSettings
+    setting = SystemSettings.query.filter_by(key='cpe_apply_job_status').first()
+    if not setting or not setting.value:
+        return jsonify({'status': 'idle', 'message': 'No CPE auto-apply job has run yet.'})
+    try:
+        data = json.loads(setting.value)
+        return jsonify(data)
+    except (json.JSONDecodeError, TypeError):
+        return jsonify({'status': 'idle', 'message': ''})
 
 
 @bp.route('/api/products/cpe-suggestions', methods=['GET'])
