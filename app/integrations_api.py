@@ -606,6 +606,7 @@ def get_import_queue():
     status = request.args.get('status', 'pending')
     integration_id = request.args.get('integration_id', type=int)
     org_id = request.args.get('organization_id', type=int)
+    vendor = request.args.get('vendor', '').strip()
     limit = request.args.get('limit', 100, type=int)
     offset = request.args.get('offset', 0, type=int)
 
@@ -617,6 +618,8 @@ def get_import_queue():
         query = query.filter_by(integration_id=integration_id)
     if org_id:
         query = query.filter_by(organization_id=org_id)
+    if vendor:
+        query = query.filter(ImportQueue.vendor == vendor)
 
     total = query.count()
     items = query.order_by(ImportQueue.created_at.desc()).offset(offset).limit(limit).all()
@@ -793,6 +796,107 @@ def bulk_process_queue():
             pass
 
     return jsonify(results)
+
+
+@bp.route('/api/import/queue/approve-all', methods=['POST'])
+@admin_required
+@requires_professional('Integrations')
+def approve_all_queue():
+    """Approve all pending import queue items, optionally filtered by vendor or organization."""
+    data = request.get_json() or {}
+    vendor_filter = data.get('vendor')
+    org_filter = data.get('organization_id', type=None)
+
+    query = ImportQueue.query.filter_by(status='pending')
+    if vendor_filter:
+        query = query.filter(ImportQueue.vendor == vendor_filter)
+    if org_filter:
+        query = query.filter(ImportQueue.organization_id == org_filter)
+
+    items = query.all()
+    if not items:
+        return jsonify({'processed': 0, 'message': 'No pending items to approve'})
+
+    results = {'processed': 0, 'errors': 0, 'products': []}
+
+    for item in items:
+        product = create_product_from_queue(item)
+        if product:
+            item.status = 'approved'
+            item.product_id = product.id
+            item.processed_at = datetime.utcnow()
+            item.processed_by = session.get('user_id')
+            results['processed'] += 1
+            results['products'].append(product.id)
+        else:
+            results['errors'] += 1
+
+    db.session.commit()
+
+    # Trigger vulnerability matching in batches
+    if results['products']:
+        try:
+            from app.filters import match_vulnerabilities_to_products
+            products = Product.query.filter(Product.id.in_(results['products'])).all()
+            match_vulnerabilities_to_products(products)
+        except Exception:
+            pass
+
+    return jsonify(results)
+
+
+@bp.route('/api/import/queue/reject-all', methods=['POST'])
+@admin_required
+@requires_professional('Integrations')
+def reject_all_queue():
+    """Reject all pending import queue items, optionally filtered by vendor or organization."""
+    data = request.get_json() or {}
+    vendor_filter = data.get('vendor')
+    org_filter = data.get('organization_id', type=None)
+
+    query = ImportQueue.query.filter_by(status='pending')
+    if vendor_filter:
+        query = query.filter(ImportQueue.vendor == vendor_filter)
+    if org_filter:
+        query = query.filter(ImportQueue.organization_id == org_filter)
+
+    count = query.count()
+    if count == 0:
+        return jsonify({'processed': 0, 'message': 'No pending items to reject'})
+
+    query.update({
+        ImportQueue.status: 'rejected',
+        ImportQueue.processed_at: datetime.utcnow(),
+        ImportQueue.processed_by: session.get('user_id')
+    }, synchronize_session='fetch')
+    db.session.commit()
+
+    return jsonify({'processed': count})
+
+
+@bp.route('/api/import/queue/vendors', methods=['GET'])
+@login_required
+@requires_professional('Integrations')
+def get_queue_vendors():
+    """Get list of vendors with pending items and their counts."""
+    from sqlalchemy import func
+    vendor_counts = db.session.query(
+        ImportQueue.vendor,
+        func.count(ImportQueue.id)
+    ).filter_by(
+        status='pending'
+    ).group_by(
+        ImportQueue.vendor
+    ).order_by(
+        func.count(ImportQueue.id).desc()
+    ).all()
+
+    return jsonify({
+        'vendors': [
+            {'vendor': v, 'count': c}
+            for v, c in vendor_counts
+        ]
+    })
 
 
 # ============================================================================
@@ -1563,102 +1667,162 @@ echo "Kernel:     $KERNEL"
 echo "Agent ID:   $AGENT_ID"
 echo ""
 
+# Helper: escape a string for safe embedding in JSON.
+# Escapes \\ and " (critical for valid JSON), strips control chars as safety net.
+json_escape() {{
+    printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g' | tr -d '\\001-\\011\\013\\014\\016-\\037'
+}}
+
 # Collect installed software
 echo "Scanning installed software..."
 PRODUCTS_FILE=$(mktemp)
-trap "rm -f $PRODUCTS_FILE" EXIT
+PAYLOAD_FILE=$(mktemp)
+trap "rm -f $PRODUCTS_FILE $PAYLOAD_FILE" EXIT
 
 # dpkg (Debian/Ubuntu)
 if command -v dpkg-query &> /dev/null; then
-    dpkg-query -W -f='${{Package}}|${{Version}}|dpkg\\n' 2>/dev/null | while IFS='|' read pkg ver src; do
-        [ -n "$pkg" ] && echo "{{\\"vendor\\":\\"$src\\",\\"product\\":\\"$pkg\\",\\"version\\":\\"$ver\\"}},"
+    dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null | while IFS=$'\\t' read -r pkg ver; do
+        [ -n "$pkg" ] && printf '{{"vendor":"dpkg","product":"%s","version":"%s"}},\\n' "$(json_escape "$pkg")" "$(json_escape "$ver")"
     done >> "$PRODUCTS_FILE"
 fi
 
 # rpm (RHEL/CentOS/Fedora)
 if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
-    rpm -qa --queryformat '%{{NAME}}|%{{VERSION}}|%{{VENDOR}}\\n' 2>/dev/null | while IFS='|' read pkg ver vendor; do
-        [ -n "$pkg" ] && echo "{{\\"vendor\\":\\"${{vendor:-rpm}}\\",\\"product\\":\\"$pkg\\",\\"version\\":\\"$ver\\"}},"
+    rpm -qa --queryformat '%{{NAME}}\\t%{{VERSION}}-%{{RELEASE}}\\t%{{VENDOR}}\\n' 2>/dev/null | while IFS=$'\\t' read -r pkg ver vendor; do
+        [ -n "$pkg" ] && printf '{{"vendor":"%s","product":"%s","version":"%s"}},\\n' "$(json_escape "${{vendor:-rpm}}")" "$(json_escape "$pkg")" "$(json_escape "$ver")"
     done >> "$PRODUCTS_FILE"
 fi
 
 # snap
 if command -v snap &> /dev/null; then
-    snap list 2>/dev/null | tail -n +2 | while read name ver rest; do
-        [ -n "$name" ] && echo "{{\\"vendor\\":\\"snap\\",\\"product\\":\\"$name\\",\\"version\\":\\"$ver\\"}},"
+    snap list 2>/dev/null | tail -n +2 | while read -r name ver rest; do
+        [ -n "$name" ] && printf '{{"vendor":"snap","product":"%s","version":"%s"}},\\n' "$(json_escape "$name")" "$(json_escape "$ver")"
     done >> "$PRODUCTS_FILE"
 fi
 
 # flatpak
 if command -v flatpak &> /dev/null; then
-    flatpak list --columns=name,version 2>/dev/null | while read name ver; do
-        [ -n "$name" ] && echo "{{\\"vendor\\":\\"flatpak\\",\\"product\\":\\"$name\\",\\"version\\":\\"$ver\\"}},"
+    flatpak list --columns=name,version 2>/dev/null | while read -r name ver; do
+        [ -n "$name" ] && printf '{{"vendor":"flatpak","product":"%s","version":"%s"}},\\n' "$(json_escape "$name")" "$(json_escape "$ver")"
     done >> "$PRODUCTS_FILE"
 fi
 
-# Build products array
+COUNT=0
 if [ -s "$PRODUCTS_FILE" ]; then
-    PRODUCTS="[$(sed '$s/,$//' "$PRODUCTS_FILE" | tr '\\n' ' ')]"
     COUNT=$(wc -l < "$PRODUCTS_FILE")
-else
-    PRODUCTS="[]"
-    COUNT=0
 fi
 
 echo "Found $COUNT installed packages"
 echo ""
 
-# Build JSON payload
-PAYLOAD=$(cat <<EOFPAYLOAD
-{{
-    "hostname": "$HOSTNAME",
-    "ip_address": "$IP_ADDRESS",
-    "os": {{
-        "name": "$OS_NAME",
-        "version": "$OS_VERSION",
-        "kernel": "$KERNEL"
-    }},
-    "agent": {{
-        "id": "$AGENT_ID",
-        "version": "1.0.0"
-    }},
-    "products": $PRODUCTS
+# Chunked sending: split large inventories into batches to avoid
+# overwhelming the server and to handle timeouts gracefully.
+CHUNK_SIZE=500
+H_ESC=$(json_escape "$HOSTNAME")
+IP_ESC=$(json_escape "$IP_ADDRESS")
+OSV_ESC=$(json_escape "$OS_VERSION")
+K_ESC=$(json_escape "$KERNEL")
+AID_ESC=$(json_escape "$AGENT_ID")
+
+send_chunk() {{
+    local CHUNK_FILE="$1"
+    local CHUNK_NUM="$2"
+    local TOTAL_CHUNKS="$3"
+
+    {{
+        printf '{{"hostname":"%s","ip_address":"%s","os":{{"name":"%s","version":"%s","kernel":"%s"}},"agent":{{"id":"%s","version":"1.0.0"}},"chunk_index":%d,"total_chunks":%d,"products":[' \\
+            "$H_ESC" "$IP_ESC" "$OS_NAME" "$OSV_ESC" "$K_ESC" "$AID_ESC" "$CHUNK_NUM" "$TOTAL_CHUNKS"
+        if [ -s "$CHUNK_FILE" ]; then
+            sed '$s/,$//' "$CHUNK_FILE" | tr -d '\\n'
+        fi
+        printf ']}}'
+    }} > "$PAYLOAD_FILE"
+
+    local PAYLOAD_SIZE
+    PAYLOAD_SIZE=$(wc -c < "$PAYLOAD_FILE")
+
+    if [ "$TOTAL_CHUNKS" -gt 1 ]; then
+        echo "  Sending chunk $CHUNK_NUM/$TOTAL_CHUNKS ($PAYLOAD_SIZE bytes)..."
+    else
+        echo "  Sending inventory ($PAYLOAD_SIZE bytes)..."
+    fi
+
+    RESPONSE=$(curl -s -w "\\n%{{http_code}}" -X POST "$API_URL/api/agent/inventory" \\
+        -H "X-Agent-Key: $API_KEY" \\
+        -H "Content-Type: application/json" \\
+        -d @"$PAYLOAD_FILE")
+
+    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+    BODY=$(echo "$RESPONSE" | sed '$d')
+
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+        return 0
+    else
+        echo "  ERROR on chunk $CHUNK_NUM (HTTP $HTTP_CODE): $BODY"
+        return 1
+    fi
 }}
-EOFPAYLOAD
-)
 
 echo "Sending inventory to SentriKat..."
+ERRORS=0
 
-# Send to SentriKat
-RESPONSE=$(curl -s -w "\\n%{{http_code}}" -X POST "$API_URL/api/agent/inventory" \\
-    -H "X-Agent-Key: $API_KEY" \\
-    -H "Content-Type: application/json" \\
-    -d "$PAYLOAD")
+if [ "$COUNT" -le "$CHUNK_SIZE" ] || [ "$COUNT" -eq 0 ]; then
+    # Small enough to send in one request
+    send_chunk "$PRODUCTS_FILE" 1 1
+    if [ $? -ne 0 ]; then
+        ERRORS=1
+    fi
+else
+    # Split into chunks for reliable delivery
+    TOTAL_CHUNKS=$(( (COUNT + CHUNK_SIZE - 1) / CHUNK_SIZE ))
+    echo "Splitting $COUNT products into $TOTAL_CHUNKS chunks of $CHUNK_SIZE..."
+    echo ""
+    CHUNK_DIR=$(mktemp -d)
+    trap "rm -rf $CHUNK_DIR $PRODUCTS_FILE $PAYLOAD_FILE" EXIT
+    split -l $CHUNK_SIZE -d --additional-suffix=.chunk "$PRODUCTS_FILE" "$CHUNK_DIR/chunk_"
 
-HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-BODY=$(echo "$RESPONSE" | sed '$d')
+    CHUNK_NUM=1
+    for CHUNK_FILE in "$CHUNK_DIR"/chunk_*.chunk; do
+        send_chunk "$CHUNK_FILE" "$CHUNK_NUM" "$TOTAL_CHUNKS"
+        if [ $? -ne 0 ]; then
+            ERRORS=$((ERRORS + 1))
+        fi
+        CHUNK_NUM=$((CHUNK_NUM + 1))
+        # Small delay between chunks to avoid overwhelming the server
+        if [ "$CHUNK_NUM" -le "$TOTAL_CHUNKS" ]; then
+            sleep 2
+        fi
+    done
+fi
 
 echo ""
-if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+if [ "$ERRORS" -eq 0 ]; then
     echo "SUCCESS!"
     echo "----------------------------------------"
     echo "$BODY" | python3 -c "
 import sys,json
 try:
     d=json.load(sys.stdin)
-    print(f\\"Asset ID: {{d.get('asset_id')}}\\")
-    print(f\\"Products Created: {{d.get('products_created', 0)}}\\")
-    print(f\\"Products Updated: {{d.get('products_updated', 0)}}\\")
-    print(f\\"Installations Created: {{d.get('installations_created', 0)}}\\")
-    print(f\\"Installations Updated: {{d.get('installations_updated', 0)}}\\")
+    if d.get('status') == 'queued':
+        print(f\\"Status:       Queued for processing\\")
+        print(f\\"Job ID:       {{d.get('job_id')}}\\")
+        print(f\\"Asset ID:     {{d.get('asset_id')}}\\")
+    else:
+        print(f\\"Asset ID:     {{d.get('asset_id')}}\\")
+        s=d.get('summary',d)
+        print(f\\"Products Created: {{s.get('products_created', 0)}}\\")
+        print(f\\"Products Updated: {{s.get('products_updated', 0)}}\\")
+        print(f\\"Installations Created: {{s.get('installations_created', 0)}}\\")
+        print(f\\"Installations Updated: {{s.get('installations_updated', 0)}}\\")
 except:
     print(sys.stdin.read())
 " 2>/dev/null || echo "$BODY"
     echo "----------------------------------------"
 else
-    echo "ERROR! (HTTP $HTTP_CODE)"
+    echo "COMPLETED WITH $ERRORS ERRORS"
     echo "----------------------------------------"
-    echo "$BODY"
+    echo "Some chunks failed. Check SentriKat logs for details."
+    echo "Successfully sent chunks will still be processed."
     exit 1
 fi
 

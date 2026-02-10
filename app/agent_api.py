@@ -271,16 +271,37 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
     Queue a product to ImportQueue for review instead of directly adding to Products.
     Used when auto_approve is False on the API key.
 
-    Returns True if queued successfully, False if already exists or error.
+    Smart handling:
+    - If product already exists globally → auto-link to this org (no queue needed)
+    - If product already in queue → skip (dedup)
+    - Otherwise → add to import queue for admin review
+
+    Returns: 'queued', 'auto_linked', 'skipped', or 'error'
     """
     from app.integrations_models import ImportQueue
 
     # Skip irrelevant software before queuing (don't flood import queue with junk)
     if _should_skip_software(vendor, product_name):
         logger.debug(f"Skipping irrelevant software from import queue: {vendor} {product_name}")
-        return False
+        return 'skipped'
 
     try:
+        # Check if product already exists globally
+        existing_product = Product.query.filter_by(
+            vendor=vendor,
+            product_name=product_name
+        ).first()
+
+        if existing_product:
+            # Product exists globally. Auto-link to this organization if not already linked.
+            # This avoids flooding the import queue with products we already know about.
+            from app.models import Organization
+            org = Organization.query.get(organization_id)
+            if org and org not in existing_product.organizations:
+                existing_product.organizations.append(org)
+                logger.info(f"Auto-linked existing product '{vendor} {product_name}' to org {organization_id}")
+            return 'auto_linked'
+
         # Check if already in queue (avoid duplicates)
         existing = ImportQueue.query.filter_by(
             organization_id=organization_id,
@@ -291,17 +312,7 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
 
         if existing:
             logger.debug(f"Product already in import queue: {vendor} {product_name}")
-            return False
-
-        # Also check if product already exists (approved previously)
-        existing_product = Product.query.filter_by(
-            vendor=vendor,
-            product_name=product_name
-        ).first()
-
-        if existing_product:
-            # Product exists, don't queue - will be handled normally
-            return False
+            return 'skipped'
 
         # Add to import queue
         queue_item = ImportQueue(
@@ -315,10 +326,10 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
         )
         db.session.add(queue_item)
         logger.info(f"Queued product for review: {vendor} {product_name}")
-        return True
+        return 'queued'
     except Exception as e:
         logger.warning(f"Error queueing to import queue: {e}")
-        return False
+        return 'error'
 
 
 def get_agent_api_key():
@@ -936,10 +947,13 @@ def process_inventory_job(job):
                         items_processed += 1
                         continue
 
-                    # Check auto_approve: if False, queue for review instead of creating
+                    # Check auto_approve: if False, queue or auto-link instead of creating
                     if not auto_approve:
-                        if _queue_to_import_queue(organization.id, vendor, product_name, version, asset.hostname):
+                        result = _queue_to_import_queue(organization.id, vendor, product_name, version, asset.hostname)
+                        if result == 'queued':
                             products_queued += 1
+                        elif result == 'auto_linked':
+                            products_updated += 1
                         items_processed += 1
                         continue
 
@@ -1150,7 +1164,10 @@ def report_inventory():
 
     hostname = data.get('hostname')
     products = data.get('products', [])
-    logger.info(f"Agent inventory: {hostname} sending {len(products)} products "
+    chunk_index = data.get('chunk_index')
+    total_chunks = data.get('total_chunks')
+    chunk_info = f" (chunk {chunk_index}/{total_chunks})" if chunk_index else ""
+    logger.info(f"Agent inventory: {hostname} sending {len(products)} products{chunk_info} "
                 f"(threshold={ASYNC_BATCH_THRESHOLD})")
 
     # Validate organization
@@ -1331,10 +1348,13 @@ def report_inventory():
             ).first()
 
             if not product:
-                # Check auto_approve: if False, queue for review instead of creating
+                # Check auto_approve: if False, queue or auto-link instead of creating
                 if not auto_approve:
-                    if _queue_to_import_queue(organization.id, vendor, product_name, version, hostname):
+                    result = _queue_to_import_queue(organization.id, vendor, product_name, version, hostname)
+                    if result == 'queued':
                         products_queued += 1
+                    elif result == 'auto_linked':
+                        products_updated += 1
                     continue
 
                 # Create product

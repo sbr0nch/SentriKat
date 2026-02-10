@@ -7576,6 +7576,7 @@ function renderImportQueue() {
 // Load import queue
 async function loadImportQueue() {
     const status = SK.DOM.get('queueFilterStatus')?.value || 'pending';
+    const vendorFilter = SK.DOM.get('queueFilterVendor')?.value || '';
     const perPage = parseInt(SK.DOM.get('queuePerPage')?.value) || 25;
     const tbody = SK.DOM.get('importQueueTable');
 
@@ -7590,6 +7591,9 @@ async function loadImportQueue() {
     selectedQueueItems.clear();
     updateQueueBulkButtons();
 
+    // Load vendor dropdown (fire-and-forget)
+    loadQueueVendors();
+
     tbody.innerHTML = `
         <tr>
             <td colspan="7" class="text-center py-4 text-muted">
@@ -7599,7 +7603,9 @@ async function loadImportQueue() {
     `;
 
     try {
-        const response = await fetch(`/api/import/queue?status=${status}`);
+        let queueUrl = `/api/import/queue?status=${status}`;
+        if (vendorFilter) queueUrl += `&vendor=${encodeURIComponent(vendorFilter)}`;
+        const response = await fetch(queueUrl);
         if (!response.ok) throw new Error('Failed to load queue');
 
         const data = await response.json();
@@ -7849,6 +7855,99 @@ async function bulkRejectQueue() {
         showToast('Error: ' + error.message, 'danger');
     }
 }
+
+// Approve/Reject ALL pending items (respects vendor filter)
+async function approveAllPending() {
+    const vendorFilter = SK.DOM.get('queueFilterVendor')?.value || '';
+    const vendorLabel = vendorFilter ? ` from "${vendorFilter}"` : '';
+    const pendingCount = importQueueData.filter(i => i.status === 'pending').length;
+    const totalLabel = vendorFilter ? `all pending items${vendorLabel}` : `ALL ${pendingCount}+ pending items`;
+
+    const confirmed = await showConfirm(
+        `Approve ${totalLabel}? Products will be added to inventory and matched against vulnerabilities.`,
+        'Approve All Pending',
+        'Approve All',
+        'btn-success'
+    );
+    if (!confirmed) return;
+
+    try {
+        const body = {};
+        if (vendorFilter) body.vendor = vendorFilter;
+
+        const response = await fetch('/api/import/queue/approve-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        const result = await response.json();
+        showToast(`Approved ${result.processed} items${result.errors ? ` (${result.errors} errors)` : ''}`, 'success');
+        loadImportQueue();
+        loadQueueVendors();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+async function rejectAllPending() {
+    const vendorFilter = SK.DOM.get('queueFilterVendor')?.value || '';
+    const vendorLabel = vendorFilter ? ` from "${vendorFilter}"` : '';
+
+    const confirmed = await showConfirm(
+        `Reject all pending items${vendorLabel}? This cannot be undone.`,
+        'Reject All Pending',
+        'Reject All',
+        'btn-danger'
+    );
+    if (!confirmed) return;
+
+    try {
+        const body = {};
+        if (vendorFilter) body.vendor = vendorFilter;
+
+        const response = await fetch('/api/import/queue/reject-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        const result = await response.json();
+        showToast(`Rejected ${result.processed} items`, 'success');
+        loadImportQueue();
+        loadQueueVendors();
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
+    }
+}
+
+// Load vendor list for the vendor filter dropdown
+async function loadQueueVendors() {
+    const select = SK.DOM.get('queueFilterVendor');
+    if (!select) return;
+
+    try {
+        const response = await fetch('/api/import/queue/vendors');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">All Vendors</option>';
+        (data.vendors || []).forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v.vendor;
+            opt.textContent = `${v.vendor} (${v.count})`;
+            select.appendChild(opt);
+        });
+        // Restore selection if still valid
+        if (currentVal && [...select.options].some(o => o.value === currentVal)) {
+            select.value = currentVal;
+        }
+    } catch (e) {
+        // Silently fail - vendor filter is optional
+    }
+}
+
 
 // ============================================================================
 // INTEGRATIONS - Overview Summary
