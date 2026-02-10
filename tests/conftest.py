@@ -72,6 +72,26 @@ def db_session(app):
 
 
 @pytest.fixture
+def setup_complete(db_session):
+    """Ensure setup is complete (org + user exist) so check_setup() doesn't return 503."""
+    from app.models import Organization, User
+    from werkzeug.security import generate_password_hash
+
+    org = Organization(name='Setup Org', display_name='Setup Org', active=True)
+    db_session.add(org)
+    db_session.flush()
+    user = User(
+        username='setupuser', email='setup@test.local',
+        password_hash=generate_password_hash('pass'),
+        role='user', organization_id=org.id,
+        is_active=True, auth_type='local'
+    )
+    db_session.add(user)
+    db_session.commit()
+    return org
+
+
+@pytest.fixture
 def test_org(db_session):
     """Create a test organization."""
     from app.models import Organization

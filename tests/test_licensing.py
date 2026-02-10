@@ -168,7 +168,7 @@ class TestAgentUsageTracking:
 class TestFeatureGating:
     """Tests for professional feature gating."""
 
-    def test_ldap_settings_requires_login(self, app, client, db_session):
+    def test_ldap_settings_requires_login(self, app, client, db_session, setup_complete):
         """Test LDAP settings endpoint requires authentication."""
         # Try to access LDAP settings without login
         response = client.get('/api/settings/ldap')
