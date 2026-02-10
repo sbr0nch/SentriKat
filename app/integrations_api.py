@@ -241,6 +241,216 @@ def import_software():
     return jsonify(results)
 
 
+@bp.route('/api/import/sbom', methods=['POST'])
+@api_key_or_login_required
+def import_sbom():
+    """
+    Import software inventory from an SBOM (Software Bill of Materials).
+
+    Supports:
+    - CycloneDX JSON (1.4, 1.5, 1.6)
+    - SPDX JSON (2.2, 2.3)
+
+    The SBOM components are parsed into SentriKat's standard software format
+    and routed through the normal import pipeline (review queue or auto-approve).
+
+    Request: POST with JSON body containing the SBOM document,
+             or multipart/form-data with file upload.
+
+    Query params:
+        auto_approve: true/false (default: false)
+        organization_id: int (optional)
+    """
+    import re as _re
+
+    integration = getattr(request, 'integration', None)
+    org_id = request.args.get('organization_id', type=int)
+    if not org_id and integration:
+        org_id = integration.organization_id
+    auto_approve = request.args.get('auto_approve', 'false').lower() == 'true'
+    if integration and integration.auto_approve:
+        auto_approve = True
+
+    # Accept JSON body or file upload
+    sbom_data = None
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        f = request.files.get('file') or request.files.get('sbom')
+        if not f:
+            return jsonify({'error': 'No file uploaded. Use field name "file" or "sbom".'}), 400
+        try:
+            import json as _json
+            sbom_data = _json.loads(f.read().decode('utf-8'))
+        except Exception as e:
+            return jsonify({'error': f'Invalid JSON in uploaded file: {e}'}), 400
+    else:
+        sbom_data = request.get_json()
+
+    if not sbom_data or not isinstance(sbom_data, dict):
+        return jsonify({'error': 'Request body must be a JSON SBOM document'}), 400
+
+    # Detect SBOM format
+    software_list = []
+
+    if sbom_data.get('bomFormat') == 'CycloneDX' or 'components' in sbom_data:
+        # ── CycloneDX ──
+        spec_version = sbom_data.get('specVersion', 'unknown')
+        components = sbom_data.get('components', [])
+
+        if not components:
+            return jsonify({'error': 'CycloneDX SBOM has no components'}), 400
+
+        for comp in components:
+            comp_type = comp.get('type', 'library')
+            name = comp.get('name', '').strip()
+            version = comp.get('version', '').strip() or None
+            group = comp.get('group', '').strip()
+            publisher = comp.get('publisher', '').strip()
+            purl = comp.get('purl', '')
+
+            if not name:
+                continue
+
+            # Extract vendor from group, publisher, or purl
+            vendor = publisher or group or ''
+            if not vendor and purl:
+                # Parse purl: pkg:npm/@scope/name@version or pkg:pypi/name@version
+                purl_match = _re.match(r'pkg:([^/]+)/(?:@([^/]+)/)?([^@]+)(?:@(.+))?', purl)
+                if purl_match:
+                    ecosystem = purl_match.group(1)
+                    scope = purl_match.group(2)
+                    vendor = scope or ecosystem
+                    if not version and purl_match.group(4):
+                        version = purl_match.group(4)
+
+            if not vendor:
+                vendor = name.split('/')[0] if '/' in name else name
+
+            software_list.append({
+                'vendor': vendor,
+                'product': name,
+                'version': version,
+                'source_type': 'sbom_cyclonedx',
+                'source_detail': f'CycloneDX {spec_version}, type={comp_type}',
+            })
+
+    elif sbom_data.get('spdxVersion') or 'packages' in sbom_data:
+        # ── SPDX ──
+        spdx_version = sbom_data.get('spdxVersion', 'unknown')
+        packages = sbom_data.get('packages', [])
+
+        if not packages:
+            return jsonify({'error': 'SPDX SBOM has no packages'}), 400
+
+        for pkg in packages:
+            name = pkg.get('name', '').strip()
+            version = pkg.get('versionInfo', '').strip() or None
+            supplier = pkg.get('supplier', '').strip()
+            originator = pkg.get('originator', '').strip()
+
+            if not name:
+                continue
+
+            # Extract vendor from supplier/originator
+            vendor = ''
+            for field in [supplier, originator]:
+                if field:
+                    # SPDX format: "Organization: Name" or "Person: Name"
+                    v = _re.sub(r'^(Organization|Person|Tool):\s*', '', field).strip()
+                    if v:
+                        vendor = v
+                        break
+
+            if not vendor:
+                # Try to extract from external references
+                for ref in pkg.get('externalRefs', []):
+                    if ref.get('referenceType') == 'purl':
+                        purl = ref.get('referenceLocator', '')
+                        purl_match = _re.match(r'pkg:([^/]+)/(?:@([^/]+)/)?([^@]+)', purl)
+                        if purl_match:
+                            vendor = purl_match.group(2) or purl_match.group(1)
+                            break
+
+            if not vendor:
+                vendor = name
+
+            software_list.append({
+                'vendor': vendor,
+                'product': name,
+                'version': version,
+                'source_type': 'sbom_spdx',
+                'source_detail': f'SPDX {spdx_version}',
+            })
+    else:
+        return jsonify({
+            'error': 'Unrecognized SBOM format. Supported: CycloneDX JSON, SPDX JSON.',
+            'hint': 'CycloneDX must have "bomFormat": "CycloneDX". SPDX must have "spdxVersion".'
+        }), 400
+
+    if not software_list:
+        return jsonify({'error': 'No valid software components found in SBOM'}), 400
+
+    # Route through existing import pipeline
+    results = {
+        'format': 'cyclonedx' if 'bomFormat' in sbom_data else 'spdx',
+        'total_components': len(software_list),
+        'queued': 0,
+        'auto_approved': 0,
+        'duplicates': 0,
+        'errors': 0,
+    }
+
+    for item in software_list:
+        vendor = item['vendor']
+        product_name = item['product']
+        version = item.get('version')
+
+        if not vendor or not product_name:
+            results['errors'] += 1
+            continue
+
+        # Check for existing product
+        existing = Product.query.filter(
+            db.func.lower(Product.vendor) == vendor.lower(),
+            db.func.lower(Product.product_name) == product_name.lower()
+        ).first()
+
+        if existing:
+            results['duplicates'] += 1
+            continue
+
+        # Create import queue entry
+        source_data = {
+            'source_type': item.get('source_type'),
+            'source_detail': item.get('source_detail'),
+        }
+
+        queue_item = ImportQueue(
+            vendor=vendor,
+            product_name=product_name,
+            detected_version=version,
+            organization_id=org_id,
+            status='pending' if not auto_approve else 'approved'
+        )
+        queue_item.set_source_data(source_data)
+        db.session.add(queue_item)
+
+        if auto_approve:
+            product = create_product_from_queue(queue_item)
+            if product:
+                queue_item.status = 'approved'
+                queue_item.product_id = product.id
+                queue_item.processed_at = datetime.utcnow()
+                results['auto_approved'] += 1
+            else:
+                results['queued'] += 1
+        else:
+            results['queued'] += 1
+
+    db.session.commit()
+
+    return jsonify(results)
+
+
 def attempt_cpe_match(vendor, product_name):
     """
     Attempt to find matching CPE via NVD API search (the actual API call).

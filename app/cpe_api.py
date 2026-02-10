@@ -84,6 +84,21 @@ def search_products():
     try:
         if grouped:
             results = search_cpe_grouped(query, limit=limit)
+
+            # Supplement with local CPE dictionary results (always available, no API needed)
+            try:
+                local_results = _search_local_cpe_dictionary(query, limit=20)
+                for vendor_key, vendor_data in local_results.items():
+                    if vendor_key not in results:
+                        results[vendor_key] = vendor_data
+                    else:
+                        # Merge products not already in NVD results
+                        for prod_key, prod_data in vendor_data['products'].items():
+                            if prod_key not in results[vendor_key]['products']:
+                                results[vendor_key]['products'][prod_key] = prod_data
+            except Exception:
+                pass  # Local search failure is non-critical
+
             return jsonify({
                 'vendors': results,
                 'total_results': sum(
@@ -100,6 +115,18 @@ def search_products():
             })
 
     except Exception as e:
+        # If NVD API fails entirely, fall back to local dictionary only
+        try:
+            local_results = _search_local_cpe_dictionary(query, limit=50)
+            if local_results:
+                return jsonify({
+                    'vendors': local_results,
+                    'total_results': sum(len(v['products']) for v in local_results.values()),
+                    'query': query,
+                    'source': 'local_dictionary'
+                })
+        except Exception:
+            pass
         return jsonify({'error': f'CPE search failed: {str(e)}'}), 500
 
 
@@ -972,3 +999,121 @@ def kb_sync_trigger():
     from app.kb_sync import kb_sync
     result = kb_sync()
     return jsonify(result)
+
+
+# ============================================================================
+# CPE Dictionary Endpoints
+# ============================================================================
+
+@bp.route('/dictionary/status', methods=['GET'])
+@manager_required
+def cpe_dictionary_status():
+    """Get local CPE dictionary statistics."""
+    from app.cpe_dictionary import get_dictionary_stats
+    return jsonify(get_dictionary_stats())
+
+
+@bp.route('/dictionary/sync-nvd', methods=['POST'])
+@admin_required
+def cpe_dictionary_sync_nvd():
+    """
+    Manually trigger NVD CPE dictionary download.
+    This can take 5-50 minutes depending on API key availability.
+    """
+    from app.cpe_dictionary import sync_nvd_cpe_dictionary
+    import threading
+
+    def _run_sync():
+        from app import create_app
+        app = create_app()
+        with app.app_context():
+            sync_nvd_cpe_dictionary()
+
+    # Run in background thread to avoid HTTP timeout
+    t = threading.Thread(target=_run_sync, daemon=True, name='NvdCpeDictSync')
+    t.start()
+
+    return jsonify({
+        'status': 'started',
+        'message': 'NVD CPE dictionary sync started in background. Check logs for progress.'
+    }), 202
+
+
+@bp.route('/dictionary/rebuild', methods=['POST'])
+@admin_required
+def cpe_dictionary_rebuild():
+    """Rebuild local CPE dictionary from vulnerability data (fast)."""
+    from app.cpe_dictionary import build_cpe_dictionary
+    result = build_cpe_dictionary()
+    return jsonify(result)
+
+
+# ============================================================================
+# Local CPE Dictionary Search (offline fallback for product search)
+# ============================================================================
+
+def _search_local_cpe_dictionary(query, limit=50):
+    """
+    Search the local CPE dictionary for matching products.
+    Returns results in the same grouped format as search_cpe_grouped().
+    This works even when NVD API is down or rate-limited.
+    """
+    from app.models import CpeDictionaryEntry
+    import re
+
+    query_lower = query.lower().strip()
+    terms = query_lower.split()
+
+    if not terms:
+        return {}
+
+    # Build query: search vendor, product, and aliases
+    from sqlalchemy import or_
+    filters = []
+    for term in terms:
+        term_pattern = f'%{term}%'
+        filters.append(or_(
+            CpeDictionaryEntry.cpe_vendor.ilike(term_pattern),
+            CpeDictionaryEntry.cpe_product.ilike(term_pattern),
+            CpeDictionaryEntry.search_aliases.ilike(term_pattern),
+        ))
+
+    entries = CpeDictionaryEntry.query.filter(
+        *filters
+    ).order_by(
+        CpeDictionaryEntry.cve_count.desc()
+    ).limit(limit).all()
+
+    # Group into same format as NVD search results
+    grouped = {}
+    for entry in entries:
+        vendor = entry.cpe_vendor
+        product = entry.cpe_product
+
+        if vendor not in grouped:
+            grouped[vendor] = {
+                'display_name': vendor.replace('_', ' ').title(),
+                'products': {},
+                'max_score': entry.cve_count or 0,
+            }
+
+        if product not in grouped[vendor]['products']:
+            # Build display name from alias if available
+            display_name = product.replace('_', ' ').title()
+            aliases = (entry.search_aliases or '').split('|')
+            for alias in aliases:
+                if alias and len(alias) > len(display_name):
+                    display_name = alias.title()
+                    break
+
+            grouped[vendor]['products'][product] = {
+                'display_name': display_name,
+                'versions': [],
+                'cpe_vendor': vendor,
+                'cpe_product': product,
+                'title': display_name,
+                'relevance_score': entry.cve_count or 0,
+                'source': 'local_dictionary',
+            }
+
+    return grouped

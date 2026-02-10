@@ -2321,6 +2321,50 @@ class UserCpeMapping(db.Model):
 
 
 # ============================================================================
+# LOCAL CPE DICTIONARY - Extracted from vulnerability CPE data
+# ============================================================================
+
+class CpeDictionaryEntry(db.Model):
+    """
+    Local CPE dictionary built from vulnerability CPE data.
+
+    Every vulnerability in the database contains CPE entries (vendor:product).
+    We extract these into a searchable table for fast offline CPE matching.
+    This eliminates the dependency on rate-limited NVD API for common products.
+    """
+    __tablename__ = 'cpe_dictionary_entries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    cpe_vendor = db.Column(db.String(200), nullable=False, index=True)
+    cpe_product = db.Column(db.String(200), nullable=False, index=True)
+
+    # Search aliases from vulnerability human-readable names (pipe-separated)
+    search_aliases = db.Column(db.Text, nullable=True)
+
+    # How many CVEs reference this vendor:product (popularity signal)
+    cve_count = db.Column(db.Integer, default=0)
+
+    # How many times this entry was used for matching (quality signal)
+    usage_count = db.Column(db.Integer, default=0)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('cpe_vendor', 'cpe_product', name='uq_cpe_dict_vendor_product'),
+    )
+
+    def to_dict(self):
+        return {
+            'cpe_vendor': self.cpe_vendor,
+            'cpe_product': self.cpe_product,
+            'cve_count': self.cve_count,
+            'usage_count': self.usage_count,
+            'aliases': (self.search_aliases or '').split('|') if self.search_aliases else [],
+        }
+
+
+# ============================================================================
 # VULNERABILITY TREND TRACKING - Historical data for analytics
 # ============================================================================
 
