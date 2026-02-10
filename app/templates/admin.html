@@ -111,6 +111,14 @@
                                 <i class="bi bi-bar-chart me-2"></i>CPE Coverage Stats
                             </a>
                         </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><h6 class="dropdown-header text-danger">Danger Zone</h6></li>
+                        <li>
+                            <a class="dropdown-item text-danger" href="#" onclick="showPurgeProducts(); return false;">
+                                <i class="bi bi-trash3 me-2"></i>Purge Products
+                                <small class="text-muted d-block ms-4">Delete all products from selected orgs</small>
+                            </a>
+                        </li>
                     </ul>
                 </div>
                 {% endif %}
@@ -559,6 +567,48 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="saveProduct()">
                     <i class="bi bi-check-circle me-1"></i>Save Product
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Purge Products Modal -->
+<div class="modal fade" id="purgeProductsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Purge Products</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger">
+                    <strong>Warning:</strong> This will permanently delete all products, their installations, vulnerability matches, and version history from the selected organization(s). This cannot be undone.
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Select Organizations</label>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="purgeAllOrgs" onchange="togglePurgeAllOrgs()">
+                        <label class="form-check-label fw-semibold" for="purgeAllOrgs">All Organizations (full purge)</label>
+                    </div>
+                    <div id="purgeOrgList" class="ms-3 border rounded p-2" style="max-height: 200px; overflow-y: auto;">
+                        <div class="text-muted small">Loading organizations...</div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold text-danger">Type "PURGE" to confirm</label>
+                    <input type="text" class="form-control" id="purgeConfirmInput" placeholder="Type PURGE here" autocomplete="off">
+                </div>
+                <div id="purgeProgress" style="display: none;">
+                    <div class="progress mb-2">
+                        <div class="progress-bar bg-danger progress-bar-striped progress-bar-animated" id="purgeProgressBar" style="width: 0%"></div>
+                    </div>
+                    <small class="text-muted" id="purgeProgressText">Deleting...</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="purgeExecuteBtn" onclick="executePurgeProducts()" disabled>
+                    <i class="bi bi-trash3 me-1"></i>Purge Products
                 </button>
             </div>
         </div>
@@ -3321,6 +3371,123 @@
             }
         } catch (error) {
             showAdminResult('Error', `<p class="text-danger">Failed to get CPE stats: ${error.message}</p>`, 'error');
+        }
+    }
+
+    // ---- Purge Products ----
+    async function showPurgeProducts() {
+        const modal = new bootstrap.Modal(document.getElementById('purgeProductsModal'));
+        const orgList = document.getElementById('purgeOrgList');
+        const confirmInput = document.getElementById('purgeConfirmInput');
+        const executeBtn = document.getElementById('purgeExecuteBtn');
+        const purgeAllCheck = document.getElementById('purgeAllOrgs');
+        const progressDiv = document.getElementById('purgeProgress');
+
+        // Reset state
+        if (confirmInput) confirmInput.value = '';
+        if (executeBtn) executeBtn.disabled = true;
+        if (purgeAllCheck) purgeAllCheck.checked = false;
+        if (progressDiv) progressDiv.style.display = 'none';
+
+        // Enable button only when PURGE is typed
+        if (confirmInput) {
+            confirmInput.oninput = function() {
+                const hasOrgs = purgeAllCheck.checked || document.querySelectorAll('.purge-org-check:checked').length > 0;
+                executeBtn.disabled = !(this.value.trim() === 'PURGE' && hasOrgs);
+            };
+        }
+
+        // Load organizations
+        try {
+            const response = await fetch('/api/organizations');
+            const data = await response.json();
+            const orgs = data.organizations || data || [];
+            orgList.innerHTML = orgs.map(org => `
+                <div class="form-check">
+                    <input class="form-check-input purge-org-check" type="checkbox" value="${org.id}" id="purgeOrg${org.id}"
+                           onchange="document.getElementById('purgeConfirmInput').oninput()">
+                    <label class="form-check-label" for="purgeOrg${org.id}">
+                        ${escapeHtml(org.display_name || org.name)} <small class="text-muted">(ID: ${org.id})</small>
+                    </label>
+                </div>
+            `).join('');
+        } catch (e) {
+            orgList.innerHTML = '<div class="text-danger small">Failed to load organizations</div>';
+        }
+
+        modal.show();
+    }
+
+    function togglePurgeAllOrgs() {
+        const allChecked = document.getElementById('purgeAllOrgs').checked;
+        document.querySelectorAll('.purge-org-check').forEach(cb => {
+            cb.checked = allChecked;
+            cb.disabled = allChecked;
+        });
+        // Re-trigger validation
+        const confirmInput = document.getElementById('purgeConfirmInput');
+        if (confirmInput && confirmInput.oninput) confirmInput.oninput();
+    }
+
+    async function executePurgeProducts() {
+        const confirmInput = document.getElementById('purgeConfirmInput');
+        if (!confirmInput || confirmInput.value.trim() !== 'PURGE') return;
+
+        const purgeAll = document.getElementById('purgeAllOrgs').checked;
+        const selectedOrgs = purgeAll
+            ? []
+            : Array.from(document.querySelectorAll('.purge-org-check:checked')).map(cb => parseInt(cb.value));
+
+        if (!purgeAll && selectedOrgs.length === 0) return;
+
+        const executeBtn = document.getElementById('purgeExecuteBtn');
+        const progressDiv = document.getElementById('purgeProgress');
+        const progressBar = document.getElementById('purgeProgressBar');
+        const progressText = document.getElementById('purgeProgressText');
+
+        executeBtn.disabled = true;
+        executeBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Purging...';
+        progressDiv.style.display = 'block';
+        progressBar.style.width = '10%';
+        progressText.textContent = 'Deleting products and related data...';
+
+        try {
+            const body = purgeAll
+                ? { all_organizations: true }
+                : { organization_ids: selectedOrgs };
+
+            const response = await fetch('/api/products/purge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            const result = await response.json();
+
+            progressBar.style.width = '100%';
+
+            if (response.ok && result.success) {
+                progressBar.classList.remove('progress-bar-animated');
+                progressText.textContent = `Purged ${result.deleted_products} products, ${result.deleted_installations} installations, ${result.deleted_matches} vulnerability matches`;
+
+                showToast(`Purged ${result.deleted_products} products successfully`, 'success');
+
+                setTimeout(() => {
+                    bootstrap.Modal.getInstance(document.getElementById('purgeProductsModal'))?.hide();
+                    loadProducts();
+                }, 2000);
+            } else {
+                progressBar.classList.replace('bg-danger', 'bg-warning');
+                progressText.textContent = result.error || 'Purge failed';
+                showToast('Purge failed: ' + (result.error || 'Unknown error'), 'danger');
+                executeBtn.disabled = false;
+                executeBtn.innerHTML = '<i class="bi bi-trash3 me-1"></i>Purge Products';
+            }
+        } catch (error) {
+            progressText.textContent = 'Error: ' + error.message;
+            showToast('Purge failed: ' + error.message, 'danger');
+            executeBtn.disabled = false;
+            executeBtn.innerHTML = '<i class="bi bi-trash3 me-1"></i>Purge Products';
         }
     }
 

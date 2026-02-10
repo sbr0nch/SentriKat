@@ -1077,6 +1077,125 @@ def delete_product(product_id):
         return jsonify({'success': False, 'error': ERROR_MSGS['database']}), 500
 
 
+@bp.route('/api/products/purge', methods=['POST'])
+@admin_required
+@limiter.limit("5 per minute")
+def purge_products():
+    """
+    Bulk delete all products from specified organizations or globally.
+    Super admin only. Cascading deletes: installations, matches, version history, org links.
+    """
+    from app.auth import get_current_user
+    current_user = get_current_user()
+    if not current_user or not current_user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    purge_all = data.get('all_organizations', False)
+    org_ids = data.get('organization_ids', [])
+
+    if not purge_all and not org_ids:
+        return jsonify({'error': 'Specify all_organizations=true or organization_ids'}), 400
+
+    try:
+        from app.models import product_organizations
+
+        if purge_all:
+            # Delete ALL products globally
+            product_ids = [p.id for p in Product.query.with_entities(Product.id).all()]
+        else:
+            # Get products belonging to the selected organizations
+            # Include both legacy org_id and many-to-many
+            from sqlalchemy import select, or_
+
+            legacy_ids = set(
+                p.id for p in Product.query.filter(Product.organization_id.in_(org_ids))
+                .with_entities(Product.id).all()
+            )
+
+            m2m_ids = set(
+                row.product_id for row in db.session.execute(
+                    select(product_organizations.c.product_id).where(
+                        product_organizations.c.organization_id.in_(org_ids)
+                    )
+                ).all()
+            )
+
+            product_ids = list(legacy_ids | m2m_ids)
+
+        if not product_ids:
+            return jsonify({
+                'success': True,
+                'deleted_products': 0,
+                'deleted_installations': 0,
+                'deleted_matches': 0,
+                'message': 'No products found for the selected organizations'
+            })
+
+        # Cascade delete in correct order (foreign key dependencies)
+        # Process in batches to avoid locking issues on large datasets
+        batch_size = 500
+        total_installations = 0
+        total_matches = 0
+        total_versions = 0
+
+        for i in range(0, len(product_ids), batch_size):
+            batch = product_ids[i:i + batch_size]
+            total_versions += ProductVersionHistory.query.filter(
+                ProductVersionHistory.product_id.in_(batch)
+            ).delete(synchronize_session=False)
+            total_installations += ProductInstallation.query.filter(
+                ProductInstallation.product_id.in_(batch)
+            ).delete(synchronize_session=False)
+            total_matches += VulnerabilityMatch.query.filter(
+                VulnerabilityMatch.product_id.in_(batch)
+            ).delete(synchronize_session=False)
+
+        # Remove many-to-many org links
+        db.session.execute(
+            product_organizations.delete().where(
+                product_organizations.c.product_id.in_(product_ids)
+            )
+        )
+
+        # Delete products
+        deleted_products = Product.query.filter(Product.id.in_(product_ids)).delete(
+            synchronize_session=False
+        )
+
+        db.session.commit()
+
+        # Audit log
+        log_audit_event(
+            'delete',
+            'products',
+            None,
+            details=f"Purged {deleted_products} products" +
+                    (f" from organizations {org_ids}" if not purge_all else " globally") +
+                    f" ({total_installations} installations, {total_matches} matches, {total_versions} version records)"
+        )
+
+        logger.warning(
+            f"PURGE: User {current_user.username} deleted {deleted_products} products"
+            f" ({total_installations} installations, {total_matches} matches)"
+            + (" globally" if purge_all else f" from orgs {org_ids}")
+        )
+
+        return jsonify({
+            'success': True,
+            'deleted_products': deleted_products,
+            'deleted_installations': total_installations,
+            'deleted_matches': total_matches,
+            'deleted_versions': total_versions
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("Failed to purge products")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
