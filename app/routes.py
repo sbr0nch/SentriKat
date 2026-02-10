@@ -1481,6 +1481,256 @@ def get_vulnerability_stats():
     })
 
 
+@bp.route('/api/vulnerabilities/charts', methods=['GET'])
+@login_required
+def get_vulnerability_chart_data():
+    """
+    Get chart data for configurable dashboard widgets.
+
+    Query params:
+    - chart: Chart type (top_vendors, epss_distribution, remediation_rate, age_distribution, vuln_timeline)
+
+    Returns chart-specific data formatted for Chart.js rendering.
+    """
+    from app.models import product_organizations, VulnerabilitySnapshot
+    from sqlalchemy import select
+    from collections import defaultdict
+
+    chart_type = request.args.get('chart', 'top_vendors')
+
+    # Get current organization
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
+    # Get org product IDs (handles both legacy and multi-org)
+    org_product_ids = None
+    if org_id:
+        legacy_ids = [p.id for p in Product.query.filter_by(organization_id=org_id).all()]
+        multi_ids = [row.product_id for row in db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == org_id
+            )
+        ).all()]
+        org_product_ids = list(set(legacy_ids + multi_ids))
+
+    try:
+        if chart_type == 'top_vendors':
+            return _chart_top_vendors(org_product_ids)
+        elif chart_type == 'epss_distribution':
+            return _chart_epss_distribution(org_product_ids)
+        elif chart_type == 'remediation_rate':
+            return _chart_remediation_rate(org_product_ids)
+        elif chart_type == 'age_distribution':
+            return _chart_age_distribution(org_product_ids)
+        elif chart_type == 'vuln_timeline':
+            return _chart_vuln_timeline(org_product_ids)
+        else:
+            return jsonify({'error': f'Unknown chart type: {chart_type}'}), 400
+    except Exception as e:
+        logger.exception(f"Error generating chart data for {chart_type}")
+        return jsonify({'error': 'Failed to generate chart data'}), 500
+
+
+def _chart_top_vendors(org_product_ids):
+    """Top 10 vendors by unacknowledged vulnerability count."""
+    query = db.session.query(
+        Vulnerability.vendor_project,
+        func.count(VulnerabilityMatch.id).label('count')
+    ).join(
+        VulnerabilityMatch, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+    ).filter(
+        VulnerabilityMatch.acknowledged == False
+    )
+
+    if org_product_ids is not None:
+        if org_product_ids:
+            query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
+        else:
+            return jsonify({'labels': [], 'values': [], 'chart_type': 'top_vendors'})
+
+    results = query.group_by(Vulnerability.vendor_project).order_by(
+        func.count(VulnerabilityMatch.id).desc()
+    ).limit(10).all()
+
+    return jsonify({
+        'labels': [r[0] or 'Unknown' for r in results],
+        'values': [r[1] for r in results],
+        'chart_type': 'top_vendors',
+        'title': 'Top Affected Vendors'
+    })
+
+
+def _chart_epss_distribution(org_product_ids):
+    """EPSS score distribution across matched vulnerabilities."""
+    query = db.session.query(
+        Vulnerability.epss_score
+    ).join(
+        VulnerabilityMatch, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+    ).filter(
+        VulnerabilityMatch.acknowledged == False,
+        Vulnerability.epss_score.isnot(None)
+    )
+
+    if org_product_ids is not None:
+        if org_product_ids:
+            query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
+        else:
+            return jsonify({'labels': [], 'values': [], 'chart_type': 'epss_distribution'})
+
+    scores = [r[0] for r in query.distinct().all()]
+
+    # Bucket into ranges
+    buckets = {'0-10%': 0, '10-30%': 0, '30-50%': 0, '50-70%': 0, '70-90%': 0, '90-100%': 0}
+    for s in scores:
+        pct = s * 100
+        if pct < 10:
+            buckets['0-10%'] += 1
+        elif pct < 30:
+            buckets['10-30%'] += 1
+        elif pct < 50:
+            buckets['30-50%'] += 1
+        elif pct < 70:
+            buckets['50-70%'] += 1
+        elif pct < 90:
+            buckets['70-90%'] += 1
+        else:
+            buckets['90-100%'] += 1
+
+    return jsonify({
+        'labels': list(buckets.keys()),
+        'values': list(buckets.values()),
+        'chart_type': 'epss_distribution',
+        'title': 'EPSS Exploit Probability Distribution',
+        'total_scored': len(scores)
+    })
+
+
+def _chart_remediation_rate(org_product_ids):
+    """Acknowledged vs unacknowledged over time from snapshots."""
+    from app.models import VulnerabilitySnapshot
+
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
+    snapshots = VulnerabilitySnapshot.get_trend_data(organization_id=org_id, days=30)
+
+    dates = []
+    acknowledged = []
+    unacknowledged = []
+    rates = []
+
+    for s in snapshots:
+        dates.append(s.snapshot_date.strftime('%Y-%m-%d'))
+        total = (s.acknowledged or 0) + (s.unacknowledged or 0)
+        acknowledged.append(s.acknowledged or 0)
+        unacknowledged.append(s.unacknowledged or 0)
+        rates.append(round((s.acknowledged / total * 100), 1) if total > 0 else 0)
+
+    return jsonify({
+        'dates': dates,
+        'acknowledged': acknowledged,
+        'unacknowledged': unacknowledged,
+        'rates': rates,
+        'chart_type': 'remediation_rate',
+        'title': 'Remediation Progress'
+    })
+
+
+def _chart_age_distribution(org_product_ids):
+    """Distribution of vulnerability age (days since added to KEV)."""
+    query = db.session.query(
+        Vulnerability.date_added
+    ).join(
+        VulnerabilityMatch, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+    ).filter(
+        VulnerabilityMatch.acknowledged == False
+    )
+
+    if org_product_ids is not None:
+        if org_product_ids:
+            query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
+        else:
+            return jsonify({'labels': [], 'values': [], 'chart_type': 'age_distribution'})
+
+    dates = [r[0] for r in query.distinct().all()]
+    today = datetime.utcnow().date()
+
+    buckets = {
+        '< 7 days': 0,
+        '7-30 days': 0,
+        '30-90 days': 0,
+        '90-180 days': 0,
+        '180-365 days': 0,
+        '> 1 year': 0
+    }
+
+    for d in dates:
+        if d is None:
+            continue
+        age = (today - d).days
+        if age < 7:
+            buckets['< 7 days'] += 1
+        elif age < 30:
+            buckets['7-30 days'] += 1
+        elif age < 90:
+            buckets['30-90 days'] += 1
+        elif age < 180:
+            buckets['90-180 days'] += 1
+        elif age < 365:
+            buckets['180-365 days'] += 1
+        else:
+            buckets['> 1 year'] += 1
+
+    return jsonify({
+        'labels': list(buckets.keys()),
+        'values': list(buckets.values()),
+        'chart_type': 'age_distribution',
+        'title': 'Vulnerability Age Distribution'
+    })
+
+
+def _chart_vuln_timeline(org_product_ids):
+    """New vulnerabilities added to KEV per month (last 12 months)."""
+    from collections import OrderedDict
+
+    twelve_months_ago = datetime.utcnow() - timedelta(days=365)
+
+    query = db.session.query(
+        func.date_trunc('month', Vulnerability.date_added).label('month'),
+        func.count(func.distinct(Vulnerability.id)).label('total_cves'),
+    ).join(
+        VulnerabilityMatch, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+    ).filter(
+        Vulnerability.date_added >= twelve_months_ago
+    )
+
+    if org_product_ids is not None:
+        if org_product_ids:
+            query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
+        else:
+            return jsonify({'labels': [], 'values': [], 'chart_type': 'vuln_timeline'})
+
+    results = query.group_by('month').order_by('month').all()
+
+    labels = []
+    values = []
+    for r in results:
+        if r[0]:
+            labels.append(r[0].strftime('%b %Y'))
+            values.append(r[1])
+
+    return jsonify({
+        'labels': labels,
+        'values': values,
+        'chart_type': 'vuln_timeline',
+        'title': 'New Affecting CVEs per Month'
+    })
+
+
 @bp.route('/api/vulnerabilities/trends', methods=['GET'])
 @login_required
 def get_vulnerability_trends():

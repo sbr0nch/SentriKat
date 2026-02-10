@@ -45,6 +45,10 @@ services:
       # License persistence: Set a fixed installation ID to keep license across rebuilds
       # Generate once with: echo "SK-INST-$(openssl rand -hex 16 | tr '[:lower:]' '[:upper:]')"
       - SENTRIKAT_INSTALLATION_ID=${SENTRIKAT_INSTALLATION_ID:-}
+      # Gunicorn performance tuning (defaults: auto-detect CPUs, 4 threads, gthread workers)
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-4}
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
     volumes:
       - sentrikat_data:/app/data
       # Custom CA certificates for trusting internal/corporate PKI

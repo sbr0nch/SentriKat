@@ -2429,12 +2429,25 @@ class VulnerabilitySnapshot(db.Model):
         }
 
     @classmethod
+    def _get_org_product_ids(cls, organization_id):
+        """Get all product IDs for an organization, including both legacy and multi-org relationships."""
+        from sqlalchemy import select
+        legacy_ids = [p.id for p in Product.query.filter_by(organization_id=organization_id).all()]
+        multi_org_ids = [row.product_id for row in db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == organization_id
+            )
+        ).all()]
+        return list(set(legacy_ids + multi_org_ids))
+
+    @classmethod
     def take_snapshot(cls, organization_id=None):
         """
         Take a snapshot of current vulnerability statistics.
         If organization_id is None, takes a global snapshot.
+        Handles both legacy Product.organization_id and many-to-many product_organizations.
         """
-        from sqlalchemy import func
+        from sqlalchemy import func, select
 
         today = date.today()
 
@@ -2447,11 +2460,8 @@ class VulnerabilitySnapshot(db.Model):
         if existing:
             return existing  # Already have today's snapshot
 
-        # Build query filters
-        if organization_id:
-            product_filter = Product.organization_id == organization_id
-        else:
-            product_filter = True  # No filter for global
+        # Get org product IDs (handles both legacy and multi-org relationships)
+        org_product_ids = cls._get_org_product_ids(organization_id) if organization_id else None
 
         # Get total KEV vulnerabilities
         total_vulns = Vulnerability.query.count()
@@ -2464,10 +2474,10 @@ class VulnerabilitySnapshot(db.Model):
             func.sum(db.case((VulnerabilityMatch.snoozed_until != None, 1), else_=0)).label('snoozed')
         )
 
-        if organization_id:
-            match_query = match_query.join(Product, VulnerabilityMatch.product_id == Product.id).filter(
-                Product.organization_id == organization_id
-            )
+        if org_product_ids is not None:
+            match_query = match_query.filter(
+                VulnerabilityMatch.product_id.in_(org_product_ids)
+            ) if org_product_ids else match_query.filter(VulnerabilityMatch.id < 0)
 
         match_stats = match_query.first()
 
@@ -2481,19 +2491,22 @@ class VulnerabilitySnapshot(db.Model):
             VulnerabilityMatch.acknowledged == False
         )
 
-        if organization_id:
-            severity_query = severity_query.join(
-                Product, VulnerabilityMatch.product_id == Product.id
-            ).filter(Product.organization_id == organization_id)
+        if org_product_ids is not None:
+            severity_query = severity_query.filter(
+                VulnerabilityMatch.product_id.in_(org_product_ids)
+            ) if org_product_ids else severity_query.filter(VulnerabilityMatch.id < 0)
 
         severity_query = severity_query.group_by(Vulnerability.severity)
         severity_counts = dict(severity_query.all())
 
         # Get product counts
-        products_query = Product.query.filter(Product.active == True)
-        if organization_id:
-            products_query = products_query.filter(Product.organization_id == organization_id)
-        products_tracked = products_query.count()
+        if org_product_ids is not None:
+            products_tracked = Product.query.filter(
+                Product.active == True,
+                Product.id.in_(org_product_ids)
+            ).count() if org_product_ids else 0
+        else:
+            products_tracked = Product.query.filter(Product.active == True).count()
 
         # Products with vulnerabilities
         products_with_vulns_query = db.session.query(
@@ -2502,10 +2515,10 @@ class VulnerabilitySnapshot(db.Model):
             Product.active == True,
             VulnerabilityMatch.acknowledged == False
         )
-        if organization_id:
+        if org_product_ids is not None:
             products_with_vulns_query = products_with_vulns_query.filter(
-                Product.organization_id == organization_id
-            )
+                VulnerabilityMatch.product_id.in_(org_product_ids)
+            ) if org_product_ids else products_with_vulns_query.filter(VulnerabilityMatch.id < 0)
         products_with_vulns = products_with_vulns_query.scalar() or 0
 
         # Get agent count

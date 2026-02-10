@@ -285,44 +285,72 @@
             </div>
         </div>
 
-        <!-- Right Column: Dual Charts -->
+        <!-- Right Column: Configurable Chart Widgets -->
         <div class="col-lg-7 col-xl-8">
             <div class="row g-3 h-100">
-                <!-- Severity Breakdown Donut -->
+                <!-- Widget Slot 1 (Left) -->
                 <div class="col-md-5">
-                    <div class="card h-100" id="severityChartCard">
-                        <div class="card-header py-2">
-                            <span><i class="bi bi-pie-chart me-2"></i>Priority Breakdown</span>
+                    <div class="card h-100" id="widgetCard1">
+                        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                            <span id="widgetTitle1"><i class="bi bi-pie-chart me-2"></i>Priority Breakdown</span>
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-outline-secondary py-0 px-2 dropdown-toggle" type="button" data-bs-toggle="dropdown" title="Change widget">
+                                    <i class="bi bi-gear"></i>
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'severity_donut'); return false;"><i class="bi bi-pie-chart me-2"></i>Priority Breakdown</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'epss_distribution'); return false;"><i class="bi bi-lightning-charge me-2"></i>EPSS Distribution</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'age_distribution'); return false;"><i class="bi bi-clock-history me-2"></i>Vulnerability Age</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'top_vendors'); return false;"><i class="bi bi-building me-2"></i>Top Vendors</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'vuln_timeline'); return false;"><i class="bi bi-calendar3 me-2"></i>Monthly Timeline</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'remediation_rate'); return false;"><i class="bi bi-check2-circle me-2"></i>Remediation Progress</a></li>
+                                </ul>
+                            </div>
                         </div>
                         <div class="card-body py-2 d-flex flex-column align-items-center justify-content-center">
-                            <p class="text-muted mb-1 small" style="font-size: 0.7rem;">Unacknowledged matches by effective priority</p>
-                            <div id="severityChartContainer" style="position: relative; width: 100%; max-height: 200px;">
-                                <canvas id="severityChart"></canvas>
+                            <p class="text-muted mb-1 small widget-subtitle" id="widgetSubtitle1" style="font-size: 0.7rem;">Unacknowledged matches by effective priority</p>
+                            <div id="widgetChartContainer1" style="position: relative; width: 100%; max-height: 200px;">
+                                <canvas id="widgetCanvas1"></canvas>
                             </div>
-                            <div id="severityNoData" class="text-center text-muted py-3 d-none">
+                            <div id="widgetNoData1" class="text-center text-muted py-3 d-none">
                                 <i class="bi bi-pie-chart fs-2 opacity-50"></i>
                                 <p class="mt-1 mb-0 small">No data yet</p>
                             </div>
                         </div>
                     </div>
                 </div>
-                <!-- Trend Line -->
+                <!-- Widget Slot 2 (Right) -->
                 <div class="col-md-7">
-                    <div class="card h-100" id="trendChartCard">
+                    <div class="card h-100" id="widgetCard2">
                         <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-graph-up me-2"></i>30-Day Trend</span>
-                            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="loadTrendChart()" title="Refresh">
-                                <i class="bi bi-arrow-clockwise"></i>
-                            </button>
+                            <span id="widgetTitle2"><i class="bi bi-building me-2"></i>Top Affected Vendors</span>
+                            <div class="d-flex gap-1">
+                                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="refreshWidget(2)" title="Refresh">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-secondary py-0 px-2 dropdown-toggle" type="button" data-bs-toggle="dropdown" title="Change widget">
+                                        <i class="bi bi-gear"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item" href="#" onclick="setWidget(2, 'severity_donut'); return false;"><i class="bi bi-pie-chart me-2"></i>Priority Breakdown</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="setWidget(2, 'epss_distribution'); return false;"><i class="bi bi-lightning-charge me-2"></i>EPSS Distribution</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="setWidget(2, 'age_distribution'); return false;"><i class="bi bi-clock-history me-2"></i>Vulnerability Age</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="setWidget(2, 'top_vendors'); return false;"><i class="bi bi-building me-2"></i>Top Vendors</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="setWidget(2, 'vuln_timeline'); return false;"><i class="bi bi-calendar3 me-2"></i>Monthly Timeline</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="setWidget(2, 'remediation_rate'); return false;"><i class="bi bi-check2-circle me-2"></i>Remediation Progress</a></li>
+                                    </ul>
+                                </div>
+                            </div>
                         </div>
                         <div class="card-body py-2">
-                            <p class="text-muted mb-1 small" style="font-size: 0.7rem;">Daily snapshots of unacknowledged vulnerabilities by CVSS severity</p>
-                            <div id="trendChartContainer" style="position: relative; height: 190px;">
-                                <canvas id="trendChart"></canvas>
+                            <p class="text-muted mb-1 small widget-subtitle" id="widgetSubtitle2" style="font-size: 0.7rem;">Top 10 vendors with unacknowledged vulnerabilities</p>
+                            <div id="widgetChartContainer2" style="position: relative; height: 190px;">
+                                <canvas id="widgetCanvas2"></canvas>
                             </div>
-                            <div id="trendNoData" class="text-center text-muted py-3 d-none">
+                            <div id="widgetNoData2" class="text-center text-muted py-3 d-none">
                                 <i class="bi bi-bar-chart fs-2 opacity-50"></i>
-                                <p class="mt-1 mb-0 small">No trend data yet. Snapshots taken daily.</p>
+                                <p class="mt-1 mb-0 small">No data yet</p>
                                 {% if session.get('is_admin') %}
                                 <button class="btn btn-sm btn-outline-primary mt-1" onclick="takeManualSnapshot()">
                                     <i class="bi bi-camera"></i> Take Snapshot
@@ -387,11 +415,12 @@
                     <input type="text" class="form-control" id="filterCVE" placeholder="CVE-...">
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label">Sort</label>
-                    <select class="form-select" id="sortBy">
-                        <option value="priority">Priority</option>
-                        <option value="date_desc">Newest</option>
-                        <option value="date_asc">Oldest</option>
+                    <label class="form-label">EPSS Risk</label>
+                    <select class="form-select" id="filterEpss">
+                        <option value="">All</option>
+                        <option value="critical">Top 5% (Critical)</option>
+                        <option value="high">Top 15% (High)</option>
+                        <option value="medium">Top 30% (Medium)</option>
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
@@ -663,8 +692,9 @@
 {% endblock %}
 
 {% block extra_js %}
-<!-- Chart.js for trend visualization -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<!-- Chart.js for trend visualization (local-first with CDN fallback) -->
+<script src="{{ url_for('static', filename='vendor/js/chart.umd.min.js') }}"
+        onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';document.body.appendChild(s);"></script>
 <script>
     // Helper functions for priority styling
     function getPriorityBadgeClass(priority) {
@@ -1088,8 +1118,9 @@
             document.getElementById('lowCves').textContent = formatNumber(stats.low_cves || 0);
             document.getElementById('lowCount').textContent = formatNumber(stats.low_count || 0);
 
-            // Update severity donut chart with real-time priority data
-            updateSeverityDonut(stats);
+            // Update configurable dashboard widgets with stats data
+            lastStatsData = stats;
+            loadAllWidgets();
         } catch (error) {
             console.error('Error loading stats:', error);
             // Show error in cards instead of just toast
@@ -1110,266 +1141,339 @@
         }
     }
 
-    // Chart instances
-    let trendChartInstance = null;
-    let severityChartInstance = null;
+    // ============================================================================
+    // Configurable Dashboard Widget System
+    // ============================================================================
 
-    function updateSeverityDonut(stats) {
+    // Chart instances for each widget slot
+    const widgetInstances = { 1: null, 2: null };
+    let lastStatsData = null;
+
+    // Widget type definitions
+    const WIDGET_TYPES = {
+        severity_donut: { icon: 'bi-pie-chart', title: 'Priority Breakdown', subtitle: 'Unacknowledged matches by effective priority' },
+        epss_distribution: { icon: 'bi-lightning-charge', title: 'EPSS Distribution', subtitle: 'Exploit probability score distribution' },
+        age_distribution: { icon: 'bi-clock-history', title: 'Vulnerability Age', subtitle: 'Time since CVEs were added to KEV catalog' },
+        top_vendors: { icon: 'bi-building', title: 'Top Affected Vendors', subtitle: 'Top 10 vendors with unacknowledged vulnerabilities' },
+        vuln_timeline: { icon: 'bi-calendar3', title: 'Monthly Timeline', subtitle: 'New affecting CVEs per month (last 12 months)' },
+        remediation_rate: { icon: 'bi-check2-circle', title: 'Remediation Progress', subtitle: 'Acknowledged vs unacknowledged over time' }
+    };
+
+    // Get saved widget preferences from localStorage
+    function getWidgetPrefs() {
+        try {
+            const saved = localStorage.getItem('sentrikat_widget_prefs');
+            if (saved) return JSON.parse(saved);
+        } catch (e) { /* ignore */ }
+        return { slot1: 'severity_donut', slot2: 'top_vendors' };
+    }
+
+    function saveWidgetPrefs(prefs) {
+        localStorage.setItem('sentrikat_widget_prefs', JSON.stringify(prefs));
+    }
+
+    // Set widget type for a slot and reload
+    function setWidget(slot, widgetType) {
+        const prefs = getWidgetPrefs();
+        prefs['slot' + slot] = widgetType;
+        saveWidgetPrefs(prefs);
+        loadWidget(slot, widgetType);
+    }
+
+    function refreshWidget(slot) {
+        const prefs = getWidgetPrefs();
+        loadWidget(slot, prefs['slot' + slot]);
+    }
+
+    // Load all widgets based on saved preferences
+    function loadAllWidgets() {
+        const prefs = getWidgetPrefs();
+        loadWidget(1, prefs.slot1);
+        loadWidget(2, prefs.slot2);
+    }
+
+    // Common chart helpers
+    function getChartColors() {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        const legendColor = isDark ? '#d1d5db' : undefined;
-        const tooltipBg = isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)';
+        return {
+            isDark,
+            gridColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+            tickColor: isDark ? '#9ca3af' : '#6b7280',
+            legendColor: isDark ? '#d1d5db' : undefined,
+            tooltipBg: isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)',
+            borderColor: isDark ? '#1e1e1e' : '#ffffff'
+        };
+    }
 
-        const critical = stats.critical_count || 0;
-        const high = stats.high_count || 0;
-        const medium = stats.medium_count || 0;
-        const low = stats.low_count || 0;
+    function formatAxisValue(value) {
+        if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+        if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
+        return value;
+    }
+
+    // Load a specific widget into a slot
+    async function loadWidget(slot, widgetType) {
+        const meta = WIDGET_TYPES[widgetType] || WIDGET_TYPES.severity_donut;
+        const titleEl = document.getElementById('widgetTitle' + slot);
+        const subtitleEl = document.getElementById('widgetSubtitle' + slot);
+        const container = document.getElementById('widgetChartContainer' + slot);
+        const noData = document.getElementById('widgetNoData' + slot);
+        const canvas = document.getElementById('widgetCanvas' + slot);
+
+        // Update header
+        titleEl.innerHTML = `<i class="bi ${meta.icon} me-2"></i>${meta.title}`;
+        subtitleEl.textContent = meta.subtitle;
+
+        // Destroy old chart
+        if (widgetInstances[slot]) {
+            widgetInstances[slot].destroy();
+            widgetInstances[slot] = null;
+        }
+
+        try {
+            if (widgetType === 'severity_donut') {
+                renderSeverityDonut(slot, lastStatsData);
+            } else {
+                const response = await fetchWithRetry(`/api/vulnerabilities/charts?chart=${widgetType}`, {}, 2, 500);
+                if (!response.ok) throw new Error(`Server error: ${response.status}`);
+                const data = await response.json();
+                renderChartWidget(slot, widgetType, data);
+            }
+        } catch (error) {
+            console.error(`Error loading widget ${widgetType}:`, error);
+            container.classList.add('d-none');
+            noData.classList.remove('d-none');
+        }
+    }
+
+    // Render severity donut (uses live stats data)
+    function renderSeverityDonut(slot, stats) {
+        const container = document.getElementById('widgetChartContainer' + slot);
+        const noData = document.getElementById('widgetNoData' + slot);
+        const canvas = document.getElementById('widgetCanvas' + slot);
+        const colors = getChartColors();
+
+        const critical = (stats && stats.critical_count) || 0;
+        const high = (stats && stats.high_count) || 0;
+        const medium = (stats && stats.medium_count) || 0;
+        const low = (stats && stats.low_count) || 0;
         const total = critical + high + medium + low;
 
         if (total === 0) {
-            document.getElementById('severityChartContainer').classList.add('d-none');
-            document.getElementById('severityNoData').classList.remove('d-none');
+            container.classList.add('d-none');
+            noData.classList.remove('d-none');
             return;
         }
 
-        document.getElementById('severityChartContainer').classList.remove('d-none');
-        document.getElementById('severityNoData').classList.add('d-none');
+        container.classList.remove('d-none');
+        noData.classList.add('d-none');
 
-        if (severityChartInstance) severityChartInstance.destroy();
-
-        const sCtx = document.getElementById('severityChart').getContext('2d');
-        severityChartInstance = new Chart(sCtx, {
+        widgetInstances[slot] = new Chart(canvas.getContext('2d'), {
             type: 'doughnut',
             data: {
                 labels: ['Critical', 'High', 'Medium', 'Low'],
                 datasets: [{
                     data: [critical, high, medium, low],
-                    backgroundColor: [
-                        'rgba(220, 38, 38, 0.8)',
-                        'rgba(245, 158, 11, 0.8)',
-                        'rgba(59, 130, 246, 0.8)',
-                        'rgba(34, 197, 94, 0.8)'
-                    ],
-                    borderColor: isDark ? '#1e1e1e' : '#ffffff',
+                    backgroundColor: ['rgba(220, 38, 38, 0.8)', 'rgba(245, 158, 11, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(34, 197, 94, 0.8)'],
+                    borderColor: colors.borderColor,
                     borderWidth: 2,
                     hoverOffset: 6
                 }]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                cutout: '60%',
+                responsive: true, maintainAspectRatio: true, cutout: '60%',
                 plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            usePointStyle: true,
-                            padding: 10,
-                            font: { size: 10 },
-                            color: legendColor,
-                            generateLabels: function(chart) {
-                                const data = chart.data;
-                                return data.labels.map((label, i) => ({
-                                    text: label + ' (' + data.datasets[0].data[i] + ')',
-                                    fillStyle: data.datasets[0].backgroundColor[i],
-                                    strokeStyle: data.datasets[0].backgroundColor[i],
-                                    pointStyle: 'circle',
-                                    hidden: false,
-                                    index: i
-                                }));
-                            }
+                    legend: { position: 'bottom', labels: { usePointStyle: true, padding: 10, font: { size: 10 }, color: colors.legendColor,
+                        generateLabels: function(chart) {
+                            return chart.data.labels.map((label, i) => ({
+                                text: label + ' (' + chart.data.datasets[0].data[i] + ')',
+                                fillStyle: chart.data.datasets[0].backgroundColor[i],
+                                strokeStyle: chart.data.datasets[0].backgroundColor[i],
+                                pointStyle: 'circle', hidden: false, index: i
+                            }));
                         }
-                    },
-                    tooltip: {
-                        backgroundColor: tooltipBg,
-                        titleColor: '#fff',
-                        bodyColor: '#e5e7eb',
-                        callbacks: {
-                            label: function(context) {
-                                const pct = ((context.parsed / total) * 100).toFixed(1);
-                                return context.label + ': ' + context.parsed + ' (' + pct + '%)';
-                            }
-                        }
+                    }},
+                    tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb',
+                        callbacks: { label: ctx => ctx.label + ': ' + ctx.parsed + ' (' + ((ctx.parsed / total) * 100).toFixed(1) + '%)' }
                     }
                 }
             }
         });
     }
 
-    async function loadTrendChart() {
-        try {
-            const response = await fetch('/api/vulnerabilities/trends?days=30');
-            if (!response.ok) {
-                throw new Error(`Server error: ${response.status}`);
-            }
+    // Generic chart renderer for API-driven widgets
+    function renderChartWidget(slot, widgetType, data) {
+        const container = document.getElementById('widgetChartContainer' + slot);
+        const noData = document.getElementById('widgetNoData' + slot);
+        const canvas = document.getElementById('widgetCanvas' + slot);
+        const colors = getChartColors();
 
-            const data = await response.json();
-            const trends = data.trends;
+        const hasData = (data.labels && data.labels.length > 0) || (data.dates && data.dates.length > 0);
+        if (!hasData) {
+            container.classList.add('d-none');
+            noData.classList.remove('d-none');
+            return;
+        }
 
-            // Dark mode aware colors
-            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-            const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
-            const tickColor = isDark ? '#9ca3af' : '#6b7280';
-            const legendColor = isDark ? '#d1d5db' : undefined;
-            const tooltipBg = isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)';
+        container.classList.remove('d-none');
+        noData.classList.add('d-none');
 
-            // Severity colors
-            const colors = {
-                critical: { bg: '#dc2626' },
-                high:     { bg: '#f59e0b' },
-                medium:   { bg: '#3b82f6' },
-                low:      { bg: '#22c55e' }
-            };
+        const ctx = canvas.getContext('2d');
+        let chartConfig;
 
-            // --- Trend Line Chart ---
-            if (!trends.dates || trends.dates.length === 0) {
-                document.getElementById('trendChartContainer').classList.add('d-none');
-                document.getElementById('trendNoData').classList.remove('d-none');
-                return;
-            }
-
-            document.getElementById('trendChartContainer').classList.remove('d-none');
-            document.getElementById('trendNoData').classList.add('d-none');
-
-            const ctx = document.getElementById('trendChart').getContext('2d');
-
-            if (trendChartInstance) {
-                trendChartInstance.destroy();
-            }
-
-            // Format dates for display
-            const labels = trends.dates.map(d => {
-                const date = new Date(d);
-                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            });
-
-            function formatAxisValue(value) {
-                if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
-                if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
-                return value;
-            }
-
-            // Build datasets - severity lines + total unacknowledged
-            const datasets = [
-                {
-                    label: 'Critical',
-                    data: trends.critical,
-                    borderColor: colors.critical.bg,
-                    backgroundColor: 'rgba(220, 38, 38, 0.05)',
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 2,
-                    pointHoverRadius: 5,
-                    borderWidth: 2.5
-                },
-                {
-                    label: 'High',
-                    data: trends.high,
-                    borderColor: colors.high.bg,
-                    backgroundColor: 'rgba(245, 158, 11, 0.05)',
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 2,
-                    pointHoverRadius: 5,
-                    borderWidth: 2
-                },
-                {
-                    label: 'Medium',
-                    data: trends.medium,
-                    borderColor: colors.medium.bg,
-                    backgroundColor: 'rgba(59, 130, 246, 0.05)',
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 2,
-                    pointHoverRadius: 5,
-                    borderWidth: 2
-                }
-            ];
-
-            // Add Low line if there's data
-            if (trends.low && trends.low.some(v => v > 0)) {
-                datasets.push({
-                    label: 'Low',
-                    data: trends.low,
-                    borderColor: colors.low.bg,
-                    backgroundColor: 'rgba(34, 197, 94, 0.05)',
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 2,
-                    pointHoverRadius: 5,
-                    borderWidth: 1.5
-                });
-            }
-
-            trendChartInstance = new Chart(ctx, {
-                type: 'line',
-                data: { labels: labels, datasets: datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        intersect: false,
-                        mode: 'index'
+        switch (widgetType) {
+            case 'top_vendors':
+                chartConfig = {
+                    type: 'bar',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: 'Vulnerabilities',
+                            data: data.values,
+                            backgroundColor: data.labels.map((_, i) => {
+                                const palette = ['#dc2626', '#f59e0b', '#3b82f6', '#22c55e', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#84cc16'];
+                                return palette[i % palette.length] + 'CC';
+                            }),
+                            borderRadius: 4,
+                            borderSkipped: false
+                        }]
                     },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: {
-                                usePointStyle: true,
-                                padding: 12,
-                                font: { size: 10 },
-                                color: legendColor,
-                                boxWidth: 8
-                            }
+                    options: {
+                        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
                         },
-                        tooltip: {
-                            backgroundColor: tooltipBg,
-                            titleColor: '#fff',
-                            bodyColor: '#e5e7eb',
-                            padding: 10,
-                            titleFont: { size: 12 },
-                            bodyFont: { size: 11 },
-                            callbacks: {
-                                title: function(context) {
-                                    const idx = context[0].dataIndex;
-                                    return trends.dates[idx];
-                                },
-                                label: function(context) {
-                                    return ' ' + context.dataset.label + ': ' + formatAxisValue(context.parsed.y);
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            grid: { display: false },
-                            ticks: {
-                                font: { size: 9 },
-                                color: tickColor,
-                                maxRotation: 45,
-                                autoSkip: true,
-                                maxTicksLimit: 10
-                            }
-                        },
-                        y: {
-                            type: 'linear',
-                            position: 'left',
-                            beginAtZero: true,
-                            grid: { color: gridColor },
-                            ticks: {
-                                font: { size: 10 },
-                                color: tickColor,
-                                precision: 0,
-                                callback: formatAxisValue
-                            }
+                        scales: {
+                            x: { beginAtZero: true, grid: { color: colors.gridColor }, ticks: { font: { size: 10 }, color: colors.tickColor, precision: 0, callback: formatAxisValue } },
+                            y: { grid: { display: false }, ticks: { font: { size: 9 }, color: colors.tickColor } }
                         }
                     }
-                }
-            });
-        } catch (error) {
-            console.error('Error loading trend chart:', error);
-            document.getElementById('trendChartContainer').classList.add('d-none');
-            document.getElementById('trendNoData').classList.remove('d-none');
+                };
+                break;
+
+            case 'epss_distribution':
+                chartConfig = {
+                    type: 'bar',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: 'CVEs',
+                            data: data.values,
+                            backgroundColor: ['#22c55eCC', '#84cc16CC', '#f59e0bCC', '#f97316CC', '#ef4444CC', '#dc2626CC'],
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { font: { size: 9 }, color: colors.tickColor } },
+                            y: { beginAtZero: true, grid: { color: colors.gridColor }, ticks: { font: { size: 10 }, color: colors.tickColor, precision: 0 } }
+                        }
+                    }
+                };
+                break;
+
+            case 'age_distribution':
+                chartConfig = {
+                    type: 'bar',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: 'CVEs',
+                            data: data.values,
+                            backgroundColor: ['#dc2626CC', '#f59e0bCC', '#3b82f6CC', '#8b5cf6CC', '#6b7280CC', '#374151CC'],
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { font: { size: 9 }, color: colors.tickColor } },
+                            y: { beginAtZero: true, grid: { color: colors.gridColor }, ticks: { font: { size: 10 }, color: colors.tickColor, precision: 0 } }
+                        }
+                    }
+                };
+                break;
+
+            case 'vuln_timeline':
+                chartConfig = {
+                    type: 'bar',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: 'New CVEs',
+                            data: data.values,
+                            backgroundColor: '#3b82f6CC',
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { font: { size: 9 }, color: colors.tickColor, maxRotation: 45 } },
+                            y: { beginAtZero: true, grid: { color: colors.gridColor }, ticks: { font: { size: 10 }, color: colors.tickColor, precision: 0 } }
+                        }
+                    }
+                };
+                break;
+
+            case 'remediation_rate':
+                chartConfig = {
+                    type: 'line',
+                    data: {
+                        labels: data.dates.map(d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })),
+                        datasets: [
+                            {
+                                label: 'Acknowledged',
+                                data: data.acknowledged,
+                                borderColor: '#22c55e',
+                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2
+                            },
+                            {
+                                label: 'Unacknowledged',
+                                data: data.unacknowledged,
+                                borderColor: '#dc2626',
+                                backgroundColor: 'rgba(220, 38, 38, 0.1)',
+                                fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        interaction: { intersect: false, mode: 'index' },
+                        plugins: {
+                            legend: { position: 'top', labels: { usePointStyle: true, padding: 12, font: { size: 10 }, color: colors.legendColor, boxWidth: 8 } },
+                            tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { font: { size: 9 }, color: colors.tickColor, maxRotation: 45, autoSkip: true, maxTicksLimit: 10 } },
+                            y: { beginAtZero: true, grid: { color: colors.gridColor }, ticks: { font: { size: 10 }, color: colors.tickColor, precision: 0, callback: formatAxisValue } }
+                        }
+                    }
+                };
+                break;
+
+            default:
+                container.classList.add('d-none');
+                noData.classList.remove('d-none');
+                return;
         }
+
+        widgetInstances[slot] = new Chart(ctx, chartConfig);
     }
 
     async function takeManualSnapshot() {
@@ -1384,7 +1488,7 @@
             }
 
             showToast('Snapshot taken successfully!', 'success');
-            loadTrendChart();
+            loadAllWidgets();
         } catch (error) {
             showToast(`Error: ${error.message}`, 'danger');
         }
@@ -1505,6 +1609,17 @@
             currentVulnerabilities = currentVulnerabilities.filter(match => {
                 const daysOld = match.vulnerability.days_old || 0;
                 return daysOld <= maxDays;
+            });
+        }
+
+        // Filter by EPSS risk percentile
+        const epssFilter = document.getElementById('filterEpss').value;
+        if (epssFilter) {
+            const thresholds = {'critical': 0.95, 'high': 0.85, 'medium': 0.70};
+            const minPercentile = thresholds[epssFilter] || 0;
+            currentVulnerabilities = currentVulnerabilities.filter(match => {
+                const percentile = match.vulnerability.epss_percentile;
+                return percentile != null && percentile >= minPercentile;
             });
         }
     }
@@ -2039,7 +2154,8 @@
         document.getElementById('filterPlatform').value = '';
         document.getElementById('filterRansomware').checked = false;
         document.getElementById('filterUnack').checked = false;
-        document.getElementById('sortBy').value = 'priority';
+        document.getElementById('filterEpss').value = '';
+        document.getElementById('sortBy').value = 'priority-asc';
         document.querySelectorAll('.alert-card').forEach(card => card.classList.remove('active-filter'));
         currentPage = 1;  // Reset pagination
         loadGroupedVulnerabilities();
@@ -2114,7 +2230,6 @@
         loadGroupedVulnerabilities();
         loadStats();
         loadLastSync();
-        loadTrendChart();
 
         // Auto-refresh stats every 5 minutes
         setInterval(loadStats, 300000);
@@ -2267,13 +2382,7 @@
     document.getElementById('filterUrgency').addEventListener('change', resetAndLoadVulnerabilities);
     document.getElementById('filterAge').addEventListener('change', resetAndLoadVulnerabilities);
     document.getElementById('filterPlatform').addEventListener('change', resetAndLoadVulnerabilities);
-
-    // Handle sort change (reset to page 1)
-    document.getElementById('sortBy').addEventListener('change', function() {
-        if (currentGroupedVulnerabilities.length > 0) {
-            resetAndLoadVulnerabilities();
-        }
-    });
+    document.getElementById('filterEpss').addEventListener('change', resetAndLoadVulnerabilities);
 
     // ============================================================================
     // Shared Filtered Views
