@@ -1563,77 +1563,80 @@ echo "Kernel:     $KERNEL"
 echo "Agent ID:   $AGENT_ID"
 echo ""
 
+# Helper: escape a string for safe embedding in JSON
+json_escape() {{
+    printf '%s' "$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g; s/\\t/\\\\t/g; s/\\r/\\\\r/g'
+}}
+
 # Collect installed software
 echo "Scanning installed software..."
 PRODUCTS_FILE=$(mktemp)
-trap "rm -f $PRODUCTS_FILE" EXIT
+PAYLOAD_FILE=$(mktemp)
+trap "rm -f $PRODUCTS_FILE $PAYLOAD_FILE" EXIT
 
 # dpkg (Debian/Ubuntu)
 if command -v dpkg-query &> /dev/null; then
-    dpkg-query -W -f='${{Package}}|${{Version}}|dpkg\\n' 2>/dev/null | while IFS='|' read pkg ver src; do
-        [ -n "$pkg" ] && echo "{{\\"vendor\\":\\"$src\\",\\"product\\":\\"$pkg\\",\\"version\\":\\"$ver\\"}},"
+    dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null | while IFS=$'\\t' read -r pkg ver; do
+        [ -n "$pkg" ] && printf '{{"vendor":"dpkg","product":"%s","version":"%s"}},\\n' "$(json_escape "$pkg")" "$(json_escape "$ver")"
     done >> "$PRODUCTS_FILE"
 fi
 
 # rpm (RHEL/CentOS/Fedora)
 if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
-    rpm -qa --queryformat '%{{NAME}}|%{{VERSION}}|%{{VENDOR}}\\n' 2>/dev/null | while IFS='|' read pkg ver vendor; do
-        [ -n "$pkg" ] && echo "{{\\"vendor\\":\\"${{vendor:-rpm}}\\",\\"product\\":\\"$pkg\\",\\"version\\":\\"$ver\\"}},"
+    rpm -qa --queryformat '%{{NAME}}\\t%{{VERSION}}-%{{RELEASE}}\\t%{{VENDOR}}\\n' 2>/dev/null | while IFS=$'\\t' read -r pkg ver vendor; do
+        [ -n "$pkg" ] && printf '{{"vendor":"%s","product":"%s","version":"%s"}},\\n' "$(json_escape "${{vendor:-rpm}}")" "$(json_escape "$pkg")" "$(json_escape "$ver")"
     done >> "$PRODUCTS_FILE"
 fi
 
 # snap
 if command -v snap &> /dev/null; then
-    snap list 2>/dev/null | tail -n +2 | while read name ver rest; do
-        [ -n "$name" ] && echo "{{\\"vendor\\":\\"snap\\",\\"product\\":\\"$name\\",\\"version\\":\\"$ver\\"}},"
+    snap list 2>/dev/null | tail -n +2 | while read -r name ver rest; do
+        [ -n "$name" ] && printf '{{"vendor":"snap","product":"%s","version":"%s"}},\\n' "$(json_escape "$name")" "$(json_escape "$ver")"
     done >> "$PRODUCTS_FILE"
 fi
 
 # flatpak
 if command -v flatpak &> /dev/null; then
-    flatpak list --columns=name,version 2>/dev/null | while read name ver; do
-        [ -n "$name" ] && echo "{{\\"vendor\\":\\"flatpak\\",\\"product\\":\\"$name\\",\\"version\\":\\"$ver\\"}},"
+    flatpak list --columns=name,version 2>/dev/null | while read -r name ver; do
+        [ -n "$name" ] && printf '{{"vendor":"flatpak","product":"%s","version":"%s"}},\\n' "$(json_escape "$name")" "$(json_escape "$ver")"
     done >> "$PRODUCTS_FILE"
 fi
 
-# Build products array
+COUNT=0
 if [ -s "$PRODUCTS_FILE" ]; then
-    PRODUCTS="[$(sed '$s/,$//' "$PRODUCTS_FILE" | tr '\\n' ' ')]"
     COUNT=$(wc -l < "$PRODUCTS_FILE")
-else
-    PRODUCTS="[]"
-    COUNT=0
 fi
 
 echo "Found $COUNT installed packages"
 echo ""
 
-# Build JSON payload
-PAYLOAD=$(cat <<EOFPAYLOAD
+# Build JSON payload as a FILE (not a variable) to avoid ARG_MAX limits.
+# On servers with 1000+ packages, the payload can exceed shell argument limits.
+# Using curl -d @file reads directly from disk with no size constraints.
+H_ESC=$(json_escape "$HOSTNAME")
+IP_ESC=$(json_escape "$IP_ADDRESS")
+OSV_ESC=$(json_escape "$OS_VERSION")
+K_ESC=$(json_escape "$KERNEL")
+AID_ESC=$(json_escape "$AGENT_ID")
+
 {{
-    "hostname": "$HOSTNAME",
-    "ip_address": "$IP_ADDRESS",
-    "os": {{
-        "name": "$OS_NAME",
-        "version": "$OS_VERSION",
-        "kernel": "$KERNEL"
-    }},
-    "agent": {{
-        "id": "$AGENT_ID",
-        "version": "1.0.0"
-    }},
-    "products": $PRODUCTS
-}}
-EOFPAYLOAD
-)
+    printf '{{"hostname":"%s","ip_address":"%s","os":{{"name":"%s","version":"%s","kernel":"%s"}},"agent":{{"id":"%s","version":"1.0.0"}},"products":[' \\
+        "$H_ESC" "$IP_ESC" "$OS_NAME" "$OSV_ESC" "$K_ESC" "$AID_ESC"
+    if [ -s "$PRODUCTS_FILE" ]; then
+        # Remove trailing comma from last line and output
+        sed '$s/,$//' "$PRODUCTS_FILE" | tr -d '\\n'
+    fi
+    printf ']}}'
+}} > "$PAYLOAD_FILE"
 
 echo "Sending inventory to SentriKat..."
+echo "Payload size: $(wc -c < "$PAYLOAD_FILE") bytes"
 
-# Send to SentriKat
+# Send to SentriKat (read payload from file to bypass ARG_MAX)
 RESPONSE=$(curl -s -w "\\n%{{http_code}}" -X POST "$API_URL/api/agent/inventory" \\
     -H "X-Agent-Key: $API_KEY" \\
     -H "Content-Type: application/json" \\
-    -d "$PAYLOAD")
+    -d @"$PAYLOAD_FILE")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
 BODY=$(echo "$RESPONSE" | sed '$d')
@@ -1646,11 +1649,17 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202
 import sys,json
 try:
     d=json.load(sys.stdin)
-    print(f\\"Asset ID: {{d.get('asset_id')}}\\")
-    print(f\\"Products Created: {{d.get('products_created', 0)}}\\")
-    print(f\\"Products Updated: {{d.get('products_updated', 0)}}\\")
-    print(f\\"Installations Created: {{d.get('installations_created', 0)}}\\")
-    print(f\\"Installations Updated: {{d.get('installations_updated', 0)}}\\")
+    if d.get('status') == 'queued':
+        print(f\\"Status:       Queued for processing\\")
+        print(f\\"Job ID:       {{d.get('job_id')}}\\")
+        print(f\\"Asset ID:     {{d.get('asset_id')}}\\")
+    else:
+        print(f\\"Asset ID:     {{d.get('asset_id')}}\\")
+        s=d.get('summary',d)
+        print(f\\"Products Created: {{s.get('products_created', 0)}}\\")
+        print(f\\"Products Updated: {{s.get('products_updated', 0)}}\\")
+        print(f\\"Installations Created: {{s.get('installations_created', 0)}}\\")
+        print(f\\"Installations Updated: {{s.get('installations_updated', 0)}}\\")
 except:
     print(sys.stdin.read())
 " 2>/dev/null || echo "$BODY"
