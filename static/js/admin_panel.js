@@ -6665,21 +6665,21 @@ async function loadAgentKeys() {
         } else {
             tbody.innerHTML = keys.map(key => `
                 <tr>
-                    <td>
+                    <td data-column="name">
                         <strong>${escapeHtml(key.name)}</strong>
                         <br><small class="text-muted font-monospace">${escapeHtml(key.key_prefix || '')}...</small>
                     </td>
-                    <td>${escapeHtml(key.organization_name || 'Unknown')}</td>
-                    <td>
+                    <td data-column="organization">${escapeHtml(key.organization_name || 'Unknown')}</td>
+                    <td data-column="mode">
                         ${key.auto_approve
                             ? '<span class="badge bg-success" title="Products are added directly to inventory"><i class="bi bi-check-circle me-1"></i>Auto</span>'
                             : '<span class="badge bg-info" title="Products go to Import Queue for review"><i class="bi bi-inbox me-1"></i>Queue</span>'}
                     </td>
-                    <td>${key.last_used_at ? formatRelativeTime(key.last_used_at) : '<span class="text-muted">Never</span>'}</td>
-                    <td>
+                    <td data-column="lastused">${key.last_used_at ? formatRelativeTime(key.last_used_at) : '<span class="text-muted">Never</span>'}</td>
+                    <td data-column="usage">
                         <span class="badge bg-secondary">${key.usage_count || 0}</span>
                     </td>
-                    <td>${key.expires_at ? formatDate(key.expires_at) : '<span class="text-muted">-</span>'}</td>
+                    <td data-column="expires">${key.expires_at ? formatDate(key.expires_at) : '<span class="text-muted">-</span>'}</td>
                     <td>
                         <div class="btn-group btn-group-sm">
                             <button class="btn btn-outline-primary" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'windows')" title="Download Windows Agent">
@@ -6697,6 +6697,10 @@ async function loadAgentKeys() {
             `).join('');
         }
         agentKeysLoaded = true;
+        // Initialize sortable headers for agent keys table
+        if (typeof SortableTable !== 'undefined') {
+            SortableTable.init('agentKeysTable');
+        }
     } catch (error) {
         console.error('Error loading agent keys:', error);
         tbody.innerHTML = `

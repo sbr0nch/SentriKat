@@ -831,15 +831,15 @@
                         </div>
                         <div class="card-body p-0">
                             <div class="table-responsive">
-                                <table class="table table-hover mb-0" id="agentKeysTable">
+                                <table class="table table-hover mb-0" id="agentKeysTable" data-sortable="true">
                                     <thead class="table-light">
                                         <tr>
-                                            <th>Name / Key Prefix</th>
-                                            <th>Organization</th>
-                                            <th>Mode</th>
-                                            <th>Last Used</th>
-                                            <th>Usage</th>
-                                            <th>Expires</th>
+                                            <th data-column="name" data-sort-key="name" data-sort-type="string">Name / Key Prefix</th>
+                                            <th data-column="organization" data-sort-key="organization" data-sort-type="string">Organization</th>
+                                            <th data-column="mode" data-sort-key="mode" data-sort-type="string">Mode</th>
+                                            <th data-column="lastused" data-sort-key="lastused" data-sort-type="date">Last Used</th>
+                                            <th data-column="usage" data-sort-key="usage" data-sort-type="number">Usage</th>
+                                            <th data-column="expires" data-sort-key="expires" data-sort-type="date">Expires</th>
                                             <th style="width: 150px;">Download / Actions</th>
                                         </tr>
                                     </thead>
