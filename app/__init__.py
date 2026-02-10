@@ -70,6 +70,11 @@ def _apply_schema_migrations(logger, db_uri):
         ('products', 'rejection_reason', 'VARCHAR(500)', 'VARCHAR(500)'),
         ('products', 'last_agent_report', 'DATETIME', 'TIMESTAMP'),
         ('products', 'auto_disabled', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        # Agent license server/client breakdown columns
+        ('agent_licenses', 'server_count', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
+        ('agent_licenses', 'client_count', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
+        ('agent_licenses', 'peak_servers', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
+        ('agent_licenses', 'peak_clients', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

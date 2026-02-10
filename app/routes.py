@@ -88,10 +88,11 @@ def system_notifications():
     Returns active system notifications for the notification banner.
     Only admins see all notifications; regular users see a subset.
     """
-    from flask_login import current_user
+    from app.auth import get_current_user
     from app.models import AgentApiKey
     notifications = []
-    is_admin = current_user.is_super_admin() if hasattr(current_user, 'is_super_admin') else False
+    current_user = get_current_user()
+    is_admin = current_user.is_super_admin() if current_user and hasattr(current_user, 'is_super_admin') else False
 
     try:
         now = datetime.utcnow()
