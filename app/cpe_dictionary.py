@@ -293,12 +293,17 @@ def lookup_cpe_dictionary(vendor, product_name):
 
 
 def _increment_usage(entry):
-    """Increment usage count for a dictionary entry (non-blocking)."""
+    """Increment usage count for a dictionary entry (non-blocking).
+
+    Uses raw SQL to avoid dirtying the ORM session, which can cause
+    autoflush timeouts that roll back the caller's transaction.
+    """
     try:
         from app import db
-        entry.usage_count = (entry.usage_count or 0) + 1
-        db.session.add(entry)
-        # Don't commit here - let the caller's transaction handle it
+        db.session.execute(
+            db.text("UPDATE cpe_dictionary_entries SET usage_count = COALESCE(usage_count, 0) + 1 WHERE id = :id"),
+            {'id': entry.id}
+        )
     except Exception:
         pass
 

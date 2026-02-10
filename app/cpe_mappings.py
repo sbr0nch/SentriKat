@@ -504,6 +504,17 @@ def save_user_mapping(vendor: str, product_name: str, cpe_vendor: str, cpe_produ
         return False
 
 
+def _bump_mapping_usage(mapping_id):
+    """Increment usage_count with raw SQL to avoid dirtying the ORM session."""
+    try:
+        db.session.execute(
+            db.text("UPDATE user_cpe_mappings SET usage_count = COALESCE(usage_count, 0) + 1 WHERE id = :id"),
+            {'id': mapping_id}
+        )
+    except Exception:
+        pass
+
+
 def get_user_mapping(vendor: str, product_name: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Check if there's a user-confirmed mapping for this software.
@@ -524,8 +535,8 @@ def get_user_mapping(vendor: str, product_name: str) -> Tuple[Optional[str], Opt
         ).first()
 
         if mapping:
-            # Update usage count
-            mapping.usage_count = (mapping.usage_count or 0) + 1
+            # Update usage count with raw SQL to avoid dirtying ORM session
+            _bump_mapping_usage(mapping.id)
             return mapping.cpe_vendor, mapping.cpe_product
 
         # Try matching with just product name (vendor-agnostic)
@@ -534,7 +545,7 @@ def get_user_mapping(vendor: str, product_name: str) -> Tuple[Optional[str], Opt
         ).first()
 
         if mapping:
-            mapping.usage_count = (mapping.usage_count or 0) + 1
+            _bump_mapping_usage(mapping.id)
             return mapping.cpe_vendor, mapping.cpe_product
 
         return None, None
