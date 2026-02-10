@@ -1096,6 +1096,41 @@ def save_notification_settings():
         logger.exception("Failed to save notification settings")
         return jsonify({'error': ERROR_MSGS['config']}), 500
 
+def _is_ssrf_safe_url(url):
+    """Validate that a URL does not target internal/private network addresses."""
+    from urllib.parse import urlparse
+    import ipaddress
+    import socket
+
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname or parsed.scheme not in ('http', 'https'):
+            return False
+
+        # Resolve hostname to IP and check against private ranges
+        try:
+            ip = ipaddress.ip_address(hostname)
+        except ValueError:
+            # It's a hostname, resolve it
+            try:
+                resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                ip = ipaddress.ip_address(resolved[0][4][0])
+            except (socket.gaierror, IndexError, OSError):
+                return True  # Can't resolve - let the request fail naturally
+
+        # Block private, loopback, link-local, and metadata addresses
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+        # Block AWS/GCP/Azure metadata endpoints
+        if str(ip) in ('169.254.169.254', '169.254.170.2'):
+            return False
+
+        return True
+    except Exception:
+        return False
+
+
 @settings_bp.route('/notifications/test', methods=['POST'])
 @admin_required
 @requires_professional('Email Alerts')
@@ -1212,6 +1247,10 @@ def test_notification():
             webhook_url = data.get('webhook_url')
             if not webhook_url:
                 return jsonify({'success': False, 'error': 'Webhook URL not provided'})
+
+            # SSRF protection: block requests to internal/private networks
+            if not _is_ssrf_safe_url(webhook_url):
+                return jsonify({'success': False, 'error': 'Webhook URL must not target internal or private network addresses'}), 400
 
             webhook_format = data.get('webhook_format', 'slack')
             webhook_name = data.get('webhook_name', 'Organization Webhook')

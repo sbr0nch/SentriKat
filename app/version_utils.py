@@ -28,6 +28,15 @@ def _version_sort_key(version):
     if not version:
         return tuple()
 
+    # Pre-release labels that should sort BEFORE the release version.
+    # In semver, 1.0.0-alpha < 1.0.0-beta < 1.0.0-rc < 1.0.0
+    _PRE_RELEASE_ORDER = {
+        'dev': -5, 'alpha': -4, 'a': -4,
+        'beta': -3, 'b': -3,
+        'rc': -2, 'cr': -2,
+        'pre': -1, 'preview': -1,
+    }
+
     parts = []
     # Split on common version delimiters
     for part in re.split(r'[.\-_+]', str(version)):
@@ -43,9 +52,20 @@ def _version_sort_key(version):
             if match:
                 parts.append((0, int(match.group(1))))
                 if match.group(2):
-                    parts.append((1, match.group(2).lower()))
+                    label = match.group(2).lower()
+                    pre_order = _PRE_RELEASE_ORDER.get(label)
+                    if pre_order is not None:
+                        parts.append((-1, pre_order))
+                    else:
+                        parts.append((1, label))
             else:
-                parts.append((1, part.lower()))
+                label = part.lower()
+                pre_order = _PRE_RELEASE_ORDER.get(label)
+                if pre_order is not None:
+                    # Pre-release: sort before the release (type -1 < type 0 < type 1)
+                    parts.append((-1, pre_order))
+                else:
+                    parts.append((1, label))
     return tuple(parts)
 
 

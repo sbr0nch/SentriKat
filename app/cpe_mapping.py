@@ -75,13 +75,13 @@ CPE_MAPPINGS = [
     # -------------------------------------------------------------------------
     # Development Tools
     # -------------------------------------------------------------------------
-    ('regex', r'^git\b(?!\s*hub)', 'git', 'git'),  # git but not github
-    ('regex', r'^git\s+for\s+windows', 'git', 'git'),
+    ('regex', r'^git\b(?!\s*hub)', 'git-scm', 'git'),  # git but not github
+    ('regex', r'^git\s+for\s+windows', 'git-scm', 'git'),
     ('regex', r'^github\s*desktop', 'github', 'desktop'),
     ('regex', r'^node\.?js', 'nodejs', 'node.js'),
     ('regex', r'^node\s+js', 'nodejs', 'node.js'),
     ('regex', r'^python', 'python', 'python'),
-    ('regex', r'^java\s*(development\s*kit|jdk|runtime|jre)?', 'oracle', 'jdk'),
+    ('regex', r'^java(?!script)\s*(development\s*kit|jdk|runtime|jre|se|ee)?$', 'oracle', 'jdk'),
     ('regex', r'^openjdk', 'oracle', 'openjdk'),
     ('regex', r'^oracle\s*java', 'oracle', 'jdk'),
     ('regex', r'^php', 'php', 'php'),
@@ -97,11 +97,11 @@ CPE_MAPPINGS = [
     ('regex', r'^webstorm', 'jetbrains', 'webstorm'),
     ('regex', r'^jetbrains\s*phpstorm', 'jetbrains', 'phpstorm'),
     ('regex', r'^eclipse', 'eclipse', 'eclipse_ide'),
-    ('regex', r'^sublime\s*text', 'sublimehq', 'sublime_text'),
+    ('regex', r'^sublime\s*text', 'sublimetext', 'sublime_text'),
     ('regex', r'^notepad\+\+', 'notepad-plus-plus', 'notepad++'),
     ('regex', r'^atom\s*(editor)?', 'atom', 'atom'),
     ('regex', r'^postman', 'postman', 'postman'),
-    ('regex', r'^docker\s*desktop', 'docker', 'desktop'),
+    ('regex', r'^docker\s*desktop', 'docker', 'docker_desktop'),
     ('regex', r'^docker', 'docker', 'docker'),
     ('regex', r'^kubernetes|^kubectl', 'kubernetes', 'kubernetes'),
     ('regex', r'^vagrant', 'hashicorp', 'vagrant'),
@@ -127,7 +127,7 @@ CPE_MAPPINGS = [
     ('regex', r'^winscp', 'winscp', 'winscp'),
     ('regex', r'^wireshark', 'wireshark', 'wireshark'),
     ('regex', r'^nmap', 'nmap', 'nmap'),
-    ('regex', r'^virtualbox', 'oracle', 'virtualbox'),
+    ('regex', r'^virtualbox', 'oracle', 'vm_virtualbox'),
     ('regex', r'^vmware\s*workstation', 'vmware', 'workstation'),
     ('regex', r'^vmware\s*player', 'vmware', 'player'),
     ('regex', r'^vmware\s*fusion', 'vmware', 'fusion'),
@@ -196,10 +196,10 @@ CPE_MAPPINGS = [
     # -------------------------------------------------------------------------
     # Linux Common Packages
     # -------------------------------------------------------------------------
-    ('regex', r'^sudo', 'todd_miller', 'sudo'),
+    ('regex', r'^sudo', 'sudo_project', 'sudo'),
     ('regex', r'^bash', 'gnu', 'bash'),
     ('regex', r'^glibc|^libc6', 'gnu', 'glibc'),
-    ('regex', r'^systemd', 'systemd', 'systemd'),
+    ('regex', r'^systemd', 'systemd_project', 'systemd'),
     ('regex', r'^kernel|^linux-image', 'linux', 'linux_kernel'),
     ('regex', r'^vim', 'vim', 'vim'),
     ('regex', r'^nano', 'gnu', 'nano'),

@@ -5,8 +5,8 @@ import json
 
 # Association table for many-to-many relationship between products and organizations
 product_organizations = db.Table('product_organizations',
-    db.Column('product_id', db.Integer, db.ForeignKey('products.id'), primary_key=True),
-    db.Column('organization_id', db.Integer, db.ForeignKey('organizations.id'), primary_key=True),
+    db.Column('product_id', db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('organization_id', db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), primary_key=True),
     db.Column('assigned_at', db.DateTime, default=datetime.utcnow)
 )
 
@@ -20,12 +20,12 @@ class UserOrganization(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
     role = db.Column(db.String(20), default='user', nullable=False)  # super_admin, org_admin, manager, user
 
     # Metadata
     assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
-    assigned_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    assigned_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
 
     # Unique constraint: user can only have one role per organization
     __table_args__ = (
@@ -248,7 +248,7 @@ class Product(db.Model):
     __tablename__ = 'products'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True, index=True)  # NULL for migration compatibility
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=True, index=True)  # NULL for migration compatibility
     service_catalog_id = db.Column(db.Integer, db.ForeignKey('service_catalog.id'), nullable=True, index=True)  # Optional link to catalog
     vendor = db.Column(db.String(200), nullable=False, index=True)
     product_name = db.Column(db.String(200), nullable=False, index=True)
@@ -270,7 +270,7 @@ class Product(db.Model):
     source = db.Column(db.String(20), default='manual', index=True)  # manual, agent
     approval_status = db.Column(db.String(20), default='approved', index=True)  # approved, pending, rejected
     pending_since = db.Column(db.DateTime, nullable=True)  # When added to queue
-    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Who approved/rejected
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)  # Who approved/rejected
     reviewed_at = db.Column(db.DateTime, nullable=True)  # When approved/rejected
     rejection_reason = db.Column(db.String(500), nullable=True)  # Why rejected
 
@@ -406,7 +406,7 @@ class ProductExclusion(db.Model):
     __tablename__ = 'product_exclusions'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
     vendor = db.Column(db.String(200), nullable=False, index=True)
     product_name = db.Column(db.String(200), nullable=False, index=True)
     version = db.Column(db.String(100), nullable=True)  # NULL = exclude all versions
@@ -718,8 +718,8 @@ class VendorFixOverride(db.Model):
     notes = db.Column(db.Text, nullable=True)
 
     # Audit trail
-    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    approved_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    approved_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     approved_at = db.Column(db.DateTime, nullable=True)
     status = db.Column(db.String(20), default='approved', nullable=False)  # pending, approved, rejected
@@ -731,7 +731,7 @@ class VendorFixOverride(db.Model):
     confidence_reason = db.Column(db.String(255), nullable=True)  # Human-readable explanation
 
     # Scope
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=True)
 
     __table_args__ = (
         db.Index('idx_vendor_fix_lookup', 'cve_id', 'vendor', 'product', 'fixed_version'),
@@ -853,7 +853,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=True)  # NULL for LDAP users
 
     # Organization assignment
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=True, index=True)
 
     # Authentication type
     auth_type = db.Column(db.String(20), default='local')  # 'local', 'ldap'
@@ -1265,7 +1265,7 @@ class SystemSettings(db.Model):
     description = db.Column(db.Text, nullable=True)
     is_encrypted = db.Column(db.Boolean, default=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
 
     def to_dict(self):
         return {
@@ -1281,7 +1281,7 @@ class AlertLog(db.Model):
     __tablename__ = 'alert_logs'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
     alert_type = db.Column(db.String(50), nullable=False, index=True)  # 'critical_cve', 'ransomware', 'new_cve'
     matches_count = db.Column(db.Integer, default=0)
     recipients_count = db.Column(db.Integer, default=0)
@@ -1318,7 +1318,7 @@ class Asset(db.Model):
     __tablename__ = 'assets'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Identification
     hostname = db.Column(db.String(255), nullable=False, index=True)
@@ -1477,7 +1477,7 @@ class ProductInstallation(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Version on this specific asset (may differ from Product.version)
     version = db.Column(db.String(100), nullable=True)
@@ -1577,7 +1577,7 @@ class AgentApiKey(db.Model):
     __tablename__ = 'agent_api_keys'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Key identification
     name = db.Column(db.String(100), nullable=False)  # Friendly name like "Production Agents"
@@ -1597,7 +1597,7 @@ class AgentApiKey(db.Model):
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime, nullable=True)  # NULL = never expires
-    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
 
     # Relationships
     organization = db.relationship('Organization', backref=db.backref('agent_api_keys', lazy='dynamic'))
@@ -1660,8 +1660,8 @@ class InventoryJob(db.Model):
     __tablename__ = 'inventory_jobs'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
-    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id', ondelete='CASCADE'), nullable=True, index=True)
     api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True, index=True)
 
     # Job details
@@ -1757,7 +1757,7 @@ class AgentLicense(db.Model):
     __tablename__ = 'agent_licenses'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, unique=True, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, unique=True, index=True)
 
     # License tier and limits
     tier = db.Column(db.String(50), default='trial', nullable=False)  # trial, starter, professional, enterprise, unlimited
@@ -1951,7 +1951,7 @@ class AgentUsageRecord(db.Model):
     __tablename__ = 'agent_usage_records'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Usage date (one record per day per org)
     record_date = db.Column(db.Date, nullable=False, index=True)
@@ -2020,8 +2020,8 @@ class AgentEvent(db.Model):
     __tablename__ = 'agent_events'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
-    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id', ondelete='CASCADE'), nullable=True, index=True)
     api_key_id = db.Column(db.Integer, db.ForeignKey('agent_api_keys.id'), nullable=True, index=True)
 
     # Event details
@@ -2099,8 +2099,8 @@ class ProductVersionHistory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     installation_id = db.Column(db.Integer, db.ForeignKey('product_installations.id'), nullable=False, index=True)
-    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id', ondelete='CASCADE'), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Version info
     previous_version = db.Column(db.String(100), nullable=True)
@@ -2212,8 +2212,8 @@ class StaleAssetNotification(db.Model):
     __tablename__ = 'stale_asset_notifications'
 
     id = db.Column(db.Integer, primary_key=True)
-    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id', ondelete='CASCADE'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Notification state
     notification_type = db.Column(db.String(50), nullable=False)  # offline, stale, critical_offline
@@ -2272,7 +2272,7 @@ class UserCpeMapping(db.Model):
     notes = db.Column(db.Text, nullable=True)  # Optional notes about this mapping
 
     # Audit
-    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     usage_count = db.Column(db.Integer, default=0)  # Track how often this mapping is used
@@ -2376,7 +2376,7 @@ class VulnerabilitySnapshot(db.Model):
     __tablename__ = 'vulnerability_snapshots'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=True, index=True)
     snapshot_date = db.Column(db.Date, nullable=False, index=True)
 
     # Core metrics
@@ -2575,7 +2575,7 @@ class ScheduledReport(db.Model):
     __tablename__ = 'scheduled_reports'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True)
 
@@ -2605,7 +2605,7 @@ class ScheduledReport(db.Model):
 
     # Audit
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
@@ -2720,8 +2720,8 @@ class ContainerImage(db.Model):
     __tablename__ = 'container_images'
 
     id = db.Column(db.Integer, primary_key=True)
-    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False, index=True)
-    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True, index=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id', ondelete='CASCADE'), nullable=True, index=True)
 
     # Image identification
     image_name = db.Column(db.String(500), nullable=False, index=True)  # e.g. "nginx", "myapp"

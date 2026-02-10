@@ -233,7 +233,9 @@ class LDAPManager:
             conn = ldap3.Connection(server, user=config['bind_dn'], password=config['bind_password'], auto_bind=True)
 
             # Search for user - try with memberOf (AD), fall back without it (OpenLDAP)
-            search_filter = config['search_filter'].replace('{username}', username)
+            # Escape username to prevent LDAP injection
+            from ldap3.utils.conv import escape_filter_chars
+            search_filter = config['search_filter'].replace('{username}', escape_filter_chars(username))
             memberof_ok = True
             try:
                 conn.search(

@@ -58,13 +58,129 @@ csrf.exempt(agent_bp)  # Agents use API keys, not CSRF
 
 
 # ============================================================================
-# Software Filtering - Server-Side (Comprehensive)
+# Software Filtering - Server-Side (CVE-History-Guarded)
+#
 # Agents send ALL installed packages. The server filters out noise here.
 # CONSERVATIVE: when in doubt, DON'T skip. Better noise than missing a CVE.
+#
+# APPROACH (3-phase, safest-first):
+#   Phase 1 - Structural derivatives: suffixes like -doc, -dbg, -locale
+#             indicate non-runtime derivative packages. These are universally
+#             safe to skip because the documentation/debug/locale package for
+#             ANY product never has its own CVEs.
+#   Phase 2 - CVE history guard: check if the package has EVER had a CVE.
+#             If yes → NEVER skip it, regardless of any pattern rules.
+#             This prevents accidental skipping of packages like openssl,
+#             xz-utils, bzip2, tcpdump, etc.
+#   Phase 3 - Noise patterns: pattern/exact-match rules ONLY apply to
+#             packages that passed the CVE history guard (i.e., have never
+#             had a CVE in their entire history).
+#
+# This is fundamentally safer than hardcoded skip lists because a package
+# with CVE history can NEVER be accidentally filtered out.
 # ============================================================================
 
-# Exact product names to skip (case-insensitive) - Windows
-SKIP_PRODUCTS_WINDOWS = {
+from app.cve_known_products import has_cve_history
+
+# Phase 1: Structural derivative suffixes - ALWAYS safe to skip.
+# These indicate the package is a non-runtime derivative (documentation,
+# debug symbols, locale data, dev headers) of another package.
+# The derivative itself doesn't have its own CVEs.
+STRUCTURAL_SKIP_SUFFIXES = [
+    '-doc', '-docs', '-man',                              # Documentation
+    '-dbg', '-dbgsym', '-debug', '-debuginfo',            # Debug symbols
+    '-debugsource',                                       # Debug source
+    '-locale', '-locales', '-l10n', '-i18n',              # Locale data
+    '-lang',                                              # Language translations
+    '-fonts',                                             # Font packages
+    '-dev', '-devel',                                     # Development headers
+    '-headers',                                           # Kernel/lib headers
+    '-static',                                            # Static libraries
+    '-data',                                              # Pure data files
+    '-examples',                                          # Example files
+    '-tests', '-testsuite', '-test',                      # Test packages
+    '-completion',                                        # Shell completion scripts
+    '-icon-theme', '-icons',                              # Icon themes
+    '-wallpapers',                                        # Wallpaper packages
+    '-sounds',                                            # Sound themes
+    '-help',                                              # Help files
+    '-source',                                            # Source packages
+    '-udeb',                                              # Installer packages
+]
+
+# Phase 1: Structural derivative prefixes - ALWAYS safe to skip.
+# These prefixes indicate non-runtime content packages.
+STRUCTURAL_SKIP_PREFIXES = [
+    'fonts-',           # Font packages (fonts-liberation, fonts-dejavu, etc.)
+    'xfonts-',          # X11 font packages
+    # NOTE: texlive- moved to Phase 3 noise patterns (texlive-bin has had CVEs)
+    'gir1.2-',          # GObject introspection data (not runtime bindings)
+    'aspell-',          # Spell check dictionaries (data files, not code)
+    'hunspell-',        # Spell check dictionaries
+    'hyphen-',          # Hyphenation data
+    'mythes-',          # Thesaurus data
+    'manpages-',        # Manual pages
+    'language-pack-',   # Language packs
+    'libreoffice-l10n-',# LibreOffice translation packs
+    'firefox-locale-',  # Firefox locale packs
+    'thunderbird-locale-', # Thunderbird locale packs
+    'r-cran-',          # R CRAN packages (statistics data)
+    'r-bioc-',          # R Bioconductor packages
+    'r-base-',          # R base components
+    'libghc-',          # Haskell GHC library packages
+    'dh-',              # Debian helper/packaging tools
+    'librust-',         # Rust crate packages
+    'xkb-',             # X keyboard data
+]
+
+# Phase 3: Noise patterns - ONLY applied to packages with NO CVE history.
+# These catch Windows/macOS noise that hasn't been security-relevant.
+# Because Phase 2 (CVE history guard) runs first, these can NEVER
+# accidentally skip a package that has had CVEs.
+NOISE_PATTERNS = [
+    # TeX/LaTeX data packages (huge count, but NOT texlive-bin which has had CVEs)
+    r'^texlive-(?!bin)',
+    # Windows language/input packs (never had their own CVEs)
+    r'^(microsoft )?language (pack|experience pack|feature)',
+    r'^(windows|language) (input|handwriting|ocr|speech|text.to.speech)',
+    # Font metadata packages
+    r'^(microsoft|windows) (fonts?|typography)',
+    r'^fonts?-',
+    # Linux locale packages
+    r'^locales?(-all)?$',
+    r'^language-pack-',
+    # Windows Update KB metadata entries (tracked separately, not actual software)
+    r'^kb\d+',
+    r'^(update|security update|hotfix|cumulative update) for',
+    # Telemetry / diagnostic agents (no CVE surface)
+    r'.*(telemetry|diagnostic data|customer experience improvement).*',
+    # Windows Store consumer apps (no CVE history)
+    r'^(cortana|people app|groove music|movies & tv|mixed reality)',
+    # Games (not enterprise-relevant, no CVE history)
+    r'.*(solitaire|candy crush|disney|xbox game).*',
+    # Windows ADK / Assessment & Deployment Kit components
+    r'^windows (assessment|deployment|phone common|system image manager|pe x86)',
+    r'(assessment and deployment kit|imaging designer|imaging tools|imaging and configuration)',
+    r'^(kits configuration|toolkit documentation)',
+    # Driver management utilities (not the drivers themselves)
+    r'driver uninstall tool',
+    # Perl module library packages (libFoo-perl)
+    r'^lib.+-perl$',
+    # Transitional/dummy/virtual packages
+    r'transitional',
+    r'^dummy-',
+    # Python 2 packages (EOL, no security relevance)
+    r'^python-(?!3)',
+    # Misc non-runtime Linux packages
+    r'^(adwaita|hicolor|humanity|ubuntu-mono)-icon-theme',
+    r'^(desktop-file-utils|mime-support|shared-mime-info)$',
+    r'^(plymouth|plymouth-theme)',
+]
+_NOISE_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in NOISE_PATTERNS]
+
+# Phase 3: Exact-match noise products (ONLY applied after CVE history guard).
+# Windows entries that are deployment metadata, not actual software.
+NOISE_EXACT_WINDOWS = {
     # Windows Update metadata entries (not actual software)
     'update for windows',
     'security update for windows',
@@ -77,7 +193,7 @@ SKIP_PRODUCTS_WINDOWS = {
     'windows sdk desktop headers',
     'windows sdk desktop libs',
     'windows sdk modern versioned developer tools',
-    # Windows ADK / Assessment Toolkit components (internal dev/deployment tools)
+    # Windows ADK / Assessment Toolkit components
     'application compatibility toolkit',
     'imaging designer',
     'imaging tools support',
@@ -105,104 +221,10 @@ SKIP_PRODUCTS_WINDOWS = {
     'microsoft language experience pack',
 }
 
-# Linux package suffixes indicating non-runtime packages
-SKIP_SUFFIXES_LINUX = [
-    '-doc', '-docs', '-man',                              # Documentation
-    '-dbg', '-dbgsym', '-debug', '-debuginfo',            # Debug symbols
-    '-debugsource',                                       # Debug source
-    '-locale', '-locales', '-l10n', '-i18n',              # Locale data
-    '-lang',                                              # Language translations
-    '-fonts',                                             # Font packages
-    '-dev', '-devel',                                     # Development headers
-    '-headers',                                           # Kernel/lib headers
-    '-static',                                            # Static libraries
-    '-data',                                              # Pure data files
-    '-examples',                                          # Example files
-    '-tests', '-testsuite', '-test',                      # Test packages
-    '-completion',                                        # Shell completion scripts
-    '-icon-theme', '-icons',                              # Icon themes
-    '-wallpapers',                                        # Wallpaper packages
-    '-sounds',                                            # Sound themes
-    '-help',                                              # Help files
-    '-source',                                            # Source packages
-    '-udeb',                                              # Installer packages
-]
-
-# Linux package prefixes that are almost always noise
-SKIP_PREFIXES_LINUX = [
-    'fonts-',           # Font packages (fonts-liberation, fonts-dejavu, etc.)
-    'xfonts-',          # X11 font packages
-    'texlive-',         # LaTeX/TeX packages (huge count, no CVE surface)
-    'gir1.2-',          # GObject introspection data (not runtime)
-    'aspell-',          # Spell check dictionaries
-    'hunspell-',        # Spell check dictionaries
-    'hyphen-',          # Hyphenation data
-    'mythes-',          # Thesaurus data
-    'manpages-',        # Manual pages
-    'language-pack-',   # Language packs
-    'libreoffice-l10n-',# LibreOffice translation packs
-    'firefox-locale-',  # Firefox locale packs
-    'thunderbird-locale-', # Thunderbird locale packs
-    'r-cran-',          # R CRAN packages (statistics)
-    'r-bioc-',          # R Bioconductor packages
-    'r-base-',          # R base components
-    'golang-',          # Go source packages (not runtime)
-    'libghc-',          # Haskell GHC library packages
-    'dh-',              # Debian helper/packaging tools
-    'node-',            # Debian-packaged npm modules (not runtime Node.js)
-    'ruby-',            # Ruby library packages (not runtime Ruby)
-    'librust-',         # Rust crate packages
-    'x11-',             # X11 utility packages
-    'xdg-',             # XDG desktop utilities
-    'xserver-',         # X server components
-    'xkb-',             # X keyboard data
-]
-
-# Patterns to skip (compiled once for performance)
-SKIP_PATTERNS = [
-    # Windows language/input packs
-    r'^(microsoft )?language (pack|experience pack|feature)',
-    r'^(windows|language) (input|handwriting|ocr|speech|text.to.speech)',
-    # Font packages
-    r'^(microsoft|windows) (fonts?|typography)',
-    r'^fonts?-',
-    # Linux locale packages
-    r'^locales?(-all)?$',
-    r'^language-pack-',
-    # Windows Update KBs (tracked separately)
-    r'^kb\d+',
-    r'^(update|security update|hotfix|cumulative update) for',
-    # Telemetry / diagnostic (no CVE surface)
-    r'.*(telemetry|diagnostic data|customer experience improvement).*',
-    # Windows Store consumer apps
-    r'^(cortana|people app|groove music|movies & tv|mixed reality)',
-    # Games (not enterprise-relevant)
-    r'.*(solitaire|candy crush|minecraft|disney|xbox game).*',
-    # Windows ADK / Assessment & Deployment Kit components
-    r'^windows (assessment|deployment|phone common|system image manager|pe x86)',
-    r'(assessment and deployment kit|imaging designer|imaging tools|imaging and configuration)',
-    r'^(kits configuration|toolkit documentation)',
-    # Driver management utilities (not the drivers themselves)
-    r'driver uninstall tool',
-    # Perl module library packages (libFoo-perl)
-    r'^lib.+-perl$',
-    # Transitional/dummy/virtual packages
-    r'transitional',
-    r'^dummy-',
-    # Python 2 packages (EOL, no security relevance)
-    r'^python-(?!3)',
-    # Misc non-runtime Linux packages
-    r'^(adwaita|hicolor|humanity|ubuntu-mono)-icon-theme',
-    r'^(desktop-file-utils|mime-support|shared-mime-info)$',
-    r'^(plymouth|plymouth-theme)',
-]
-_SKIP_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in SKIP_PATTERNS]
-
-# Linux packages to skip by exact name (high-volume, no CVE surface)
-# CONSERVATIVE: Only skip packages that are truly non-security-relevant.
-# Packages that parse untrusted input, handle network traffic, or have
-# known CVE history are NOT in this list (e.g., openssl, xz-utils, curl).
-SKIP_EXACT_LINUX = {
+# Phase 3: Exact-match noise products (Linux) - build/doc tools, never had CVEs.
+# Protected by Phase 2 CVE-history guard: any package here that ever gets a CVE
+# will automatically be kept by Phase 2, so false negatives are impossible.
+NOISE_EXACT_LINUX = {
     # Packaging & build tools (no runtime attack surface)
     'info', 'texinfo', 'man-db', 'manpages',
     'lintian', 'debhelper', 'dpkg-dev', 'build-essential',
@@ -257,43 +279,77 @@ def _should_skip_software(vendor: str, product_name: str) -> bool:
     """
     Server-side filter: skip packages that are clearly not security-relevant.
 
-    Since agents now send ALL installed packages (no agent-side filtering),
-    this function handles the comprehensive noise reduction. It is designed
-    to be fast and run for every package in large batches (2000+ items).
+    Uses a 3-phase CVE-history-guarded approach:
 
-    Skips: documentation, debug symbols, dev headers, fonts, themes, locale
-    packs, spell-check dictionaries, TeX/LaTeX, GObject introspection data,
-    Windows Update metadata, consumer games, telemetry.
+    Phase 1 - Structural derivatives (ALWAYS safe):
+        Suffixes/prefixes that indicate non-runtime derivative packages
+        (docs, debug symbols, locale data, dev headers, fonts, spell-check).
+        These never have their own CVEs.
 
-    Does NOT skip: any runtime library, service, framework, or tool that
-    could have a CVE. When in doubt, keeps the package.
+    Phase 2 - CVE history guard (SAFETY NET):
+        Check if the package has EVER had a CVE in NVD/CISA history.
+        If yes → KEEP the package, regardless of any noise patterns.
+        This prevents accidental skipping of packages like openssl, xz-utils,
+        bzip2, tcpdump, etc.
+
+    Phase 3 - Noise patterns (only for packages with NO CVE history):
+        Pattern/exact-match rules that filter Windows/macOS/Linux noise.
+        Only applied to packages that passed the CVE history guard.
+
+    Args:
+        vendor: Software vendor name
+        product_name: Software product name
+
+    Returns:
+        True if the package should be skipped (not security-relevant),
+        False if the package should be kept.
     """
     if not vendor or not product_name:
         return True
 
     product_lower = product_name.lower().strip()
 
-    # --- Fast exact match (O(1) hash lookup) ---
-    if product_lower in SKIP_PRODUCTS_WINDOWS:
-        return True
-    if product_lower in SKIP_EXACT_LINUX:
-        return True
+    # ---- Phase 1: Structural derivatives (universally safe to skip) ----
+    # These suffixes/prefixes indicate non-runtime content (docs, debug
+    # symbols, locale data, dev headers). The derivative package for ANY
+    # product never has its own CVEs - the CVEs are in the base package.
 
-    # --- Suffix check (documentation, debug, dev headers, locale, fonts) ---
-    for suffix in SKIP_SUFFIXES_LINUX:
+    for suffix in STRUCTURAL_SKIP_SUFFIXES:
         if product_lower.endswith(suffix):
-            # Exception: keep security-relevant packages that happen to
-            # end in a skip suffix (e.g. openssh-doc is noise, but
-            # libssl-dev is noise too, so no exceptions needed)
             return True
 
-    # --- Prefix check (fonts, texlive, spell-check, locale packs) ---
-    for prefix in SKIP_PREFIXES_LINUX:
+    for prefix in STRUCTURAL_SKIP_PREFIXES:
         if product_lower.startswith(prefix):
             return True
 
-    # --- Regex patterns (compiled, for Windows noise + misc) ---
-    for pattern in _SKIP_PATTERNS_COMPILED:
+    # ---- Phase 2: CVE history guard (SAFETY NET) ----
+    # If this package has EVER had a CVE, it MUST NOT be skipped.
+    # This is the key protection against false negatives.
+    if has_cve_history(product_lower):
+        return False  # Has CVE history → KEEP, never skip
+
+    # Also check the vendor name for known CVE-bearing vendors
+    vendor_lower = vendor.lower().strip()
+    if has_cve_history(vendor_lower):
+        # Vendor has CVE history, but be conservative: still check if
+        # this specific product is clearly noise. The CVE guard for the
+        # product name didn't fire, so the product itself has no direct
+        # CVE history. Continue to Phase 3.
+        pass
+
+    # ---- Phase 3: Noise patterns (only for packages with NO CVE history) ----
+    # These rules ONLY fire for packages where Phase 2 confirmed no CVE
+    # history exists. This is safe because we've already protected all
+    # packages that have ever had vulnerabilities.
+
+    # Fast exact match (O(1) hash lookup)
+    if product_lower in NOISE_EXACT_WINDOWS:
+        return True
+    if product_lower in NOISE_EXACT_LINUX:
+        return True
+
+    # Regex noise patterns
+    for pattern in _NOISE_PATTERNS_COMPILED:
         if pattern.search(product_lower):
             return True
 

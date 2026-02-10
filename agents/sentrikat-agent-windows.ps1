@@ -56,7 +56,8 @@ param(
     [switch]$Verbose
 )
 
-$ErrorActionPreference = "SilentlyContinue"
+# Use Stop so unexpected errors are visible; individual cmdlets use -ErrorAction SilentlyContinue where intended
+$ErrorActionPreference = "Stop"
 $AgentVersion = "1.4.0"
 $LogFile = "$env:ProgramData\SentriKat\agent.log"
 $HeartbeatIntervalMinutes = 5
@@ -139,6 +140,19 @@ function Save-AgentConfig {
     }
 
     $Config | ConvertTo-Json | Set-Content $ConfigFile -Force
+
+    # Restrict file ACL to SYSTEM and Administrators only (config contains API key)
+    try {
+        $acl = Get-Acl $ConfigFile
+        $acl.SetAccessRuleProtection($true, $false)
+        $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","FullControl","Allow")
+        $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM","FullControl","Allow")
+        $acl.AddAccessRule($adminRule)
+        $acl.AddAccessRule($systemRule)
+        Set-Acl $ConfigFile $acl
+    } catch {
+        Write-Log "Warning: Could not restrict config file permissions: $_" -Level "WARN"
+    }
 }
 
 # ============================================================================

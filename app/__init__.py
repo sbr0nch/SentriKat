@@ -191,6 +191,32 @@ def create_app(config_class=Config):
     app.register_blueprint(reports_api.bp)
     app.register_blueprint(api_docs.api_docs_bp)
 
+    # Error handlers: return JSON for API routes, HTML for browser routes
+    @app.errorhandler(404)
+    def not_found_error(e):
+        from flask import request as _req, jsonify as _jfy
+        if _req.path.startswith('/api/'):
+            return _jfy({'error': 'Not found'}), 404
+        return '<h1>404 - Page Not Found</h1><p>The requested page does not exist.</p>', 404
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        from flask import request as _req, jsonify as _jfy
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        if _req.path.startswith('/api/'):
+            return _jfy({'error': 'Internal server error'}), 500
+        return '<h1>500 - Internal Server Error</h1><p>An unexpected error occurred.</p>', 500
+
+    @app.errorhandler(429)
+    def rate_limit_error(e):
+        from flask import request as _req, jsonify as _jfy
+        if _req.path.startswith('/api/'):
+            return _jfy({'error': 'Rate limit exceeded'}), 429
+        return '<h1>429 - Too Many Requests</h1><p>Please try again later.</p>', 429
+
     # Make current user and branding available in all templates
     @app.context_processor
     def inject_globals():

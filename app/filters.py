@@ -94,11 +94,22 @@ def check_cpe_match(vulnerability, product):
                         range_str = f"{entry.get('version_start', '*')} - {entry.get('version_end', '*')}"
                         return [f"CPE match: {cpe_vendor}:{cpe_product} (version range {range_str}, product version unknown)"], 'cpe', 'medium'
                 else:
-                    # No version constraint - all versions affected
-                    if version:
-                        return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (all versions affected)"], 'cpe', 'high'
+                    # No version range fields -- check for exact-version CPE entry
+                    exact_ver = entry.get('exact_version')
+                    if exact_ver:
+                        # CPE specifies a single affected version (e.g., cpe:2.3:a:vendor:product:1.2.3)
+                        if version and version.strip() == exact_ver.strip():
+                            return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (exact version match)"], 'cpe', 'high'
+                        elif not version:
+                            return [f"CPE match: {cpe_vendor}:{cpe_product} (exact version {exact_ver}, product version unknown)"], 'cpe', 'medium'
+                        # Version doesn't match this exact entry - skip to next
+                        continue
                     else:
-                        return [f"CPE match: {cpe_vendor}:{cpe_product} (all versions affected)"], 'cpe', 'high'
+                        # No version constraint and no exact version - all versions affected
+                        if version:
+                            return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (all versions affected)"], 'cpe', 'high'
+                        else:
+                            return [f"CPE match: {cpe_vendor}:{cpe_product} (all versions affected)"], 'cpe', 'high'
     else:
         # No cached CPE data - try to match against CISA KEV vendor/product
         # Use STRICT word-boundary matching to prevent false positives
