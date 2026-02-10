@@ -3888,12 +3888,17 @@
 <script src="{{ url_for('static', filename='js/admin_panel.js') }}"></script>
 <script>
 // Hash-based navigation for admin panel sections
+// Supports compound hashes like #settings:auth or #integrations:pushAgents
 function activateTabFromHash() {
-    // Get hash from URL, default to 'users' if none
-    let hash = window.location.hash.replace('#', '') || 'users';
+    const rawHash = window.location.hash.replace('#', '') || 'users';
 
-    // Validate that the tab exists
-    const tabButton = document.getElementById(hash + '-tab');
+    // Parse compound hash: "settings:auth" → mainTab="settings", subTab="auth"
+    const colonIdx = rawHash.indexOf(':');
+    const mainTab = colonIdx > -1 ? rawHash.substring(0, colonIdx) : rawHash;
+    const subTab = colonIdx > -1 ? rawHash.substring(colonIdx + 1) : null;
+
+    // Validate that the main tab exists
+    const tabButton = document.getElementById(mainTab + '-tab');
     if (tabButton) {
         // Hide all main tab panes first (only direct children of adminTabsContent)
         document.querySelectorAll('#adminTabsContent > .tab-pane').forEach(pane => {
@@ -3901,29 +3906,52 @@ function activateTabFromHash() {
         });
 
         // Show the target pane
-        const targetPane = document.getElementById(hash);
+        const targetPane = document.getElementById(mainTab);
         if (targetPane) {
             targetPane.classList.add('show', 'active');
 
-            // If this section has inner pills (Integrations, Settings, LDAP Groups),
-            // activate the first pill and its content
-            const innerPillsNav = targetPane.querySelector('.nav-pills');
-            if (innerPillsNav) {
-                const firstPill = innerPillsNav.querySelector('.nav-link');
-                const innerTabContent = targetPane.querySelector('.tab-content');
-
-                if (firstPill && innerTabContent) {
-                    // Activate first pill button
-                    innerPillsNav.querySelectorAll('.nav-link').forEach(p => p.classList.remove('active'));
-                    firstPill.classList.add('active');
-
-                    // Show first inner tab pane
-                    innerTabContent.querySelectorAll('.tab-pane').forEach(p => {
-                        p.classList.remove('show', 'active');
-                    });
-                    const firstInnerPane = innerTabContent.querySelector('.tab-pane');
-                    if (firstInnerPane) {
-                        firstInnerPane.classList.add('show', 'active');
+            // Handle inner sub-tab activation
+            if (subTab) {
+                // Settings uses showSettingsGroup() for sub-tabs
+                if (mainTab === 'settings' && typeof showSettingsGroup === 'function') {
+                    const settingsTabBtn = document.getElementById(subTab + '-settings-tab') ||
+                                           document.getElementById(subTab + '-tab');
+                    showSettingsGroup(subTab, settingsTabBtn);
+                }
+                // Integrations uses Bootstrap pills for sub-tabs
+                else if (mainTab === 'integrations') {
+                    const pillMapping = {
+                        'pushAgents': 'push-agents-tab',
+                        'jiraIntegration': 'jira-integration-tab'
+                    };
+                    const pillTabId = pillMapping[subTab];
+                    if (pillTabId) {
+                        const pillBtn = document.getElementById(pillTabId);
+                        if (pillBtn) pillBtn.click();
+                    }
+                }
+            } else {
+                // No sub-tab specified: activate first inner pill/group if present
+                if (mainTab === 'settings' && typeof showSettingsGroup === 'function') {
+                    const firstBtn = targetPane.querySelector('#settingsTabs .nav-link');
+                    if (firstBtn) {
+                        const match = firstBtn.getAttribute('onclick')?.match(/showSettingsGroup\('(\w+)'/);
+                        if (match) showSettingsGroup(match[1], firstBtn);
+                    }
+                } else {
+                    const innerPillsNav = targetPane.querySelector('.nav-pills');
+                    if (innerPillsNav) {
+                        const firstPill = innerPillsNav.querySelector('.nav-link');
+                        const innerTabContent = targetPane.querySelector('.tab-content');
+                        if (firstPill && innerTabContent) {
+                            innerPillsNav.querySelectorAll('.nav-link').forEach(p => p.classList.remove('active'));
+                            firstPill.classList.add('active');
+                            innerTabContent.querySelectorAll('.tab-pane').forEach(p => {
+                                p.classList.remove('show', 'active');
+                            });
+                            const firstInnerPane = innerTabContent.querySelector('.tab-pane');
+                            if (firstInnerPane) firstInnerPane.classList.add('show', 'active');
+                        }
                     }
                 }
             }

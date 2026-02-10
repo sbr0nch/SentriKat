@@ -9812,20 +9812,23 @@ function getSavedAdminTab() {
 
 /**
  * Handle URL hash to switch to the correct tab on page load
+ * Supports compound hashes like #settings:auth or #integrations:pushAgents
  * Falls back to localStorage if no hash is present
  */
 function handleUrlHash() {
-    const hash = window.location.hash.substring(1); // Remove the '#'
+    const rawHash = window.location.hash.substring(1); // Remove the '#'
 
     // Use hash if present, otherwise check localStorage
-    const tabName = hash || getSavedAdminTab();
-    if (!tabName) return;
+    const effectiveHash = rawHash || getSavedAdminTab();
+    if (!effectiveHash) return;
 
-    // Switching to tab
+    // Parse compound hash: "settings:auth" → mainTab="settings", subTab="auth"
+    const colonIdx = effectiveHash.indexOf(':');
+    const mainTab = colonIdx > -1 ? effectiveHash.substring(0, colonIdx) : effectiveHash;
+    const subTab = colonIdx > -1 ? effectiveHash.substring(colonIdx + 1) : null;
 
     // Use manual tab switching to avoid Bootstrap Tab issues with hidden buttons
-    const tabPaneId = tabName; // Tab pane IDs match the tab names
-    const tabPane = document.getElementById(tabPaneId);
+    const tabPane = document.getElementById(mainTab);
     const tabContent = document.getElementById('adminTabsContent');
 
     if (tabPane && tabContent) {
@@ -9837,10 +9840,29 @@ function handleUrlHash() {
         // Show the target tab pane
         tabPane.classList.add('show', 'active');
 
-        // Save to localStorage
-        saveCurrentAdminTab(tabName);
+        // Handle inner sub-tab activation
+        if (subTab) {
+            if (mainTab === 'settings' && typeof showSettingsGroup === 'function') {
+                const settingsTabBtn = document.getElementById(subTab + '-settings-tab') ||
+                                       document.getElementById(subTab + '-tab');
+                setTimeout(() => showSettingsGroup(subTab, settingsTabBtn), 50);
+            } else if (mainTab === 'integrations') {
+                const pillMapping = {
+                    'pushAgents': 'push-agents-tab',
+                    'jiraIntegration': 'jira-integration-tab'
+                };
+                const pillTabId = pillMapping[subTab];
+                if (pillTabId) {
+                    const pillBtn = document.getElementById(pillTabId);
+                    if (pillBtn) setTimeout(() => pillBtn.click(), 50);
+                }
+            }
+        }
+
+        // Save to localStorage (save full hash for compound hashes)
+        saveCurrentAdminTab(effectiveHash);
     } else {
-        console.warn('Tab pane not found:', tabPaneId);
+        console.warn('Tab pane not found:', mainTab);
     }
 }
 

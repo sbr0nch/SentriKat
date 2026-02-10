@@ -459,12 +459,12 @@ if [ "$TOTAL_CVES" -gt 0 ] 2>/dev/null; then
 
     # CISA KEV flagged
     KEV_COUNT=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
-        "SELECT COUNT(*) FROM vulnerabilities WHERE is_known_exploited = true;" 2>&1 | xargs)
-    info "CISA KEV (actively exploited): $KEV_COUNT CVEs"
+        "SELECT COUNT(*) FROM vulnerabilities WHERE known_ransomware = true;" 2>&1 | xargs)
+    info "Known ransomware campaign CVEs: $KEV_COUNT"
 
     # Last sync
     LAST_SYNC=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
-        "SELECT sync_date, sync_type, new_count, total_count FROM sync_logs ORDER BY sync_date DESC LIMIT 1;" 2>&1 | xargs)
+        "SELECT sync_date, status, vulnerabilities_count, matches_found FROM sync_logs ORDER BY sync_date DESC LIMIT 1;" 2>&1 | xargs)
     info "Last sync: $LAST_SYNC"
 else
     fail "Vulnerability database is EMPTY - run a sync first!"
@@ -525,7 +525,7 @@ section "9. Agent System"
 
 # Agent API keys
 AGENT_KEYS=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
-    "SELECT COUNT(*) FROM agent_api_keys WHERE revoked = false;" 2>&1 | xargs)
+    "SELECT COUNT(*) FROM agent_api_keys WHERE active = true;" 2>&1 | xargs)
 info "Active agent API keys: $AGENT_KEYS"
 
 # Assets/Endpoints
@@ -583,7 +583,7 @@ ORG_COUNT=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
 USER_COUNT=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
     "SELECT COUNT(*) FROM users WHERE is_active = true;" 2>&1 | xargs)
 ADMIN_COUNT=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
-    "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = true;" 2>&1 | xargs)
+    "SELECT COUNT(*) FROM users WHERE role IN ('super_admin', 'org_admin') AND is_active = true;" 2>&1 | xargs)
 info "Organizations: $ORG_COUNT"
 info "Active users: $USER_COUNT"
 info "Admin users: $ADMIN_COUNT"
@@ -616,7 +616,7 @@ fi
 
 # Check scheduler by looking at recent sync logs
 SYNC_24H=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
-    "SELECT sync_type, sync_date, status FROM sync_logs WHERE sync_date > NOW() - INTERVAL '48 hours' ORDER BY sync_date DESC LIMIT 5;" 2>&1)
+    "SELECT status, sync_date, vulnerabilities_count, matches_found FROM sync_logs WHERE sync_date > NOW() - INTERVAL '48 hours' ORDER BY sync_date DESC LIMIT 5;" 2>&1)
 if [ -n "$SYNC_24H" ]; then
     log ""
     log "  Recent sync logs (last 48h):"

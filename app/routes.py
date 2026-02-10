@@ -81,6 +81,138 @@ def health_check():
     return jsonify(health), 200
 
 
+@bp.route('/api/system/notifications', methods=['GET'])
+@login_required
+def system_notifications():
+    """
+    Returns active system notifications for the notification banner.
+    Only admins see all notifications; regular users see a subset.
+    """
+    from flask_login import current_user
+    from app.models import AgentApiKey
+    notifications = []
+    is_admin = current_user.is_super_admin() if hasattr(current_user, 'is_super_admin') else False
+
+    try:
+        now = datetime.utcnow()
+
+        # 1. Stale vulnerability data (no sync in 24+ hours) - admin only
+        if is_admin:
+            last_sync = SyncLog.query.order_by(SyncLog.sync_date.desc()).first()
+            if last_sync:
+                hours_since = (now - last_sync.sync_date).total_seconds() / 3600
+                if hours_since > 48:
+                    notifications.append({
+                        'id': 'stale_vuln_data',
+                        'level': 'warning',
+                        'icon': 'bi-exclamation-triangle-fill',
+                        'message': f'Vulnerability data is {int(hours_since)}h old. Last sync: {last_sync.sync_date.strftime("%Y-%m-%d %H:%M")} UTC.',
+                        'action': {'label': 'Sync Now', 'url': '#', 'onclick': 'syncCISA()'},
+                        'dismissible': True
+                    })
+            else:
+                vuln_count = Vulnerability.query.count()
+                if vuln_count == 0:
+                    notifications.append({
+                        'id': 'no_vuln_data',
+                        'level': 'danger',
+                        'icon': 'bi-shield-exclamation',
+                        'message': 'No vulnerability data loaded. Run an initial CISA KEV sync to start matching.',
+                        'dismissible': False
+                    })
+
+        # 2. No products configured - all users
+        product_count = Product.query.filter_by(auto_disabled=False, approval_status='approved').count()
+        if product_count == 0:
+            notifications.append({
+                'id': 'no_products',
+                'level': 'info',
+                'icon': 'bi-box-seam',
+                'message': 'No products configured yet. Add products to start vulnerability tracking.',
+                'action': {'label': 'Add Products', 'url': '/admin'},
+                'dismissible': True
+            })
+
+        # 3. Agent keys with no recent reports - admin only
+        if is_admin:
+            active_keys = AgentApiKey.query.filter_by(active=True).count()
+            if active_keys > 0:
+                recent_report = Product.query.filter(
+                    Product.source == 'agent',
+                    Product.last_agent_report > now - timedelta(hours=48)
+                ).first()
+                if not recent_report:
+                    agent_products = Product.query.filter(Product.source == 'agent').count()
+                    if agent_products > 0:
+                        notifications.append({
+                            'id': 'agent_stale',
+                            'level': 'warning',
+                            'icon': 'bi-hdd-network',
+                            'message': 'No agent reports received in the last 48 hours. Check agent connectivity.',
+                            'action': {'label': 'View Agents', 'url': '/admin-panel#integrations:pushAgents'},
+                            'dismissible': True
+                        })
+
+        # 4. ENCRYPTION_KEY not set - admin only
+        if is_admin:
+            if not os.environ.get('ENCRYPTION_KEY'):
+                notifications.append({
+                    'id': 'no_encryption_key',
+                    'level': 'warning',
+                    'icon': 'bi-key-fill',
+                    'message': 'ENCRYPTION_KEY not set. Encryption is derived from SECRET_KEY. Set a dedicated key for production.',
+                    'action': {'label': 'Settings', 'url': '/admin-panel#settings:system'},
+                    'dismissible': True
+                })
+
+        # 5. License expiring soon - admin only
+        if is_admin:
+            try:
+                from app.licensing import get_license
+                from datetime import date
+                lic = get_license()
+                if lic and lic.expires_at:
+                    days_left = (lic.expires_at - date.today()).days
+                    if 0 < days_left <= 30:
+                        notifications.append({
+                            'id': 'license_expiring',
+                            'level': 'warning',
+                            'icon': 'bi-clock-history',
+                            'message': f'Your license expires in {days_left} day{"s" if days_left != 1 else ""}.',
+                            'action': {'label': 'License', 'url': '/admin-panel#settings:license'},
+                            'dismissible': True
+                        })
+                    elif days_left <= 0:
+                        notifications.append({
+                            'id': 'license_expired',
+                            'level': 'danger',
+                            'icon': 'bi-exclamation-octagon-fill',
+                            'message': 'Your license has expired. Some features may be restricted.',
+                            'action': {'label': 'Renew', 'url': '/admin-panel#settings:license'},
+                            'dismissible': False
+                        })
+            except Exception:
+                pass
+
+        # 6. Pending import queue items - admin only
+        if is_admin:
+            pending_imports = Product.query.filter_by(approval_status='pending').count()
+            if pending_imports > 0:
+                notifications.append({
+                    'id': 'pending_imports',
+                    'level': 'info',
+                    'icon': 'bi-inbox-fill',
+                    'message': f'{pending_imports} product{"s" if pending_imports != 1 else ""} waiting for review in the import queue.',
+                    'action': {'label': 'Review', 'url': '/admin#import-queue'},
+                    'dismissible': True
+                })
+
+    except Exception as e:
+        logger.error(f"Error fetching system notifications: {e}")
+
+    return jsonify({'notifications': notifications})
+
+
 @bp.route('/api/version', methods=['GET'])
 def get_version():
     """
