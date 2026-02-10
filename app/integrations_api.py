@@ -1683,28 +1683,28 @@ trap "rm -f $PRODUCTS_FILE $PAYLOAD_FILE" EXIT
 if command -v dpkg-query &> /dev/null; then
     dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null | while IFS=$'\\t' read -r pkg ver; do
         [ -n "$pkg" ] && printf '{{"vendor":"dpkg","product":"%s","version":"%s"}},\\n' "$(json_escape "$pkg")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE"
+    done >> "$PRODUCTS_FILE" || true
 fi
 
 # rpm (RHEL/CentOS/Fedora)
 if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
     rpm -qa --queryformat '%{{NAME}}\\t%{{VERSION}}-%{{RELEASE}}\\t%{{VENDOR}}\\n' 2>/dev/null | while IFS=$'\\t' read -r pkg ver vendor; do
         [ -n "$pkg" ] && printf '{{"vendor":"%s","product":"%s","version":"%s"}},\\n' "$(json_escape "${{vendor:-rpm}}")" "$(json_escape "$pkg")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE"
+    done >> "$PRODUCTS_FILE" || true
 fi
 
 # snap
 if command -v snap &> /dev/null; then
     snap list 2>/dev/null | tail -n +2 | while read -r name ver rest; do
         [ -n "$name" ] && printf '{{"vendor":"snap","product":"%s","version":"%s"}},\\n' "$(json_escape "$name")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE"
+    done >> "$PRODUCTS_FILE" || true
 fi
 
 # flatpak
 if command -v flatpak &> /dev/null; then
     flatpak list --columns=name,version 2>/dev/null | while read -r name ver; do
         [ -n "$name" ] && printf '{{"vendor":"flatpak","product":"%s","version":"%s"}},\\n' "$(json_escape "$name")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE"
+    done >> "$PRODUCTS_FILE" || true
 fi
 
 COUNT=0
@@ -1717,12 +1717,24 @@ echo ""
 
 # Chunked sending: split large inventories into batches to avoid
 # overwhelming the server and to handle timeouts gracefully.
-CHUNK_SIZE=500
+# Dynamic chunk size: small enough for reliable delivery, large enough to minimize round-trips.
+if [ "$COUNT" -le 500 ]; then
+    CHUNK_SIZE=$COUNT  # No splitting needed
+elif [ "$COUNT" -le 2000 ]; then
+    CHUNK_SIZE=500     # 500 per chunk (typical workstations: ~1800 packages = 4 chunks)
+elif [ "$COUNT" -le 5000 ]; then
+    CHUNK_SIZE=750     # Larger chunks for servers with many packages
+else
+    CHUNK_SIZE=1000    # Maximum chunk for very large inventories
+fi
 H_ESC=$(json_escape "$HOSTNAME")
 IP_ESC=$(json_escape "$IP_ADDRESS")
 OSV_ESC=$(json_escape "$OS_VERSION")
 K_ESC=$(json_escape "$KERNEL")
 AID_ESC=$(json_escape "$AGENT_ID")
+
+# Disable exit-on-error for the send phase (we handle errors ourselves)
+set +e
 
 send_chunk() {{
     local CHUNK_FILE="$1"
@@ -1747,15 +1759,17 @@ send_chunk() {{
         echo "  Sending inventory ($PAYLOAD_SIZE bytes)..."
     fi
 
-    RESPONSE=$(curl -s -w "\\n%{{http_code}}" -X POST "$API_URL/api/agent/inventory" \\
+    RESPONSE=$(curl -s -w "\\n%{{http_code}}" --connect-timeout 30 --max-time 120 \\
+        -X POST "$API_URL/api/agent/inventory" \\
         -H "X-Agent-Key: $API_KEY" \\
         -H "Content-Type: application/json" \\
-        -d @"$PAYLOAD_FILE")
+        -d @"$PAYLOAD_FILE" 2>&1)
 
     HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
     BODY=$(echo "$RESPONSE" | sed '$d')
 
     if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+        echo "  Chunk $CHUNK_NUM OK"
         return 0
     else
         echo "  ERROR on chunk $CHUNK_NUM (HTTP $HTTP_CODE): $BODY"
@@ -1765,11 +1779,13 @@ send_chunk() {{
 
 echo "Sending inventory to SentriKat..."
 ERRORS=0
+SENT=0
 
 if [ "$COUNT" -le "$CHUNK_SIZE" ] || [ "$COUNT" -eq 0 ]; then
     # Small enough to send in one request
-    send_chunk "$PRODUCTS_FILE" 1 1
-    if [ $? -ne 0 ]; then
+    if send_chunk "$PRODUCTS_FILE" 1 1; then
+        SENT=1
+    else
         ERRORS=1
     fi
 else
@@ -1783,8 +1799,9 @@ else
 
     CHUNK_NUM=1
     for CHUNK_FILE in "$CHUNK_DIR"/chunk_*.chunk; do
-        send_chunk "$CHUNK_FILE" "$CHUNK_NUM" "$TOTAL_CHUNKS"
-        if [ $? -ne 0 ]; then
+        if send_chunk "$CHUNK_FILE" "$CHUNK_NUM" "$TOTAL_CHUNKS"; then
+            SENT=$((SENT + 1))
+        else
             ERRORS=$((ERRORS + 1))
         fi
         CHUNK_NUM=$((CHUNK_NUM + 1))
@@ -1796,33 +1813,41 @@ else
 fi
 
 echo ""
+echo "========================================"
 if [ "$ERRORS" -eq 0 ]; then
-    echo "SUCCESS!"
-    echo "----------------------------------------"
+    echo "  SUCCESS! Sent $SENT chunk(s), $COUNT packages"
+    echo "========================================"
+    echo ""
+    echo "Last server response:"
     echo "$BODY" | python3 -c "
 import sys,json
 try:
     d=json.load(sys.stdin)
     if d.get('status') == 'queued':
-        print(f\\"Status:       Queued for processing\\")
-        print(f\\"Job ID:       {{d.get('job_id')}}\\")
-        print(f\\"Asset ID:     {{d.get('asset_id')}}\\")
+        print(f\\"  Status:       Queued for background processing\\")
+        print(f\\"  Job ID:       {{d.get('job_id')}}\\")
+        print(f\\"  Asset ID:     {{d.get('asset_id')}}\\")
+        print(f\\"  Note:         Large batch queued. Check Endpoints in SentriKat UI.\\")
     else:
-        print(f\\"Asset ID:     {{d.get('asset_id')}}\\")
+        print(f\\"  Asset ID:     {{d.get('asset_id')}}\\")
         s=d.get('summary',d)
-        print(f\\"Products Created: {{s.get('products_created', 0)}}\\")
-        print(f\\"Products Updated: {{s.get('products_updated', 0)}}\\")
-        print(f\\"Installations Created: {{s.get('installations_created', 0)}}\\")
-        print(f\\"Installations Updated: {{s.get('installations_updated', 0)}}\\")
+        print(f\\"  Products Created:      {{s.get('products_created', 0)}}\\")
+        print(f\\"  Products Updated:      {{s.get('products_updated', 0)}}\\")
+        print(f\\"  Installations Created: {{s.get('installations_created', 0)}}\\")
+        print(f\\"  Installations Updated: {{s.get('installations_updated', 0)}}\\")
+        q=s.get('products_queued', 0)
+        if q > 0:
+            print(f\\"  Queued for Review:     {{q}} (check Import Queue in UI)\\")
 except:
     print(sys.stdin.read())
 " 2>/dev/null || echo "$BODY"
-    echo "----------------------------------------"
 else
-    echo "COMPLETED WITH $ERRORS ERRORS"
-    echo "----------------------------------------"
-    echo "Some chunks failed. Check SentriKat logs for details."
-    echo "Successfully sent chunks will still be processed."
+    echo "  COMPLETED: $SENT OK, $ERRORS FAILED"
+    echo "========================================"
+    echo ""
+    echo "Some chunks failed to send. Successfully sent chunks are still processed."
+    echo "Check SentriKat server logs for details."
+    echo "Last server response: $BODY"
     exit 1
 fi
 

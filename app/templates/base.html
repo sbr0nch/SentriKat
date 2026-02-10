@@ -2894,9 +2894,9 @@
                         <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
                     <div class="sidebar-submenu {{ 'open' if request.endpoint == 'main.admin' else '' }}">
-                        <a href="/admin" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.admin' and not request.args.get('tab') else '' }}" onclick="navigateInventoryTab('products', event)" data-tooltip="Products">
+                        <a href="/admin" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.admin' and not request.args.get('tab') else '' }}" onclick="navigateInventoryTab('products', event)" data-tooltip="Products List">
                             <i class="bi bi-box-seam"></i>
-                            Products
+                            Products List
                         </a>
                         <a href="/admin#endpoints" class="sidebar-sublink" onclick="navigateInventoryTab('endpoints', event)" data-tooltip="Endpoints">
                             <i class="bi bi-pc-display"></i>

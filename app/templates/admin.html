@@ -21,7 +21,7 @@
     <ul class="nav nav-tabs mb-3" id="inventoryTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="products-tab" data-bs-toggle="tab" data-bs-target="#productsPane" type="button">
-                <i class="bi bi-box-seam me-1"></i>Products
+                <i class="bi bi-box-seam me-1"></i>Products List
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -3670,6 +3670,13 @@
     document.getElementById('endpoints-tab')?.addEventListener('shown.bs.tab', function() {
         if (!endpointsLoaded) loadEndpoints();
     });
+    // Also load if the tab is already active on page load (hash navigation)
+    document.addEventListener('DOMContentLoaded', function() {
+        const epTab = document.getElementById('endpointsPane');
+        if (epTab && epTab.classList.contains('active') && !endpointsLoaded) {
+            loadEndpoints();
+        }
+    });
 
     // Sync sidebar active state and URL hash when tabs change
     document.querySelectorAll('#inventoryTabs button[data-bs-toggle="tab"]').forEach(btn => {
@@ -3709,8 +3716,12 @@
             }
         }
     }
-    // Activate on page load
-    activateTabFromHash();
+    // Activate on page load (must wait for DOMContentLoaded so Bootstrap JS is loaded)
+    // The inline script block runs BEFORE base.html loads bootstrap.bundle.js,
+    // so new bootstrap.Tab() would fail if called inline.
+    document.addEventListener('DOMContentLoaded', function() {
+        activateTabFromHash();
+    });
     // Also activate on hash change (e.g., sidebar link clicked while already on page)
     window.addEventListener('hashchange', activateTabFromHash);
 
@@ -3899,6 +3910,13 @@
     // Lazy load software overview on tab show
     document.getElementById('software-overview-tab')?.addEventListener('shown.bs.tab', function() {
         if (!softwareOverviewLoaded) loadSoftwareOverview();
+    });
+    // Also load if the tab is already active on page load (hash navigation)
+    document.addEventListener('DOMContentLoaded', function() {
+        const soTab = document.getElementById('softwareOverviewPane');
+        if (soTab && soTab.classList.contains('active') && !softwareOverviewLoaded) {
+            loadSoftwareOverview();
+        }
     });
 
     // =========================================================================
@@ -4136,6 +4154,14 @@
     // Lazy load import queue on tab show
     document.getElementById('import-queue-tab')?.addEventListener('shown.bs.tab', function() {
         if (!importQueueLoaded) {
+            loadImportQueue();
+            importQueueLoaded = true;
+        }
+    });
+    // Also load if the tab is already active on page load (hash navigation)
+    document.addEventListener('DOMContentLoaded', function() {
+        const iqTab = document.getElementById('importQueuePane');
+        if (iqTab && iqTab.classList.contains('active') && !importQueueLoaded) {
             loadImportQueue();
             importQueueLoaded = true;
         }

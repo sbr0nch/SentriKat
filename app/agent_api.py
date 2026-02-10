@@ -32,8 +32,11 @@ from app.auth import login_required, admin_required, org_admin_required
 from app.error_utils import ERROR_MSGS
 import json
 
-# Threshold for async processing (queued instead of immediate)
-ASYNC_BATCH_THRESHOLD = 100
+# Threshold for async processing (queued instead of immediate).
+# Agent script sends chunks of 500 max, so 750 ensures agent chunks are
+# processed synchronously (faster, more reliable). Only truly massive
+# single requests (e.g., from integrations) go async.
+ASYNC_BATCH_THRESHOLD = 750
 
 # Input validation limits
 MAX_HOSTNAME_LENGTH = 255
