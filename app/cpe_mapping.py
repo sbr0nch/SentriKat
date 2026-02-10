@@ -355,6 +355,12 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
 
     logger.info(f"CPE Phase 1 (local): mapped {updated_count}/{total_without_cpe}, {len(still_unmatched)} still unmatched")
 
+    # Log unmatched products for debugging
+    if still_unmatched:
+        samples = still_unmatched[:30]
+        for p in samples:
+            logger.info(f"  UNMATCHED: vendor='{p.vendor}' product='{p.product_name}'")
+
     # Phase 2: Try NVD API for remaining unmatched products (online, rate-limited)
     if use_nvd and still_unmatched:
         nvd_lookups = 0

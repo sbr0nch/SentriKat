@@ -507,6 +507,7 @@ def save_user_mapping(vendor: str, product_name: str, cpe_vendor: str, cpe_produ
 def _bump_mapping_usage(mapping_id):
     """Increment usage_count with raw SQL to avoid dirtying the ORM session."""
     try:
+        from app import db
         db.session.execute(
             db.text("UPDATE user_cpe_mappings SET usage_count = COALESCE(usage_count, 0) + 1 WHERE id = :id"),
             {'id': mapping_id}
