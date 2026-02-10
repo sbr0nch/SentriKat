@@ -16,8 +16,15 @@ Override defaults via environment variables:
 import os
 import multiprocessing
 
+
+def _env_int(key, default):
+    """Get env var as int, treating empty string as missing."""
+    val = os.environ.get(key, '')
+    return int(val) if val.strip() else default
+
+
 # Bind address
-bind = os.environ.get('GUNICORN_BIND', '0.0.0.0:5000')
+bind = os.environ.get('GUNICORN_BIND') or '0.0.0.0:5000'
 
 # Worker configuration
 # gthread provides threaded workers - better for I/O-bound workloads
@@ -30,15 +37,15 @@ worker_class = 'gthread'
 # For medium deployments (4 CPU): 8 workers (capped)
 _cpu_count = multiprocessing.cpu_count()
 _default_workers = min(_cpu_count * 2 + 1, 8)
-workers = int(os.environ.get('GUNICORN_WORKERS', _default_workers))
+workers = _env_int('GUNICORN_WORKERS', _default_workers)
 
 # Threads per worker - allows concurrent request handling within each worker
 # 4 threads * N workers = 4N concurrent requests
-threads = int(os.environ.get('GUNICORN_THREADS', 4))
+threads = _env_int('GUNICORN_THREADS', 4)
 
 # Timeout for worker response (seconds)
 # 120s accommodates long-running operations (CISA sync, report generation)
-timeout = int(os.environ.get('GUNICORN_TIMEOUT', 120))
+timeout = _env_int('GUNICORN_TIMEOUT', 120)
 
 # Graceful timeout for worker shutdown
 graceful_timeout = 30
@@ -55,7 +62,7 @@ preload_app = True
 
 # Max requests before worker restart (prevents memory leaks)
 # After processing this many requests, worker is gracefully restarted
-max_requests = int(os.environ.get('GUNICORN_MAX_REQUESTS', 2000))
+max_requests = _env_int('GUNICORN_MAX_REQUESTS', 2000)
 max_requests_jitter = 200  # Add randomness to prevent all workers restarting at once
 
 # Security: run as non-root user after binding
