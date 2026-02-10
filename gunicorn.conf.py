@@ -104,8 +104,10 @@ def post_fork(server, worker):
     creates its own fresh pool on first use.
     """
     try:
+        from run import app
         from app import db
-        db.engine.dispose()
+        with app.app_context():
+            db.engine.dispose()
         server.log.info("Worker %s: disposed inherited DB connections", worker.pid)
     except Exception as e:
         server.log.warning("Worker %s: failed to dispose DB pool: %s", worker.pid, e)
