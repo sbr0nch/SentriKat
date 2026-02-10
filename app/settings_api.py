@@ -117,8 +117,9 @@ def get_setting(key, default=None, include_source=False):
             try:
                 value = decrypt_value(setting.value)
             except Exception as e:
-                logger.error(f"Failed to decrypt setting '{key}': {type(e).__name__}")
-                value = setting.value  # Return raw value - might be legacy plaintext
+                logger.error(f"Failed to decrypt setting '{key}': {type(e).__name__}. "
+                             f"The encryption key may have changed. Re-save this setting to fix.")
+                value = default  # Return default (empty) - don't leak encrypted blob
         else:
             value = setting.value
         source = 'database'
