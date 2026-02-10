@@ -1769,6 +1769,29 @@ def list_assets():
         if active is not None:
             query = query.filter_by(active=active.lower() == 'true')
 
+        # Filter by product (show only endpoints that have a specific product installed)
+        filter_product_vendor = request.args.get('product_vendor')
+        filter_product_name = request.args.get('product_name')
+        if filter_product_vendor and filter_product_name:
+            matching_product_ids = [p.id for p in Product.query.filter(
+                db.func.lower(Product.vendor) == filter_product_vendor.lower(),
+                db.func.lower(Product.product_name) == filter_product_name.lower(),
+                Product.active == True
+            ).all()]
+            if matching_product_ids:
+                asset_ids_with_product = db.session.query(
+                    ProductInstallation.asset_id
+                ).filter(
+                    ProductInstallation.product_id.in_(matching_product_ids)
+                ).distinct().all()
+                asset_ids = [a[0] for a in asset_ids_with_product]
+                if asset_ids:
+                    query = query.filter(Asset.id.in_(asset_ids))
+                else:
+                    query = query.filter(db.literal(False))
+            else:
+                query = query.filter(db.literal(False))
+
         search = request.args.get('search')
         if search:
             search_term = f"%{search}%"
