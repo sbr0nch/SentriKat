@@ -2823,9 +2823,9 @@ def apply_cpe_mappings():
         use_nvd = data.get('use_nvd', True)
         max_nvd = data.get('max_nvd_lookups', 50)
 
+        app = current_app._get_current_object()
+
         def _run_cpe_apply():
-            from app import create_app
-            app = create_app()
             with app.app_context():
                 try:
                     # If dictionary is empty, do bulk download first
