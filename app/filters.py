@@ -395,10 +395,19 @@ def match_vulnerabilities_to_products():
 def cleanup_invalid_matches():
     """
     Remove matches that no longer pass the matching criteria.
-    Call this after updating matching logic to clean up stale data.
+    This is critical for correctness when NVD CPE version ranges change
+    (e.g., vendor releases cumulative update narrowing the affected range).
     Returns count of removed matches.
     """
-    all_matches = VulnerabilityMatch.query.all()
+    import logging
+    logger = logging.getLogger(__name__)
+    from sqlalchemy.orm import selectinload
+
+    # Eager-load product and vulnerability to avoid N+1 queries
+    all_matches = VulnerabilityMatch.query.options(
+        selectinload(VulnerabilityMatch.product),
+        selectinload(VulnerabilityMatch.vulnerability)
+    ).all()
     removed_count = 0
 
     for match in all_matches:
@@ -411,11 +420,22 @@ def cleanup_invalid_matches():
             removed_count += 1
             continue
 
+        # Skip inactive products - don't evaluate matches for disabled products
+        if not product.active:
+            continue
+
         # Re-check if this match is still valid with current logic
         match_reasons, _, _ = check_match(vulnerability, product)
 
         if not match_reasons:
             # Match no longer valid - remove it
+            if match.acknowledged:
+                logger.info(
+                    "Removing previously-acknowledged match %s <-> %s %s %s "
+                    "(no longer in affected version range)",
+                    vulnerability.cve_id, product.vendor,
+                    product.product_name, product.version or 'Any'
+                )
             db.session.delete(match)
             removed_count += 1
 
