@@ -952,7 +952,7 @@ def get_product(product_id):
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     if current_user and current_user.role != 'super_admin':
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
             product_org_ids.append(product.organization_id)
@@ -1363,7 +1363,7 @@ def get_product_organizations(product_id):
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     if current_user and current_user.role != 'super_admin':
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
             product_org_ids.append(product.organization_id)
@@ -1396,7 +1396,7 @@ def assign_product_organizations(product_id):
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     if current_user and current_user.role != 'super_admin':
-        user_org_ids = [org.id for org in current_user.get_all_organizations()]
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
             product_org_ids.append(product.organization_id)
@@ -1456,7 +1456,7 @@ def remove_product_organization(product_id, org_id):
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     if current_user and current_user.role != 'super_admin':
-        user_org_ids = [o.id for o in current_user.get_all_organizations()]
+        user_org_ids = [o['id'] for o in current_user.get_all_organizations()]
         if org_id not in user_org_ids:
             return jsonify({'error': 'You can only manage organizations you belong to'}), 403
 
