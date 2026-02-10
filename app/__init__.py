@@ -274,7 +274,7 @@ def create_app(config_class=Config):
     # Setup wizard redirect
     @app.before_request
     def check_setup():
-        from flask import request, redirect, url_for
+        from flask import request, redirect, url_for, jsonify
         # Skip setup check for static files, setup routes, auth routes, and API status
         if request.endpoint and (
             request.endpoint.startswith('static') or
@@ -285,9 +285,16 @@ def create_app(config_class=Config):
         ):
             return None
 
+        # Skip setup check for agent API endpoints (they use their own key-based auth)
+        if request.path.startswith('/api/agent/') or request.path == '/api/health':
+            return None
+
         # Check if setup is complete
         if not setup.is_setup_complete():
-            # Redirect to setup wizard
+            # Return JSON error for API paths instead of HTML redirect
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Setup not complete', 'setup_required': True}), 503
+            # Redirect to setup wizard for browser requests
             if request.endpoint != 'setup.setup_wizard':
                 return redirect(url_for('setup.setup_wizard'))
 

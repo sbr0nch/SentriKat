@@ -1090,6 +1090,71 @@
             font-size: 1.25rem;
         }
 
+        /* System Notifications */
+        .system-notifications-container {
+            padding: 0;
+        }
+        .system-notifications-container:empty {
+            display: none;
+        }
+        .system-notification {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem 1.75rem;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+            gap: 0.5rem;
+        }
+        .system-notification i {
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+        .system-notification .notif-message {
+            flex: 1;
+        }
+        .system-notification .notif-action {
+            font-weight: 600;
+            text-decoration: underline;
+            white-space: nowrap;
+        }
+        .system-notification .btn-close {
+            font-size: 0.6rem;
+            padding: 0.4rem;
+            flex-shrink: 0;
+        }
+        .system-notification.notif-warning {
+            background: #fff3cd;
+            color: #664d03;
+        }
+        .system-notification.notif-danger {
+            background: #f8d7da;
+            color: #842029;
+        }
+        .system-notification.notif-info {
+            background: #cff4fc;
+            color: #055160;
+        }
+        .system-notification.notif-success {
+            background: #d1e7dd;
+            color: #0f5132;
+        }
+        [data-theme="dark"] .system-notification.notif-warning {
+            background: rgba(255, 193, 7, 0.15);
+            color: #ffc107;
+        }
+        [data-theme="dark"] .system-notification.notif-danger {
+            background: rgba(220, 53, 69, 0.15);
+            color: #ea868f;
+        }
+        [data-theme="dark"] .system-notification.notif-info {
+            background: rgba(13, 202, 240, 0.15);
+            color: #6edff6;
+        }
+        [data-theme="dark"] .system-notification.notif-success {
+            background: rgba(25, 135, 84, 0.15);
+            color: #75b798;
+        }
+
         /* Main Content */
         .main-content {
             flex: 1;
@@ -2954,7 +3019,7 @@
                         <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
                     <div class="sidebar-submenu">
-                        <a href="/admin-panel#integrations" class="sidebar-sublink" data-hash="integrations" onclick="switchIntegrationTab('pushAgents')">
+                        <a href="/admin-panel#integrations:pushAgents" class="sidebar-sublink" data-hash="integrations:pushAgents">
                             <i class="bi bi-key"></i>
                             Agent Keys
                         </a>
@@ -2966,7 +3031,7 @@
                             <i class="bi bi-calendar-check"></i>
                             Scheduled Reports
                         </a>
-                        <a href="/admin-panel#integrations" class="sidebar-sublink" data-hash="integrations" onclick="switchIntegrationTab('jiraIntegration')">
+                        <a href="/admin-panel#integrations:jiraIntegration" class="sidebar-sublink" data-hash="integrations:jiraIntegration">
                             <i class="bi bi-kanban"></i>
                             Issue Trackers
                         </a>
@@ -2986,30 +3051,30 @@
                     </a>
                     <div class="sidebar-submenu">
                         {% if license and license.is_professional() %}
-                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('auth')">
+                        <a href="/admin-panel#settings:auth" class="sidebar-sublink" data-hash="settings:auth">
                             <i class="bi bi-shield-lock"></i>
                             Authentication
                         </a>
                         {% endif %}
-                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('email')">
+                        <a href="/admin-panel#settings:email" class="sidebar-sublink" data-hash="settings:email">
                             <i class="bi bi-envelope"></i>
                             Email & Alerts
                         </a>
-                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('system')">
+                        <a href="/admin-panel#settings:system" class="sidebar-sublink" data-hash="settings:system">
                             <i class="bi bi-gear"></i>
                             System
                         </a>
-                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('compliance')">
+                        <a href="/admin-panel#settings:compliance" class="sidebar-sublink" data-hash="settings:compliance">
                             <i class="bi bi-clipboard-check"></i>
                             Compliance
                         </a>
                         {% if license and license.is_professional() %}
-                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('appearance')">
+                        <a href="/admin-panel#settings:appearance" class="sidebar-sublink" data-hash="settings:appearance">
                             <i class="bi bi-palette"></i>
                             Appearance
                         </a>
                         {% endif %}
-                        <a href="/admin-panel#settings" class="sidebar-sublink" data-hash="settings" onclick="switchSettingsGroup('license')">
+                        <a href="/admin-panel#settings:license" class="sidebar-sublink" data-hash="settings:license">
                             <i class="bi bi-key"></i>
                             License
                         </a>
@@ -3039,6 +3104,9 @@
                 </nav>
             </div>
             {% endblock %}
+
+            <!-- System Notifications Banner -->
+            <div id="systemNotifications" class="system-notifications-container"></div>
 
             <!-- Main Content -->
             <div class="main-content">
@@ -3893,48 +3961,58 @@
         // Highlight sidebar links based on current page and hash
         function updateSidebarHighlight() {
             const path = window.location.pathname;
-            const hash = window.location.hash.replace('#', '') || '';
+            const rawHash = window.location.hash.replace('#', '') || '';
             const isAdminPanel = (path === '/admin-panel');
 
             if (!isAdminPanel) return;
+
+            // Parse compound hash (e.g., "settings:auth" → mainHash="settings", subHash="auth")
+            const colonIdx = rawHash.indexOf(':');
+            const mainHash = colonIdx > -1 ? rawHash.substring(0, colonIdx) : rawHash;
+            const currentHash = mainHash || 'users'; // Default tab is users
 
             // Clear all admin-panel related active states
             document.querySelectorAll('.sidebar-link[data-hash], .sidebar-sublink[data-hash]').forEach(el => {
                 el.classList.remove('active');
             });
-
-            // Also clear the parent submenu toggle link
             document.querySelectorAll('.sidebar-link[data-admin-panel-hashes]').forEach(el => {
                 el.classList.remove('active');
             });
 
-            // User-related hashes go to the Users & Access submenu
-            const userHashes = ['users', 'ldapUsers', 'ldapGroups'];
-            const currentHash = hash || 'users'; // Default tab is users
+            // Try to find an exact match for the full hash first (compound hashes like "settings:auth")
+            let matchedSublink = rawHash ? document.querySelector(`.sidebar-sublink[data-hash="${rawHash}"]`) : null;
 
-            if (userHashes.includes(currentHash)) {
-                // Highlight the Users & Access parent link
-                const parentLink = document.querySelector('.sidebar-link[data-admin-panel-hashes]');
-                if (parentLink) {
-                    parentLink.classList.add('active');
-                    // Auto-expand the submenu
-                    const submenu = parentLink.nextElementSibling;
-                    if (submenu && submenu.classList.contains('sidebar-submenu')) {
-                        submenu.classList.add('open');
-                        parentLink.classList.add('expanded');
+            // Fall back to main hash match (simple hashes like "users", "ldapUsers")
+            if (!matchedSublink && currentHash) {
+                matchedSublink = document.querySelector(`.sidebar-sublink[data-hash="${currentHash}"]`);
+            }
+
+            if (matchedSublink) {
+                matchedSublink.classList.add('active');
+                // Expand the parent submenu
+                const submenu = matchedSublink.closest('.sidebar-submenu');
+                if (submenu) {
+                    submenu.classList.add('open');
+                    const parentLink = submenu.previousElementSibling;
+                    if (parentLink) {
+                        parentLink.classList.add('active', 'expanded');
                     }
                 }
-                // Highlight the specific sublink
-                const sublink = document.querySelector(`.sidebar-sublink[data-hash="${currentHash}"]`);
-                if (sublink) {
-                    sublink.classList.add('active');
-                }
             } else {
-                // Highlight the matching top-level sidebar link (organizations, integrations, settings)
+                // Check for top-level sidebar link match (e.g., organizations)
                 const matchingLink = document.querySelector(`.sidebar-link[data-hash="${currentHash}"]`);
                 if (matchingLink) {
                     matchingLink.classList.add('active');
                 }
+                // Also check parent links that contain this hash
+                document.querySelectorAll('.sidebar-link[data-admin-panel-hashes]').forEach(el => {
+                    const hashes = (el.getAttribute('data-admin-panel-hashes') || '').split(',');
+                    if (hashes.includes(currentHash)) {
+                        el.classList.add('active', 'expanded');
+                        const submenu = el.nextElementSibling;
+                        if (submenu) submenu.classList.add('open');
+                    }
+                });
             }
         }
 
@@ -3942,10 +4020,60 @@
         document.addEventListener('DOMContentLoaded', function() {
             initSidebar();
             updateSidebarHighlight();
+            loadSystemNotifications();
         });
 
         // Update highlighting when hash changes (tab navigation within admin-panel)
         window.addEventListener('hashchange', updateSidebarHighlight);
+
+        // ============================================================================
+        // System Notifications
+        // ============================================================================
+        function loadSystemNotifications() {
+            const container = document.getElementById('systemNotifications');
+            if (!container) return;
+
+            // Get dismissed notifications from sessionStorage (dismiss per session)
+            const dismissed = JSON.parse(sessionStorage.getItem('dismissedNotifications') || '[]');
+
+            fetch('/api/system/notifications')
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (!data || !data.notifications || data.notifications.length === 0) {
+                        container.innerHTML = '';
+                        return;
+                    }
+                    container.innerHTML = data.notifications
+                        .filter(n => !dismissed.includes(n.id))
+                        .map(n => {
+                            const actionHtml = n.action
+                                ? (n.action.onclick
+                                    ? `<a href="${n.action.url}" class="notif-action" onclick="${n.action.onclick}; return false;">${n.action.label}</a>`
+                                    : `<a href="${n.action.url}" class="notif-action">${n.action.label}</a>`)
+                                : '';
+                            const closeHtml = n.dismissible !== false
+                                ? `<button type="button" class="btn-close" aria-label="Close" onclick="dismissNotification('${n.id}', this)"></button>`
+                                : '';
+                            return `<div class="system-notification notif-${n.level}" data-notif-id="${n.id}">
+                                <i class="bi ${n.icon}"></i>
+                                <span class="notif-message">${n.message}</span>
+                                ${actionHtml}
+                                ${closeHtml}
+                            </div>`;
+                        }).join('');
+                })
+                .catch(() => {}); // Silently fail - notifications are non-critical
+        }
+
+        function dismissNotification(id, btn) {
+            const dismissed = JSON.parse(sessionStorage.getItem('dismissedNotifications') || '[]');
+            if (!dismissed.includes(id)) {
+                dismissed.push(id);
+                sessionStorage.setItem('dismissedNotifications', JSON.stringify(dismissed));
+            }
+            const notifEl = btn.closest('.system-notification');
+            if (notifEl) notifEl.remove();
+        }
 
         // ============================================================================
         // Theme Toggle Functions
