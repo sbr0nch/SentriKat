@@ -230,13 +230,14 @@
                                 <th data-sort="organization" onclick="sortEndpoints('organization')" style="cursor:pointer;">Organization <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th data-sort="product_count" onclick="sortEndpoints('product_count')" style="cursor:pointer;">Products <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th data-sort="status" onclick="sortEndpoints('status')" style="cursor:pointer;">Status <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th data-sort="agent_version" onclick="sortEndpoints('agent_version')" style="cursor:pointer;">Agent <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th data-sort="last_checkin" onclick="sortEndpoints('last_checkin')" style="cursor:pointer;">Last Seen <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th style="width: 100px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="endpointsTableBody">
                             <tr>
-                                <td colspan="8" class="text-center py-4 text-muted">
+                                <td colspan="9" class="text-center py-4 text-muted">
                                     <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
                                     <p class="mt-2 mb-0">Click the Endpoints tab to load data</p>
                                 </td>
@@ -288,16 +289,29 @@
         </div>
 
         <!-- Bulk Actions -->
-        <div class="mb-3 d-flex justify-content-between align-items-center">
-            <div class="btn-group">
-                <button class="btn btn-success btn-sm" onclick="bulkApproveQueue()" id="bulkApproveBtn" disabled>
-                    <i class="bi bi-check-all me-1"></i>Approve Selected
-                </button>
-                <button class="btn btn-outline-danger btn-sm" onclick="bulkRejectQueue()" id="bulkRejectBtn" disabled>
-                    <i class="bi bi-x-lg me-1"></i>Reject Selected
-                </button>
+        <div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="d-flex gap-2 flex-wrap">
+                <div class="btn-group">
+                    <button class="btn btn-success btn-sm" onclick="bulkApproveQueue()" id="bulkApproveBtn" disabled>
+                        <i class="bi bi-check-all me-1"></i>Approve Selected
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="bulkRejectQueue()" id="bulkRejectBtn" disabled>
+                        <i class="bi bi-x-lg me-1"></i>Reject Selected
+                    </button>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-outline-success btn-sm" onclick="approveAllPending()" id="approveAllBtn" title="Approve all pending items (or filtered by vendor)">
+                        <i class="bi bi-check2-all me-1"></i>Approve All
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="rejectAllPending()" id="rejectAllBtn" title="Reject all pending items (or filtered by vendor)">
+                        <i class="bi bi-x-circle me-1"></i>Reject All
+                    </button>
+                </div>
             </div>
-            <div class="d-flex gap-2 align-items-center">
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                <select class="form-select form-select-sm d-inline-block w-auto" id="queueFilterVendor" onchange="loadImportQueue()" style="max-width: 200px;">
+                    <option value="">All Vendors</option>
+                </select>
                 <select class="form-select form-select-sm d-inline-block w-auto" id="queuePerPage" onchange="loadImportQueue()">
                     <option value="25">25 per page</option>
                     <option value="50">50 per page</option>
@@ -3395,7 +3409,7 @@
             if (countEl) countEl.textContent = `Showing ${assets.length} of ${total} endpoints`;
 
             if (assets.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-muted">
+                tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-muted">
                     <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
                     <p class="mt-2 mb-0">No endpoints discovered</p>
                     <p class="small">Endpoints appear when agents report their inventory</p>
@@ -3413,8 +3427,12 @@
                     const statusBadge = statusBadges[asset.status] || `<span class="badge bg-secondary">${escapeHtml(asset.status || 'Unknown')}</span>`;
                     const vulnCount = asset.total_vulnerabilities || 0;
                     const vulnBadge = vulnCount > 0 ? `<span class="badge bg-danger ms-1" title="${vulnCount} vulnerabilities">${vulnCount} CVEs</span>` : '';
-                    const lastSeen = asset.last_checkin || asset.last_inventory_at;
+                    const lastSeen = asset.last_seen || asset.last_checkin || asset.last_inventory_at;
                     const lastSeenDisplay = lastSeen ? formatRelativeTime(lastSeen) : '<span class="text-muted">Never</span>';
+                    const agentVer = asset.agent_version || '';
+                    const agentBadge = agentVer
+                        ? `<span class="badge bg-info text-dark" title="Agent v${escapeHtml(agentVer)}"><i class="bi bi-cpu me-1"></i>v${escapeHtml(agentVer)}</span>`
+                        : '<span class="text-muted small">Manual</span>';
 
                     return `<tr>
                         <td><strong>${escapeHtml(asset.hostname)}</strong></td>
@@ -3423,6 +3441,7 @@
                         <td>${escapeHtml(asset.organization_name || 'Unknown')}</td>
                         <td><span class="badge bg-primary">${asset.product_count || 0}</span>${vulnBadge}</td>
                         <td>${statusBadge}</td>
+                        <td>${agentBadge}</td>
                         <td>${lastSeenDisplay}</td>
                         <td>
                             <button class="btn btn-outline-danger btn-sm" onclick="deleteEndpoint(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Delete endpoint">
