@@ -190,7 +190,9 @@ class ImportQueue(db.Model):
         return {
             'id': self.id,
             'integration_id': self.integration_id,
-            'integration_name': self.integration.name if self.integration else 'Manual Import',
+            'integration_name': self.integration.name if self.integration else (
+                'Agent' if self.source_data and 'push_agent' in (self.source_data or '') else 'Manual Import'
+            ),
             'vendor': self.vendor,
             'product_name': self.product_name,
             'detected_version': self.detected_version,
