@@ -69,6 +69,28 @@ info() {
 }
 
 # ============================================================================
+# 0. WAIT FOR DATABASE READINESS
+# ============================================================================
+section "0. Pre-flight: Waiting for Database"
+
+DB_READY=false
+for i in $(seq 1 30); do
+    if docker exec sentrikat-db pg_isready -U sentrikat &>/dev/null; then
+        DB_READY=true
+        pass "Database ready after ${i}s"
+        break
+    fi
+    echo -n "." | tee -a "$REPORT"
+    sleep 2
+done
+echo "" | tee -a "$REPORT"
+
+if [ "$DB_READY" = "false" ]; then
+    fail "Database not ready after 60 seconds - results below may be unreliable!"
+    warn "PostgreSQL may be recovering. Wait and re-run this script."
+fi
+
+# ============================================================================
 # 1. DOCKER SERVICES
 # ============================================================================
 section "1. Docker Services Health"

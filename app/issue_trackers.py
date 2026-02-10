@@ -664,6 +664,11 @@ class YouTrackTracker(IssueTrackerBase):
                 'description': description
             }
 
+            # Fetch required custom fields for this project and populate them
+            custom_fields = self._get_required_custom_fields(project_id, priority)
+            if custom_fields:
+                issue_data['customFields'] = custom_fields
+
             response = requests.post(
                 f"{self.base_url}/api/issues?fields=id,idReadable",
                 headers=self._get_headers(),
@@ -699,6 +704,68 @@ class YouTrackTracker(IssueTrackerBase):
 
         except Exception as e:
             return False, f"Error: {str(e)}", None, None
+
+    def _get_required_custom_fields(self, project_short_name: str, priority: Optional[str] = None) -> List[Dict]:
+        """Fetch required custom fields for a project and return them with default values."""
+        custom_fields = []
+        try:
+            # Get project custom fields with their bundles
+            response = requests.get(
+                f"{self.base_url}/api/admin/projects/{project_short_name}/customFields"
+                f"?fields=field(id,name,fieldType(id)),canBeEmpty,bundle(id,values(name,id))",
+                headers=self._get_headers(),
+                timeout=10
+            )
+            if response.status_code != 200:
+                return []
+
+            for cf in response.json():
+                can_be_empty = cf.get('canBeEmpty', True)
+                if can_be_empty:
+                    continue
+
+                # This field is required - pick a default value
+                field_info = cf.get('field', {})
+                field_name = field_info.get('name', '')
+                field_type_id = field_info.get('fieldType', {}).get('id', '')
+                bundle = cf.get('bundle', {})
+                bundle_values = bundle.get('values', [])
+
+                if not bundle_values:
+                    continue
+
+                # For Priority field, try to match the CVE severity
+                if field_name.lower() == 'priority' and priority:
+                    priority_map = {
+                        'Highest': ['critical', 'blocker', 'urgent', 'highest', 'show-stopper'],
+                        'High': ['major', 'high'],
+                        'Medium': ['normal', 'medium'],
+                        'Low': ['minor', 'low', 'trivial']
+                    }
+                    search_terms = priority_map.get(priority, ['normal', 'medium'])
+                    selected = None
+                    for bv in bundle_values:
+                        if bv.get('name', '').lower() in search_terms:
+                            selected = bv
+                            break
+                    if not selected:
+                        selected = bundle_values[0]
+                else:
+                    # For any other required enum field, pick the first value
+                    selected = bundle_values[0]
+
+                # Build the custom field payload based on type
+                if 'enum' in field_type_id.lower() or 'state' in field_type_id.lower():
+                    custom_fields.append({
+                        '$type': 'SingleEnumIssueCustomField',
+                        'name': field_name,
+                        'value': {'name': selected.get('name')}
+                    })
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch YouTrack custom fields for {project_short_name}: {e}")
+
+        return custom_fields
 
 
 class GitHubTracker(IssueTrackerBase):
