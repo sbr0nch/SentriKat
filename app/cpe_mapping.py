@@ -343,21 +343,38 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
     total_without_cpe = len(products_without_cpe)
     updated_count = 0
 
+    # Phase 0: Tag noise products (Windows ADK, dev tools, etc.) so they
+    # don't show as "unmapped" and don't waste NVD API calls
+    from app.agent_api import _should_skip_software
+    real_products = []
+    skipped_count = 0
+    for product in products_without_cpe:
+        if _should_skip_software(product.vendor, product.product_name):
+            product.cpe_vendor = '_skip'
+            product.cpe_product = '_not_security_relevant'
+            skipped_count += 1
+            updated_count += 1
+        else:
+            real_products.append(product)
+
+    if skipped_count:
+        logger.info(f"CPE Phase 0: tagged {skipped_count} noise products as not-security-relevant")
+
     # Phase 1: Apply local matches (regex + curated dict + local dictionary)
     # Use no_autoflush to prevent mid-query flushes that can cause statement timeouts
     still_unmatched = []
     with db.session.no_autoflush:
-        for product in products_without_cpe:
+        for product in real_products:
             if apply_cpe_to_product(product):
                 updated_count += 1
             else:
                 still_unmatched.append(product)
 
-    logger.info(f"CPE Phase 1 (local): mapped {updated_count}/{total_without_cpe}, {len(still_unmatched)} still unmatched")
+    logger.info(f"CPE Phase 1 (local): mapped {updated_count - skipped_count}/{len(real_products)}, {len(still_unmatched)} still unmatched")
 
     # Log unmatched products for debugging
     if still_unmatched:
-        samples = still_unmatched[:30]
+        samples = still_unmatched[:20]
         for p in samples:
             logger.info(f"  UNMATCHED: vendor='{p.vendor}' product='{p.product_name}'")
 

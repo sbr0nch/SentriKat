@@ -233,6 +233,18 @@ SOFTWARE_TO_CPE_MAPPINGS: Dict[str, Tuple[str, str, float]] = {
     'dell supportassist': ('dell', 'supportassist', 0.95),
 
     # ---------------------------------------------------------------------
+    # REALTEK
+    # ---------------------------------------------------------------------
+    'realtek audio driver': ('realtek', 'audio_driver', 0.90),
+    'realtek card reader': ('realtek', 'pcie_card_reader', 0.90),
+    'realtek high definition audio': ('realtek', 'high_definition_audio_codec', 0.90),
+
+    # ---------------------------------------------------------------------
+    # KEYSTORE EXPLORER
+    # ---------------------------------------------------------------------
+    'keystore explorer': ('keystore_explorer_project', 'keystore_explorer', 0.85),
+
+    # ---------------------------------------------------------------------
     # LOGITECH
     # ---------------------------------------------------------------------
     'logitech options': ('logitech', 'options', 0.90),
@@ -337,6 +349,8 @@ def normalize_text(text: str) -> str:
         return ''
     # Lowercase
     text = text.lower()
+    # Remove special characters (pipes, ampersands, etc.)
+    text = re.sub(r'[|&®™©]', ' ', text)
     # Remove parenthetical content like (x64 de), (64-bit), (x86), etc.
     text = re.sub(r'\s*\([^)]*\)', '', text)
     # Remove version numbers at the end (e.g., "Chrome 120.0.1234")
