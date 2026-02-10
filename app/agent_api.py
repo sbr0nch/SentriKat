@@ -563,6 +563,7 @@ def check_license_can_add_agent(organization_id, is_new_agent=True):
             license_obj.update_agent_count()
     except Exception as e:
         logger.warning(f"Could not update usage tracking: {e}")
+        db.session.rollback()
 
     # Calculate usage percentage for warnings
     current = agent_usage['agents']['current']
