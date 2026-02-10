@@ -155,6 +155,16 @@ def start_scheduler(app):
     )
     logger.info("KB sync scheduled every 12 hours")
 
+    # Schedule NVD CPE dictionary sync (weekly, Sundays at 04:00)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('nvd_cpe_dict_sync', nvd_cpe_dict_sync_job, app),
+        trigger=CronTrigger(day_of_week='sun', hour=4, minute=0),
+        id='nvd_cpe_dict_sync',
+        name='NVD CPE Dictionary Sync (weekly)',
+        replace_existing=True
+    )
+    logger.info("NVD CPE dictionary sync scheduled weekly (Sundays 04:00)")
+
     scheduler.start()
     logger.info(f"Scheduler started. CISA KEV sync scheduled at {Config.SYNC_HOUR:02d}:{Config.SYNC_MINUTE:02d}")
 
@@ -578,6 +588,22 @@ def license_heartbeat_job(app):
 
         except Exception as e:
             logger.error(f"License heartbeat job failed: {str(e)}", exc_info=True)
+
+
+def nvd_cpe_dict_sync_job(app):
+    """Job to download NVD CPE dictionary for offline matching."""
+    with app.app_context():
+        try:
+            from app.cpe_dictionary import sync_nvd_cpe_dictionary
+
+            logger.info("Starting NVD CPE dictionary sync...")
+            result = sync_nvd_cpe_dictionary()
+            logger.info(
+                f"NVD CPE dictionary sync complete: "
+                f"{result.get('added', 0)} added, {result.get('total', 0)} total entries"
+            )
+        except Exception as e:
+            logger.error(f"NVD CPE dictionary sync failed: {str(e)}", exc_info=True)
 
 
 def kb_sync_job(app):

@@ -273,9 +273,13 @@
                         <small class="text-muted"><i class="bi bi-clock-history me-1"></i>Needs Review</small>
                         <span class="fw-bold text-warning" id="unacknowledged">-</span>
                     </div>
-                    <div class="d-flex justify-content-between align-items-center py-1 px-2">
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
                         <small class="text-muted"><i class="bi bi-gear-fill me-1"></i>Products Tracked</small>
                         <span class="fw-bold text-success" id="productsTracked">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2">
+                        <small class="text-muted"><i class="bi bi-lightning-charge me-1"></i>High EPSS Risk</small>
+                        <span class="fw-bold text-danger" id="highEpss" title="CVEs with EPSS >= 10% exploit probability">-</span>
                     </div>
                 </div>
             </div>
@@ -1044,6 +1048,13 @@
             document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
             document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
 
+            // EPSS risk indicator
+            if (stats.epss) {
+                const epssEl = document.getElementById('highEpss');
+                epssEl.textContent = formatNumber(stats.epss.high_epss);
+                epssEl.title = `${stats.epss.high_epss} CVEs with ≥10% exploit probability (avg: ${(stats.epss.avg_epss * 100).toFixed(1)}%)`;
+            }
+
             // Show/hide unmapped products warning (respects dismiss)
             const unmappedWarning = document.getElementById('unmappedWarning');
             const unmappedCount = document.getElementById('unmappedCount');
@@ -1086,6 +1097,7 @@
             document.getElementById('totalMatches').textContent = '-';
             document.getElementById('unacknowledged').textContent = '-';
             document.getElementById('productsTracked').textContent = '-';
+            document.getElementById('highEpss').textContent = '-';
             document.getElementById('criticalCves').textContent = '-';
             document.getElementById('criticalCount').textContent = '-';
             document.getElementById('highCves').textContent = '-';

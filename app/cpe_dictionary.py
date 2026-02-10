@@ -1,25 +1,20 @@
 """
-Local CPE Dictionary - Offline CPE matching from vulnerability data.
+Local CPE Dictionary - Offline CPE matching from vulnerability data + NVD feed.
 
-Problem: SentriKat has only 379 static CPE mappings. When an agent reports
-software like "Apache Tomcat" and it's not in the curated dictionary, we
-fall back to the NVD API which is rate-limited (5 req/30s without key).
+Two data sources populate the dictionary:
 
-Solution: Every vulnerability in our database already contains CPE entries
-(vendor:product pairs). We extract these into a searchable local dictionary.
-This gives us CPE coverage for EVERY product mentioned in EVERY vulnerability
-we've ever synced — thousands of entries, instantly, with zero API calls.
+1. VULNERABILITY EXTRACTION (build_cpe_dictionary):
+   Every vulnerability in the database has CPE entries (vendor:product).
+   We extract these into cpe_dictionary_entries. Automatic, runs daily.
+   Gives us coverage for every product mentioned in any synced CVE.
 
-Example: CVE-2024-21762 affects cpe:2.3:a:fortinet:fortiproxy:*
-  → We extract vendor="fortinet", product="fortiproxy"
-  → We also store the vulnerability's human-readable names as search aliases
-  → When an agent reports "Fortinet FortiProxy", we match locally
+2. NVD CPE DICTIONARY DOWNLOAD (sync_nvd_cpe_dictionary):
+   The NVD publishes ~900,000 CPE entries via API. We download ALL unique
+   vendor:product pairs with their human-readable titles.
+   ~30,000-50,000 unique pairs → massive matching improvement.
+   Runs weekly or on-demand. Uses NVD API 2.0 with pagination.
 
-Architecture:
-  - CpeDictionaryEntry model stores unique vendor:product pairs
-  - build_cpe_dictionary() scans all Vulnerability.cpe_data and extracts entries
-  - lookup_cpe_dictionary() provides fast matching for apply_cpe_to_product()
-  - Scheduled to rebuild after each CISA KEV sync (daily)
+Together these give us offline CPE matching without rate-limited API calls.
 """
 
 import re
@@ -288,7 +283,7 @@ def _increment_usage(entry):
 
 def get_dictionary_stats():
     """Get statistics about the local CPE dictionary."""
-    from app.models import CpeDictionaryEntry
+    from app.models import CpeDictionaryEntry, SystemSettings
 
     try:
         total = CpeDictionaryEntry.query.count()
@@ -299,10 +294,280 @@ def get_dictionary_stats():
             CpeDictionaryEntry.usage_count > 0
         ).count()
 
+        # Check last NVD sync time
+        last_nvd_sync = None
+        try:
+            setting = SystemSettings.query.filter_by(key='cpe_dict_last_nvd_sync').first()
+            if setting:
+                last_nvd_sync = setting.value
+        except Exception:
+            pass
+
         return {
             'total_entries': total,
             'with_aliases': with_aliases,
             'used_for_matching': top_used,
+            'last_nvd_sync': last_nvd_sync,
         }
     except Exception:
-        return {'total_entries': 0, 'with_aliases': 0, 'used_for_matching': 0}
+        return {'total_entries': 0, 'with_aliases': 0, 'used_for_matching': 0, 'last_nvd_sync': None}
+
+
+# ============================================================================
+# NVD CPE DICTIONARY DOWNLOAD
+# ============================================================================
+
+def sync_nvd_cpe_dictionary(max_pages=500):
+    """
+    Download the NVD CPE dictionary and extract unique vendor:product pairs
+    with human-readable titles.
+
+    The NVD has ~900,000 CPE entries. Most are version-specific duplicates
+    (e.g., cpe:2.3:a:google:chrome:120.0.6099, cpe:2.3:a:google:chrome:119.0.6045).
+    We extract only unique vendor:product pairs → ~30,000-50,000 entries.
+
+    Uses NVD CPE API 2.0 with pagination (10,000 results per page).
+    Rate: 5 req/30s without key, 50 req/30s with key.
+    Time estimate: ~5 min with key, ~50 min without key.
+
+    Returns: dict with stats
+    """
+    import requests
+    import time
+    import urllib3
+    from config import Config
+    from app import db
+    from app.models import CpeDictionaryEntry, SystemSettings
+
+    stats = {
+        'pages_fetched': 0,
+        'cpe_entries_scanned': 0,
+        'unique_pairs_found': 0,
+        'added': 0,
+        'updated': 0,
+        'total': 0,
+        'errors': 0,
+    }
+
+    # Get NVD API key
+    try:
+        from app.nvd_cpe_api import _get_api_key
+        api_key = _get_api_key()
+    except Exception:
+        api_key = None
+
+    has_key = bool(api_key)
+    results_per_page = 10000
+    delay_between_requests = 0.6 if has_key else 6.0  # Respect rate limits
+
+    logger.info(
+        f"Starting NVD CPE dictionary sync "
+        f"(API key: {'yes' if has_key else 'no'}, "
+        f"delay: {delay_between_requests}s/page)"
+    )
+
+    # Collect unique vendor:product pairs
+    seen_pairs = {}  # "vendor|product" -> {vendor, product, title, count}
+
+    url = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
+    headers = {}
+    if api_key:
+        headers['apiKey'] = api_key
+
+    proxies = Config.get_proxies()
+    verify_ssl = Config.get_verify_ssl()
+    if not verify_ssl:
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    start_index = 0
+    total_results = None
+    consecutive_errors = 0
+
+    for page in range(max_pages):
+        params = {
+            'resultsPerPage': results_per_page,
+            'startIndex': start_index,
+        }
+
+        try:
+            response = requests.get(
+                url, params=params, headers=headers,
+                timeout=30, proxies=proxies, verify=verify_ssl
+            )
+
+            if response.status_code == 403:
+                logger.warning("NVD rate limit hit, waiting 30s...")
+                time.sleep(30)
+                continue
+
+            if response.status_code != 200:
+                consecutive_errors += 1
+                if consecutive_errors >= 3:
+                    logger.error(f"NVD CPE sync: {consecutive_errors} consecutive errors, stopping")
+                    break
+                time.sleep(delay_between_requests * 2)
+                continue
+
+            consecutive_errors = 0
+            data = response.json()
+
+            if total_results is None:
+                total_results = data.get('totalResults', 0)
+                logger.info(f"NVD CPE dictionary: {total_results} total entries to scan")
+
+            products = data.get('products', [])
+            if not products:
+                break
+
+            for product_entry in products:
+                cpe_data = product_entry.get('cpe', {})
+                cpe_name = cpe_data.get('cpeName', '')
+
+                # Skip deprecated
+                if cpe_data.get('deprecated', False):
+                    continue
+
+                # Parse vendor:product from CPE URI
+                parts = cpe_name.split(':')
+                if len(parts) < 5:
+                    continue
+
+                vendor = parts[3].lower()
+                product = parts[4].lower()
+
+                if not vendor or not product or vendor == '*' or product == '*':
+                    continue
+
+                key = f"{vendor}|{product}"
+                stats['cpe_entries_scanned'] += 1
+
+                if key not in seen_pairs:
+                    # Get human-readable title
+                    titles = cpe_data.get('titles', [])
+                    title = titles[0].get('title', '') if titles else ''
+
+                    seen_pairs[key] = {
+                        'vendor': vendor,
+                        'product': product,
+                        'title': title,
+                        'count': 0,
+                    }
+
+                seen_pairs[key]['count'] += 1
+
+            stats['pages_fetched'] += 1
+            start_index += results_per_page
+
+            if start_index >= (total_results or 0):
+                break  # All pages fetched
+
+            # Progress log every 10 pages
+            if stats['pages_fetched'] % 10 == 0:
+                logger.info(
+                    f"NVD CPE sync progress: {stats['pages_fetched']} pages, "
+                    f"{stats['cpe_entries_scanned']} entries, "
+                    f"{len(seen_pairs)} unique pairs"
+                )
+
+            time.sleep(delay_between_requests)
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"NVD CPE sync timeout on page {page}, retrying...")
+            time.sleep(delay_between_requests * 3)
+            consecutive_errors += 1
+            if consecutive_errors >= 3:
+                break
+        except Exception as e:
+            logger.error(f"NVD CPE sync error on page {page}: {e}")
+            consecutive_errors += 1
+            if consecutive_errors >= 3:
+                break
+            time.sleep(delay_between_requests)
+
+    stats['unique_pairs_found'] = len(seen_pairs)
+    logger.info(
+        f"NVD CPE scan complete: {stats['pages_fetched']} pages, "
+        f"{stats['cpe_entries_scanned']} entries, "
+        f"{stats['unique_pairs_found']} unique vendor:product pairs"
+    )
+
+    # Upsert into database
+    batch_count = 0
+    for key, data in seen_pairs.items():
+        try:
+            existing = CpeDictionaryEntry.query.filter_by(
+                cpe_vendor=data['vendor'],
+                cpe_product=data['product']
+            ).first()
+
+            # Build alias from title if meaningful
+            title = data.get('title', '')
+            alias = ''
+            if title:
+                # Extract product name from title (e.g. "Apache Tomcat 10.1.18" -> "apache tomcat")
+                import re as _re
+                clean_title = _re.sub(r'\s+\d[\d.]*.*$', '', title).lower().strip()
+                if clean_title and clean_title not in (data['vendor'], data['product']):
+                    alias = clean_title
+
+            if existing:
+                # Update count, add alias if new
+                if data['count'] > (existing.cve_count or 0):
+                    existing.cve_count = data['count']
+                if alias and alias not in (existing.search_aliases or ''):
+                    current = existing.search_aliases or ''
+                    existing.search_aliases = f"{current}|{alias}" if current else alias
+                existing.updated_at = datetime.utcnow()
+                stats['updated'] += 1
+            else:
+                entry = CpeDictionaryEntry(
+                    cpe_vendor=data['vendor'],
+                    cpe_product=data['product'],
+                    search_aliases=alias or None,
+                    cve_count=data['count'],
+                )
+                db.session.add(entry)
+                stats['added'] += 1
+
+            batch_count += 1
+            if batch_count % 500 == 0:
+                db.session.commit()
+
+        except Exception as e:
+            stats['errors'] += 1
+            if stats['errors'] % 100 == 0:
+                logger.warning(f"NVD CPE sync: {stats['errors']} errors so far")
+            continue
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"NVD CPE sync final commit failed: {e}")
+        db.session.rollback()
+
+    # Save sync timestamp
+    try:
+        setting = SystemSettings.query.filter_by(key='cpe_dict_last_nvd_sync').first()
+        if setting:
+            setting.value = datetime.utcnow().isoformat()
+        else:
+            setting = SystemSettings(
+                key='cpe_dict_last_nvd_sync',
+                value=datetime.utcnow().isoformat(),
+                category='sync',
+                description='Last NVD CPE dictionary sync timestamp'
+            )
+            db.session.add(setting)
+        db.session.commit()
+    except Exception:
+        pass
+
+    stats['total'] = CpeDictionaryEntry.query.count()
+
+    logger.info(
+        f"NVD CPE dictionary sync complete: "
+        f"{stats['added']} added, {stats['updated']} updated, "
+        f"{stats['total']} total entries, {stats['errors']} errors"
+    )
+
+    return stats

@@ -268,6 +268,20 @@ def agent_activity():
     """Agent Activity monitoring page - job queue, worker status, events."""
     return render_template('agent_activity.html')
 
+
+@bp.route('/containers')
+@login_required
+def containers():
+    """Container security page - view container image vulnerabilities."""
+    return render_template('containers.html')
+
+
+@bp.route('/reports/scheduled')
+@org_admin_required
+def scheduled_reports():
+    """Scheduled reports management page."""
+    return render_template('scheduled_reports.html')
+
 @bp.route('/admin-panel')
 @org_admin_required
 def admin_panel():
@@ -1424,6 +1438,23 @@ def get_vulnerability_stats():
     except Exception:
         pass  # Container tables may not exist yet
 
+    # EPSS exploitability stats for matched vulnerabilities
+    epss_stats = {'high_epss': 0, 'with_epss': 0, 'avg_epss': 0}
+    try:
+        matched_vuln_ids = list(set(m.vulnerability_id for m in all_matches))
+        if matched_vuln_ids:
+            matched_vulns = Vulnerability.query.filter(
+                Vulnerability.id.in_(matched_vuln_ids),
+                Vulnerability.epss_score.isnot(None)
+            ).all()
+            epss_stats['with_epss'] = len(matched_vulns)
+            if matched_vulns:
+                scores = [v.epss_score for v in matched_vulns]
+                epss_stats['avg_epss'] = round(sum(scores) / len(scores), 4)
+                epss_stats['high_epss'] = sum(1 for s in scores if s >= 0.1)
+    except Exception:
+        pass
+
     return jsonify({
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
@@ -1445,6 +1476,8 @@ def get_vulnerability_stats():
         'low_cves': cve_priority_counts['low'],
         # Container image scanning stats
         'container': container_stats,
+        # EPSS exploitability risk
+        'epss': epss_stats,
     })
 
 
@@ -2572,7 +2605,7 @@ def sync_epss():
 @bp.route('/api/sync/epss/status', methods=['GET'])
 @login_required
 def epss_status():
-    """Get EPSS sync status - how many CVEs have scores, when last updated."""
+    """Get EPSS sync status with score distribution for dashboard widgets."""
     from app.models import Vulnerability
     from sqlalchemy import func
 
@@ -2580,17 +2613,94 @@ def epss_status():
     with_epss = Vulnerability.query.filter(Vulnerability.epss_score.isnot(None)).count()
     last_fetch = db.session.query(func.max(Vulnerability.epss_fetched_at)).scalar()
 
-    # Get score distribution
-    high_risk = Vulnerability.query.filter(Vulnerability.epss_percentile >= 0.85).count()
+    # Score distribution (buckets for dashboard chart)
+    very_high = Vulnerability.query.filter(Vulnerability.epss_score >= 0.5).count()
+    high_risk = Vulnerability.query.filter(
+        Vulnerability.epss_score >= 0.1, Vulnerability.epss_score < 0.5
+    ).count()
+    medium_risk = Vulnerability.query.filter(
+        Vulnerability.epss_score >= 0.01, Vulnerability.epss_score < 0.1
+    ).count()
+    low_risk = Vulnerability.query.filter(
+        Vulnerability.epss_score > 0, Vulnerability.epss_score < 0.01
+    ).count()
+
+    # Top 10 highest EPSS scores (most likely to be exploited)
+    top_epss = Vulnerability.query.filter(
+        Vulnerability.epss_score.isnot(None)
+    ).order_by(Vulnerability.epss_score.desc()).limit(10).all()
 
     return jsonify({
         'total_vulnerabilities': total_vulns,
         'with_epss_scores': with_epss,
         'without_epss_scores': total_vulns - with_epss,
-        'high_risk_count': high_risk,  # EPSS percentile >= 85%
+        'coverage_percent': round((with_epss / total_vulns * 100), 1) if total_vulns > 0 else 0,
         'last_sync': last_fetch.isoformat() if last_fetch else None,
-        'coverage_percent': round((with_epss / total_vulns * 100), 1) if total_vulns > 0 else 0
+        'distribution': {
+            'very_high': very_high,   # >= 50% probability
+            'high': high_risk,         # 10-50%
+            'medium': medium_risk,     # 1-10%
+            'low': low_risk,           # < 1%
+        },
+        'top_epss': [{
+            'cve_id': v.cve_id,
+            'epss_score': round(v.epss_score, 4) if v.epss_score else None,
+            'epss_percentile': round(v.epss_percentile, 4) if v.epss_percentile else None,
+            'cvss_score': v.cvss_score,
+            'known_ransomware': v.known_ransomware,
+        } for v in top_epss],
     })
+
+
+@bp.route('/api/system/health', methods=['GET'])
+@login_required
+def system_health():
+    """System health overview for dashboard - CPE dictionary, sync status."""
+    from app.models import Vulnerability, Product, UserCpeMapping
+    from sqlalchemy import func
+
+    result = {}
+
+    # CPE coverage
+    total_products = Product.query.filter(Product.active == True).count()
+    with_cpe = Product.query.filter(
+        Product.active == True,
+        Product.cpe_vendor.isnot(None),
+        Product.cpe_vendor != ''
+    ).count()
+    result['cpe_coverage'] = {
+        'total_products': total_products,
+        'with_cpe': with_cpe,
+        'without_cpe': total_products - with_cpe,
+        'coverage_percent': round((with_cpe / total_products * 100), 1) if total_products > 0 else 0,
+    }
+
+    # CPE dictionary stats
+    try:
+        from app.cpe_dictionary import get_dictionary_stats
+        result['cpe_dictionary'] = get_dictionary_stats()
+    except Exception:
+        result['cpe_dictionary'] = {'total_entries': 0}
+
+    # User-learned mappings
+    result['user_mappings'] = {
+        'total': UserCpeMapping.query.count(),
+        'user': UserCpeMapping.query.filter_by(source='user').count(),
+        'auto_nvd': UserCpeMapping.query.filter_by(source='auto_nvd').count(),
+        'community': UserCpeMapping.query.filter_by(source='community').count(),
+    }
+
+    # Vulnerability sync status
+    total_vulns = Vulnerability.query.count()
+    with_cpe_data = Vulnerability.query.filter(Vulnerability.cpe_data.isnot(None)).count()
+    last_sync = db.session.query(func.max(Vulnerability.created_at)).scalar()
+    result['vulnerabilities'] = {
+        'total': total_vulns,
+        'with_cpe_data': with_cpe_data,
+        'last_sync': last_sync.isoformat() if last_sync else None,
+    }
+
+    return jsonify(result)
 
 
 @bp.route('/api/sync/test-connection', methods=['POST'])

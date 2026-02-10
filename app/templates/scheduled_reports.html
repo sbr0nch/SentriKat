@@ -1,0 +1,301 @@
+{% extends 'base.html' %}
+
+{% block title %}Scheduled Reports - SentriKat{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item active" aria-current="page"><i class="bi bi-calendar-check me-1"></i>Scheduled Reports</li>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .report-card { border-left: 4px solid var(--primary-color); transition: all 0.2s; }
+    .report-card.disabled { border-left-color: var(--text-muted); opacity: 0.7; }
+    .report-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .freq-badge { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+    .next-run { font-size: 0.8rem; }
+    [data-theme="dark"] .report-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h4 class="mb-0">Scheduled Reports</h4>
+        <small class="text-muted">Automated vulnerability reports delivered by email</small>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="showCreateModal()">
+        <i class="bi bi-plus-lg me-1"></i>New Report
+    </button>
+</div>
+
+<div id="reportList"></div>
+
+<div id="emptyState" class="text-center py-5 d-none">
+    <i class="bi bi-calendar-check text-muted" style="font-size:3rem"></i>
+    <h5 class="mt-3 text-muted">No scheduled reports</h5>
+    <p class="text-muted">Create automated reports to keep your team informed about vulnerability status.</p>
+    <button class="btn btn-primary btn-sm" onclick="showCreateModal()"><i class="bi bi-plus-lg me-1"></i>Create First Report</button>
+</div>
+
+<!-- Create/Edit Modal -->
+<div class="modal fade" id="reportModal" tabindex="-1">
+<div class="modal-dialog">
+<div class="modal-content">
+    <div class="modal-header">
+        <h5 class="modal-title" id="modalTitle">New Scheduled Report</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+        <input type="hidden" id="editReportId">
+        <div class="mb-3">
+            <label class="form-label">Report Name</label>
+            <input type="text" class="form-control form-control-sm" id="reportName" placeholder="Weekly Security Summary">
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Description</label>
+            <input type="text" class="form-control form-control-sm" id="reportDesc" placeholder="Optional description">
+        </div>
+        <div class="row mb-3">
+            <div class="col-6">
+                <label class="form-label">Report Type</label>
+                <select class="form-select form-select-sm" id="reportType">
+                    <option value="summary">Summary</option>
+                    <option value="detailed">Detailed</option>
+                    <option value="compliance">Compliance (BOD 22-01)</option>
+                    <option value="executive">Executive</option>
+                </select>
+            </div>
+            <div class="col-6">
+                <label class="form-label">Priority Filter</label>
+                <select class="form-select form-select-sm" id="priorityFilter">
+                    <option value="">All priorities</option>
+                    <option value="critical">Critical only</option>
+                    <option value="high">High and above</option>
+                    <option value="medium">Medium and above</option>
+                </select>
+            </div>
+        </div>
+        <div class="row mb-3">
+            <div class="col-4">
+                <label class="form-label">Frequency</label>
+                <select class="form-select form-select-sm" id="reportFreq" onchange="updateFreqFields()">
+                    <option value="daily">Daily</option>
+                    <option value="weekly" selected>Weekly</option>
+                    <option value="monthly">Monthly</option>
+                </select>
+            </div>
+            <div class="col-4" id="dowGroup">
+                <label class="form-label">Day</label>
+                <select class="form-select form-select-sm" id="dayOfWeek">
+                    <option value="0">Monday</option>
+                    <option value="1">Tuesday</option>
+                    <option value="2">Wednesday</option>
+                    <option value="3">Thursday</option>
+                    <option value="4">Friday</option>
+                    <option value="5">Saturday</option>
+                    <option value="6">Sunday</option>
+                </select>
+            </div>
+            <div class="col-4 d-none" id="domGroup">
+                <label class="form-label">Day of Month</label>
+                <input type="number" class="form-control form-control-sm" id="dayOfMonth" min="1" max="28" value="1">
+            </div>
+            <div class="col-4">
+                <label class="form-label">Time (UTC)</label>
+                <input type="time" class="form-control form-control-sm" id="timeOfDay" value="09:00">
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Recipients (comma-separated emails)</label>
+            <input type="text" class="form-control form-control-sm" id="recipients" placeholder="security@company.com, ciso@company.com">
+        </div>
+        <div class="d-flex gap-3 mb-2">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sendAdmins" checked>
+                <label class="form-check-label" for="sendAdmins">Send to admins</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sendManagers">
+                <label class="form-check-label" for="sendManagers">Send to managers</label>
+            </div>
+        </div>
+        <div class="d-flex gap-3">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="inclAck" checked>
+                <label class="form-check-label" for="inclAck">Include acknowledged</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="inclTrends" checked>
+                <label class="form-check-label" for="inclTrends">Include trends</label>
+            </div>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveReport()">Save</button>
+    </div>
+</div>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+function updateFreqFields() {
+    const freq = document.getElementById('reportFreq').value;
+    document.getElementById('dowGroup').classList.toggle('d-none', freq !== 'weekly');
+    document.getElementById('domGroup').classList.toggle('d-none', freq !== 'monthly');
+}
+
+async function loadReports() {
+    try {
+        const res = await fetch('/api/reports/scheduled');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const reports = await res.json();
+
+        const container = document.getElementById('reportList');
+        const empty = document.getElementById('emptyState');
+
+        if (!reports.length) { container.innerHTML = ''; empty.classList.remove('d-none'); return; }
+        empty.classList.add('d-none');
+
+        container.innerHTML = reports.map(r => {
+            const freqLabel = r.frequency === 'weekly' ? `Every ${DAYS[r.day_of_week||0]}` :
+                              r.frequency === 'monthly' ? `Monthly (day ${r.day_of_month||1})` : 'Daily';
+            const nextRun = r.next_run_at ? new Date(r.next_run_at).toLocaleString() : 'Not scheduled';
+            const lastRun = r.last_run_at ? timeAgo(new Date(r.last_run_at)) : 'Never';
+            const typeLabel = {'summary':'Summary','detailed':'Detailed','compliance':'Compliance','executive':'Executive'}[r.report_type] || r.report_type;
+
+            return `<div class="card report-card mb-2 ${r.enabled ? '' : 'disabled'}">
+                <div class="card-body py-2 px-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>${escHtml(r.name)}</strong>
+                            <span class="badge bg-primary freq-badge ms-2">${freqLabel} at ${r.time_of_day || '09:00'}</span>
+                            <span class="badge bg-secondary freq-badge ms-1">${typeLabel}</span>
+                            ${!r.enabled ? '<span class="badge bg-warning text-dark freq-badge ms-1">Disabled</span>' : ''}
+                            ${r.description ? `<br><small class="text-muted">${escHtml(r.description)}</small>` : ''}
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="text-end">
+                                <div class="next-run"><i class="bi bi-clock me-1"></i>Next: ${nextRun}</div>
+                                <div class="next-run text-muted">Last: ${lastRun}</div>
+                            </div>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-primary" onclick="sendNow(${r.id})" title="Send now"><i class="bi bi-send"></i></button>
+                                <button class="btn btn-outline-secondary" onclick="editReport(${r.id})" title="Edit"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-outline-${r.enabled ? 'warning' : 'success'}" onclick="toggleReport(${r.id}, ${!r.enabled})" title="${r.enabled ? 'Disable' : 'Enable'}">
+                                    <i class="bi bi-${r.enabled ? 'pause' : 'play'}"></i>
+                                </button>
+                                <button class="btn btn-outline-danger" onclick="deleteReport(${r.id})" title="Delete"><i class="bi bi-trash"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        document.getElementById('reportList').innerHTML = `<div class="alert alert-warning">Failed to load reports: ${e.message}</div>`;
+    }
+}
+
+function showCreateModal() {
+    document.getElementById('editReportId').value = '';
+    document.getElementById('modalTitle').textContent = 'New Scheduled Report';
+    document.getElementById('reportName').value = '';
+    document.getElementById('reportDesc').value = '';
+    document.getElementById('reportType').value = 'summary';
+    document.getElementById('reportFreq').value = 'weekly';
+    document.getElementById('dayOfWeek').value = '0';
+    document.getElementById('dayOfMonth').value = '1';
+    document.getElementById('timeOfDay').value = '09:00';
+    document.getElementById('recipients').value = '';
+    document.getElementById('sendAdmins').checked = true;
+    document.getElementById('sendManagers').checked = false;
+    document.getElementById('inclAck').checked = true;
+    document.getElementById('inclTrends').checked = true;
+    document.getElementById('priorityFilter').value = '';
+    updateFreqFields();
+    new bootstrap.Modal(document.getElementById('reportModal')).show();
+}
+
+async function editReport(id) {
+    const res = await fetch(`/api/reports/scheduled/${id}`);
+    if (!res.ok) return;
+    const r = await res.json();
+    document.getElementById('editReportId').value = id;
+    document.getElementById('modalTitle').textContent = 'Edit Report';
+    document.getElementById('reportName').value = r.name || '';
+    document.getElementById('reportDesc').value = r.description || '';
+    document.getElementById('reportType').value = r.report_type || 'summary';
+    document.getElementById('reportFreq').value = r.frequency || 'weekly';
+    document.getElementById('dayOfWeek').value = r.day_of_week || 0;
+    document.getElementById('dayOfMonth').value = r.day_of_month || 1;
+    document.getElementById('timeOfDay').value = r.time_of_day || '09:00';
+    document.getElementById('recipients').value = r.recipients || '';
+    document.getElementById('sendAdmins').checked = r.send_to_admins !== false;
+    document.getElementById('sendManagers').checked = !!r.send_to_managers;
+    document.getElementById('inclAck').checked = r.include_acknowledged !== false;
+    document.getElementById('inclTrends').checked = r.include_trends !== false;
+    document.getElementById('priorityFilter').value = r.priority_filter || '';
+    updateFreqFields();
+    new bootstrap.Modal(document.getElementById('reportModal')).show();
+}
+
+async function saveReport() {
+    const id = document.getElementById('editReportId').value;
+    const body = {
+        name: document.getElementById('reportName').value,
+        description: document.getElementById('reportDesc').value,
+        report_type: document.getElementById('reportType').value,
+        frequency: document.getElementById('reportFreq').value,
+        day_of_week: parseInt(document.getElementById('dayOfWeek').value),
+        day_of_month: parseInt(document.getElementById('dayOfMonth').value),
+        time_of_day: document.getElementById('timeOfDay').value,
+        recipients: document.getElementById('recipients').value,
+        send_to_admins: document.getElementById('sendAdmins').checked,
+        send_to_managers: document.getElementById('sendManagers').checked,
+        include_acknowledged: document.getElementById('inclAck').checked,
+        include_trends: document.getElementById('inclTrends').checked,
+        priority_filter: document.getElementById('priorityFilter').value || null,
+    };
+
+    const url = id ? `/api/reports/scheduled/${id}` : '/api/reports/scheduled';
+    const method = id ? 'PUT' : 'POST';
+
+    const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (res.ok) {
+        bootstrap.Modal.getInstance(document.getElementById('reportModal')).hide();
+        loadReports();
+    } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to save');
+    }
+}
+
+async function toggleReport(id, enable) {
+    await fetch(`/api/reports/scheduled/${id}/toggle`, { method: 'POST' });
+    loadReports();
+}
+
+async function sendNow(id) {
+    if (!confirm('Send this report now?')) return;
+    const res = await fetch(`/api/reports/scheduled/${id}/send-now`, { method: 'POST' });
+    const data = await res.json();
+    alert(data.message || (res.ok ? 'Report sent!' : 'Failed'));
+}
+
+async function deleteReport(id) {
+    if (!confirm('Delete this scheduled report?')) return;
+    await fetch(`/api/reports/scheduled/${id}`, { method: 'DELETE' });
+    loadReports();
+}
+
+function escHtml(s) { if (!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+function timeAgo(d) { const s=Math.floor((Date.now()-d.getTime())/1000); if(s<60)return'just now'; if(s<3600)return Math.floor(s/60)+'m ago'; if(s<86400)return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
+
+loadReports();
+</script>
+{% endblock %}
