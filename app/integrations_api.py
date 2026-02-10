@@ -1563,9 +1563,10 @@ echo "Kernel:     $KERNEL"
 echo "Agent ID:   $AGENT_ID"
 echo ""
 
-# Helper: escape a string for safe embedding in JSON
+# Helper: escape a string for safe embedding in JSON.
+# Escapes \\ and " (critical for valid JSON), strips control chars as safety net.
 json_escape() {{
-    printf '%s' "$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g; s/\\t/\\\\t/g; s/\\r/\\\\r/g'
+    printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g' | tr -d '\\001-\\011\\013\\014\\016-\\037'
 }}
 
 # Collect installed software
