@@ -659,7 +659,7 @@ class YouTrackTracker(IssueTrackerBase):
     ) -> Tuple[bool, str, Optional[str], Optional[str]]:
         try:
             issue_data = {
-                'project': {'id': project_id},
+                'project': {'$type': 'Project', 'shortName': project_id},
                 'summary': summary[:250],
                 'description': description
             }
@@ -691,7 +691,11 @@ class YouTrackTracker(IssueTrackerBase):
 
                 return True, f"Created issue {issue_id}", issue_id, issue_url
             else:
-                return False, f"Failed: HTTP {response.status_code}", None, None
+                try:
+                    error_detail = response.json().get('error_description', response.json().get('error', response.text))
+                except Exception:
+                    error_detail = response.text[:200]
+                return False, f"YouTrack error (HTTP {response.status_code}): {error_detail}", None, None
 
         except Exception as e:
             return False, f"Error: {str(e)}", None, None

@@ -61,6 +61,15 @@ def _apply_schema_migrations(logger, db_uri):
         ('vendor_fix_overrides', 'confidence', "VARCHAR(20) DEFAULT 'medium'", "VARCHAR(20) DEFAULT 'medium'"),
         ('vendor_fix_overrides', 'confidence_reason', 'VARCHAR(255)', 'VARCHAR(255)'),
         ('vulnerability_matches', 'vendor_fix_confidence', 'VARCHAR(20)', 'VARCHAR(20)'),
+        # Product agent tracking columns (required for agent inventory submission)
+        ('products', 'source', "VARCHAR(20) DEFAULT 'manual'", "VARCHAR(20) DEFAULT 'manual'"),
+        ('products', 'approval_status', "VARCHAR(20) DEFAULT 'approved'", "VARCHAR(20) DEFAULT 'approved'"),
+        ('products', 'pending_since', 'DATETIME', 'TIMESTAMP'),
+        ('products', 'reviewed_by', 'INTEGER', 'INTEGER'),
+        ('products', 'reviewed_at', 'DATETIME', 'TIMESTAMP'),
+        ('products', 'rejection_reason', 'VARCHAR(500)', 'VARCHAR(500)'),
+        ('products', 'last_agent_report', 'DATETIME', 'TIMESTAMP'),
+        ('products', 'auto_disabled', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

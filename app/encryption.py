@@ -33,19 +33,17 @@ def _get_fernet():
     encryption_key = os.environ.get('ENCRYPTION_KEY')
 
     if not encryption_key:
-        # In production, this should be required
+        # Derive a stable key from SECRET_KEY so encrypted settings (Jira PAT,
+        # SMTP password, etc.) survive container restarts as long as SECRET_KEY
+        # remains the same.
+        import logging
+        _logger = logging.getLogger(__name__)
         if os.environ.get('FLASK_ENV') == 'production':
-            raise ValueError(
-                "ENCRYPTION_KEY environment variable must be set in production! "
-                "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            _logger.warning(
+                "ENCRYPTION_KEY not set - deriving from SECRET_KEY. "
+                "For best security, set ENCRYPTION_KEY in .env. Generate with: "
+                "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
             )
-        # For development, derive a key from SECRET_KEY (not recommended for production)
-        import warnings
-        warnings.warn(
-            "ENCRYPTION_KEY not set - deriving from SECRET_KEY for development only. "
-            "Set ENCRYPTION_KEY in production!",
-            UserWarning
-        )
         secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
         # Derive a valid Fernet key (32 bytes, base64-encoded) from SECRET_KEY
         key_bytes = hashlib.sha256(secret_key.encode()).digest()
