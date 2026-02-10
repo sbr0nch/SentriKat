@@ -40,6 +40,11 @@ ENV https_proxy=""
 # Copy application code
 COPY . .
 
+# Download vendor assets (Bootstrap, Chart.js, etc.) for offline/on-premise deployment
+# Uses CDN during build; falls back gracefully if unavailable
+RUN chmod +x /app/scripts/download_vendor_assets.sh \
+    && /app/scripts/download_vendor_assets.sh /app/static/vendor || true
+
 # Create data directory for uploads/backups and custom CA certs directory
 RUN mkdir -p /app/data /app/custom-certs
 
@@ -62,7 +67,7 @@ ENV PYTHONUNBUFFERED=1
 # Note: entrypoint runs as root to install CA certs, then exec's gunicorn
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-# Run the application with gunicorn
-# --preload loads app once before forking workers (prevents race condition in db.create_all)
-# --user sentrikat drops privileges after binding to port
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "--preload", "--user", "sentrikat", "--group", "sentrikat", "run:app"]
+# Run the application with gunicorn using config file
+# Config at gunicorn.conf.py: gthread workers, auto-scaling, max-requests recycling
+# Override defaults: GUNICORN_WORKERS=4 GUNICORN_THREADS=4 GUNICORN_TIMEOUT=120
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "run:app"]

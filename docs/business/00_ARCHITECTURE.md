@@ -4,7 +4,7 @@
 
 ---
 
-**Document Version:** 1.1.0
+**Document Version:** 1.4.0
 **Last Updated:** February 2026
 **Classification:** CONFIDENTIAL - NOT FOR PUBLIC DISTRIBUTION
 **Author:** SentriKat Development Team
@@ -215,10 +215,37 @@ FROM python:3.11-slim
 - libxml2-dev, libxmlsec1-dev (SAML)
 
 # Runtime
-- Gunicorn with 2 workers
-- 120 second timeout
-- Preload for DB initialization
+- Gunicorn with gthread workers (configurable via gunicorn.conf.py)
+- Auto-scaling workers: min(CPU*2+1, 8) with 4 threads each
+- 120 second timeout, max-requests recycling for memory safety
+- Preload for DB initialization and shared memory
+- Bundled vendor assets (Bootstrap, Chart.js) for offline/on-premise deployment
 ```
+
+## 3.6 On-Premise / Air-Gapped Deployment
+
+SentriKat supports fully on-premise deployments. Frontend assets (Bootstrap, Chart.js, icons) are bundled
+during Docker build via `scripts/download_vendor_assets.sh`. Templates use local-first loading with CDN fallback.
+
+### Network Requirements (On-Premise)
+
+| Category | Service | URL | Required |
+|----------|---------|-----|----------|
+| **CRITICAL** | CISA KEV | `https://www.cisa.gov/feeds/...` | YES |
+| **CRITICAL** | NVD CVE API | `https://services.nvd.nist.gov/rest/json/cves/2.0` | YES |
+| **CRITICAL** | NVD CPE API | `https://services.nvd.nist.gov/rest/json/cpes/2.0` | YES |
+| **ESSENTIAL** | OSV API | `https://api.osv.dev/v1` | For false-positive reduction |
+| **ESSENTIAL** | Red Hat API | `https://access.redhat.com/hydra/rest/securitydata` | For RHEL patch detection |
+| **ESSENTIAL** | Debian Tracker | `https://security-tracker.debian.org/tracker/data/json` | For Debian patch detection |
+| **OPTIONAL** | EPSS API | `https://api.first.org/data/v1/epss` | Exploit probability scoring |
+| **OPTIONAL** | SMTP | Org-configured | Email alerts |
+| **OPTIONAL** | LDAP | Org-configured | Enterprise user sync |
+| **OPTIONAL** | Issue Trackers | Jira/GitHub/GitLab | Ticket creation |
+| **OPTIONAL** | Webhooks | Slack/Teams/Custom | Real-time notifications |
+| **OPTIONAL** | License Server | `https://portal.sentrikat.com/api` | Graceful degradation if offline |
+| **OPTIONAL** | GitHub API | `https://api.github.com` | Version update checks |
+
+All HTTP calls respect proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`) and SSL verification (`VERIFY_SSL`).
 
 ---
 
@@ -1187,9 +1214,17 @@ jobs:
 
 ## 15.1 Dashboard
 
-- **Two-Column Widget Layout**: Stats cards (left) and vulnerability trends chart (right) side by side
+- **Two-Column Widget Layout**: Stats cards (left) and configurable chart widgets (right) side by side
 - **Clickable Priority Cards**: CRITICAL/HIGH/MEDIUM/LOW cards filter the CVE table by severity
-- **Dual Y-Axis Chart**: Auto-detects when Unacknowledged count significantly exceeds severity data and adds a secondary Y-axis
+- **Configurable Chart Widgets**: Two widget slots with gear dropdown to select from 6 chart types:
+  - **Priority Breakdown** (doughnut) - Unacknowledged matches by severity
+  - **Top Affected Vendors** (horizontal bar) - Top 10 vendors with open vulnerabilities
+  - **EPSS Distribution** (bar) - Exploit probability score distribution across matched CVEs
+  - **Vulnerability Age** (bar) - Time distribution since CVEs were added to KEV catalog
+  - **Monthly Timeline** (bar) - New affecting CVEs per month over the last 12 months
+  - **Remediation Progress** (line) - Acknowledged vs unacknowledged trend over 30 days
+- **Saved Widget Preferences**: Widget selection persists in localStorage; changing a widget automatically saves it as default
+- **EPSS Risk Filter**: New filter in the advanced filters panel to filter CVEs by EPSS percentile (Top 5%/15%/30%)
 - **Dark Mode Awareness**: Chart.js colors (grid, ticks, legend, tooltips) adapt to the active theme
 - **Dismissible CPE Warning**: Products-without-CPE alert can be dismissed; reappears after 4 hours or when the count changes
 
@@ -1239,6 +1274,11 @@ NVD_API_KEY=<nvd-key>               # Optional but recommended (higher rate limi
 FLASK_ENV=production                 # production or development
 VERIFY_SSL=true                      # Set to false only for dev/self-signed certs
 HTTP_PROXY=http://proxy:3128         # Corporate proxy support
+
+# ── PERFORMANCE ──────────────────────────────────────
+GUNICORN_WORKERS=                    # Auto: min(CPU*2+1, 8). Set explicitly if needed.
+GUNICORN_THREADS=4                   # Threads per worker (default: 4)
+GUNICORN_TIMEOUT=120                 # Request timeout in seconds
 ```
 
 **Minimum `.env` for Docker deployment:**
@@ -1283,6 +1323,7 @@ DB_PASSWORD=change-me-to-a-secure-password
 | 1.1.0 | Feb 2026 | Development Team | Added: CVE auto-resolution, in-app update check, sidebar highlighting, dashboard redesign, clickable priority cards, dark mode, multi-tracker support, XSS fixes, settings consolidation, Software Overview tab, CPE UX improvements |
 | 1.2.0 | Feb 2026 | Development Team | Added: Automatic vendor advisory sync (OSV.dev, Red Hat, MSRC, Debian), distro-native version comparison (dpkg/RPM/APK), three-tier confidence system (affected/likely resolved/resolved), license server heartbeat, agent distro_package_version support |
 | 1.3.0 | Feb 2026 | Development Team | Added: Online license activation (activation code exchange via portal.sentrikat.com with rate limiting and security hardening), fixed agent product organization assignment, fixed Software Overview N+1 query performance |
+| 1.4.0 | Feb 2026 | Development Team | Added: Configurable dashboard chart widgets (6 types with saved defaults), on-premise asset bundling, gthread Gunicorn workers with auto-scaling, connection pooling, EPSS filter, network requirements audit. Fixed: duplicate sortBy ID bug, VulnerabilitySnapshot multi-tenant mismatch |
 
 ---
 
