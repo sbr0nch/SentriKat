@@ -656,7 +656,7 @@ fi
 
 # Check CSRF protection on auth endpoints
 CSRF_CODE=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" \
-    -X POST "$BASE_URL/api/login" \
+    -X POST "$BASE_URL/api/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"username":"test","password":"test"}' 2>&1)
 info "Login endpoint without CSRF: HTTP $CSRF_CODE"
@@ -951,119 +951,81 @@ info "License server URL: $LICENSE_SERVER"
 
 # DNS resolution
 LICENSE_HOST=$(echo "$LICENSE_SERVER" | sed 's|https\?://||' | sed 's|/.*||')
-if docker exec sentrikat python3 -c "import socket; socket.getaddrinfo('$LICENSE_HOST', 443)" &>/dev/null; then
+if docker exec sentrikat getent hosts "$LICENSE_HOST" &>/dev/null || \
+   docker exec sentrikat python3 -c "import socket; socket.getaddrinfo('$LICENSE_HOST', 443)" &>/dev/null; then
     pass "DNS resolves: $LICENSE_HOST"
 else
-    fail "Cannot resolve DNS: $LICENSE_HOST"
+    # Behind proxy DNS may resolve at proxy level
+    warn "Cannot resolve DNS directly: $LICENSE_HOST (may resolve via proxy)"
 fi
 
-# TCP connectivity to license server
-if docker exec sentrikat python3 -c "
-import socket, ssl
-s = socket.create_connection(('$LICENSE_HOST', 443), timeout=10)
-ctx = ssl.create_default_context()
-ss = ctx.wrap_socket(s, server_hostname='$LICENSE_HOST')
-ss.close()
-print('ok')
-" &>/dev/null; then
-    pass "TLS connection to $LICENSE_HOST:443 successful"
-else
-    warn "Cannot establish TLS to $LICENSE_HOST:443 (may be behind proxy)"
-fi
+# Helper: test license endpoint with proxy and direct
+test_license_ep() {
+    local LABEL="$1"
+    local URL="$2"
+    local METHOD="$3"  # GET or POST
+    local DATA="$4"
 
-# HTTP connectivity test - try to reach the license server health/root
-PORTAL_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl, json
-ctx = ssl.create_default_context()
-req = urllib.request.Request('$LICENSE_SERVER/v1/health', method='GET')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
-    print(resp.status)
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
+    local CURL_EXTRA=""
+    [ "$METHOD" = "POST" ] && CURL_EXTRA="-X POST -H 'Content-Type: application/json' -d '$DATA'"
 
-case "$PORTAL_CODE" in
-    200|204)
-        pass "License server health: HTTP $PORTAL_CODE (reachable)"
-        ;;
-    404|405)
-        pass "License server reachable (HTTP $PORTAL_CODE on health endpoint)"
-        ;;
-    ERR:*)
-        fail "License server unreachable: $PORTAL_CODE"
-        ;;
-    *)
-        warn "License server returned HTTP $PORTAL_CODE"
-        ;;
-esac
+    # With proxy (default)
+    local CODE_PROXY
+    if [ "$METHOD" = "POST" ]; then
+        CODE_PROXY=$(docker exec sentrikat curl -sk --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            -d "$DATA" "$URL" 2>&1)
+    else
+        CODE_PROXY=$(docker exec sentrikat curl -sk --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            "$URL" 2>&1)
+    fi
+    [ "$CODE_PROXY" = "000" ] && CODE_PROXY="FAIL"
 
-# Test heartbeat endpoint connectivity (POST with empty body to verify routing)
-HEARTBEAT_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl, json
-ctx = ssl.create_default_context()
-data = json.dumps({'test': True}).encode()
-req = urllib.request.Request('$LICENSE_SERVER/v1/heartbeat', data=data, method='POST')
-req.add_header('Content-Type', 'application/json')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
-    print(resp.status)
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
+    # Without proxy (direct)
+    local CODE_DIRECT
+    if [ "$METHOD" = "POST" ]; then
+        CODE_DIRECT=$(docker exec sentrikat curl -sk --noproxy '*' --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            -d "$DATA" "$URL" 2>&1)
+    else
+        CODE_DIRECT=$(docker exec sentrikat curl -sk --noproxy '*' --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            "$URL" 2>&1)
+    fi
+    [ "$CODE_DIRECT" = "000" ] && CODE_DIRECT="FAIL"
 
-case "$HEARTBEAT_CODE" in
-    200)
-        pass "Heartbeat endpoint: HTTP $HEARTBEAT_CODE (functional)"
-        ;;
-    400|401|403|422)
-        pass "Heartbeat endpoint reachable (HTTP $HEARTBEAT_CODE - auth/validation expected)"
-        ;;
-    ERR:*)
-        fail "Heartbeat endpoint unreachable: $HEARTBEAT_CODE"
-        ;;
-    *)
-        info "Heartbeat endpoint: HTTP $HEARTBEAT_CODE"
-        ;;
-esac
+    # Report
+    local OK=false
+    if echo "$CODE_PROXY" | grep -qE '^[2-4][0-9][0-9]$'; then
+        OK=true
+        pass "$LABEL → HTTP $CODE_PROXY via proxy"
+    elif echo "$CODE_DIRECT" | grep -qE '^[2-4][0-9][0-9]$'; then
+        OK=true
+        pass "$LABEL → HTTP $CODE_DIRECT direct (no proxy needed)"
+    fi
 
-# Test activation endpoint connectivity
-ACTIVATE_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl, json
-ctx = ssl.create_default_context()
-data = json.dumps({'test': True}).encode()
-req = urllib.request.Request('$LICENSE_SERVER/v1/license/activate', data=data, method='POST')
-req.add_header('Content-Type', 'application/json')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
-    print(resp.status)
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
+    if [ "$OK" = "false" ]; then
+        fail "$LABEL → unreachable (proxy=$CODE_PROXY, direct=$CODE_DIRECT)"
+    else
+        info "  proxy=$CODE_PROXY  direct=$CODE_DIRECT"
+    fi
+}
 
-case "$ACTIVATE_CODE" in
-    200)
-        pass "Activation endpoint: HTTP $ACTIVATE_CODE"
-        ;;
-    400|401|403|422)
-        pass "Activation endpoint reachable (HTTP $ACTIVATE_CODE - validation expected)"
-        ;;
-    ERR:*)
-        fail "Activation endpoint unreachable: $ACTIVATE_CODE"
-        ;;
-    *)
-        info "Activation endpoint: HTTP $ACTIVATE_CODE"
-        ;;
-esac
+# Health endpoint
+test_license_ep "License server health" "$LICENSE_SERVER/v1/health" "GET"
+
+# Heartbeat endpoint
+test_license_ep "Heartbeat endpoint" "$LICENSE_SERVER/v1/heartbeat" "POST" '{"test":true}'
+
+# Activation endpoint
+test_license_ep "Activation endpoint" "$LICENSE_SERVER/v1/license/activate" "POST" '{"test":true}'
 
 # Check last heartbeat from app logs
 LAST_HB=$(docker logs sentrikat --since 24h 2>&1 | grep -i "heartbeat" | tail -3)
@@ -1094,73 +1056,55 @@ KB_SHARE=$(docker exec sentrikat printenv SENTRIKAT_KB_SHARE_MAPPINGS 2>/dev/nul
 info "KB sync enabled: ${KB_ENABLED:-true (default)}"
 info "KB share mappings: ${KB_SHARE:-true (default)}"
 
-# Test KB pull endpoint
-KB_PULL_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl
-ctx = ssl.create_default_context()
-req = urllib.request.Request('$KB_SERVER/v1/kb/mappings/pull?since=2020-01-01T00:00:00Z', method='GET')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
-    import json
-    data = json.loads(resp.read())
-    count = len(data.get('mappings', []))
-    print(f'{resp.status}:{count}')
-except urllib.error.HTTPError as e:
-    print(f'{e.code}:0')
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
+# Test KB pull endpoint (proxy vs direct)
+KB_PULL_PROXY=$(docker exec sentrikat curl -sk --connect-timeout 8 --max-time 15 \
+    -w "\n%{http_code}" \
+    -H "User-Agent: SentriKat-Audit/1.0" \
+    "$KB_SERVER/v1/kb/mappings/pull?since=2020-01-01T00:00:00Z" 2>&1)
+KB_PULL_PROXY_CODE=$(echo "$KB_PULL_PROXY" | tail -1)
+[ "$KB_PULL_PROXY_CODE" = "000" ] && KB_PULL_PROXY_CODE="FAIL"
 
-KB_PULL_STATUS=$(echo "$KB_PULL_CODE" | cut -d: -f1)
-KB_PULL_COUNT=$(echo "$KB_PULL_CODE" | cut -d: -f2)
+KB_PULL_DIRECT=$(docker exec sentrikat curl -sk --noproxy '*' --connect-timeout 8 --max-time 15 \
+    -w "\n%{http_code}" \
+    -H "User-Agent: SentriKat-Audit/1.0" \
+    "$KB_SERVER/v1/kb/mappings/pull?since=2020-01-01T00:00:00Z" 2>&1)
+KB_PULL_DIRECT_CODE=$(echo "$KB_PULL_DIRECT" | tail -1)
+[ "$KB_PULL_DIRECT_CODE" = "000" ] && KB_PULL_DIRECT_CODE="FAIL"
 
-case "$KB_PULL_STATUS" in
-    200)
-        pass "KB pull endpoint: HTTP 200 ($KB_PULL_COUNT community mappings available)"
-        ;;
-    401|403)
-        pass "KB pull endpoint reachable (HTTP $KB_PULL_STATUS - auth required)"
-        ;;
-    ERR:*)
-        warn "KB pull endpoint unreachable: $KB_PULL_STATUS"
-        ;;
-    *)
-        info "KB pull endpoint: HTTP $KB_PULL_STATUS"
-        ;;
-esac
+if echo "$KB_PULL_PROXY_CODE" | grep -qE '^[2-4][0-9][0-9]$'; then
+    KB_PULL_COUNT=$(echo "$KB_PULL_PROXY" | head -n -1 | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('mappings',[])))" 2>/dev/null || echo "?")
+    pass "KB pull endpoint: HTTP $KB_PULL_PROXY_CODE via proxy ($KB_PULL_COUNT mappings)"
+elif echo "$KB_PULL_DIRECT_CODE" | grep -qE '^[2-4][0-9][0-9]$'; then
+    KB_PULL_COUNT=$(echo "$KB_PULL_DIRECT" | head -n -1 | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('mappings',[])))" 2>/dev/null || echo "?")
+    pass "KB pull endpoint: HTTP $KB_PULL_DIRECT_CODE direct ($KB_PULL_COUNT mappings)"
+else
+    warn "KB pull endpoint unreachable (proxy=$KB_PULL_PROXY_CODE, direct=$KB_PULL_DIRECT_CODE)"
+fi
 
-# Test KB push endpoint
-KB_PUSH_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl, json
-ctx = ssl.create_default_context()
-data = json.dumps({'mappings': [], 'timestamp': '2024-01-01T00:00:00Z'}).encode()
-req = urllib.request.Request('$KB_SERVER/v1/kb/mappings/push', data=data, method='POST')
-req.add_header('Content-Type', 'application/json')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
-    print(resp.status)
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
+# Test KB push endpoint (proxy vs direct)
+KB_PUSH_PROXY=$(docker exec sentrikat curl -sk --connect-timeout 8 --max-time 15 \
+    -o /dev/null -w "%{http_code}" \
+    -X POST -H "Content-Type: application/json" \
+    -H "User-Agent: SentriKat-Audit/1.0" \
+    -d '{"mappings":[],"timestamp":"2024-01-01T00:00:00Z"}' \
+    "$KB_SERVER/v1/kb/mappings/push" 2>&1)
+[ "$KB_PUSH_PROXY" = "000" ] && KB_PUSH_PROXY="FAIL"
 
-case "$KB_PUSH_CODE" in
-    200|201)
-        pass "KB push endpoint: HTTP $KB_PUSH_CODE (functional)"
-        ;;
-    400|401|403|422)
-        pass "KB push endpoint reachable (HTTP $KB_PUSH_CODE - validation expected)"
-        ;;
-    ERR:*)
-        warn "KB push endpoint unreachable: $KB_PUSH_CODE"
-        ;;
-    *)
-        info "KB push endpoint: HTTP $KB_PUSH_CODE"
-        ;;
-esac
+KB_PUSH_DIRECT=$(docker exec sentrikat curl -sk --noproxy '*' --connect-timeout 8 --max-time 15 \
+    -o /dev/null -w "%{http_code}" \
+    -X POST -H "Content-Type: application/json" \
+    -H "User-Agent: SentriKat-Audit/1.0" \
+    -d '{"mappings":[],"timestamp":"2024-01-01T00:00:00Z"}' \
+    "$KB_SERVER/v1/kb/mappings/push" 2>&1)
+[ "$KB_PUSH_DIRECT" = "000" ] && KB_PUSH_DIRECT="FAIL"
+
+if echo "$KB_PUSH_PROXY" | grep -qE '^[2-4][0-9][0-9]$'; then
+    pass "KB push endpoint: HTTP $KB_PUSH_PROXY via proxy"
+elif echo "$KB_PUSH_DIRECT" | grep -qE '^[2-4][0-9][0-9]$'; then
+    pass "KB push endpoint: HTTP $KB_PUSH_DIRECT direct"
+else
+    warn "KB push endpoint unreachable (proxy=$KB_PUSH_PROXY, direct=$KB_PUSH_DIRECT)"
+fi
 
 # Check local CPE mapping stats
 CPE_STATS=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
@@ -1196,24 +1140,35 @@ section "19. Software Update Checker"
 GITHUB_REPO="sbr0nch/SentriKat"
 info "GitHub repo: $GITHUB_REPO"
 
-# Check GitHub API connectivity
-GH_RESP=$(docker exec sentrikat python3 -c "
-import urllib.request, json, ssl
-ctx = ssl.create_default_context()
-req = urllib.request.Request('https://api.github.com/repos/$GITHUB_REPO/releases/latest')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
-    data = json.loads(resp.read())
-    tag = data.get('tag_name', '?')
-    name = data.get('name', '?')
-    published = data.get('published_at', '?')
-    print(f'200|{tag}|{name}|{published}')
-except urllib.error.HTTPError as e:
-    print(f'{e.code}|||')
-except Exception as e:
-    print(f'ERR:{type(e).__name__}|||')
-" 2>&1)
+# Check GitHub API connectivity (try proxy first, then direct)
+GH_RAW=$(docker exec sentrikat curl -sk --connect-timeout 8 --max-time 15 \
+    -w "\n%{http_code}" \
+    -H "User-Agent: SentriKat-Audit/1.0" \
+    "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>&1)
+GH_HTTP=$(echo "$GH_RAW" | tail -1)
+GH_VIA="proxy"
+
+# Fallback to direct if proxy failed
+if [ "$GH_HTTP" = "000" ]; then
+    GH_RAW=$(docker exec sentrikat curl -sk --noproxy '*' --connect-timeout 8 --max-time 15 \
+        -w "\n%{http_code}" \
+        -H "User-Agent: SentriKat-Audit/1.0" \
+        "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>&1)
+    GH_HTTP=$(echo "$GH_RAW" | tail -1)
+    GH_VIA="direct"
+fi
+
+GH_BODY=$(echo "$GH_RAW" | head -n -1)
+if [ "$GH_HTTP" = "200" ]; then
+    GH_TAG=$(echo "$GH_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name','?'))" 2>/dev/null)
+    GH_NAME=$(echo "$GH_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('name','?'))" 2>/dev/null)
+    GH_DATE=$(echo "$GH_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('published_at','?'))" 2>/dev/null)
+    GH_RESP="200|${GH_TAG}|${GH_NAME}|${GH_DATE}"
+elif [ "$GH_HTTP" = "000" ]; then
+    GH_RESP="ERR:Connection|||"
+else
+    GH_RESP="${GH_HTTP}|||"
+fi
 
 GH_STATUS=$(echo "$GH_RESP" | cut -d'|' -f1)
 GH_TAG=$(echo "$GH_RESP" | cut -d'|' -f2)
@@ -1222,7 +1177,7 @@ GH_DATE=$(echo "$GH_RESP" | cut -d'|' -f4)
 
 case "$GH_STATUS" in
     200)
-        pass "GitHub releases API reachable"
+        pass "GitHub releases API reachable (via $GH_VIA)"
         info "Latest release: $GH_TAG ($GH_NAME)"
         info "Published: $GH_DATE"
 
@@ -1261,23 +1216,21 @@ except:
 esac
 
 # Also check fallback endpoint (all releases including pre-releases)
-GH_ALL_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl
-ctx = ssl.create_default_context()
-req = urllib.request.Request('https://api.github.com/repos/$GITHUB_REPO/releases')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
-    import json
-    data = json.loads(resp.read())
-    print(f'{resp.status}:{len(data)}')
-except urllib.error.HTTPError as e:
-    print(f'{e.code}:0')
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
-GH_ALL_STATUS=$(echo "$GH_ALL_CODE" | cut -d: -f1)
-GH_ALL_COUNT=$(echo "$GH_ALL_CODE" | cut -d: -f2)
+GH_ALL_RAW=$(docker exec sentrikat curl -sk --connect-timeout 8 --max-time 15 \
+    -w "\n%{http_code}" \
+    -H "User-Agent: SentriKat-Audit/1.0" \
+    "https://api.github.com/repos/$GITHUB_REPO/releases" 2>&1)
+GH_ALL_STATUS=$(echo "$GH_ALL_RAW" | tail -1)
+# Fallback to direct if proxy failed
+if [ "$GH_ALL_STATUS" = "000" ]; then
+    GH_ALL_RAW=$(docker exec sentrikat curl -sk --noproxy '*' --connect-timeout 8 --max-time 15 \
+        -w "\n%{http_code}" \
+        -H "User-Agent: SentriKat-Audit/1.0" \
+        "https://api.github.com/repos/$GITHUB_REPO/releases" 2>&1)
+    GH_ALL_STATUS=$(echo "$GH_ALL_RAW" | tail -1)
+fi
+[ "$GH_ALL_STATUS" = "000" ] && GH_ALL_STATUS="ERR:Connection"
+GH_ALL_COUNT=$(echo "$GH_ALL_RAW" | head -n -1 | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
 info "Total GitHub releases (incl. pre-release): $GH_ALL_COUNT"
 
 # Test the actual /api/updates/check endpoint if authenticated
@@ -1316,9 +1269,9 @@ section "20. Core CVE Matching Algorithm"
 MATCH_COUNT=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
     "SELECT COUNT(*) FROM vulnerability_matches;" 2>&1 | xargs)
 MATCH_ACTIVE=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
-    "SELECT COUNT(*) FROM vulnerability_matches WHERE is_acknowledged = false;" 2>&1 | xargs)
+    "SELECT COUNT(*) FROM vulnerability_matches WHERE acknowledged = false;" 2>&1 | xargs)
 MATCH_ACK=$(docker exec sentrikat-db psql -U sentrikat -d sentrikat -t -c \
-    "SELECT COUNT(*) FROM vulnerability_matches WHERE is_acknowledged = true;" 2>&1 | xargs)
+    "SELECT COUNT(*) FROM vulnerability_matches WHERE acknowledged = true;" 2>&1 | xargs)
 
 if echo "$MATCH_COUNT" | grep -qE '^[0-9]+$'; then
     info "Total vulnerability matches: $MATCH_COUNT (active: $MATCH_ACTIVE, acknowledged: $MATCH_ACK)"
@@ -1380,17 +1333,22 @@ try:
 
     class MockProd:
         vendor = 'Microsoft'
+        product_name = 'Windows 10'
         name = 'Windows 10'
         version = '10.0'
         match_type = 'keyword'
+        keywords = ''
         effective_cpe_vendor = None
         effective_cpe_product = None
 
     match = check_keyword_match(MockVuln(), MockProd())
-    if match and match.get('matched'):
-        results.append(f'PASS:Keyword match working (confidence={match.get(\"confidence\",\"?\")})')
-    else:
+    # Returns tuple: (match_reasons, match_method, match_confidence)
+    if match and isinstance(match, tuple) and len(match) >= 3 and match[0]:
+        results.append(f'PASS:Keyword match working (confidence={match[2]}, method={match[1]})')
+    elif match and isinstance(match, tuple) and len(match) >= 1 and not match[0]:
         results.append('WARN:Keyword match returned no match for obvious Microsoft Windows test')
+    else:
+        results.append('WARN:Keyword match returned unexpected result')
 except Exception as e:
     results.append(f'FAIL:Keyword match test error: {e}')
 
@@ -1466,112 +1424,164 @@ fi
 # ============================================================================
 section "21. External Service Connectivity"
 
-# NVD API (for CPE/CVE data)
-NVD_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl
-ctx = ssl.create_default_context()
-req = urllib.request.Request('https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
-    print(resp.status)
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
-if [ "$NVD_CODE" = "200" ]; then
-    pass "NVD API (services.nvd.nist.gov) reachable"
+# Detect proxy configuration
+CONTAINER_HTTP_PROXY=$(docker exec sentrikat printenv HTTP_PROXY 2>/dev/null || docker exec sentrikat printenv http_proxy 2>/dev/null)
+CONTAINER_HTTPS_PROXY=$(docker exec sentrikat printenv HTTPS_PROXY 2>/dev/null || docker exec sentrikat printenv https_proxy 2>/dev/null)
+
+if [ -n "$CONTAINER_HTTP_PROXY" ] || [ -n "$CONTAINER_HTTPS_PROXY" ]; then
+    info "Container proxy: ${CONTAINER_HTTPS_PROXY:-$CONTAINER_HTTP_PROXY}"
+    PROXY_CONFIGURED=true
 else
-    warn "NVD API connectivity: $NVD_CODE"
+    info "No proxy configured in container"
+    PROXY_CONFIGURED=false
 fi
 
-# CISA KEV catalog
-CISA_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl
-ctx = ssl.create_default_context()
-req = urllib.request.Request('https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
-    print(resp.status)
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
-if [ "$CISA_CODE" = "200" ]; then
-    pass "CISA KEV feed (cisa.gov) reachable"
-else
-    warn "CISA KEV connectivity: $CISA_CODE"
-fi
+# Helper: test connectivity with and without proxy, and SSL verify vs skip
+# Usage: test_endpoint "Label" "URL" [POST_DATA]
+test_endpoint() {
+    local LABEL="$1"
+    local URL="$2"
+    local POST_DATA="$3"
+    local CURL_METHOD=""
+    [ -n "$POST_DATA" ] && CURL_METHOD="-X POST -H 'Content-Type: application/json' -d '$POST_DATA'"
 
-# EPSS API
-EPSS_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl
-ctx = ssl.create_default_context()
-req = urllib.request.Request('https://api.first.org/data/v1/epss?cve=CVE-2024-0001')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
-    print(resp.status)
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
-if [ "$EPSS_CODE" = "200" ]; then
-    pass "EPSS API (api.first.org) reachable"
-else
-    warn "EPSS API connectivity: $EPSS_CODE"
-fi
+    # Test 1: With proxy + skip SSL verify (most permissive)
+    local CODE_PROXY_NOSSL
+    if [ -n "$POST_DATA" ]; then
+        CODE_PROXY_NOSSL=$(docker exec sentrikat curl -sk --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            -d "$POST_DATA" "$URL" 2>&1)
+    else
+        CODE_PROXY_NOSSL=$(docker exec sentrikat curl -sk --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            "$URL" 2>&1)
+    fi
+    [ "$CODE_PROXY_NOSSL" = "000" ] && CODE_PROXY_NOSSL="FAIL"
 
-# OSV API
-OSV_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl, json
-ctx = ssl.create_default_context()
-data = json.dumps({'package': {'name': 'test', 'ecosystem': 'PyPI'}}).encode()
-req = urllib.request.Request('https://api.osv.dev/v1/query', data=data, method='POST')
-req.add_header('Content-Type', 'application/json')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
-    print(resp.status)
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
-if [ "$OSV_CODE" = "200" ]; then
-    pass "OSV API (api.osv.dev) reachable"
-else
-    warn "OSV API connectivity: $OSV_CODE"
-fi
+    # Test 2: With proxy + SSL verify (secure)
+    local CODE_PROXY_SSL
+    if [ -n "$POST_DATA" ]; then
+        CODE_PROXY_SSL=$(docker exec sentrikat curl -s --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            -d "$POST_DATA" "$URL" 2>&1)
+    else
+        CODE_PROXY_SSL=$(docker exec sentrikat curl -s --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            "$URL" 2>&1)
+    fi
+    [ "$CODE_PROXY_SSL" = "000" ] && CODE_PROXY_SSL="FAIL"
 
-# GitHub API (for updates)
-GH_API_CODE=$(docker exec sentrikat python3 -c "
-import urllib.request, ssl
-ctx = ssl.create_default_context()
-req = urllib.request.Request('https://api.github.com/rate_limit')
-req.add_header('User-Agent', 'SentriKat-Audit/1.0')
-try:
-    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
-    import json
-    data = json.loads(resp.read())
-    remaining = data.get('rate',{}).get('remaining',0)
-    limit = data.get('rate',{}).get('limit',0)
-    print(f'{resp.status}:{remaining}/{limit}')
-except urllib.error.HTTPError as e:
-    print(f'{e.code}:0/0')
-except Exception as e:
-    print(f'ERR:{type(e).__name__}')
-" 2>&1)
-GH_API_STATUS=$(echo "$GH_API_CODE" | cut -d: -f1)
-GH_API_RATE=$(echo "$GH_API_CODE" | cut -d: -f2)
-if [ "$GH_API_STATUS" = "200" ]; then
-    pass "GitHub API (api.github.com) reachable (rate limit: $GH_API_RATE)"
-else
-    warn "GitHub API connectivity: $GH_API_STATUS"
+    # Test 3: Without proxy + skip SSL verify (direct)
+    local CODE_DIRECT_NOSSL
+    if [ -n "$POST_DATA" ]; then
+        CODE_DIRECT_NOSSL=$(docker exec sentrikat curl -sk --noproxy '*' --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            -d "$POST_DATA" "$URL" 2>&1)
+    else
+        CODE_DIRECT_NOSSL=$(docker exec sentrikat curl -sk --noproxy '*' --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            "$URL" 2>&1)
+    fi
+    [ "$CODE_DIRECT_NOSSL" = "000" ] && CODE_DIRECT_NOSSL="FAIL"
+
+    # Test 4: Without proxy + SSL verify (strictest)
+    local CODE_DIRECT_SSL
+    if [ -n "$POST_DATA" ]; then
+        CODE_DIRECT_SSL=$(docker exec sentrikat curl -s --noproxy '*' --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            -d "$POST_DATA" "$URL" 2>&1)
+    else
+        CODE_DIRECT_SSL=$(docker exec sentrikat curl -s --noproxy '*' --connect-timeout 8 --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: SentriKat-Audit/1.0" \
+            "$URL" 2>&1)
+    fi
+    [ "$CODE_DIRECT_SSL" = "000" ] && CODE_DIRECT_SSL="FAIL"
+
+    # Determine status and report
+    local BEST_CODE="FAIL"
+    local NEEDS_PROXY="no"
+    local NEEDS_SSL_SKIP="no"
+    local STATUS_ICON="FAIL"
+
+    # Check what works
+    if echo "$CODE_DIRECT_SSL" | grep -qE '^[2-4][0-9][0-9]$'; then
+        BEST_CODE="$CODE_DIRECT_SSL"
+        STATUS_ICON="PASS"
+        NEEDS_PROXY="no"
+        NEEDS_SSL_SKIP="no"
+    elif echo "$CODE_DIRECT_NOSSL" | grep -qE '^[2-4][0-9][0-9]$'; then
+        BEST_CODE="$CODE_DIRECT_NOSSL"
+        STATUS_ICON="PASS"
+        NEEDS_PROXY="no"
+        NEEDS_SSL_SKIP="yes"
+    elif echo "$CODE_PROXY_SSL" | grep -qE '^[2-4][0-9][0-9]$'; then
+        BEST_CODE="$CODE_PROXY_SSL"
+        STATUS_ICON="PASS"
+        NEEDS_PROXY="yes"
+        NEEDS_SSL_SKIP="no"
+    elif echo "$CODE_PROXY_NOSSL" | grep -qE '^[2-4][0-9][0-9]$'; then
+        BEST_CODE="$CODE_PROXY_NOSSL"
+        STATUS_ICON="PASS"
+        NEEDS_PROXY="yes"
+        NEEDS_SSL_SKIP="yes"
+    fi
+
+    # Build result string
+    local DETAIL="proxy+noSSL=$CODE_PROXY_NOSSL  proxy+SSL=$CODE_PROXY_SSL  direct+noSSL=$CODE_DIRECT_NOSSL  direct+SSL=$CODE_DIRECT_SSL"
+
+    if [ "$STATUS_ICON" = "PASS" ]; then
+        local REQS=""
+        [ "$NEEDS_PROXY" = "yes" ] && REQS="NEEDS PROXY"
+        [ "$NEEDS_SSL_SKIP" = "yes" ] && REQS="${REQS:+$REQS, }SSL verify fails"
+        [ -z "$REQS" ] && REQS="direct+SSL OK"
+        pass "$LABEL → HTTP $BEST_CODE ($REQS)"
+    else
+        fail "$LABEL → unreachable"
+    fi
+    info "  $DETAIL"
+}
+
+log ""
+log "  --- Connectivity Matrix (proxy vs direct, SSL verify vs skip) ---"
+log ""
+
+test_endpoint "NVD API (CVE data)" \
+    "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1"
+
+test_endpoint "CISA KEV feed" \
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+
+test_endpoint "EPSS API (FIRST.org)" \
+    "https://api.first.org/data/v1/epss?cve=CVE-2024-0001"
+
+test_endpoint "OSV API (vendor advisories)" \
+    "https://api.osv.dev/v1/query" \
+    '{"package":{"name":"test","ecosystem":"PyPI"}}'
+
+test_endpoint "GitHub API (updates)" \
+    "https://api.github.com/rate_limit"
+
+test_endpoint "License server (portal)" \
+    "${LICENSE_SERVER:-https://portal.sentrikat.com/api}/v1/health"
+
+log ""
+log "  --- Summary ---"
+if [ "$PROXY_CONFIGURED" = "true" ]; then
+    info "Proxy configured: ${CONTAINER_HTTPS_PROXY:-$CONTAINER_HTTP_PROXY}"
+    info "If all 'direct' tests FAIL and 'proxy' tests PASS → proxy is REQUIRED"
+    info "If 'proxy+SSL' FAILs but 'proxy+noSSL' works → proxy does SSL interception"
 fi
 
 # ============================================================================
