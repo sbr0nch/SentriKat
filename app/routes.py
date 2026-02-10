@@ -1086,6 +1086,7 @@ def purge_products():
     Super admin only. Cascading deletes: installations, matches, version history, org links.
     """
     from app.auth import get_current_user
+    from app.logging_config import log_audit_event
     current_user = get_current_user()
     if not current_user or not current_user.is_super_admin():
         return jsonify({'error': 'Super admin access required'}), 403
