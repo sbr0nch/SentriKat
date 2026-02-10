@@ -3944,18 +3944,46 @@ function activateTabFromHash() {
     }
 }
 
+// Load data for the currently active section (since manual CSS activation doesn't fire shown.bs.tab)
+function loadDataForActiveSection() {
+    const activePane = document.querySelector('#adminTabsContent > .tab-pane.active');
+    if (!activePane) return;
+    const id = activePane.id;
+    if (id === 'integrations') {
+        // Check which inner pill is active
+        const activePill = activePane.querySelector('.tab-pane.active');
+        if (activePill) {
+            const pillId = activePill.id;
+            if (pillId === 'pushAgents') {
+                if (typeof loadAgentKeys === 'function') loadAgentKeys();
+                if (typeof loadAgentScriptOrganizations === 'function') loadAgentScriptOrganizations();
+            } else if (pillId === 'jiraIntegration') {
+                if (typeof loadJiraSettings === 'function') loadJiraSettings();
+            } else if (pillId === 'pullSources') {
+                if (typeof loadIntegrations === 'function') loadIntegrations();
+            } else if (pillId === 'importQueue') {
+                if (typeof loadImportQueue === 'function') loadImportQueue();
+            }
+        }
+    }
+}
+
 // Activate correct tab immediately when page loads
 document.addEventListener('DOMContentLoaded', function() {
     // Run immediately
     activateTabFromHash();
 
-    // Also run after a short delay to ensure Bootstrap is ready
-    setTimeout(activateTabFromHash, 100);
+    // Also run after a short delay to ensure Bootstrap is ready and load data
+    setTimeout(function() {
+        activateTabFromHash();
+        loadDataForActiveSection();
+    }, 100);
 });
 
 // Handle back/forward navigation
 window.addEventListener('hashchange', function() {
     activateTabFromHash();
+    setTimeout(loadDataForActiveSection, 50);
 });
 
 // Handle tab clicks to update URL and sidebar highlight

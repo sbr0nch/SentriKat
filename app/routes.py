@@ -335,6 +335,10 @@ def get_products():
     per_page = request.args.get('per_page', 25, type=int)
     per_page = min(per_page, 100)  # Limit max items per page
     grouped = request.args.get('grouped', '').lower() == 'true'
+    sort_by = request.args.get('sort_by', '').strip().lower()
+    sort_dir = request.args.get('sort_dir', 'asc').strip().lower()
+    if sort_dir not in ('asc', 'desc'):
+        sort_dir = 'asc'
 
     logger.info(f"get_products: user={current_user.username}, role={current_user.role}, is_super_admin={current_user.is_super_admin()}")
 
@@ -436,8 +440,18 @@ def get_products():
             )
         )
 
-    # Order by vendor, product name (no distinct needed with subquery approach)
-    query = query.order_by(Product.vendor, Product.product_name)
+    # Order by requested column or default vendor+product_name
+    _col_map = {
+        'product': Product.product_name,
+        'vendor': Product.vendor,
+        'version': Product.version,
+        'status': Product.active,
+    }
+    order_col = _col_map.get(sort_by)
+    if order_col is not None:
+        query = query.order_by(order_col.desc() if sort_dir == 'desc' else order_col.asc())
+    else:
+        query = query.order_by(Product.vendor, Product.product_name)
 
     # If grouped mode requested, group by vendor+product_name
     if grouped:
@@ -615,8 +629,21 @@ def get_products():
             group['versions'].sort(key=lambda v: (v['version'] == 'Any', v['version'] or ''))
             result.append(group)
 
-        # Sort by vendor, then product_name
-        result.sort(key=lambda g: (g['vendor'] or '', g['product_name'] or ''))
+        # Sort results (supports sort_by param for server-side sorting)
+        _sort_keys = {
+            'product': lambda g: (g['product_name'] or '').lower(),
+            'vendor': lambda g: (g['vendor'] or '').lower(),
+            'version': lambda g: len(g.get('versions', [])),
+            'organization': lambda g: (', '.join(g.get('organization_names', [])) or '').lower(),
+            'status': lambda g: g.get('active', False),
+            'platform': lambda g: (', '.join(g.get('platforms', [])) or '').lower(),
+            'cpe': lambda g: g.get('has_cpe', False),
+        }
+        sort_fn = _sort_keys.get(sort_by)
+        if sort_fn:
+            result.sort(key=sort_fn, reverse=(sort_dir == 'desc'))
+        else:
+            result.sort(key=lambda g: (g['vendor'] or '', g['product_name'] or ''))
 
         # Apply pagination if requested
         if page:

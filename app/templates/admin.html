@@ -123,7 +123,10 @@
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" id="productSearch" placeholder="Search vendor, product, version..."
-                               oninput="debounceSearch()">
+                               onkeydown="if(event.key==='Enter'){currentPage=1;loadProducts();}">
+                        <button class="btn btn-outline-primary" type="button" onclick="currentPage=1;loadProducts();" title="Search">
+                            <i class="bi bi-search"></i>
+                        </button>
                         <button class="btn btn-outline-secondary" type="button" onclick="clearSearch()" title="Clear search">
                             <i class="bi bi-x"></i>
                         </button>
@@ -732,16 +735,8 @@
     let selectedCatalogItems = new Set();
     let selectedVersions = {};  // Store selected versions by catalog ID
     let currentPage = 1;
-    let searchTimeout = null;
-
-    // Debounce search input
-    function debounceSearch() {
-        if (searchTimeout) clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            currentPage = 1; // Reset to first page on search
-            loadProducts();
-        }, 300);
-    }
+    let currentSortBy = '';
+    let currentSortDir = 'asc';
 
     function clearSearch() {
         document.getElementById('productSearch').value = '';
@@ -851,6 +846,11 @@
         params.append('page', currentPage);
         params.append('per_page', perPage);
         params.append('grouped', 'true');  // Use grouped mode
+
+        if (currentSortBy) {
+            params.append('sort_by', currentSortBy);
+            params.append('sort_dir', currentSortDir);
+        }
 
         try {
             const response = await fetch(`/api/products?${params.toString()}`);
@@ -1012,11 +1012,49 @@
             `;
         } finally {
             hideLoading();
-            // Re-initialize sortable table after dynamic content load
-            SortableTable.init('productsTableContainer');
+            // Set up server-side sorting (not client-side) since products are paginated
+            initProductsSortHeaders();
             // Restore table enhancements (column visibility, widths)
             TableEnhancements.refresh('productsTableContainer');
         }
+    }
+
+    // Server-side sort for paginated products table
+    function initProductsSortHeaders() {
+        const table = document.getElementById('productsTableContainer');
+        if (!table) return;
+        const headers = table.querySelectorAll('th[data-sort-key]');
+        headers.forEach(header => {
+            // Add sortable cursor + icon if not present
+            header.style.cursor = 'pointer';
+            if (!header.querySelector('.sort-icon')) {
+                header.innerHTML += ' <i class="bi bi-chevron-expand sort-icon text-muted"></i>';
+            }
+            // Remove any existing click handlers from SortableTable
+            const newHeader = header.cloneNode(true);
+            header.parentNode.replaceChild(newHeader, header);
+            // Add server-side sort handler
+            newHeader.addEventListener('click', function(e) {
+                if (e.target.classList.contains('resize-handle')) return;
+                const sortKey = this.dataset.sortKey;
+                if (currentSortBy === sortKey) {
+                    currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentSortBy = sortKey;
+                    currentSortDir = 'asc';
+                }
+                // Update header icons
+                table.querySelectorAll('th[data-sort-key] .sort-icon').forEach(icon => {
+                    icon.className = 'bi bi-chevron-expand sort-icon text-muted';
+                });
+                const icon = this.querySelector('.sort-icon');
+                if (icon) {
+                    icon.className = 'bi sort-icon ' + (currentSortDir === 'asc' ? 'bi-chevron-up' : 'bi-chevron-down');
+                }
+                currentPage = 1;
+                loadProducts();
+            });
+        });
     }
 
     function resetFilters() {
@@ -3501,10 +3539,10 @@
         if (!body) return;
 
         try {
-            const response = await fetch('/api/products?grouped=true&per_page=500&status=active');
+            const response = await fetch('/api/products?grouped=true&page=1&per_page=500&status=active');
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
-            const products = data.products || [];
+            const products = Array.isArray(data) ? data : (data.products || []);
 
             // Map to normalized structure
             softwareOverviewData = products.map(p => {
