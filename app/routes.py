@@ -2821,7 +2821,7 @@ def apply_cpe_mappings():
     try:
         data = request.get_json(silent=True) or {}
         use_nvd = data.get('use_nvd', True)
-        max_nvd = data.get('max_nvd_lookups', 50)
+        max_nvd = data.get('max_nvd_lookups', 200)
 
         app = current_app._get_current_object()
 

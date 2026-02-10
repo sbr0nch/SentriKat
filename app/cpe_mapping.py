@@ -307,7 +307,7 @@ def apply_cpe_to_product(product):
     return False
 
 
-def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=50):
+def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
     """
     Apply CPE mappings to all products that don't have CPE set.
 
@@ -343,7 +343,7 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=50):
     total_without_cpe = len(products_without_cpe)
     updated_count = 0
 
-    # Phase 1: Apply local matches (regex + curated dict + user-learned mappings)
+    # Phase 1: Apply local matches (regex + curated dict + local dictionary)
     # Use no_autoflush to prevent mid-query flushes that can cause statement timeouts
     still_unmatched = []
     with db.session.no_autoflush:
@@ -353,7 +353,9 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=50):
             else:
                 still_unmatched.append(product)
 
-    # Phase 2: Try NVD API for remaining unmatched products
+    logger.info(f"CPE Phase 1 (local): mapped {updated_count}/{total_without_cpe}, {len(still_unmatched)} still unmatched")
+
+    # Phase 2: Try NVD API for remaining unmatched products (online, rate-limited)
     if use_nvd and still_unmatched:
         nvd_lookups = 0
         # Deduplicate by vendor+product_name to avoid redundant API calls
@@ -418,8 +420,11 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=50):
             except Exception as e:
                 logger.debug(f"NVD lookup failed for {product.vendor} {product.product_name}: {e}")
 
+    logger.info(f"CPE Phase 2 (NVD API): total mapped {updated_count}/{total_without_cpe}")
+
     if commit and updated_count > 0:
         db.session.commit()
+        logger.info(f"CPE batch apply committed: {updated_count} products updated")
 
     return updated_count, total_without_cpe
 
