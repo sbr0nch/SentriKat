@@ -285,7 +285,7 @@ def check_match(vulnerability, product):
     Check if a vulnerability matches a product.
 
     Respects the product's match_type setting:
-    - auto: Use CPE if available, fallback to keyword
+    - auto: Use CPE if available, fallback to keyword ONLY if product has no CPE
     - cpe: Only use CPE matching
     - keyword: Only use keyword matching
     - both: Use both CPE and keyword matching
@@ -296,6 +296,12 @@ def check_match(vulnerability, product):
     Returns:
         tuple: (match_reasons: list, match_method: str, match_confidence: str)
     """
+    # Skip products tagged as not security relevant (noise: Windows updates,
+    # language packs, ADK tools, etc.). These should never get CVE matches.
+    cpe_vendor, cpe_product, _ = product.get_effective_cpe()
+    if cpe_vendor == '_skip' or cpe_product == '_not_security_relevant':
+        return [], None, None
+
     match_type = product.match_type or 'auto'
 
     # Determine which matching methods to use
@@ -310,14 +316,24 @@ def check_match(vulnerability, product):
     keyword_method = None
     keyword_confidence = None
 
+    # Check if product has CPE configured (for auto mode logic)
+    product_has_cpe = bool(cpe_vendor and cpe_product)
+
     # Try CPE matching first
     if use_cpe:
         cpe_reasons, cpe_method, cpe_confidence = check_cpe_match(vulnerability, product)
 
     # Try keyword matching
     if use_keyword:
-        # For 'auto' mode, only use keyword if CPE didn't match
-        if match_type == 'auto' and cpe_reasons:
+        if match_type == 'auto':
+            # In 'auto' mode: if the product HAS a CPE, CPE is authoritative.
+            # Do NOT fall back to keyword matching, even if CPE didn't match.
+            # This prevents false positives where CPE correctly says "not affected"
+            # but vendor_product fallback matches on vendor name alone.
+            # Only use keyword matching for products WITHOUT CPE configured.
+            if not product_has_cpe:
+                keyword_reasons, keyword_method, keyword_confidence = check_keyword_match(vulnerability, product)
+        elif cpe_reasons:
             pass  # Skip keyword matching, CPE matched
         else:
             keyword_reasons, keyword_method, keyword_confidence = check_keyword_match(vulnerability, product)
