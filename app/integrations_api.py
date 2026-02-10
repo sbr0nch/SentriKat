@@ -20,6 +20,7 @@ from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User
 from app.auth import admin_required, login_required
 from app.licensing import requires_professional
+from config import Config
 
 bp = Blueprint('integrations', __name__)
 csrf.exempt(bp)  # API endpoints use session auth, not CSRF tokens
@@ -1377,7 +1378,13 @@ def delete_agent(agent_id):
 def download_windows_agent():
     """Download Windows PowerShell agent script with embedded API key."""
     api_key = request.args.get('api_key', '')
-    base_url = request.url_root.rstrip('/')
+
+    # Use SENTRIKAT_URL config (which respects env var), fall back to X-Forwarded-Proto detection
+    base_url = Config.SENTRIKAT_URL
+    if not base_url:
+        proto = request.headers.get('X-Forwarded-Proto', request.scheme)
+        base_url = f"{proto}://{request.host}"
+    base_url = base_url.rstrip('/')
 
     # Build validation section based on whether key is embedded
     if api_key and api_key != 'YOUR_API_KEY_HERE':
@@ -1423,6 +1430,26 @@ param(
 )
 {validation}
 $ErrorActionPreference = "Stop"
+
+# Allow self-signed/internal SSL certificates
+try {{
+    if ($PSVersionTable.PSVersion.Major -ge 6) {{
+        # PowerShell Core 6+: -SkipCertificateCheck is handled per-request below
+        $script:SkipCert = $true
+    }} else {{
+        # PowerShell 5.x: override certificate validation globally
+        Add-Type @"
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public class TrustAll : ICertificatePolicy {{
+    public bool CheckValidationResult(ServicePoint sp, X509Certificate cert, WebRequest req, int problem) {{ return true; }}
+}}
+"@
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAll
+    }}
+}} catch {{
+    # Ignore - will fail on strict cert only
+}}
 
 # Get system information
 $Hostname = $env:COMPUTERNAME
@@ -1535,12 +1562,16 @@ Write-Host "Sending inventory to SentriKat..." -ForegroundColor Yellow
 Write-Host "Payload size: $($BodyBytes.Length) bytes" -ForegroundColor Gray
 
 try {{
-    $Response = Invoke-RestMethod -Uri "$SentriKatUrl/api/agent/inventory" `
-        -Method POST `
-        -Body $BodyBytes `
-        -ContentType "application/json; charset=utf-8" `
-        -Headers @{{"X-Agent-Key" = $ApiKey}} `
-        -ErrorAction Stop
+    $params = @{{
+        Uri         = "$SentriKatUrl/api/agent/inventory"
+        Method      = "POST"
+        Body        = $BodyBytes
+        ContentType = "application/json; charset=utf-8"
+        Headers     = @{{"X-Agent-Key" = $ApiKey}}
+        ErrorAction = "Stop"
+    }}
+    if ($script:SkipCert) {{ $params["SkipCertificateCheck"] = $true }}
+    $Response = Invoke-RestMethod @params
 
     Write-Host ""
     Write-Host "SUCCESS!" -ForegroundColor Green
@@ -1601,7 +1632,13 @@ $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 def download_linux_agent():
     """Download Linux Bash agent script with embedded API key."""
     api_key = request.args.get('api_key', '')
-    base_url = request.url_root.rstrip('/')
+
+    # Use SENTRIKAT_URL config (which respects env var), fall back to X-Forwarded-Proto detection
+    base_url = Config.SENTRIKAT_URL
+    if not base_url:
+        proto = request.headers.get('X-Forwarded-Proto', request.scheme)
+        base_url = f"{proto}://{request.host}"
+    base_url = base_url.rstrip('/')
 
     # Build key section based on whether embedded
     if api_key and api_key != 'YOUR_API_KEY_HERE':
@@ -1759,7 +1796,7 @@ send_chunk() {{
         echo "  Sending inventory ($PAYLOAD_SIZE bytes)..."
     fi
 
-    RESPONSE=$(curl -s -w "\\n%{{http_code}}" --connect-timeout 30 --max-time 120 \\
+    RESPONSE=$(curl -sk -w "\\n%{{http_code}}" --connect-timeout 30 --max-time 120 \\
         -X POST "$API_URL/api/agent/inventory" \\
         -H "X-Agent-Key: $API_KEY" \\
         -H "Content-Type: application/json" \\
