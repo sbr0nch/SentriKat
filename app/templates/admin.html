@@ -227,8 +227,8 @@
                                 <th data-sort="hostname" onclick="sortEndpoints('hostname')" style="cursor:pointer;">Hostname <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th data-sort="ip_address" onclick="sortEndpoints('ip_address')" style="cursor:pointer;">IP Address <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th data-sort="os_name" onclick="sortEndpoints('os_name')" style="cursor:pointer;">OS <i class="bi bi-arrow-down-up text-muted"></i></th>
-                                <th>Organization</th>
-                                <th>Products</th>
+                                <th data-sort="organization" onclick="sortEndpoints('organization')" style="cursor:pointer;">Organization <i class="bi bi-arrow-down-up text-muted"></i></th>
+                                <th data-sort="product_count" onclick="sortEndpoints('product_count')" style="cursor:pointer;">Products <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th data-sort="status" onclick="sortEndpoints('status')" style="cursor:pointer;">Status <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th data-sort="last_checkin" onclick="sortEndpoints('last_checkin')" style="cursor:pointer;">Last Seen <i class="bi bi-arrow-down-up text-muted"></i></th>
                                 <th style="width: 100px;">Actions</th>
@@ -3786,6 +3786,7 @@
                 case 'vendor': aVal = `${a.vendor || ''} ${a.product_name || ''}`.toLowerCase(); bVal = `${b.vendor || ''} ${b.product_name || ''}`.toLowerCase(); break;
                 case 'version': aVal = (a.detected_version || '').toLowerCase(); bVal = (b.detected_version || '').toLowerCase(); break;
                 case 'organization': aVal = (a.organization_name || '').toLowerCase(); bVal = (b.organization_name || '').toLowerCase(); break;
+                case 'criticality': { const co = {'critical':4,'high':3,'medium':2,'low':1}; aVal = co[(a.criticality||'').toLowerCase()] || 0; bVal = co[(b.criticality||'').toLowerCase()] || 0; break; }
                 case 'source': aVal = (a.integration_name || 'zzz').toLowerCase(); bVal = (b.integration_name || 'zzz').toLowerCase(); break;
                 default: aVal = ''; bVal = '';
             }

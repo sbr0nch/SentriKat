@@ -1765,7 +1765,24 @@ def list_assets():
         order = request.args.get('order', 'hostname')
         direction = request.args.get('direction', 'asc')
 
-        if hasattr(Asset, order):
+        if order == 'organization':
+            # Sort by organization display name (requires join)
+            query = query.outerjoin(Organization, Asset.organization_id == Organization.id)
+            order_col = Organization.display_name
+            if direction == 'desc':
+                order_col = order_col.desc()
+            query = query.order_by(order_col)
+        elif order == 'product_count':
+            # Sort by number of installed products
+            from sqlalchemy import func
+            product_count = func.count(ProductInstallation.id).label('product_count')
+            query = query.outerjoin(ProductInstallation, ProductInstallation.asset_id == Asset.id) \
+                         .group_by(Asset.id)
+            if direction == 'desc':
+                query = query.order_by(product_count.desc())
+            else:
+                query = query.order_by(product_count.asc())
+        elif hasattr(Asset, order):
             order_col = getattr(Asset, order)
             if direction == 'desc':
                 order_col = order_col.desc()

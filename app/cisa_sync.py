@@ -479,8 +479,14 @@ def sync_cisa_kev(enrich_cvss=False, cvss_limit=50, fetch_cpe=True, cpe_limit=30
                 logger.warning(f"CPE version fetch failed (non-critical): {e}")
 
         # Match vulnerabilities with products (now with version data if available)
-        from app.filters import match_vulnerabilities_to_products
-        matches_count = match_vulnerabilities_to_products()
+        # Use rematch_all_products() to BOTH clean up stale matches (where CPE
+        # version ranges have changed, e.g. vendor released cumulative update)
+        # AND create new matches.  Without cleanup, matches persist even after
+        # the NVD narrows the affected version range.
+        from app.filters import rematch_all_products
+        removed_count, matches_count = rematch_all_products()
+        if removed_count:
+            logger.info(f"Cleaned up {removed_count} stale matches (no longer in affected version range)")
 
         # Optionally enrich with CVSS data from NVD
         if enrich_cvss:
