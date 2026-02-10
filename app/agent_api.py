@@ -74,6 +74,21 @@ SKIP_PRODUCTS_WINDOWS = {
     'windows sdk desktop headers',
     'windows sdk desktop libs',
     'windows sdk modern versioned developer tools',
+    # Windows ADK / Assessment Toolkit components (internal dev/deployment tools)
+    'application compatibility toolkit',
+    'imaging designer',
+    'imaging tools support',
+    'assessments on client',
+    'user state migration tool',
+    'windows assessment toolkit',
+    'windows assessment services - client',
+    'windows deployment tools',
+    'windows deployment customizations',
+    'kits configuration installer',
+    'toolkit documentation',
+    'windows pe x86 x64 wims',
+    'mxax64',
+    'wptx64',
     # Language/localization (no executable code)
     'windows language pack',
     'microsoft language experience pack',
@@ -129,6 +144,10 @@ SKIP_PATTERNS = [
     r'^(cortana|people app|groove music|movies & tv|mixed reality)',
     # Games (not enterprise-relevant)
     r'.*(solitaire|candy crush|minecraft|disney|xbox game).*',
+    # Windows ADK / Assessment & Deployment Kit components
+    r'^windows (assessment|deployment|phone common)',
+    r'(assessment and deployment kit|imaging designer|imaging tools)',
+    r'^(kits configuration|toolkit documentation)',
 ]
 _SKIP_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in SKIP_PATTERNS]
 
