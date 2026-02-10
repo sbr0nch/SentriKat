@@ -147,7 +147,7 @@ class TestVulnerabilityEndpoints:
         vulns = response.get_json()
         assert isinstance(vulns, list)
 
-    def test_get_vulnerability_details(self, client, db_session, sample_vulnerability):
+    def test_get_vulnerability_details(self, client, db_session, setup_complete, sample_vulnerability):
         """Test getting vulnerability details."""
         # This endpoint might be public
         response = client.get(f'/api/vulnerabilities/{sample_vulnerability.cve_id}')

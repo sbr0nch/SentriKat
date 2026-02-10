@@ -276,7 +276,16 @@ def check_for_updates():
             except (ValueError, AttributeError):
                 return ((0, 0, 0), 0)
 
-        update_available = parse_ver(latest_tag) > parse_ver(current)
+        latest_parsed = parse_ver(latest_tag)
+        current_parsed = parse_ver(current)
+
+        # Never suggest a pre-release as an update when running a stable release
+        latest_is_prerelease = '-' in latest_tag
+        current_is_stable = '-' not in current
+        if latest_is_prerelease and current_is_stable:
+            update_available = False
+        else:
+            update_available = latest_parsed > current_parsed
 
         return jsonify({
             'update_available': update_available,
