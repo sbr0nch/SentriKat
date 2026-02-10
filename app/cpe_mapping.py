@@ -372,6 +372,13 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
 
     logger.info(f"CPE Phase 1 (local): mapped {updated_count - skipped_count}/{len(real_products)}, {len(still_unmatched)} still unmatched")
 
+    # Commit Phase 0+1 changes now to keep session clean for Phase 2.
+    # Phase 2 does queries (user mappings, NVD API) that trigger autoflush.
+    # If dirty product objects are pending, autoflush causes statement_timeout.
+    if commit and updated_count > 0:
+        db.session.commit()
+        logger.info(f"CPE Phase 0+1 committed: {updated_count} products updated")
+
     # Log unmatched products for debugging
     if still_unmatched:
         samples = still_unmatched[:20]

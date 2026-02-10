@@ -2829,14 +2829,21 @@ def apply_cpe_mappings():
             """Save CPE apply job status to SystemSettings."""
             import json
             from app.models import SystemSettings
+            try:
+                db.session.rollback()  # Clear any pending rollback state
+            except Exception:
+                pass
             val = json.dumps({'status': status, 'message': message, 'updated': updated, 'total': total, 'ts': datetime.utcnow().isoformat()})
-            setting = SystemSettings.query.filter_by(key='cpe_apply_job_status').first()
-            if setting:
-                setting.value = val
-            else:
-                setting = SystemSettings(key='cpe_apply_job_status', value=val, category='sync')
-                db.session.add(setting)
-            db.session.commit()
+            try:
+                setting = SystemSettings.query.filter_by(key='cpe_apply_job_status').first()
+                if setting:
+                    setting.value = val
+                else:
+                    setting = SystemSettings(key='cpe_apply_job_status', value=val, category='sync')
+                    db.session.add(setting)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
         def _run_cpe_apply():
             with app.app_context():
