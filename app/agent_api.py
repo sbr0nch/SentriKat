@@ -116,6 +116,16 @@ SKIP_SUFFIXES_LINUX = [
     '-dev', '-devel',                                     # Development headers
     '-headers',                                           # Kernel/lib headers
     '-static',                                            # Static libraries
+    '-data',                                              # Pure data files
+    '-examples',                                          # Example files
+    '-tests', '-testsuite', '-test',                      # Test packages
+    '-completion',                                        # Shell completion scripts
+    '-icon-theme', '-icons',                              # Icon themes
+    '-wallpapers',                                        # Wallpaper packages
+    '-sounds',                                            # Sound themes
+    '-help',                                              # Help files
+    '-source',                                            # Source packages
+    '-udeb',                                              # Installer packages
 ]
 
 # Linux package prefixes that are almost always noise
@@ -133,6 +143,19 @@ SKIP_PREFIXES_LINUX = [
     'libreoffice-l10n-',# LibreOffice translation packs
     'firefox-locale-',  # Firefox locale packs
     'thunderbird-locale-', # Thunderbird locale packs
+    'r-cran-',          # R CRAN packages (statistics)
+    'r-bioc-',          # R Bioconductor packages
+    'r-base-',          # R base components
+    'golang-',          # Go source packages (not runtime)
+    'libghc-',          # Haskell GHC library packages
+    'dh-',              # Debian helper/packaging tools
+    'node-',            # Debian-packaged npm modules (not runtime Node.js)
+    'ruby-',            # Ruby library packages (not runtime Ruby)
+    'librust-',         # Rust crate packages
+    'x11-',             # X11 utility packages
+    'xdg-',             # XDG desktop utilities
+    'xserver-',         # X server components
+    'xkb-',             # X keyboard data
 ]
 
 # Patterns to skip (compiled once for performance)
@@ -161,14 +184,72 @@ SKIP_PATTERNS = [
     r'^(kits configuration|toolkit documentation)',
     # Driver management utilities (not the drivers themselves)
     r'driver uninstall tool',
+    # Perl module library packages (libFoo-perl)
+    r'^lib.+-perl$',
+    # Transitional/dummy/virtual packages
+    r'transitional',
+    r'^dummy-',
+    # Python 2 packages (EOL, no security relevance)
+    r'^python-(?!3)',
+    # Misc non-runtime Linux packages
+    r'^(adwaita|hicolor|humanity|ubuntu-mono)-icon-theme',
+    r'^(desktop-file-utils|mime-support|shared-mime-info)$',
+    r'^(plymouth|plymouth-theme)',
 ]
 _SKIP_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in SKIP_PATTERNS]
 
 # Linux packages to skip by exact name (high-volume, no CVE surface)
+# CONSERVATIVE: Only skip packages that are truly non-security-relevant.
+# Packages that parse untrusted input, handle network traffic, or have
+# known CVE history are NOT in this list (e.g., openssl, xz-utils, curl).
 SKIP_EXACT_LINUX = {
+    # Packaging & build tools (no runtime attack surface)
     'info', 'texinfo', 'man-db', 'manpages',
     'lintian', 'debhelper', 'dpkg-dev', 'build-essential',
     'dh-python', 'dh-strip-nondeterminism',
+    # Base system metadata / configuration packages (no executable code)
+    'adduser', 'base-files', 'base-passwd', 'debconf', 'debconf-i18n',
+    'debianutils', 'init-system-helpers', 'install-info',
+    'lsb-base', 'lsb-release', 'netbase', 'passwd',
+    'sensible-utils', 'sysvinit-utils', 'ucf', 'usrmerge',
+    # Apt / package management (admin tools, not attack surface)
+    'apt-utils', 'apt-transport-https', 'apt-listchanges',
+    'aptitude', 'aptitude-common', 'software-properties-common',
+    'python3-apt', 'python3-software-properties', 'unattended-upgrades',
+    'needrestart', 'debian-goodies', 'apt-config-icons',
+    # Ubuntu/cloud admin meta-packages (no executable code)
+    'cloud-guest-utils', 'landscape-common',
+    'ubuntu-advantage-tools', 'ubuntu-pro-client',
+    'ubuntu-release-upgrader-core', 'update-manager-core',
+    'update-notifier-common', 'ubuntu-minimal', 'ubuntu-standard',
+    'ubuntu-server', 'ubuntu-server-minimal',
+    # Shell completion & convenience (no attack surface)
+    'bash-completion', 'command-not-found', 'popularity-contest',
+    'friendly-recovery', 'byobu',
+    'ed', 'bc', 'dc',
+    # Hardware info tools (read-only, no CVE surface)
+    'dmidecode', 'lshw', 'ethtool', 'rfkill', 'irqbalance',
+    # Boot metadata
+    'os-prober', 'initramfs-tools', 'initramfs-tools-core',
+    # Scheduling (pure cron wrappers, no parsing of untrusted input)
+    'anacron',
+    # Misc non-security packages
+    'dialog', 'whiptail', 'gettext-base',
+    'iso-codes', 'xauth', 'xdg-user-dirs', 'time', 'tree',
+    # Python3 trivial packages (not crypto/network/parsing libraries)
+    'python3-minimal', 'python3-distutils', 'python3-lib2to3',
+    'python3-pkg-resources', 'python3-setuptools', 'python3-pip',
+    'python3-wheel', 'python3-venv', 'python3-dev',
+    'python3-distro', 'python3-distro-info', 'python3-apport',
+    'python3-problem-report', 'python3-systemd', 'python3-dbus',
+    'python3-gi', 'python3-six', 'python3-colorama',
+    'python3-commandnotfound', 'python3-debconf', 'python3-debian',
+    'python3-debianbts', 'python3-launchpadlib',
+    'python3-lazr.restfulclient', 'python3-lazr.uri',
+    'python3-newt', 'python3-pyparsing',
+    'python3-reportbug', 'python3-wadllib',
+    'python3-update-manager', 'python3-gdbm',
+    'python3-attr', 'python3-automat',
 }
 
 
@@ -1840,9 +1921,40 @@ def list_assets():
 
         # Safely convert assets to dict
         assets_list = []
+        asset_ids = [a.id for a in pagination.items]
+
+        # Batch-fetch latest completed job stats for these assets
+        # This tells the UI about products pending in import queue
+        latest_jobs = {}
+        if asset_ids:
+            from sqlalchemy import func as sqlfunc
+            # Get the latest completed job for each asset
+            subq = db.session.query(
+                InventoryJob.asset_id,
+                sqlfunc.max(InventoryJob.id).label('max_id')
+            ).filter(
+                InventoryJob.asset_id.in_(asset_ids),
+                InventoryJob.status == 'completed'
+            ).group_by(InventoryJob.asset_id).subquery()
+
+            jobs = db.session.query(InventoryJob).join(
+                subq, InventoryJob.id == subq.c.max_id
+            ).all()
+            for j in jobs:
+                latest_jobs[j.asset_id] = {
+                    'total_items': j.total_items or 0,
+                    'items_created': j.items_created or 0,
+                    'completed_at': j.completed_at.isoformat() if j.completed_at else None
+                }
+
         for asset in pagination.items:
             try:
-                assets_list.append(asset.to_dict())
+                asset_dict = asset.to_dict()
+                # Add latest job info so UI can show "N products pending review"
+                job_info = latest_jobs.get(asset.id)
+                if job_info:
+                    asset_dict['last_job'] = job_info
+                assets_list.append(asset_dict)
             except Exception as e:
                 logger.error(f"Error converting asset {asset.id} to dict: {e}")
                 assets_list.append({
@@ -2409,8 +2521,16 @@ def get_worker_status():
     if not (user.is_super_admin() or user.is_org_admin() or user.is_admin):
         return jsonify({'error': 'Admin access required'}), 403
 
-    # Worker status
+    # Worker status - auto-restart if stopped
     worker_alive = _worker_thread is not None and _worker_thread.is_alive()
+    if not worker_alive:
+        try:
+            start_background_worker(current_app._get_current_object())
+            worker_alive = _worker_thread is not None and _worker_thread.is_alive()
+            if worker_alive:
+                logger.info("Auto-restarted background worker via status check")
+        except Exception as e:
+            logger.warning(f"Could not auto-restart background worker: {e}")
 
     # Queue statistics
     pending_jobs = InventoryJob.query.filter_by(status='pending').count()

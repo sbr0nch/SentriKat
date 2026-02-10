@@ -3516,7 +3516,8 @@
 
     function formatRelativeTime(dateStr) {
         if (!dateStr) return 'Never';
-        const date = new Date(dateStr);
+        // Server returns UTC dates without timezone suffix - append 'Z' so JS parses as UTC
+        const date = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
         const now = new Date();
         const diffMs = now - date;
         const diffMins = Math.floor(diffMs / 60000);
@@ -3610,7 +3611,7 @@
                         <td><code>${escapeHtml(asset.ip_address || '-')}</code></td>
                         <td>${escapeHtml(asset.os_name || '-')} ${escapeHtml(asset.os_version || '')}</td>
                         <td>${escapeHtml(asset.organization_name || 'Unknown')}</td>
-                        <td><span class="badge bg-primary">${asset.product_count || 0}</span>${vulnBadge}</td>
+                        <td><span class="badge bg-primary">${asset.product_count || 0}</span>${asset.last_job && asset.product_count === 0 && asset.last_job.total_items > 0 ? `<span class="badge bg-warning text-dark ms-1" title="${asset.last_job.total_items} products pending review in Import Queue"><i class="bi bi-hourglass-split me-1"></i>${asset.last_job.total_items} pending</span>` : ''}${vulnBadge}</td>
                         <td>${statusBadge}</td>
                         <td>${agentBadge}</td>
                         <td>${lastSeenDisplay}</td>
@@ -3957,6 +3958,7 @@
                     </td>
                     <td>${item.status === 'pending' ? `<select class="form-select form-select-sm" style="width: 120px;" onchange="updateQueueItemVersion(${item.id}, this.value)"><option value="">Any version</option>${versionOptions}</select>` : `<span class="text-muted">${escapeHtml(item.selected_version || item.detected_version || 'Any')}</span>`}</td>
                     <td>${item.status === 'pending' ? `<select class="form-select form-select-sm" style="width: 140px;" onchange="updateQueueItemOrg(${item.id}, this.value)"><option value="">Select org...</option>${importQueueOrganizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}</select>` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}</td>
+                    <td><span class="badge bg-${{'critical':'danger','high':'warning text-dark','medium':'info text-dark','low':'secondary'}[item.criticality] || 'secondary'}">${escapeHtml(item.criticality || 'medium')}</span></td>
                     <td><small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small></td>
                     <td>${item.status === 'pending' ? `<button class="btn btn-success btn-sm me-1" onclick="approveQueueItem(${item.id})" title="Approve"><i class="bi bi-check"></i></button><button class="btn btn-outline-danger btn-sm" onclick="rejectQueueItem(${item.id})" title="Reject"><i class="bi bi-x"></i></button>` : `<span class="badge bg-${item.status === 'approved' ? 'success' : 'secondary'}">${item.status}</span>`}</td>
                 </tr>`;
