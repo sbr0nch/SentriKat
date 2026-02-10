@@ -348,17 +348,9 @@
             color: var(--text-color);
         }
 
-        /* Dark mode: fix version box, collapsible sections, software overview rows */
+        /* Dark mode: fix version box, collapsible sections */
         [data-theme="dark"] .border-start.border-success.bg-light {
             background-color: rgba(16, 185, 129, 0.1) !important;
-        }
-
-        [data-theme="dark"] .software-overview-row {
-            border-bottom-color: var(--border-color, #333) !important;
-        }
-
-        [data-theme="dark"] .software-overview-row:hover {
-            background-color: rgba(255, 255, 255, 0.03);
         }
 
         /* Dark mode settings group separator */
@@ -2902,10 +2894,6 @@
                             <i class="bi bi-pc-display"></i>
                             Endpoints
                         </a>
-                        <a href="/admin#software-overview" class="sidebar-sublink" onclick="navigateInventoryTab('software-overview', event)" data-tooltip="Software Overview">
-                            <i class="bi bi-layers"></i>
-                            Software Overview
-                        </a>
                         <a href="/containers" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.containers' else '' }}" data-tooltip="Container Security">
                             <i class="bi bi-box-seam"></i>
                             Containers
@@ -3821,7 +3809,6 @@
                 const tabMap = {
                     'products': 'products-tab',
                     'endpoints': 'endpoints-tab',
-                    'software-overview': 'software-overview-tab',
                     'import-queue': 'import-queue-tab'
                 };
                 const tabId = tabMap[tabName];
