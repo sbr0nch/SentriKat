@@ -653,7 +653,7 @@ def get_user_mapping_stats() -> dict:
     try:
         total = UserCpeMapping.query.count()
         by_source = {}
-        for source in ['user', 'import', 'community']:
+        for source in ['user', 'import', 'auto_nvd', 'auto_verified', 'community']:
             by_source[source] = UserCpeMapping.query.filter_by(source=source).count()
 
         top_used = UserCpeMapping.query.order_by(

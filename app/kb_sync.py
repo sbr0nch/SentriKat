@@ -7,9 +7,10 @@ central SentriKat Knowledge Base API.
 Security model (3 layers of protection against bad data):
 
   PUSH SIDE (what we send):
-  - Only human-created mappings (source='user') are pushed
-  - auto_nvd mappings are EXCLUDED (fuzzy matching can be wrong)
-  - Minimum usage_count >= 5 (must be proven useful, not accidental)
+  - Human-created mappings (source='user') with usage_count >= 5
+  - Auto-verified mappings (source='auto_verified') - auto_nvd promoted after
+    20+ uses with no human override (battle-tested automatic discoveries)
+  - Raw auto_nvd mappings are EXCLUDED (fuzzy matching can be wrong)
   - Max 500 mappings per push
 
   SERVER SIDE (portal.sentrikat.com must implement):
@@ -24,9 +25,10 @@ Security model (3 layers of protection against bad data):
   - overwrite=False: never replaces existing local mappings
   - source='community' tag for easy identification and cleanup
 
-Result: A mapping must be (1) created by a human, (2) used 5+ times locally,
-(3) confirmed by 3+ independent installations OR SentriKat team, and (4) still
-won't override any local mapping the customer already has.
+Result: A mapping must be (1) created by a human OR auto-verified by 20+ uses,
+(2) used 5+ times locally, (3) confirmed by 3+ independent installations OR
+SentriKat team, and (4) still won't override any local mapping the customer
+already has.
 
 Configuration:
     SENTRIKAT_KB_SERVER: KB server URL (default: portal.sentrikat.com/api)
@@ -78,23 +80,21 @@ def get_local_mappings_for_sync():
     """
     Get locally-learned CPE mappings that should be synced to the KB.
 
-    Only includes mappings that:
-    - Were created manually by a human user (source='user')
-    - Have been used at least 5 times (proven useful, not accidental)
-    - Are not imported from community (to avoid echo)
+    Includes mappings from two trusted sources:
+    - source='user': Manually created by a human (usage_count >= 5)
+    - source='auto_verified': Auto-discovered by NVD API, promoted after
+      20+ successful uses with no human override (battle-tested)
 
-    SECURITY: We intentionally exclude 'auto_nvd' mappings because they are
-    created by fuzzy matching heuristics and may be incorrect. Pushing
-    unverified auto-mappings to the community KB could cause false negatives
-    (missed vulnerabilities) across all installations that pull them.
-    Only human-verified mappings are trusted enough to share.
+    Raw 'auto_nvd' mappings are EXCLUDED (fuzzy matching can be wrong).
+    The promotion pipeline (promote_proven_auto_mappings) ensures only
+    high-confidence auto-mappings reach the KB.
     """
     from app.models import UserCpeMapping
 
     try:
         mappings = UserCpeMapping.query.filter(
-            UserCpeMapping.usage_count >= 5,  # Must be proven useful, not accidental
-            UserCpeMapping.source == 'user'   # Only human-verified mappings
+            UserCpeMapping.usage_count >= 5,
+            UserCpeMapping.source.in_(['user', 'auto_verified'])
         ).order_by(
             UserCpeMapping.usage_count.desc()
         ).limit(500).all()
@@ -325,6 +325,74 @@ def kb_sync():
         }
 
 
+def promote_proven_auto_mappings(min_usage=20):
+    """
+    Promote auto_nvd mappings to 'auto_verified' after extensive real-world usage.
+
+    Logic: If an auto_nvd mapping has been used 20+ times (meaning 20+ products
+    matched it successfully), and no human has overridden it with a different
+    mapping for the same vendor+product pattern, then it's proven correct.
+
+    Promoted mappings become eligible for KB push (treated like user mappings).
+
+    This solves the cold-start problem: even if no customer manually maps CPEs,
+    the KB gets populated from battle-tested automatic discoveries.
+
+    Args:
+        min_usage: Minimum usage_count to qualify for promotion (default 20)
+
+    Returns:
+        int: Number of mappings promoted
+    """
+    from app import db
+    from app.models import UserCpeMapping
+
+    promoted = 0
+
+    try:
+        # Find auto_nvd mappings with high usage
+        candidates = UserCpeMapping.query.filter(
+            UserCpeMapping.source == 'auto_nvd',
+            UserCpeMapping.usage_count >= min_usage
+        ).all()
+
+        if not candidates:
+            return 0
+
+        for mapping in candidates:
+            # Check if a human has created a DIFFERENT mapping for the same pattern
+            human_override = UserCpeMapping.query.filter(
+                UserCpeMapping.vendor_pattern == mapping.vendor_pattern,
+                UserCpeMapping.product_pattern == mapping.product_pattern,
+                UserCpeMapping.source == 'user'
+            ).first()
+
+            if human_override:
+                # Human disagreed — don't promote, the human mapping takes priority
+                continue
+
+            # Promote: change source to 'auto_verified'
+            mapping.source = 'auto_verified'
+            mapping.notes = (
+                f"Auto-promoted from auto_nvd (usage_count={mapping.usage_count}). "
+                f"Original: {mapping.notes or 'NVD API discovery'}"
+            )
+            promoted += 1
+
+        if promoted > 0:
+            db.session.commit()
+            logger.info(f"Promoted {promoted} auto_nvd mappings to auto_verified (min_usage={min_usage})")
+
+    except Exception as e:
+        logger.error(f"Failed to promote auto_nvd mappings: {e}")
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+    return promoted
+
+
 def get_kb_sync_status():
     """Get the current KB sync configuration and last sync info."""
     from app.models import SystemSettings, UserCpeMapping
@@ -338,6 +406,7 @@ def get_kb_sync_status():
             'total': 0,
             'user': 0,
             'auto_nvd': 0,
+            'auto_verified': 0,
             'community': 0,
         }
     }
@@ -350,6 +419,7 @@ def get_kb_sync_status():
         status['local_mappings']['total'] = UserCpeMapping.query.count()
         status['local_mappings']['user'] = UserCpeMapping.query.filter_by(source='user').count()
         status['local_mappings']['auto_nvd'] = UserCpeMapping.query.filter_by(source='auto_nvd').count()
+        status['local_mappings']['auto_verified'] = UserCpeMapping.query.filter_by(source='auto_verified').count()
         status['local_mappings']['community'] = UserCpeMapping.query.filter_by(source='community').count()
     except Exception as e:
         logger.warning(f"Failed to get KB sync status: {e}")
