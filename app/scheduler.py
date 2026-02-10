@@ -591,16 +591,18 @@ def license_heartbeat_job(app):
 
 
 def nvd_cpe_dict_sync_job(app):
-    """Job to download NVD CPE dictionary for offline matching."""
+    """Job to sync NVD CPE dictionary (bulk CSV download + incremental API)."""
     with app.app_context():
         try:
             from app.cpe_dictionary import sync_nvd_cpe_dictionary
 
-            logger.info("Starting NVD CPE dictionary sync...")
+            logger.info("Starting NVD CPE dictionary sync (bulk + incremental)...")
             result = sync_nvd_cpe_dictionary()
             logger.info(
                 f"NVD CPE dictionary sync complete: "
-                f"{result.get('added', 0)} added, {result.get('total', 0)} total entries"
+                f"bulk({result.get('bulk_added', 0)} new), "
+                f"incremental({result.get('incremental_added', 0)} new), "
+                f"{result.get('total', 0)} total entries"
             )
         except Exception as e:
             logger.error(f"NVD CPE dictionary sync failed: {str(e)}", exc_info=True)

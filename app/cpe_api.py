@@ -1017,8 +1017,9 @@ def cpe_dictionary_status():
 @admin_required
 def cpe_dictionary_sync_nvd():
     """
-    Manually trigger NVD CPE dictionary download.
-    This can take 5-50 minutes depending on API key availability.
+    Manually trigger NVD CPE dictionary sync.
+    Phase 1: Bulk CSV download (~40-50K pairs, seconds).
+    Phase 2: Incremental NVD API sync (recent changes only).
     """
     from app.cpe_dictionary import sync_nvd_cpe_dictionary
     import threading
@@ -1035,7 +1036,7 @@ def cpe_dictionary_sync_nvd():
 
     return jsonify({
         'status': 'started',
-        'message': 'NVD CPE dictionary sync started in background. Check logs for progress.'
+        'message': 'NVD CPE dictionary sync started (bulk CSV + incremental API). Check logs for progress.'
     }), 202
 
 
