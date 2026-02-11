@@ -25,6 +25,12 @@ def extract_core_product_name(product_name):
 
     name = product_name.lower().strip()
 
+    # Handle vendor|product separators (e.g., "Dell | Command Update" -> "command update")
+    # Many vendors use pipe as a brand separator; the part after the pipe is the real product name
+    if '|' in name:
+        parts = name.split('|', 1)
+        name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else name
+
     # Remove parenthetical suffixes (architecture, language, etc.)
     name = re.sub(r'\s*\([^)]*\)\s*$', '', name)
 

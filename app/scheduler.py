@@ -4,6 +4,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.cisa_sync import sync_cisa_kev
 from app import db
 from config import Config
+from datetime import datetime, timedelta
 import logging
 import os
 import threading
@@ -175,6 +176,36 @@ def start_scheduler(app):
         name='CVE Known Products Cache Refresh',
         replace_existing=True
     )
+
+    # Schedule stuck job recovery (every 10 minutes)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('stuck_job_recovery', stuck_job_recovery_job, app),
+        trigger=IntervalTrigger(minutes=10),
+        id='stuck_job_recovery',
+        name='Recover Stuck Inventory Jobs',
+        replace_existing=True
+    )
+    logger.info("Stuck job recovery scheduled every 10 minutes")
+
+    # Schedule asset type auto-detection (daily at 06:00)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('auto_detect_asset_type', auto_detect_asset_type_job, app),
+        trigger=CronTrigger(hour=6, minute=0),
+        id='auto_detect_asset_type',
+        name='Auto-Detect Asset Type (server/workstation/container)',
+        replace_existing=True
+    )
+    logger.info("Asset type auto-detection scheduled daily at 06:00")
+
+    # Schedule unmapped CPE retry (weekly, Mondays at 05:00 - after Sunday CPE dict sync)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('unmapped_cpe_retry', unmapped_cpe_retry_job, app),
+        trigger=CronTrigger(day_of_week='mon', hour=5, minute=0),
+        id='unmapped_cpe_retry',
+        name='Retry CPE Mapping for Unmapped Products',
+        replace_existing=True
+    )
+    logger.info("Unmapped CPE retry scheduled weekly (Mondays 05:00)")
 
     # Warm up the CVE known products cache on startup
     try:
@@ -701,3 +732,141 @@ def cve_known_products_refresh_job(app):
             logger.info(f"CVE known products cache refreshed: {count} entries")
         except Exception as e:
             logger.error(f"CVE known products refresh failed: {str(e)}", exc_info=True)
+
+
+def stuck_job_recovery_job(app):
+    """
+    Recover stuck inventory jobs.
+
+    If a background worker crashes mid-processing, the job stays in 'processing'
+    status forever. This job marks them as 'failed' so they can be retried.
+    Runs every 10 minutes.
+    """
+    with app.app_context():
+        try:
+            from app.models import InventoryJob
+            cutoff = datetime.utcnow() - timedelta(minutes=30)
+            stuck_jobs = InventoryJob.query.filter(
+                InventoryJob.status == 'processing',
+                InventoryJob.updated_at < cutoff
+            ).all()
+            for job in stuck_jobs:
+                logger.warning(f"Recovering stuck job {job.id} (stuck since {job.updated_at})")
+                job.status = 'pending'  # Reset to pending for retry
+                job.error_message = 'Recovered from stuck processing state'
+            if stuck_jobs:
+                db.session.commit()
+                logger.info(f"Recovered {len(stuck_jobs)} stuck inventory jobs")
+        except Exception as e:
+            logger.error(f"Stuck job recovery failed: {str(e)}", exc_info=True)
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+
+def auto_detect_asset_type_job(app):
+    """
+    Auto-detect asset_type from os_name/os_version for assets still set to default.
+
+    Many agents report OS info but asset_type defaults to 'server'. This job
+    infers the correct type from OS strings:
+    - Windows 10/11 → workstation
+    - Windows Server → server
+    - macOS → workstation
+    - Ubuntu Desktop → workstation
+    - Container images → container
+
+    Runs once daily. Only updates assets where asset_type was never manually set.
+    """
+    with app.app_context():
+        try:
+            from app.models import Asset
+
+            # Only fix assets with default 'server' type that have OS info
+            assets = Asset.query.filter(
+                Asset.active == True,
+                Asset.os_version.isnot(None),
+                # Only auto-detect for assets still at default 'server' type
+                # that have never been manually categorized
+                db.or_(
+                    Asset.asset_type == 'server',
+                    Asset.asset_type.is_(None)
+                )
+            ).all()
+
+            updated = 0
+            for asset in assets:
+                os_ver = (asset.os_version or '').lower()
+                os_name = (asset.os_name or '').lower()
+                detected_type = None
+
+                # Windows detection
+                if 'windows' in os_name or 'windows' in os_ver:
+                    if any(w in os_ver for w in ['windows 10', 'windows 11', 'windows 8']):
+                        detected_type = 'workstation'
+                    elif 'server' in os_ver:
+                        detected_type = 'server'
+                # macOS is always a workstation
+                elif 'macos' in os_name or 'darwin' in os_name or 'mac os' in os_ver:
+                    detected_type = 'workstation'
+                # Linux desktop detection
+                elif 'ubuntu' in os_name or 'ubuntu' in os_ver:
+                    if 'desktop' in os_ver:
+                        detected_type = 'workstation'
+                # Container detection (if hostname looks like a container ID)
+                elif asset.hostname and len(asset.hostname) == 12 and all(
+                    c in '0123456789abcdef' for c in asset.hostname
+                ):
+                    detected_type = 'container'
+
+                if detected_type and detected_type != asset.asset_type:
+                    asset.asset_type = detected_type
+                    updated += 1
+
+            if updated:
+                db.session.commit()
+                logger.info(f"Auto-detected asset type for {updated} assets")
+        except Exception as e:
+            logger.error(f"Asset type auto-detection failed: {str(e)}", exc_info=True)
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+
+def unmapped_cpe_retry_job(app):
+    """
+    Retry CPE mapping for products that have no CPE assigned.
+
+    Products without CPE get zero vulnerability matches (blind spots).
+    This weekly job retries the 3-tier mapping for unmapped products,
+    which may now succeed because:
+    - New entries in local CPE dictionary (from weekly NVD sync)
+    - New curated mappings (from KB sync)
+    - New regex patterns (from app updates)
+
+    Runs weekly on Mondays at 05:00 (after Sunday's NVD CPE dict sync).
+    """
+    with app.app_context():
+        try:
+            from app.models import Product
+            from app.cpe_mapping import batch_apply_cpe_mappings
+
+            unmapped_count = Product.query.filter(
+                Product.active == True,
+                db.or_(
+                    Product.cpe_vendor.is_(None),
+                    Product.cpe_vendor == ''
+                )
+            ).count()
+
+            if unmapped_count == 0:
+                logger.info("No unmapped products to retry CPE for")
+                return
+
+            logger.info(f"Retrying CPE mapping for {unmapped_count} unmapped products")
+            result = batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=100)
+            logger.info(f"CPE retry complete: {result}")
+        except Exception as e:
+            logger.error(f"Unmapped CPE retry failed: {str(e)}", exc_info=True)

@@ -219,6 +219,29 @@ CPE_MAPPINGS = [
     ('regex', r'^libvirt', 'redhat', 'libvirt'),
     ('regex', r'^podman', 'redhat', 'podman'),
     ('regex', r'^containerd', 'linuxfoundation', 'containerd'),
+
+    # -------------------------------------------------------------------------
+    # Dell Products (commonly reported as "Dell | Product Name")
+    # Pipe separators are normalized before matching, so these patterns
+    # match the part after the pipe (e.g., "Dell | Command Update" → "command update")
+    # -------------------------------------------------------------------------
+    ('regex', r'^command\s*update', 'dell', 'command_update'),
+    ('regex', r'^supportassist', 'dell', 'supportassist'),
+    ('regex', r'^bios', 'dell', 'bios'),
+    ('regex', r'^power\s*manager', 'dell', 'power_manager'),
+    ('regex', r'^digital\s*delivery', 'dell', 'digital_delivery'),
+    ('regex', r'^openmanage\s*(server\s*administrator)?', 'dell', 'openmanage_server_administrator'),
+    ('regex', r'^idrac', 'dell', 'idrac_firmware'),
+    ('regex', r'^wyse\s*management\s*suite', 'dell', 'wyse_management_suite'),
+    ('regex', r'^emc\s*unity', 'dell', 'emc_unity_operating_environment'),
+    ('regex', r'^avamar', 'dell', 'avamar'),
+
+    # -------------------------------------------------------------------------
+    # HP / HPE Products (similar naming patterns)
+    # -------------------------------------------------------------------------
+    ('regex', r'^hp\s*support\s*assistant', 'hp', 'support_assistant'),
+    ('regex', r'^hpe?\s*system\s*management\s*homepage', 'hp', 'system_management_homepage'),
+    ('regex', r'^ilo\s*\d?', 'hp', 'integrated_lights-out'),
 ]
 
 
@@ -238,6 +261,11 @@ def get_cpe_for_product(product_name, vendor_name=None):
 
     # Normalize the product name
     name_lower = product_name.lower().strip()
+
+    # Handle vendor|product separators (e.g., "Dell | Command Update" -> "command update")
+    if '|' in name_lower:
+        parts = name_lower.split('|', 1)
+        name_lower = parts[1].strip() if len(parts) > 1 and parts[1].strip() else name_lower
 
     # Remove common suffixes for better matching
     name_lower = re.sub(r'\s*\([^)]*\)', '', name_lower)      # Remove all parenthetical content
