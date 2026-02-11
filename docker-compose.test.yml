@@ -1,0 +1,74 @@
+# SentriKat Test Environment
+# Adds Keycloak (SAML/OIDC IdP), OpenLDAP, and a Syslog receiver
+# for testing SSO, LDAP auth, and SIEM forwarding.
+#
+# Usage:
+#   ./tests/setup-test-env.sh        # Start everything + auto-configure
+#   docker compose -f docker-compose.test.yml down -v   # Tear down
+#
+# Access:
+#   Keycloak Admin:  http://localhost:8080  (admin / admin)
+#   SentriKat:       http://localhost:5000  (or via nginx on :80)
+#   Syslog viewer:   docker logs -f sentrikat-syslog
+
+services:
+  # ── Keycloak (SAML + OIDC Identity Provider) ─────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: sentrikat-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+      # Import realm on first boot
+      KC_FEATURES: preview
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./tests/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\n\r\n' >&3 && cat <&3 | grep -q 'UP'"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── OpenLDAP (for LDAP auth testing) ─────────────────────────────
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: sentrikat-openldap
+    environment:
+      LDAP_ORGANISATION: "SentriKat Test"
+      LDAP_DOMAIN: "sentrikat.test"
+      LDAP_BASE_DN: "dc=sentrikat,dc=test"
+      LDAP_ADMIN_PASSWORD: admin
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: readonly
+      LDAP_READONLY_USER_PASSWORD: readonly
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ./tests/ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-users.ldif:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost", "-b", "dc=sentrikat,dc=test", "-D", "cn=admin,dc=sentrikat,dc=test", "-w", "admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Syslog receiver (for SIEM/CEF testing) ───────────────────────
+  syslog:
+    image: balabit/syslog-ng:4.6.0
+    container_name: sentrikat-syslog
+    ports:
+      - "5514:514/udp"
+      - "5514:514/tcp"
+    volumes:
+      - ./tests/syslog/syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro
+    restart: unless-stopped
+
+volumes:
+  keycloak_data:

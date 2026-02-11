@@ -1,0 +1,72 @@
+# SentriKat Test LDAP Users
+# Loaded by OpenLDAP on first boot
+# Base DN: dc=sentrikat,dc=test
+
+# Organizational Units
+dn: ou=users,dc=sentrikat,dc=test
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,dc=sentrikat,dc=test
+objectClass: organizationalUnit
+ou: groups
+
+# ── Test Users ─────────────────────────────────────────────────────
+
+dn: uid=john.doe,ou=users,dc=sentrikat,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: John Doe
+sn: Doe
+givenName: John
+uid: john.doe
+mail: john.doe@sentrikat.test
+uidNumber: 1001
+gidNumber: 1001
+homeDirectory: /home/john.doe
+userPassword: password123
+displayName: John Doe
+
+dn: uid=jane.admin,ou=users,dc=sentrikat,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Jane Admin
+sn: Admin
+givenName: Jane
+uid: jane.admin
+mail: jane.admin@sentrikat.test
+uidNumber: 1002
+gidNumber: 1001
+homeDirectory: /home/jane.admin
+userPassword: password123
+displayName: Jane Admin
+
+dn: uid=marco.rossi,ou=users,dc=sentrikat,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Marco Rossi
+sn: Rossi
+givenName: Marco
+uid: marco.rossi
+mail: marco.rossi@sentrikat.test
+uidNumber: 1003
+gidNumber: 1001
+homeDirectory: /home/marco.rossi
+userPassword: password123
+displayName: Marco Rossi
+
+# ── Groups ─────────────────────────────────────────────────────────
+
+dn: cn=sentrikat-admins,ou=groups,dc=sentrikat,dc=test
+objectClass: groupOfNames
+cn: sentrikat-admins
+member: uid=jane.admin,ou=users,dc=sentrikat,dc=test
+
+dn: cn=sentrikat-users,ou=groups,dc=sentrikat,dc=test
+objectClass: groupOfNames
+cn: sentrikat-users
+member: uid=john.doe,ou=users,dc=sentrikat,dc=test
+member: uid=marco.rossi,ou=users,dc=sentrikat,dc=test
