@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/python-3.11+-green.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"/>
   <img src="https://img.shields.io/badge/license-Commercial-red.svg" alt="License"/>
+  <a href="docs/OWASP-ASVS.md"><img src="docs/owasp-asvs-badge.svg" alt="OWASP ASVS Level 1 Self-Assessment"/></a>
 </p>
 
 <p align="center">
