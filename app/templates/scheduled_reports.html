@@ -61,8 +61,9 @@
                 <select class="form-select form-select-sm" id="reportType">
                     <option value="summary">Summary</option>
                     <option value="detailed">Detailed</option>
-                    <option value="compliance">Compliance (BOD 22-01)</option>
-                    <option value="executive">Executive</option>
+                    <option value="compliance">Compliance (CISA BOD 22-01)</option>
+                    <option value="nis2">Compliance (EU NIS2)</option>
+                    <option value="executive">Executive Summary</option>
                 </select>
             </div>
             <div class="col-6">
@@ -166,7 +167,7 @@ async function loadReports() {
                               r.frequency === 'monthly' ? `Monthly (day ${r.day_of_month||1})` : 'Daily';
             const nextRun = r.next_run_at ? new Date(r.next_run_at).toLocaleString() : 'Not scheduled';
             const lastRun = r.last_run_at ? timeAgo(new Date(r.last_run_at)) : 'Never';
-            const typeLabel = {'summary':'Summary','detailed':'Detailed','compliance':'Compliance','executive':'Executive'}[r.report_type] || r.report_type;
+            const typeLabel = {'summary':'Summary','detailed':'Detailed','compliance':'Compliance (BOD 22-01)','nis2':'Compliance (NIS2)','executive':'Executive Summary'}[r.report_type] || r.report_type;
 
             return `<div class="card report-card mb-2 ${r.enabled ? '' : 'disabled'}">
                 <div class="card-body py-2 px-3">

@@ -1159,6 +1159,13 @@
                         <i class="bi bi-gear me-2"></i>System
                     </button>
                 </li>
+                {% if license and license.is_professional() %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="syslog-settings-tab" type="button" onclick="showSettingsGroup('syslog', this)">
+                        <i class="bi bi-broadcast me-2"></i>SIEM / Syslog
+                    </button>
+                </li>
+                {% endif %}
                 {% if current_user and current_user.is_super_admin() %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="compliance-settings-tab" type="button" onclick="showSettingsGroup('compliance', this)">
@@ -2401,6 +2408,82 @@
                     </div>
                 </div>
 
+                <!-- Syslog / SIEM Settings -->
+                <div class="tab-pane fade" id="syslogSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-broadcast me-2"></i>SIEM / Syslog Forwarding
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Forward vulnerability events to your SIEM (Splunk, ELK, ArcSight, QRadar) via syslog.
+                                Supports CEF, JSON, and RFC 5424 formats over UDP or TCP.
+                            </p>
+
+                            <div class="row g-3">
+                                <div class="col-md-12">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="syslogEnabled">
+                                        <label class="form-check-label" for="syslogEnabled">Enable Syslog Forwarding</label>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label" for="syslogHost">Syslog Server Host</label>
+                                    <input type="text" class="form-control" id="syslogHost" placeholder="siem.example.com">
+                                </div>
+
+                                <div class="col-md-3">
+                                    <label class="form-label" for="syslogPort">Port</label>
+                                    <input type="number" class="form-control" id="syslogPort" value="514" min="1" max="65535">
+                                </div>
+
+                                <div class="col-md-3">
+                                    <label class="form-label" for="syslogProtocol">Protocol</label>
+                                    <select class="form-select" id="syslogProtocol">
+                                        <option value="udp">UDP</option>
+                                        <option value="tcp">TCP</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label" for="syslogFormat">Event Format</label>
+                                    <select class="form-select" id="syslogFormat">
+                                        <option value="cef">CEF (ArcSight, QRadar)</option>
+                                        <option value="json">JSON (Splunk HEC, ELK)</option>
+                                        <option value="rfc5424">RFC 5424 (Standard Syslog)</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label" for="syslogFacility">Facility</label>
+                                    <select class="form-select" id="syslogFacility">
+                                        <option value="local0">local0</option>
+                                        <option value="local1">local1</option>
+                                        <option value="local2">local2</option>
+                                        <option value="local3">local3</option>
+                                        <option value="local4">local4</option>
+                                        <option value="local5">local5</option>
+                                        <option value="local6">local6</option>
+                                        <option value="local7">local7</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-12">
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-primary" onclick="saveSyslogSettings()">
+                                            <i class="bi bi-check-lg me-1"></i>Save Settings
+                                        </button>
+                                        <button class="btn btn-outline-secondary" onclick="testSyslog()">
+                                            <i class="bi bi-send me-1"></i>Send Test Event
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Audit Logs -->
                 <div class="tab-pane fade" id="auditLogs" role="tabpanel">
                     <div class="card">
@@ -2644,6 +2727,32 @@
                                     <div class="card h-100">
                                         <div class="card-body">
                                             <h6 class="card-title">
+                                                <i class="bi bi-globe-europe-africa me-2"></i>NIS2 Compliance Report
+                                            </h6>
+                                            <p class="card-text text-muted small">
+                                                EU Directive 2022/2555 Article 21 assessment. Maps vulnerability handling,
+                                                supply chain visibility, and cyber hygiene to NIS2 requirements.
+                                            </p>
+                                            <div class="btn-group">
+                                                <button class="btn btn-primary" onclick="downloadNIS2Report('json')">
+                                                    <i class="bi bi-filetype-json me-1"></i>JSON
+                                                </button>
+                                                <button class="btn btn-outline-primary" onclick="downloadNIS2Report('csv')">
+                                                    <i class="bi bi-filetype-csv me-1"></i>CSV
+                                                </button>
+                                                <button class="btn btn-outline-primary" onclick="downloadNIS2Report('pdf')">
+                                                    <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-6">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h6 class="card-title">
                                                 <i class="bi bi-exclamation-triangle me-2"></i>Overdue Items Report
                                             </h6>
                                             <p class="card-text text-muted small">
@@ -2653,6 +2762,27 @@
                                             <button class="btn btn-danger" onclick="downloadOverdueReport()">
                                                 <i class="bi bi-download me-1"></i>Download Overdue Report
                                             </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h6 class="card-title">
+                                                <i class="bi bi-file-earmark-bar-graph me-2"></i>Executive Summary
+                                            </h6>
+                                            <p class="card-text text-muted small">
+                                                One-page PDF for board/management. Risk score, KPIs, severity breakdown,
+                                                top priorities, and remediation metrics.
+                                            </p>
+                                            <div class="btn-group">
+                                                <button class="btn btn-primary" onclick="downloadExecutiveSummary('pdf')">
+                                                    <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+                                                </button>
+                                                <button class="btn btn-outline-primary" onclick="downloadExecutiveSummary('json')">
+                                                    <i class="bi bi-filetype-json me-1"></i>JSON
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
