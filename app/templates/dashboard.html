@@ -510,6 +510,14 @@
                         <button class="btn btn-primary btn-sm w-100" onclick="exportReport()">
                             <i class="bi bi-download me-1"></i>Download PDF
                         </button>
+                        <hr class="my-2">
+                        <h6 class="dropdown-header px-0">Quick Export</h6>
+                        <button class="btn btn-outline-success btn-sm w-100 mb-1" onclick="exportCSV()">
+                            <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export CSV (Excel)
+                        </button>
+                        <button class="btn btn-outline-info btn-sm w-100" onclick="exportExecutiveSummary()">
+                            <i class="bi bi-file-earmark-bar-graph me-1"></i>Executive Summary PDF
+                        </button>
                     </div>
                 </div>
                 <!-- Sort By -->
@@ -891,6 +899,79 @@
         } catch (error) {
             console.error('Error generating report:', error);
             showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function exportCSV() {
+        try {
+            showLoading();
+            showToast('Exporting CSV...', 'info');
+
+            // Pass current filters to CSV export
+            const params = new URLSearchParams();
+            const priorityFilter = document.getElementById('priorityFilter');
+            if (priorityFilter && priorityFilter.value) params.set('priority', priorityFilter.value);
+            const ackFilter = document.getElementById('acknowledgedFilter');
+            if (ackFilter && ackFilter.value) params.set('acknowledged', ackFilter.value);
+
+            const response = await fetch(`/api/reports/export/csv?${params.toString()}`);
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `Server error: ${response.status}`);
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const cd = response.headers.get('Content-Disposition');
+            a.download = cd ? (cd.match(/filename="(.+)"/) || [])[1] || 'vulnerabilities.csv' : 'vulnerabilities.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+
+            showToast('CSV exported successfully!', 'success');
+        } catch (error) {
+            console.error('CSV export error:', error);
+            showToast(`Export failed: ${error.message}`, 'danger');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function exportExecutiveSummary() {
+        try {
+            showLoading();
+            showToast('Generating executive summary...', 'info');
+
+            const response = await fetch('/api/reports/executive-summary?format=pdf');
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                if (response.status === 403) {
+                    showToast('Executive Summary requires a Professional license', 'warning');
+                    return;
+                }
+                throw new Error(err.error || `Server error: ${response.status}`);
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const cd = response.headers.get('Content-Disposition');
+            a.download = cd ? (cd.match(/filename="(.+)"/) || [])[1] || 'executive_summary.pdf' : 'executive_summary.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+
+            showToast('Executive summary downloaded!', 'success');
+        } catch (error) {
+            console.error('Executive summary error:', error);
+            showToast(`Export failed: ${error.message}`, 'danger');
         } finally {
             hideLoading();
         }

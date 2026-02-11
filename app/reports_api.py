@@ -764,3 +764,951 @@ def generate_compliance_report():
 
     else:
         return jsonify({'error': 'Invalid format. Use json, csv, or pdf'}), 400
+
+
+# ============================================================================
+# CSV/Excel Export for Vulnerability List
+# ============================================================================
+
+@bp.route('/api/reports/export/csv', methods=['GET'])
+@login_required
+def export_vulnerabilities_csv():
+    """
+    Export all vulnerability matches as CSV (Excel-compatible).
+
+    Supports the same filters as the vulnerability list API:
+        priority: critical, high, medium, low
+        acknowledged: true, false
+        product_id: Filter by product
+        ransomware_only: true/false
+
+    Returns a downloadable CSV file with all vulnerability data.
+    """
+    import csv
+    from io import StringIO
+    from app.models import Organization, VulnerabilityMatch, Vulnerability, Product
+    from app.filters import get_filtered_vulnerabilities
+
+    try:
+        org_id = session.get('organization_id')
+        if not org_id:
+            default_org = Organization.query.filter_by(name='default').first()
+            org_id = default_org.id if default_org else None
+
+        filters = {
+            'organization_id': org_id,
+            'product_id': request.args.get('product_id', type=int),
+            'cve_id': request.args.get('cve_id'),
+            'vendor': request.args.get('vendor'),
+            'product': request.args.get('product'),
+            'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
+            'acknowledged': request.args.get('acknowledged'),
+            'priority': request.args.get('priority'),
+        }
+        filters = {k: v for k, v in filters.items() if v is not None and v != ''}
+
+        matches = get_filtered_vulnerabilities(filters)
+
+        buffer = StringIO()
+        # UTF-8 BOM for Excel compatibility
+        buffer.write('\ufeff')
+        writer = csv.writer(buffer)
+
+        # Header
+        writer.writerow([
+            'CVE ID',
+            'Severity',
+            'Priority',
+            'CVSS Score',
+            'Product',
+            'Vendor',
+            'Version',
+            'Status',
+            'Match Confidence',
+            'Match Method',
+            'Due Date',
+            'Days Overdue',
+            'Ransomware',
+            'EPSS Score',
+            'Description',
+            'Vendor Fix',
+            'Acknowledged At',
+            'First Detected',
+        ])
+
+        from datetime import date
+        today = date.today()
+
+        for m in matches:
+            vuln = m.vulnerability
+            product = m.product
+            priority = m.calculate_effective_priority()
+
+            # Calculate days overdue
+            days_overdue = ''
+            if vuln.due_date and not m.acknowledged:
+                delta = (today - vuln.due_date).days
+                if delta > 0:
+                    days_overdue = str(delta)
+
+            writer.writerow([
+                vuln.cve_id,
+                vuln.severity or 'N/A',
+                priority or 'N/A',
+                str(vuln.cvss_score) if vuln.cvss_score else 'N/A',
+                product.product_name,
+                product.vendor or '',
+                product.version or '',
+                'Acknowledged' if m.acknowledged else 'Pending',
+                m.match_confidence or 'medium',
+                m.match_method or 'keyword',
+                vuln.due_date.isoformat() if vuln.due_date else '',
+                days_overdue,
+                'Yes' if vuln.known_ransomware else 'No',
+                str(vuln.epss_score) if hasattr(vuln, 'epss_score') and vuln.epss_score else '',
+                (vuln.description or '')[:500],
+                m.vendor_fix_confidence or '',
+                m.acknowledged_at.isoformat() if m.acknowledged_at else '',
+                m.created_at.isoformat() if m.created_at else '',
+            ])
+
+        buffer.seek(0)
+        filename = f"SentriKat_Vulnerabilities_{datetime.now().strftime('%Y%m%d')}.csv"
+
+        return Response(
+            buffer.getvalue(),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+
+    except Exception as e:
+        logger.exception("Failed to export vulnerabilities as CSV")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# NIS2 Compliance Report
+# ============================================================================
+
+@bp.route('/api/reports/compliance/nis2', methods=['GET'])
+@login_required
+def generate_nis2_compliance_report():
+    """
+    Generate EU NIS2 Directive compliance report for vulnerability management.
+
+    NIS2 (Directive 2022/2555) Article 21 requires essential and important entities
+    to implement vulnerability handling and disclosure policies. This report maps
+    SentriKat's vulnerability management data to NIS2 requirements.
+
+    NIS2 Article 21(2) relevant controls:
+    (d) Supply chain security
+    (e) Vulnerability handling and disclosure
+    (g) Basic cyber hygiene practices and cybersecurity training
+
+    Query Parameters:
+        format: 'json', 'pdf', or 'csv' (default: json)
+        organization_id: Filter by organization (admin only)
+    """
+    from app.licensing import get_license
+    from app.models import Vulnerability, VulnerabilityMatch, Product, Organization, Asset
+    from sqlalchemy import func
+    from datetime import date, timedelta
+    from io import BytesIO
+
+    license_info = get_license()
+    if not license_info or not license_info.is_professional():
+        return jsonify({
+            'error': 'NIS2 Compliance Reports require a Professional license',
+            'feature': 'compliance_reports'
+        }), 403
+
+    output_format = request.args.get('format', 'json').lower()
+    org_id = request.args.get('organization_id', type=int)
+
+    user = User.query.get(session.get('user_id'))
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    if user.role == 'super_admin' and org_id:
+        org_filter = [org_id]
+    elif user.role == 'super_admin':
+        org_filter = None
+    else:
+        org_filter = [m.organization_id for m in user.org_memberships.all()]
+
+    today = date.today()
+
+    # Query all matches
+    matches_query = db.session.query(
+        VulnerabilityMatch, Vulnerability, Product
+    ).join(
+        Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+    ).join(
+        Product, VulnerabilityMatch.product_id == Product.id
+    )
+    if org_filter:
+        matches_query = matches_query.filter(Product.organization_id.in_(org_filter))
+
+    matches = matches_query.all()
+
+    # Query asset counts
+    asset_query = Asset.query.filter(Asset.active == True)
+    if org_filter:
+        asset_query = asset_query.filter(Asset.organization_id.in_(org_filter))
+    total_assets = asset_query.count()
+
+    # Query product counts
+    product_query = Product.query.filter(Product.active == True)
+    if org_filter:
+        product_query = product_query.filter(Product.organization_id.in_(org_filter))
+    total_products = product_query.count()
+    products_with_cpe = product_query.filter(
+        Product.cpe_vendor.isnot(None),
+        Product.cpe_vendor != '',
+        Product.cpe_vendor != '_skip'
+    ).count()
+
+    # NIS2 Metrics
+    total_matches = len(matches)
+    acknowledged = sum(1 for m, v, p in matches if m.acknowledged)
+    pending = total_matches - acknowledged
+
+    # Critical/high severity pending
+    critical_pending = sum(1 for m, v, p in matches if not m.acknowledged and v.severity == 'CRITICAL')
+    high_pending = sum(1 for m, v, p in matches if not m.acknowledged and v.severity == 'HIGH')
+
+    # Overdue (past CISA due date)
+    overdue = [
+        {'cve_id': v.cve_id, 'product': f"{p.vendor} {p.product_name}",
+         'severity': v.severity, 'due_date': v.due_date.isoformat(),
+         'days_overdue': (today - v.due_date).days, 'ransomware': v.known_ransomware}
+        for m, v, p in matches
+        if not m.acknowledged and v.due_date and v.due_date < today
+    ]
+
+    # Ransomware exposure
+    ransomware_pending = sum(1 for m, v, p in matches if not m.acknowledged and v.known_ransomware)
+
+    # Mean time to remediate (acknowledged matches with dates)
+    remediation_times = []
+    for m, v, p in matches:
+        if m.acknowledged and m.acknowledged_at and m.created_at:
+            delta = (m.acknowledged_at - m.created_at).days
+            if delta >= 0:
+                remediation_times.append(delta)
+    mttr_days = round(sum(remediation_times) / len(remediation_times), 1) if remediation_times else None
+
+    # CPE coverage (vulnerability identification capability)
+    cpe_coverage = round(products_with_cpe / total_products * 100, 1) if total_products > 0 else 0
+
+    # Compliance scoring (mapped to NIS2 Article 21)
+    compliance_percent = round(acknowledged / total_matches * 100, 1) if total_matches > 0 else 100.0
+
+    report = {
+        'report_type': 'NIS2 Directive - Vulnerability Management Compliance',
+        'framework': 'EU Directive 2022/2555 (NIS2)',
+        'generated_at': datetime.utcnow().isoformat() + 'Z',
+        'report_period': {'as_of_date': today.isoformat()},
+
+        # Article 21(2)(e): Vulnerability handling and disclosure
+        'vulnerability_handling': {
+            'total_known_exploited_vulnerabilities': total_matches,
+            'remediated': acknowledged,
+            'pending_remediation': pending,
+            'remediation_rate_percent': compliance_percent,
+            'critical_severity_pending': critical_pending,
+            'high_severity_pending': high_pending,
+            'overdue_count': len(overdue),
+            'ransomware_exposure': ransomware_pending,
+            'mean_time_to_remediate_days': mttr_days,
+        },
+
+        # Article 21(2)(d): Supply chain security (asset/product visibility)
+        'supply_chain_visibility': {
+            'monitored_endpoints': total_assets,
+            'tracked_products': total_products,
+            'products_with_cpe_identification': products_with_cpe,
+            'cpe_coverage_percent': cpe_coverage,
+        },
+
+        # Article 21(2)(g): Cyber hygiene assessment
+        'cyber_hygiene': {
+            'vulnerability_scanning': 'Automated' if total_assets > 0 else 'Not configured',
+            'patch_monitoring': 'Active (CISA KEV + vendor advisories)',
+            'vendor_backport_detection': 'Enabled (OSV, Red Hat, MSRC, Debian)',
+            'false_positive_mitigation': 'Active (3-phase CVE-history-guarded filtering)',
+        },
+
+        # Compliance status
+        'compliance_status': 'COMPLIANT' if (len(overdue) == 0 and compliance_percent >= 90) else
+                             'PARTIALLY COMPLIANT' if compliance_percent >= 50 else
+                             'NON-COMPLIANT',
+
+        # Overdue vulnerabilities (top 20)
+        'overdue_vulnerabilities': sorted(overdue, key=lambda x: x['days_overdue'], reverse=True)[:20],
+
+        # Recommendations
+        'recommendations': [],
+
+        # NIS2 Article mapping
+        'nis2_article_mapping': {
+            'article_21_2_d': {
+                'requirement': 'Supply chain security including security-related aspects of relationships',
+                'evidence': f'{total_assets} endpoints monitored, {total_products} products tracked, '
+                           f'{cpe_coverage}% CPE identification coverage'
+            },
+            'article_21_2_e': {
+                'requirement': 'Vulnerability handling and disclosure',
+                'evidence': f'{compliance_percent}% remediation rate, {total_matches} exploited vulnerabilities tracked, '
+                           f'automated CISA KEV + vendor advisory monitoring'
+            },
+            'article_21_2_g': {
+                'requirement': 'Basic cyber hygiene practices',
+                'evidence': 'Automated vulnerability scanning, vendor backport detection, '
+                           'false positive mitigation via CVE-history-guarded filtering'
+            },
+        }
+    }
+
+    # Recommendations
+    if len(overdue) > 0:
+        report['recommendations'].append(
+            f"URGENT: {len(overdue)} known exploited vulnerabilities are past their remediation deadline. "
+            "NIS2 Article 21 requires timely vulnerability handling."
+        )
+    if ransomware_pending > 0:
+        report['recommendations'].append(
+            f"HIGH RISK: {ransomware_pending} unpatched vulnerabilities are linked to ransomware campaigns. "
+            "NIS2 Article 23 requires incident notification within 24 hours of significant incidents."
+        )
+    if critical_pending > 0:
+        report['recommendations'].append(
+            f"CRITICAL: {critical_pending} critical-severity vulnerabilities pending remediation."
+        )
+    if cpe_coverage < 80:
+        report['recommendations'].append(
+            f"VISIBILITY GAP: Only {cpe_coverage}% of products have CPE identification. "
+            "Assign CPE to remaining products for complete vulnerability coverage."
+        )
+    if mttr_days and mttr_days > 30:
+        report['recommendations'].append(
+            f"REMEDIATION SPEED: Mean time to remediate is {mttr_days} days. "
+            "NIS2 expects timely vulnerability handling — target <14 days for critical, <30 days for high."
+        )
+
+    if output_format == 'json':
+        return jsonify(report)
+
+    elif output_format == 'csv':
+        import csv
+        from io import StringIO
+
+        buffer = StringIO()
+        buffer.write('\ufeff')
+        writer = csv.writer(buffer)
+
+        writer.writerow(['NIS2 Directive - Vulnerability Management Compliance Report'])
+        writer.writerow(['Framework', 'EU Directive 2022/2555 (NIS2)'])
+        writer.writerow(['Generated', report['generated_at']])
+        writer.writerow(['Status', report['compliance_status']])
+        writer.writerow([])
+
+        writer.writerow(['Article 21(2)(e) - Vulnerability Handling'])
+        for key, value in report['vulnerability_handling'].items():
+            writer.writerow([key.replace('_', ' ').title(), value])
+        writer.writerow([])
+
+        writer.writerow(['Article 21(2)(d) - Supply Chain Visibility'])
+        for key, value in report['supply_chain_visibility'].items():
+            writer.writerow([key.replace('_', ' ').title(), value])
+        writer.writerow([])
+
+        if overdue:
+            writer.writerow(['Overdue Vulnerabilities'])
+            writer.writerow(['CVE ID', 'Product', 'Severity', 'Days Overdue', 'Ransomware'])
+            for item in sorted(overdue, key=lambda x: x['days_overdue'], reverse=True)[:20]:
+                writer.writerow([item['cve_id'], item['product'], item['severity'],
+                                item['days_overdue'], 'Yes' if item.get('ransomware') else 'No'])
+            writer.writerow([])
+
+        writer.writerow(['Recommendations'])
+        for rec in report['recommendations']:
+            writer.writerow([rec])
+
+        buffer.seek(0)
+        filename = f"nis2_compliance_{today.strftime('%Y%m%d')}.csv"
+        return Response(
+            buffer.getvalue(),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+
+    elif output_format == 'pdf':
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+
+            # Title
+            title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=18, spaceAfter=20)
+            story.append(Paragraph("NIS2 Vulnerability Management Compliance", title_style))
+            story.append(Paragraph("EU Directive 2022/2555 - Article 21 Assessment", styles['Heading3']))
+            story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}", styles['Normal']))
+            story.append(Spacer(1, 20))
+
+            # Status
+            status_color = colors.green if 'COMPLIANT' == report['compliance_status'] else \
+                          colors.orange if 'PARTIALLY' in report['compliance_status'] else colors.red
+            status_style = ParagraphStyle('Status', parent=styles['Heading2'], textColor=status_color)
+            story.append(Paragraph(f"Status: {report['compliance_status']}", status_style))
+            story.append(Spacer(1, 20))
+
+            # Summary table
+            vuln = report['vulnerability_handling']
+            summary_data = [
+                ['Metric', 'Value'],
+                ['Known Exploited Vulnerabilities', str(vuln['total_known_exploited_vulnerabilities'])],
+                ['Remediated', str(vuln['remediated'])],
+                ['Pending Remediation', str(vuln['pending_remediation'])],
+                ['Remediation Rate', f"{vuln['remediation_rate_percent']}%"],
+                ['Critical Pending', str(vuln['critical_severity_pending'])],
+                ['Overdue', str(vuln['overdue_count'])],
+                ['Ransomware Exposure', str(vuln['ransomware_exposure'])],
+                ['Mean Time to Remediate', f"{vuln['mean_time_to_remediate_days']} days" if vuln['mean_time_to_remediate_days'] else 'N/A'],
+            ]
+            t = Table(summary_data, colWidths=[3*inch, 2*inch])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003399')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ]))
+            story.append(t)
+            story.append(Spacer(1, 20))
+
+            # Supply chain visibility
+            story.append(Paragraph("Supply Chain Visibility (Article 21(2)(d))", styles['Heading2']))
+            sc = report['supply_chain_visibility']
+            sc_data = [
+                ['Metric', 'Value'],
+                ['Monitored Endpoints', str(sc['monitored_endpoints'])],
+                ['Tracked Products', str(sc['tracked_products'])],
+                ['CPE Identification Coverage', f"{sc['cpe_coverage_percent']}%"],
+            ]
+            t2 = Table(sc_data, colWidths=[3*inch, 2*inch])
+            t2.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ]))
+            story.append(t2)
+            story.append(Spacer(1, 20))
+
+            # Recommendations
+            if report['recommendations']:
+                story.append(Paragraph("Recommendations", styles['Heading2']))
+                for rec in report['recommendations']:
+                    story.append(Paragraph(f"&bull; {rec}", styles['Normal']))
+                story.append(Spacer(1, 10))
+
+            doc.build(story)
+            buffer.seek(0)
+
+            filename = f"nis2_compliance_{today.strftime('%Y%m%d')}.pdf"
+            return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
+
+        except ImportError:
+            return jsonify({'error': 'PDF generation requires reportlab library'}), 500
+        except Exception as e:
+            logger.exception("Error generating NIS2 compliance PDF")
+            return jsonify({'error': f'PDF generation failed: {str(e)}'}), 500
+
+    else:
+        return jsonify({'error': 'Invalid format. Use json, csv, or pdf'}), 400
+
+
+# ============================================================================
+# Executive Summary One-Pager
+# ============================================================================
+
+@bp.route('/api/reports/executive-summary', methods=['GET'])
+@login_required
+def generate_executive_summary():
+    """
+    Generate a one-page executive summary PDF for board/management reporting.
+
+    This is the "executive" report type that the UI promises.
+    Contains: risk score, vulnerability trend, top priorities, KPIs.
+
+    Query Parameters:
+        format: 'json' or 'pdf' (default: pdf)
+        organization_id: Filter by organization (admin only)
+    """
+    from app.licensing import get_license
+    from app.models import Vulnerability, VulnerabilityMatch, Product, Organization, Asset, VulnerabilitySnapshot
+    from datetime import date, timedelta
+    from io import BytesIO
+
+    license_info = get_license()
+    if not license_info or not license_info.is_professional():
+        return jsonify({
+            'error': 'Executive Summary reports require a Professional license',
+            'feature': 'executive_reports'
+        }), 403
+
+    output_format = request.args.get('format', 'pdf').lower()
+    org_id = request.args.get('organization_id', type=int)
+
+    user = User.query.get(session.get('user_id'))
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    if user.role == 'super_admin' and org_id:
+        org_filter = [org_id]
+    elif user.role == 'super_admin':
+        org_filter = None
+    else:
+        org_filter = [m.organization_id for m in user.org_memberships.all()]
+
+    today = date.today()
+
+    # Get organization name
+    org_name = 'All Organizations'
+    if org_filter and len(org_filter) == 1:
+        org = Organization.query.get(org_filter[0])
+        if org:
+            org_name = org.name
+
+    # Query matches
+    matches_query = db.session.query(
+        VulnerabilityMatch, Vulnerability, Product
+    ).join(
+        Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+    ).join(
+        Product, VulnerabilityMatch.product_id == Product.id
+    )
+    if org_filter:
+        matches_query = matches_query.filter(Product.organization_id.in_(org_filter))
+    matches = matches_query.all()
+
+    # Asset count
+    asset_query = Asset.query.filter(Asset.active == True)
+    if org_filter:
+        asset_query = asset_query.filter(Asset.organization_id.in_(org_filter))
+    total_assets = asset_query.count()
+
+    # KPIs
+    total = len(matches)
+    acknowledged = sum(1 for m, v, p in matches if m.acknowledged)
+    pending = total - acknowledged
+    critical = sum(1 for m, v, p in matches if not m.acknowledged and v.severity == 'CRITICAL')
+    high = sum(1 for m, v, p in matches if not m.acknowledged and v.severity == 'HIGH')
+    medium = sum(1 for m, v, p in matches if not m.acknowledged and v.severity == 'MEDIUM')
+    low = sum(1 for m, v, p in matches if not m.acknowledged and v.severity == 'LOW')
+    ransomware = sum(1 for m, v, p in matches if not m.acknowledged and v.known_ransomware)
+    overdue = sum(1 for m, v, p in matches if not m.acknowledged and v.due_date and v.due_date < today)
+
+    # MTTR
+    remediation_times = []
+    for m, v, p in matches:
+        if m.acknowledged and m.acknowledged_at and m.created_at:
+            delta = (m.acknowledged_at - m.created_at).days
+            if delta >= 0:
+                remediation_times.append(delta)
+    mttr = round(sum(remediation_times) / len(remediation_times), 1) if remediation_times else None
+
+    # Risk score (0-100): higher = worse
+    risk_score = min(100, round(
+        (critical * 25 + high * 10 + medium * 3 + low * 1 + ransomware * 15 + overdue * 20) /
+        max(total_assets, 1) * 10
+    )) if pending > 0 else 0
+
+    # Top 5 most urgent vulnerabilities
+    urgent = []
+    for m, v, p in matches:
+        if not m.acknowledged:
+            score = 0
+            if v.severity == 'CRITICAL':
+                score += 40
+            elif v.severity == 'HIGH':
+                score += 25
+            if v.known_ransomware:
+                score += 30
+            if v.due_date and v.due_date < today:
+                score += 20 + min((today - v.due_date).days, 30)
+            urgent.append({
+                'cve_id': v.cve_id,
+                'product': f"{p.vendor} {p.product_name}",
+                'severity': v.severity,
+                'ransomware': v.known_ransomware,
+                'score': score
+            })
+    urgent.sort(key=lambda x: x['score'], reverse=True)
+    top_urgent = urgent[:5]
+
+    report_data = {
+        'report_type': 'Executive Summary',
+        'organization': org_name,
+        'generated_at': datetime.utcnow().isoformat() + 'Z',
+        'as_of_date': today.isoformat(),
+        'risk_score': risk_score,
+        'kpis': {
+            'monitored_endpoints': total_assets,
+            'total_vulnerability_matches': total,
+            'remediated': acknowledged,
+            'pending_action': pending,
+            'remediation_rate_percent': round(acknowledged / total * 100, 1) if total > 0 else 100.0,
+            'mean_time_to_remediate_days': mttr,
+        },
+        'severity_breakdown': {
+            'critical': critical,
+            'high': high,
+            'medium': medium,
+            'low': low,
+        },
+        'risk_indicators': {
+            'ransomware_exposure': ransomware,
+            'overdue_remediation': overdue,
+        },
+        'top_priorities': top_urgent,
+    }
+
+    if output_format == 'json':
+        return jsonify(report_data)
+
+    # Generate one-page PDF
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter,
+                                topMargin=0.5*inch, bottomMargin=0.5*inch,
+                                leftMargin=0.75*inch, rightMargin=0.75*inch)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Header
+        title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=20, spaceAfter=5)
+        story.append(Paragraph("Security Posture — Executive Summary", title_style))
+        story.append(Paragraph(f"{org_name} | {today.strftime('%B %d, %Y')}", styles['Normal']))
+        story.append(Spacer(1, 15))
+
+        # Risk Score with color
+        risk_color = colors.green if risk_score < 30 else colors.orange if risk_score < 70 else colors.red
+        risk_label = 'LOW' if risk_score < 30 else 'MODERATE' if risk_score < 70 else 'HIGH'
+        risk_style = ParagraphStyle('Risk', parent=styles['Heading1'], fontSize=28,
+                                    textColor=risk_color, alignment=1)
+        story.append(Paragraph(f"Risk Score: {risk_score}/100 ({risk_label})", risk_style))
+        story.append(Spacer(1, 15))
+
+        # KPI row
+        kpi_data = [
+            ['Endpoints', 'Vulnerabilities', 'Remediated', 'Pending', 'Remediation Rate', 'MTTR'],
+            [str(total_assets), str(total), str(acknowledged), str(pending),
+             f"{report_data['kpis']['remediation_rate_percent']}%",
+             f"{mttr}d" if mttr else 'N/A']
+        ]
+        kpi_table = Table(kpi_data, colWidths=[1.1*inch]*6)
+        kpi_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2C3E50')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 1), (-1, 1), 14),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ]))
+        story.append(kpi_table)
+        story.append(Spacer(1, 15))
+
+        # Severity breakdown + risk indicators side by side
+        sev_data = [
+            ['Severity', 'Pending'],
+            ['CRITICAL', str(critical)],
+            ['HIGH', str(high)],
+            ['MEDIUM', str(medium)],
+            ['LOW', str(low)],
+        ]
+        sev_table = Table(sev_data, colWidths=[1.5*inch, 1*inch])
+        sev_colors = [colors.darkred, colors.orangered, colors.orange, colors.green]
+        sev_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ]
+        for i, c in enumerate(sev_colors):
+            sev_style.append(('TEXTCOLOR', (0, i+1), (0, i+1), c))
+            sev_style.append(('FONTNAME', (0, i+1), (0, i+1), 'Helvetica-Bold'))
+        sev_table.setStyle(TableStyle(sev_style))
+
+        risk_data = [
+            ['Risk Indicator', 'Count'],
+            ['Ransomware Exposure', str(ransomware)],
+            ['Overdue Remediation', str(overdue)],
+        ]
+        risk_table = Table(risk_data, colWidths=[2*inch, 1*inch])
+        risk_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('TEXTCOLOR', (1, 1), (1, 2), colors.red if (ransomware > 0 or overdue > 0) else colors.green),
+        ]))
+
+        side_by_side = Table([[sev_table, risk_table]], colWidths=[2.8*inch, 3.5*inch])
+        story.append(side_by_side)
+        story.append(Spacer(1, 15))
+
+        # Top priorities
+        if top_urgent:
+            story.append(Paragraph("Top Priorities", styles['Heading2']))
+            prio_data = [['CVE', 'Product', 'Severity', 'Ransomware']]
+            for item in top_urgent:
+                prio_data.append([
+                    item['cve_id'],
+                    item['product'][:35],
+                    item['severity'] or 'N/A',
+                    'Yes' if item['ransomware'] else 'No'
+                ])
+            prio_table = Table(prio_data, colWidths=[1.5*inch, 2.5*inch, 1*inch, 1*inch])
+            prio_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2C3E50')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ]))
+            story.append(prio_table)
+
+        # Footer
+        story.append(Spacer(1, 20))
+        footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=7, textColor=colors.grey)
+        story.append(Paragraph(
+            f"Generated by SentriKat | {datetime.now().strftime('%Y-%m-%d %H:%M UTC')} | "
+            "Data sources: CISA KEV, NVD, OSV.dev, Red Hat, MSRC, Debian",
+            footer_style
+        ))
+
+        doc.build(story)
+        buffer.seek(0)
+
+        filename = f"SentriKat_Executive_Summary_{today.strftime('%Y%m%d')}.pdf"
+        return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
+
+    except ImportError:
+        return jsonify({'error': 'PDF generation requires reportlab library'}), 500
+    except Exception as e:
+        logger.exception("Error generating executive summary PDF")
+        return jsonify({'error': f'PDF generation failed: {str(e)}'}), 500
+
+
+# ============================================================================
+# Syslog / CEF Forwarding
+# ============================================================================
+
+@bp.route('/api/settings/syslog', methods=['GET'])
+@login_required
+def get_syslog_settings():
+    """Get current syslog forwarding configuration."""
+    from app.models import SystemSettings
+
+    settings = {}
+    for key in ['syslog_enabled', 'syslog_host', 'syslog_port', 'syslog_protocol',
+                'syslog_format', 'syslog_facility']:
+        setting = SystemSettings.query.filter_by(key=key).first()
+        settings[key] = setting.value if setting else None
+
+    return jsonify({
+        'enabled': settings.get('syslog_enabled', 'false') == 'true',
+        'host': settings.get('syslog_host', ''),
+        'port': int(settings.get('syslog_port', '514') or '514'),
+        'protocol': settings.get('syslog_protocol', 'udp'),
+        'format': settings.get('syslog_format', 'cef'),
+        'facility': settings.get('syslog_facility', 'local0'),
+    })
+
+
+@bp.route('/api/settings/syslog', methods=['POST'])
+@login_required
+def update_syslog_settings():
+    """Update syslog forwarding configuration."""
+    from app.models import SystemSettings
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Validate
+    protocol = data.get('protocol', 'udp')
+    if protocol not in ('udp', 'tcp'):
+        return jsonify({'error': 'Protocol must be udp or tcp'}), 400
+
+    fmt = data.get('format', 'cef')
+    if fmt not in ('cef', 'json', 'rfc5424'):
+        return jsonify({'error': 'Format must be cef, json, or rfc5424'}), 400
+
+    port = int(data.get('port', 514))
+    if port < 1 or port > 65535:
+        return jsonify({'error': 'Port must be 1-65535'}), 400
+
+    # Save settings
+    settings_map = {
+        'syslog_enabled': str(data.get('enabled', False)).lower(),
+        'syslog_host': data.get('host', ''),
+        'syslog_port': str(port),
+        'syslog_protocol': protocol,
+        'syslog_format': fmt,
+        'syslog_facility': data.get('facility', 'local0'),
+    }
+
+    for key, value in settings_map.items():
+        setting = SystemSettings.query.filter_by(key=key).first()
+        if setting:
+            setting.value = value
+        else:
+            setting = SystemSettings(key=key, value=value)
+            db.session.add(setting)
+
+    db.session.commit()
+
+    return jsonify({'success': True, 'message': 'Syslog settings updated'})
+
+
+@bp.route('/api/settings/syslog/test', methods=['POST'])
+@login_required
+def test_syslog():
+    """Send a test message to the configured syslog server."""
+    try:
+        result = send_syslog_event(
+            event_type='test',
+            cve_id='CVE-0000-0000',
+            severity='MEDIUM',
+            product='SentriKat Test',
+            message='Test syslog message from SentriKat'
+        )
+        if result:
+            return jsonify({'success': True, 'message': 'Test message sent'})
+        else:
+            return jsonify({'success': False, 'message': 'Syslog is not enabled or misconfigured'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+def send_syslog_event(event_type, cve_id, severity, product, message, **kwargs):
+    """
+    Send a single event to the configured syslog server.
+
+    Supports formats:
+    - CEF (ArcSight Common Event Format) — standard for SIEM ingestion
+    - JSON — structured JSON for ELK/Splunk HEC
+    - RFC 5424 — standard syslog format
+
+    Args:
+        event_type: 'new_vulnerability', 'acknowledged', 'overdue', 'test'
+        cve_id: CVE identifier
+        severity: CRITICAL, HIGH, MEDIUM, LOW
+        product: Affected product name
+        message: Human-readable description
+        **kwargs: Additional fields (vendor, due_date, ransomware, etc.)
+
+    Returns:
+        True if sent successfully, False if syslog not configured
+    """
+    import socket
+    from app.models import SystemSettings
+
+    # Check if enabled
+    enabled_setting = SystemSettings.query.filter_by(key='syslog_enabled').first()
+    if not enabled_setting or enabled_setting.value != 'true':
+        return False
+
+    host_setting = SystemSettings.query.filter_by(key='syslog_host').first()
+    port_setting = SystemSettings.query.filter_by(key='syslog_port').first()
+    protocol_setting = SystemSettings.query.filter_by(key='syslog_protocol').first()
+    format_setting = SystemSettings.query.filter_by(key='syslog_format').first()
+    facility_setting = SystemSettings.query.filter_by(key='syslog_facility').first()
+
+    host = host_setting.value if host_setting else ''
+    port = int(port_setting.value) if port_setting else 514
+    protocol = protocol_setting.value if protocol_setting else 'udp'
+    fmt = format_setting.value if format_setting else 'cef'
+    facility = facility_setting.value if facility_setting else 'local0'
+
+    if not host:
+        return False
+
+    # Map severity to syslog priority
+    severity_map = {'CRITICAL': 2, 'HIGH': 3, 'MEDIUM': 4, 'LOW': 5}
+    facility_map = {
+        'local0': 16, 'local1': 17, 'local2': 18, 'local3': 19,
+        'local4': 20, 'local5': 21, 'local6': 22, 'local7': 23,
+    }
+    syslog_severity = severity_map.get(severity, 5)
+    syslog_facility = facility_map.get(facility, 16)
+    priority = syslog_facility * 8 + syslog_severity
+
+    timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    if fmt == 'cef':
+        # CEF format: CEF:0|Vendor|Product|Version|EventID|Name|Severity|Extensions
+        cef_severity = {'CRITICAL': 10, 'HIGH': 8, 'MEDIUM': 5, 'LOW': 3}.get(severity, 1)
+        extensions = f"cveId={cve_id} product={product} msg={message}"
+        if kwargs.get('vendor'):
+            extensions += f" vendor={kwargs['vendor']}"
+        if kwargs.get('due_date'):
+            extensions += f" dueDate={kwargs['due_date']}"
+        if kwargs.get('ransomware'):
+            extensions += " ransomware=true"
+        payload = (
+            f"<{priority}>{timestamp} SentriKat "
+            f"CEF:0|SentriKat|VulnerabilityManagement|1.0|{event_type}|"
+            f"{cve_id} {severity}|{cef_severity}|{extensions}"
+        )
+    elif fmt == 'json':
+        import json
+        event = {
+            'timestamp': timestamp,
+            'source': 'SentriKat',
+            'event_type': event_type,
+            'cve_id': cve_id,
+            'severity': severity,
+            'product': product,
+            'message': message,
+        }
+        event.update(kwargs)
+        payload = f"<{priority}>{timestamp} SentriKat {json.dumps(event)}"
+    else:  # rfc5424
+        payload = (
+            f"<{priority}>1 {timestamp} SentriKat VulnerabilityManagement - "
+            f"{event_type} - {cve_id} {severity} {product}: {message}"
+        )
+
+    try:
+        encoded = payload.encode('utf-8')
+        if protocol == 'tcp':
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect((host, port))
+            sock.sendall(encoded + b'\n')
+            sock.close()
+        else:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(5)
+            sock.sendto(encoded, (host, port))
+            sock.close()
+        return True
+    except Exception as e:
+        logger.error(f"Syslog send failed: {e}")
+        return False

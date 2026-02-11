@@ -390,7 +390,15 @@ Matched vulnerabilities appear on the dashboard with:
 **Alert channels:**
 - Email digests (daily critical CVE summary)
 - Webhooks (Slack, Teams, Discord, custom)
+- Syslog/CEF forwarding (Splunk, ELK, ArcSight, QRadar)
 - Escalation (re-alert if not acknowledged within N days)
+
+**Export & Reporting:**
+- CSV/Excel export of vulnerability list (with UTF-8 BOM for Excel)
+- Executive summary one-pager PDF (risk score, KPIs, top priorities)
+- CISA BOD 22-01 compliance report (JSON, CSV, PDF)
+- EU NIS2 compliance report — Article 21(2)(d)(e)(g) mapping (JSON, CSV, PDF)
+- Scheduled reports (daily/weekly/monthly email delivery)
 
 ---
 
@@ -584,9 +592,18 @@ POST /api/vendor-advisories/sync         # Trigger vendor advisory sync
 GET  /api/settings/{key}                 # Read setting
 POST /api/settings/{key}                 # Write setting
 
-# Reports
+# Reports & Compliance
+GET  /api/reports/export/csv             # Export vulnerabilities as CSV (Excel)
+GET  /api/reports/executive-summary      # Executive summary (risk score, KPIs)
+GET  /api/reports/compliance/bod-22-01   # CISA BOD 22-01 compliance report
+GET  /api/reports/compliance/nis2        # EU NIS2 compliance report
 GET  /api/reports/scheduled              # List scheduled reports
 POST /api/reports/download               # Generate PDF report
+
+# SIEM Integration
+GET  /api/settings/syslog                # Get syslog forwarding config
+POST /api/settings/syslog                # Update syslog forwarding config
+POST /api/settings/syslog/test           # Send test syslog event
 ```
 
 ### Example: Agent Inventory Report
@@ -660,7 +677,7 @@ Includes: CISA KEV sync, NVD search, vulnerability matching, basic dashboard, CS
 | +100 agents | EUR 1,499 |
 | Unlimited agents | EUR 2,199 |
 
-**Additional features:** LDAP/AD, SAML SSO, email alerts, webhooks (Slack/Teams/Discord), multi-organization, backup/restore, white-label branding, full API access, issue tracker integrations (Jira, GitHub, GitLab, YouTrack), scheduled reports, audit log export, container scanning
+**Additional features:** LDAP/AD, SAML SSO, email alerts, webhooks (Slack/Teams/Discord), syslog/CEF forwarding (SIEM), multi-organization, backup/restore, white-label branding, full API access, issue tracker integrations (Jira, GitHub, GitLab, YouTrack), scheduled reports, CSV/Excel export, executive summary PDF, NIS2 + BOD 22-01 compliance reports, audit log export, container scanning
 
 ### License Activation
 
@@ -738,6 +755,13 @@ Multiple trackers can be enabled simultaneously:
 - **Microsoft Teams** — Webhook integration
 - **Discord** — Webhook integration
 - **Custom Webhooks** — JSON payload to any endpoint
+- **Syslog/CEF** — Forward events to SIEM (Splunk, ELK, ArcSight, QRadar) via UDP/TCP
+
+### Compliance Frameworks
+
+- **CISA BOD 22-01** — Remediation tracking with due dates, compliance percentage, overdue reporting
+- **EU NIS2 (Directive 2022/2555)** — Article 21 mapping: vulnerability handling (2e), supply chain visibility (2d), cyber hygiene (2g)
+- **Executive Summary** — Board-ready one-pager with risk score, KPIs, severity breakdown, top priorities
 
 ### Authentication Providers
 

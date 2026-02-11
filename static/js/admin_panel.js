@@ -5873,14 +5873,23 @@ function exportAuditLogs(format, days) {
 const SETTINGS_GROUPS = {
     auth:       ['ldapSettings', 'samlSettings'],
     email:      ['smtpSettings', 'notificationsSettings'],
-    system:     ['syncSettings', 'proxySettings', 'securitySettings', 'retentionSettings'],
+    system:     ['systemSubTabs'],
+    syslog:     ['syslogSettings'],
     compliance: ['auditLogs', 'complianceReports'],
     appearance: ['brandingSettings'],
     license:    ['licenseSettings']
 };
 
-// All settings pane IDs (flattened)
-const ALL_SETTINGS_PANES = Object.values(SETTINGS_GROUPS).flat();
+// System sub-tab definitions: maps sub-tab name to pane ID
+const SYSTEM_SUBTABS = {
+    sync:      'syncSettings',
+    general:   'proxySettings',
+    security:  'securitySettings',
+    retention: 'retentionSettings'
+};
+
+// All settings pane IDs (flattened) — includes system sub-panes for proper hide/show
+const ALL_SETTINGS_PANES = [...Object.values(SETTINGS_GROUPS).flat(), ...Object.values(SYSTEM_SUBTABS)];
 
 // Track which groups have been loaded (for lazy loading)
 const settingsGroupsLoaded = {};
@@ -5930,10 +5939,54 @@ function showSettingsGroup(groupName, btn) {
         if (groupName === 'compliance') {
             if (typeof loadAuditLogs === 'function') loadAuditLogs(1);
             if (typeof loadComplianceData === 'function') loadComplianceData();
+        } else if (groupName === 'syslog') {
+            if (typeof loadSyslogSettings === 'function') loadSyslogSettings();
         } else if (groupName === 'license') {
             if (typeof loadLicenseInfo === 'function') loadLicenseInfo();
         }
     }
+
+    // System group: auto-show the active (or first) sub-tab
+    if (groupName === 'system') {
+        const activeSubBtn = document.querySelector('#systemSubNav .nav-link.active');
+        if (activeSubBtn) {
+            activeSubBtn.click();
+        } else {
+            const firstBtn = document.querySelector('#systemSubNav .nav-link');
+            if (firstBtn) showSystemSubTab('sync', firstBtn);
+        }
+    }
+}
+
+/**
+ * Show a system sub-tab pane and hide the other system sub-panes.
+ * Called by sub-tab buttons within the System settings group.
+ */
+function showSystemSubTab(subName, btn) {
+    // Hide all system sub-panes
+    Object.values(SYSTEM_SUBTABS).forEach(id => {
+        const pane = SK.DOM.get(id);
+        if (pane) {
+            pane.classList.remove('show', 'active');
+            pane.style.display = 'none';
+        }
+    });
+
+    // Show the selected sub-pane
+    const targetId = SYSTEM_SUBTABS[subName];
+    if (targetId) {
+        const pane = SK.DOM.get(targetId);
+        if (pane) {
+            pane.style.display = '';
+            pane.classList.add('show', 'active');
+        }
+    }
+
+    // Update active state on sub-tab buttons
+    document.querySelectorAll('#systemSubNav .nav-link').forEach(link => {
+        link.classList.remove('active');
+    });
+    if (btn) btn.classList.add('active');
 }
 
 // Initialize settings groups when Settings main tab is shown
@@ -9082,6 +9135,144 @@ function downloadBlob(blob, filename) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+// ============================================================================
+// Syslog / SIEM Settings
+// ============================================================================
+
+async function loadSyslogSettings() {
+    try {
+        const response = await fetch('/api/settings/syslog');
+        if (!response.ok) return;
+        const data = await response.json();
+
+        const el = (id) => document.getElementById(id);
+        if (el('syslogEnabled')) el('syslogEnabled').checked = data.enabled;
+        if (el('syslogHost')) el('syslogHost').value = data.host || '';
+        if (el('syslogPort')) el('syslogPort').value = data.port || 514;
+        if (el('syslogProtocol')) el('syslogProtocol').value = data.protocol || 'udp';
+        if (el('syslogFormat')) el('syslogFormat').value = data.format || 'cef';
+        if (el('syslogFacility')) el('syslogFacility').value = data.facility || 'local0';
+    } catch (error) {
+        console.error('Error loading syslog settings:', error);
+    }
+}
+
+async function saveSyslogSettings() {
+    try {
+        const data = {
+            enabled: document.getElementById('syslogEnabled').checked,
+            host: document.getElementById('syslogHost').value.trim(),
+            port: parseInt(document.getElementById('syslogPort').value) || 514,
+            protocol: document.getElementById('syslogProtocol').value,
+            format: document.getElementById('syslogFormat').value,
+            facility: document.getElementById('syslogFacility').value,
+        };
+
+        if (data.enabled && !data.host) {
+            showToast('Syslog host is required when enabled', 'warning');
+            return;
+        }
+
+        const response = await fetch('/api/settings/syslog', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to save');
+        }
+
+        showToast('Syslog settings saved', 'success');
+    } catch (error) {
+        console.error('Error saving syslog settings:', error);
+        showToast(`Error: ${error.message}`, 'danger');
+    }
+}
+
+async function testSyslog() {
+    try {
+        const response = await fetch('/api/settings/syslog/test', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('Test message sent successfully!', 'success');
+        } else {
+            showToast(data.message || 'Test failed', 'warning');
+        }
+    } catch (error) {
+        showToast(`Test failed: ${error.message}`, 'danger');
+    }
+}
+
+async function downloadNIS2Report(format) {
+    try {
+        const response = await fetch(`/api/reports/compliance/nis2?format=${format}`);
+
+        if (response.status === 403) {
+            const error = await response.json();
+            showToast(error.error || 'Professional license required', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to generate NIS2 report');
+        }
+
+        const filename = `nis2-compliance-${new Date().toISOString().split('T')[0]}.${format}`;
+
+        if (format === 'pdf' || format === 'csv') {
+            const blob = await response.blob();
+            downloadBlob(blob, filename);
+        } else {
+            const data = await response.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            downloadBlob(blob, filename);
+        }
+
+        showToast(`NIS2 compliance report downloaded: ${filename}`, 'success');
+
+    } catch (error) {
+        console.error('Error downloading NIS2 report:', error);
+        showToast(`Error: ${error.message}`, 'danger');
+    }
+}
+
+async function downloadExecutiveSummary(format) {
+    try {
+        const response = await fetch(`/api/reports/executive-summary?format=${format}`);
+
+        if (response.status === 403) {
+            const error = await response.json();
+            showToast(error.error || 'Professional license required', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to generate executive summary');
+        }
+
+        const filename = `executive-summary-${new Date().toISOString().split('T')[0]}.${format}`;
+
+        if (format === 'pdf') {
+            const blob = await response.blob();
+            downloadBlob(blob, filename);
+        } else {
+            const data = await response.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            downloadBlob(blob, filename);
+        }
+
+        showToast(`Executive summary downloaded: ${filename}`, 'success');
+
+    } catch (error) {
+        console.error('Error downloading executive summary:', error);
+        showToast(`Error: ${error.message}`, 'danger');
+    }
 }
 
 function showCreateIntegrationModal() {
