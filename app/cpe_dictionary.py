@@ -172,6 +172,10 @@ def _normalize_product_for_lookup(product_name):
     if not product_name:
         return ''
     p = product_name.lower().strip()
+    # Handle vendor|product separators (e.g., "Dell | Command Update" -> "command update")
+    if '|' in p:
+        parts = p.split('|', 1)
+        p = parts[1].strip() if len(parts) > 1 and parts[1].strip() else p
     # Remove parenthetical suffixes
     p = re.sub(r'\s*\([^)]*\)\s*$', '', p)
     # Remove trailing version numbers

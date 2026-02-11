@@ -30,6 +30,7 @@ from app.models import (
 from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
 from app.auth import login_required, admin_required, org_admin_required
 from app.error_utils import ERROR_MSGS
+from sqlalchemy.exc import IntegrityError
 import json
 
 # Threshold for async processing (queued instead of immediate).
@@ -175,6 +176,40 @@ NOISE_PATTERNS = [
     r'^(adwaita|hicolor|humanity|ubuntu-mono)-icon-theme',
     r'^(desktop-file-utils|mime-support|shared-mime-info)$',
     r'^(plymouth|plymouth-theme)',
+    # ---- AGGRESSIVE NOISE (safe: Phase 2 CVE guard protects all CVE packages) ----
+    # Debian/Ubuntu library -N packages (libfoo0, libfoo1t64 - runtime libs with no
+    # independent CVE history; CVEs are filed under the source package name)
+    r'^lib[a-z].*\d+[a-z]*$',
+    # Golang source packages (not runtime Go binaries)
+    r'^golang-\d',
+    r'^golang-github-',
+    r'^golang-google-',
+    r'^golang-golang-x-',
+    # Node.js Debian packages (not runtime Node.js itself)
+    r'^node-',
+    # Ruby Debian packages (not runtime Ruby itself)
+    r'^ruby-',
+    # Haskell packages
+    r'^ghc-',
+    # R statistical packages
+    r'^r-(base|cran|bioc)-',
+    # Firmware packages (no CVE surface - hardware blobs)
+    r'^(firmware-|linux-firmware)',
+    # X11/Wayland infrastructure (display server plumbing)
+    r'^(x11-|xserver-|xwayland)',
+    r'^(xdg-|xsel|xclip|xinit|xinput)',
+    # GNOME/KDE desktop plumbing (not apps, just framework glue)
+    r'^(glib-networking|gsettings-desktop-schemas|gvfs)',
+    r'^(dconf-|gconf-)',
+    # systemd ancillary packages (systemd itself IS protected by CVE guard)
+    r'^(systemd-)(sysv|coredump|timesyncd|resolved)',
+    # Linux kernel headers/modules (the kernel itself IS protected)
+    r'^linux-(headers|modules|image-unsigned|tools-common)',
+    # Windows runtime redistributables (noise in inventory, not real products)
+    r'^microsoft visual c\+\+.*redistributable',
+    r'^microsoft \.net.*(targeting|sdk|host)',
+    # macOS built-in system components (Apple handles updates via OS updates)
+    r'^com\.apple\.',
 ]
 _NOISE_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in NOISE_PATTERNS]
 
@@ -272,6 +307,25 @@ NOISE_EXACT_LINUX = {
     'python3-reportbug', 'python3-wadllib',
     'python3-update-manager', 'python3-gdbm',
     'python3-attr', 'python3-automat',
+    # System plumbing packages (no independent attack surface)
+    'dbus', 'dbus-user-session', 'libdbus-1-3',
+    'policykit-1', 'polkitd', 'pkexec',
+    'udev', 'libudev1', 'eudev',
+    'logrotate', 'rsyslog', 'syslog-ng',
+    'kbd', 'console-setup', 'console-data',
+    'tzdata', 'ca-certificates', 'openssl-tool',
+    'mount', 'fuse3', 'ntfs-3g',
+    'parted', 'fdisk', 'gdisk',
+    'iproute2', 'ifupdown', 'netplan.io',
+    'iputils-ping', 'traceroute', 'mtr-tiny',
+    'rsync', 'wget2', 'aria2',
+    'file', 'patch', 'diffutils',
+    'findutils', 'coreutils', 'mawk', 'gawk',
+    'procps', 'psmisc', 'htop', 'atop',
+    'strace', 'ltrace', 'lsof',
+    'less', 'nano', 'vim-tiny', 'vim-common',
+    'screen', 'tmux', 'ncurses-base', 'ncurses-bin',
+    'apt', 'dpkg', 'rpm',
 }
 
 
@@ -924,13 +978,23 @@ def queue_inventory_job(organization, data, api_key_id=None):
                 asset = hostname_asset
 
         if not asset:
-            asset = Asset(
-                organization_id=organization.id,
-                hostname=hostname
-            )
-            db.session.add(asset)
-            db.session.flush()
-            logger.info(f"Created new asset for {hostname}, id={asset.id}")
+            try:
+                asset = Asset(
+                    organization_id=organization.id,
+                    hostname=hostname
+                )
+                db.session.add(asset)
+                db.session.flush()
+                logger.info(f"Created new asset for {hostname}, id={asset.id}")
+            except IntegrityError:
+                db.session.rollback()
+                asset = Asset.query.filter_by(
+                    organization_id=organization.id,
+                    hostname=hostname
+                ).first()
+                if not asset:
+                    raise
+                logger.info(f"Asset race condition resolved for {hostname}, using existing id={asset.id}")
 
         # Update basic asset info immediately
         asset.ip_address = data.get('ip_address')
@@ -1418,12 +1482,23 @@ def report_inventory():
 
         if not asset:
             # Create new asset
-            asset = Asset(
-                organization_id=organization.id,
-                hostname=hostname
-            )
-            db.session.add(asset)
-            logger.info(f"Created new asset: {hostname} for org {organization.id}")
+            try:
+                asset = Asset(
+                    organization_id=organization.id,
+                    hostname=hostname
+                )
+                db.session.add(asset)
+                db.session.flush()
+                logger.info(f"Created new asset: {hostname} for org {organization.id}")
+            except IntegrityError:
+                db.session.rollback()
+                asset = Asset.query.filter_by(
+                    organization_id=organization.id,
+                    hostname=hostname
+                ).first()
+                if not asset:
+                    raise
+                logger.info(f"Asset race condition resolved for {hostname}, using existing id={asset.id}")
 
         # Update asset info
         asset.ip_address = data.get('ip_address')
