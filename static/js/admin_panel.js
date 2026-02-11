@@ -5873,15 +5873,23 @@ function exportAuditLogs(format, days) {
 const SETTINGS_GROUPS = {
     auth:       ['ldapSettings', 'samlSettings'],
     email:      ['smtpSettings', 'notificationsSettings'],
-    system:     ['syncSettings', 'proxySettings', 'securitySettings', 'retentionSettings'],
+    system:     ['systemSubTabs'],
     syslog:     ['syslogSettings'],
     compliance: ['auditLogs', 'complianceReports'],
     appearance: ['brandingSettings'],
     license:    ['licenseSettings']
 };
 
-// All settings pane IDs (flattened)
-const ALL_SETTINGS_PANES = Object.values(SETTINGS_GROUPS).flat();
+// System sub-tab definitions: maps sub-tab name to pane ID
+const SYSTEM_SUBTABS = {
+    sync:      'syncSettings',
+    general:   'proxySettings',
+    security:  'securitySettings',
+    retention: 'retentionSettings'
+};
+
+// All settings pane IDs (flattened) — includes system sub-panes for proper hide/show
+const ALL_SETTINGS_PANES = [...Object.values(SETTINGS_GROUPS).flat(), ...Object.values(SYSTEM_SUBTABS)];
 
 // Track which groups have been loaded (for lazy loading)
 const settingsGroupsLoaded = {};
@@ -5937,6 +5945,48 @@ function showSettingsGroup(groupName, btn) {
             if (typeof loadLicenseInfo === 'function') loadLicenseInfo();
         }
     }
+
+    // System group: auto-show the active (or first) sub-tab
+    if (groupName === 'system') {
+        const activeSubBtn = document.querySelector('#systemSubNav .nav-link.active');
+        if (activeSubBtn) {
+            activeSubBtn.click();
+        } else {
+            const firstBtn = document.querySelector('#systemSubNav .nav-link');
+            if (firstBtn) showSystemSubTab('sync', firstBtn);
+        }
+    }
+}
+
+/**
+ * Show a system sub-tab pane and hide the other system sub-panes.
+ * Called by sub-tab buttons within the System settings group.
+ */
+function showSystemSubTab(subName, btn) {
+    // Hide all system sub-panes
+    Object.values(SYSTEM_SUBTABS).forEach(id => {
+        const pane = SK.DOM.get(id);
+        if (pane) {
+            pane.classList.remove('show', 'active');
+            pane.style.display = 'none';
+        }
+    });
+
+    // Show the selected sub-pane
+    const targetId = SYSTEM_SUBTABS[subName];
+    if (targetId) {
+        const pane = SK.DOM.get(targetId);
+        if (pane) {
+            pane.style.display = '';
+            pane.classList.add('show', 'active');
+        }
+    }
+
+    // Update active state on sub-tab buttons
+    document.querySelectorAll('#systemSubNav .nav-link').forEach(link => {
+        link.classList.remove('active');
+    });
+    if (btn) btn.classList.add('active');
 }
 
 // Initialize settings groups when Settings main tab is shown
