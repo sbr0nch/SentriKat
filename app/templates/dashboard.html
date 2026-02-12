@@ -32,33 +32,33 @@
         transform: translateY(-1px);
     }
 
-    .alert-card-critical.active-filter { --active-border-color: #dc2626; }
-    .alert-card-high.active-filter { --active-border-color: #f59e0b; }
-    .alert-card-medium.active-filter { --active-border-color: #3b82f6; }
-    .alert-card-low.active-filter { --active-border-color: #10b981; }
+    .alert-card-critical.active-filter { --active-border-color: var(--critical-color); }
+    .alert-card-high.active-filter { --active-border-color: var(--high-color); }
+    .alert-card-medium.active-filter { --active-border-color: var(--info-color); }
+    .alert-card-low.active-filter { --active-border-color: var(--low-color); }
 
     .alert-card-critical {
-        --card-bg-start: #fef2f2;
-        --card-bg-end: #fee2e2;
-        border-left: 3px solid #dc2626;
+        --card-bg-start: #fefafa;
+        --card-bg-end: #fef2f2;
+        border-left: 3px solid var(--critical-color);
     }
 
     .alert-card-high {
-        --card-bg-start: #fef3c7;
-        --card-bg-end: #fde68a;
-        border-left: 3px solid #f59e0b;
+        --card-bg-start: #fffcf5;
+        --card-bg-end: #fef8ee;
+        border-left: 3px solid var(--high-color);
     }
 
     .alert-card-medium {
-        --card-bg-start: #dbeafe;
-        --card-bg-end: #bfdbfe;
-        border-left: 3px solid #3b82f6;
+        --card-bg-start: #f8faff;
+        --card-bg-end: #eff4ff;
+        border-left: 3px solid var(--info-color);
     }
 
     .alert-card-low {
-        --card-bg-start: #f0fdf4;
-        --card-bg-end: #dcfce7;
-        border-left: 3px solid #10b981;
+        --card-bg-start: #f7fdfb;
+        --card-bg-end: #ecfdf5;
+        border-left: 3px solid var(--low-color);
     }
 
     .alert-card-label {
@@ -77,10 +77,10 @@
         margin-bottom: 0.15rem;
     }
 
-    .alert-card-critical .alert-card-value { color: #dc2626; }
-    .alert-card-high .alert-card-value { color: #f59e0b; }
-    .alert-card-medium .alert-card-value { color: #3b82f6; }
-    .alert-card-low .alert-card-value { color: #10b981; }
+    .alert-card-critical .alert-card-value { color: var(--critical-color); }
+    .alert-card-high .alert-card-value { color: var(--high-color); }
+    .alert-card-medium .alert-card-value { color: var(--info-color); }
+    .alert-card-low .alert-card-value { color: var(--low-color); }
 
     .alert-card i.alert-icon {
         font-size: 1.5rem;
@@ -726,10 +726,11 @@
     }
 
     function getPriorityColor(priority) {
+        const style = getComputedStyle(document.documentElement);
         const colors = {
-            'critical': '#dc2626',
-            'high': '#f59e0b',
-            'medium': '#3b82f6',
+            'critical': style.getPropertyValue('--critical-color').trim() || '#b91c1c',
+            'high': style.getPropertyValue('--high-color').trim() || '#c2410c',
+            'medium': style.getPropertyValue('--info-color').trim() || '#2563eb',
             'low': '#6b7280'
         };
         return colors[priority?.toLowerCase()] || '#6b7280';
@@ -1355,7 +1356,7 @@
                 labels: ['Critical', 'High', 'Medium', 'Low'],
                 datasets: [{
                     data: [critical, high, medium, low],
-                    backgroundColor: ['rgba(220, 38, 38, 0.8)', 'rgba(245, 158, 11, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(34, 197, 94, 0.8)'],
+                    backgroundColor: ['rgba(185, 28, 28, 0.75)', 'rgba(194, 65, 12, 0.75)', 'rgba(37, 99, 235, 0.75)', 'rgba(4, 120, 87, 0.75)'],
                     borderColor: colors.borderColor,
                     borderWidth: 2,
                     hoverOffset: 6
@@ -1412,7 +1413,7 @@
                             label: 'Vulnerabilities',
                             data: data.values,
                             backgroundColor: data.labels.map((_, i) => {
-                                const palette = ['#dc2626', '#f59e0b', '#3b82f6', '#22c55e', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#84cc16'];
+                                const palette = ['#b91c1c', '#c2410c', '#2563eb', '#047857', '#7c3aed', '#be185d', '#0d9488', '#c2410c', '#0891b2', '#65a30d'];
                                 return palette[i % palette.length] + 'CC';
                             }),
                             borderRadius: 4,
@@ -1441,7 +1442,7 @@
                         datasets: [{
                             label: 'CVEs',
                             data: data.values,
-                            backgroundColor: ['#22c55eCC', '#84cc16CC', '#f59e0bCC', '#f97316CC', '#ef4444CC', '#dc2626CC'],
+                            backgroundColor: ['#047857CC', '#65a30dCC', '#d97706CC', '#c2410cCC', '#b91c1cCC', '#991b1bCC'],
                             borderRadius: 4
                         }]
                     },
@@ -1467,7 +1468,7 @@
                         datasets: [{
                             label: 'CVEs',
                             data: data.values,
-                            backgroundColor: ['#dc2626CC', '#f59e0bCC', '#3b82f6CC', '#8b5cf6CC', '#6b7280CC', '#374151CC'],
+                            backgroundColor: ['#b91c1cCC', '#c2410cCC', '#2563ebCC', '#7c3aedCC', '#6b7280CC', '#374151CC'],
                             borderRadius: 4
                         }]
                     },
@@ -1520,15 +1521,15 @@
                             {
                                 label: 'Acknowledged',
                                 data: data.acknowledged,
-                                borderColor: '#22c55e',
-                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                borderColor: '#047857',
+                                backgroundColor: 'rgba(4, 120, 87, 0.1)',
                                 fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2
                             },
                             {
                                 label: 'Unacknowledged',
                                 data: data.unacknowledged,
-                                borderColor: '#dc2626',
-                                backgroundColor: 'rgba(220, 38, 38, 0.1)',
+                                borderColor: '#b91c1c',
+                                backgroundColor: 'rgba(185, 28, 28, 0.1)',
                                 fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2
                             }
                         ]

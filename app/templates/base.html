@@ -26,11 +26,11 @@
             --primary-dark: #1e3a8a;
             --primary-light: #3b82f6;
 
-            /* Priority Colors - Clear and Professional */
-            --critical-color: #dc2626;
-            --high-color: #ea580c;
-            --medium-color: #ca8a04;
-            --low-color: #059669;
+            /* Priority Colors - Muted Professional Tones */
+            --critical-color: #b91c1c;
+            --high-color: #c2410c;
+            --medium-color: #a16207;
+            --low-color: #047857;
 
             /* Neutral Colors - Clean Corporate Look */
             --gray-50: #f9fafb;
@@ -44,11 +44,11 @@
             --gray-800: #1f2937;
             --gray-900: #111827;
 
-            /* Semantic Colors */
-            --success-color: #10b981;
-            --warning-color: #f59e0b;
-            --danger-color: #ef4444;
-            --info-color: #3b82f6;
+            /* Semantic Colors - Softer Tones */
+            --success-color: #059669;
+            --warning-color: #d97706;
+            --danger-color: #b91c1c;
+            --info-color: #2563eb;
 
             /* Shadows */
             --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -1712,7 +1712,10 @@
 
         /* Tables */
         .table {
-            background: white;
+            background: var(--surface-color);
+            color: var(--text-color);
+            --bs-table-color: var(--text-color);
+            --bs-table-bg: var(--surface-color);
         }
 
         .table thead th {

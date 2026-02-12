@@ -4381,6 +4381,54 @@
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }
     }
 
+    async function approveAllPending() {
+        const vendorFilter = document.getElementById('queueFilterVendor')?.value || '';
+        const vendorLabel = vendorFilter ? ` from "${vendorFilter}"` : '';
+        const pendingCount = importQueueData.filter(i => i.status === 'pending').length;
+        const totalLabel = vendorFilter ? `all pending items${vendorLabel}` : `ALL ${pendingCount}+ pending items`;
+        const confirmed = await showConfirm(
+            `Approve ${totalLabel}? Products will be added to inventory and matched against vulnerabilities.`,
+            'Approve All Pending', 'Approve All', 'btn-success'
+        );
+        if (!confirmed) return;
+        try {
+            const body = {};
+            if (vendorFilter) body.vendor = vendorFilter;
+            const response = await fetch('/api/import/queue/approve-all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!response.ok) throw new Error(`Server error (${response.status})`);
+            const result = await response.json();
+            showToast(`Approved ${result.processed} items${result.errors ? ` (${result.errors} errors)` : ''}`, 'success');
+            loadImportQueue();
+        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    }
+
+    async function rejectAllPending() {
+        const vendorFilter = document.getElementById('queueFilterVendor')?.value || '';
+        const vendorLabel = vendorFilter ? ` from "${vendorFilter}"` : '';
+        const confirmed = await showConfirm(
+            `Reject all pending items${vendorLabel}? This cannot be undone.`,
+            'Reject All Pending', 'Reject All', 'btn-danger'
+        );
+        if (!confirmed) return;
+        try {
+            const body = {};
+            if (vendorFilter) body.vendor = vendorFilter;
+            const response = await fetch('/api/import/queue/reject-all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!response.ok) throw new Error(`Server error (${response.status})`);
+            const result = await response.json();
+            showToast(`Rejected ${result.processed} items`, 'success');
+            loadImportQueue();
+        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    }
+
     // Lazy load import queue on tab show
     document.getElementById('import-queue-tab')?.addEventListener('shown.bs.tab', function() {
         if (!importQueueLoaded) {
