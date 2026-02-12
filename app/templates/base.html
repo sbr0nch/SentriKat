@@ -12,6 +12,7 @@
           onerror="this.onerror=null;this.href='{{ url_for('static', filename='vendor/css/bootstrap-icons.min.css') }}'">
     <link href="{{ url_for('static', filename='vendor/css/inter-font.css') }}" rel="stylesheet"
           onerror="this.onerror=null;this.href='https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap'">
+    <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
     <link rel="icon" type="image/x-icon" href="/static/images/favicon.ico">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png">
@@ -66,9 +67,15 @@
 
         /* Dark Mode Theme - Softer dark for better readability */
         [data-theme="dark"] {
-            --primary-color: #60a5fa;
-            --primary-dark: #3b82f6;
-            --primary-light: #93c5fd;
+            --primary-color: #4b8cd4;
+            --primary-dark: #3672b0;
+            --primary-light: #7ab0e0;
+
+            /* Muted severity colors for dark mode */
+            --critical-color: #b04040;
+            --high-color: #c07030;
+            --medium-color: #9a7530;
+            --low-color: #2a8a60;
 
             --gray-50: #1e293b;
             --gray-100: #334155;
@@ -273,7 +280,7 @@
             color: var(--text-color);
         }
 
-        /* Dark mode button adjustments */
+        /* Dark mode button adjustments - muted colors */
         [data-theme="dark"] .btn-primary,
         [data-theme="dark"] .btn-success {
             background-color: var(--primary-color);
@@ -287,26 +294,26 @@
         }
 
         [data-theme="dark"] .btn-danger {
-            border-color: #f87171;
-            color: #f87171;
+            border-color: #c07070;
+            color: #c07070;
         }
 
         [data-theme="dark"] .btn-danger:hover {
-            background-color: #dc2626;
-            color: white;
+            background-color: #a04040;
+            color: #f0e0e0;
         }
 
         [data-theme="dark"] .btn-warning {
-            border-color: #fbbf24;
-            color: #fbbf24;
+            border-color: #c0a050;
+            color: #c0a050;
         }
 
         [data-theme="dark"] .btn-warning:hover {
-            background-color: #f59e0b;
-            color: #1e293b;
+            background-color: #9a7530;
+            color: #f0e8d8;
         }
 
-        /* Dark mode outline button variants */
+        /* Dark mode outline button variants - muted */
         [data-theme="dark"] .btn-outline-success {
             border-color: var(--primary-color);
             color: var(--primary-color);
@@ -318,29 +325,29 @@
         }
 
         [data-theme="dark"] .btn-outline-danger {
-            border-color: #f87171;
-            color: #f87171;
+            border-color: #c07070;
+            color: #c07070;
         }
 
         [data-theme="dark"] .btn-outline-danger:hover {
-            background-color: #dc2626;
-            color: white;
+            background-color: #a04040;
+            color: #f0e0e0;
         }
 
         [data-theme="dark"] .btn-outline-warning {
-            border-color: #fbbf24;
-            color: #fbbf24;
+            border-color: #c0a050;
+            color: #c0a050;
         }
 
         [data-theme="dark"] .btn-outline-warning:hover {
-            background-color: #f59e0b;
-            color: #1e293b;
+            background-color: #9a7530;
+            color: #f0e8d8;
         }
 
         [data-theme="dark"] .alert-info {
-            background-color: rgba(59, 130, 246, 0.2);
-            border-color: rgba(59, 130, 246, 0.4);
-            color: #bfdbfe;
+            background-color: rgba(75, 140, 212, 0.12);
+            border-color: rgba(75, 140, 212, 0.25);
+            color: #8ab4d8;
         }
 
         [data-theme="dark"] .vuln-card {
@@ -397,23 +404,23 @@
         }
 
         [data-theme="dark"] .alert-card-critical {
-            background: linear-gradient(135deg, rgba(220, 38, 38, 0.15) 0%, rgba(220, 38, 38, 0.25) 100%) !important;
-            border-color: rgba(220, 38, 38, 0.4);
+            background: linear-gradient(135deg, rgba(176, 64, 64, 0.10) 0%, rgba(176, 64, 64, 0.18) 100%) !important;
+            border-color: rgba(176, 64, 64, 0.30);
         }
 
         [data-theme="dark"] .alert-card-high {
-            background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.25) 100%) !important;
-            border-color: rgba(245, 158, 11, 0.4);
+            background: linear-gradient(135deg, rgba(192, 112, 48, 0.10) 0%, rgba(192, 112, 48, 0.18) 100%) !important;
+            border-color: rgba(192, 112, 48, 0.30);
         }
 
         [data-theme="dark"] .alert-card-medium {
-            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.25) 100%) !important;
-            border-color: rgba(59, 130, 246, 0.4);
+            background: linear-gradient(135deg, rgba(75, 140, 212, 0.10) 0%, rgba(75, 140, 212, 0.18) 100%) !important;
+            border-color: rgba(75, 140, 212, 0.30);
         }
 
         [data-theme="dark"] .alert-card-low {
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.25) 100%) !important;
-            border-color: rgba(16, 185, 129, 0.4);
+            background: linear-gradient(135deg, rgba(42, 138, 96, 0.10) 0%, rgba(42, 138, 96, 0.18) 100%) !important;
+            border-color: rgba(42, 138, 96, 0.30);
         }
 
         [data-theme="dark"] .alert-card-label,
@@ -643,13 +650,13 @@
 
         /* bg-opacity variants used with bg-success, bg-primary etc. */
         [data-theme="dark"] .bg-success.bg-opacity-10 {
-            background-color: rgba(16, 185, 129, 0.15) !important;
+            background-color: rgba(42, 138, 96, 0.12) !important;
         }
         [data-theme="dark"] .bg-primary.bg-opacity-10 {
-            background-color: rgba(96, 165, 250, 0.15) !important;
+            background-color: rgba(75, 140, 212, 0.12) !important;
         }
         [data-theme="dark"] .bg-danger.bg-opacity-10 {
-            background-color: rgba(220, 38, 38, 0.15) !important;
+            background-color: rgba(176, 64, 64, 0.12) !important;
         }
 
         /* Badge text-dark override for dark mode */
@@ -659,24 +666,24 @@
 
         /* Subtle badge variants for dark mode (CPE shields, status indicators) */
         [data-theme="dark"] .bg-success-subtle {
-            background-color: rgba(16, 185, 129, 0.2) !important;
+            background-color: rgba(42, 138, 96, 0.15) !important;
         }
         [data-theme="dark"] .bg-success-subtle.text-success,
         [data-theme="dark"] .bg-success-subtle .text-success {
-            color: #6ee7b7 !important;
+            color: #7abfa0 !important;
         }
         [data-theme="dark"] .bg-warning-subtle {
-            background-color: rgba(245, 158, 11, 0.2) !important;
+            background-color: rgba(192, 112, 48, 0.15) !important;
         }
         [data-theme="dark"] .bg-warning-subtle.text-warning,
         [data-theme="dark"] .bg-warning-subtle .text-warning {
-            color: #fcd34d !important;
+            color: #c0a870 !important;
         }
         [data-theme="dark"] .bg-danger-subtle {
-            background-color: rgba(220, 38, 38, 0.2) !important;
+            background-color: rgba(176, 64, 64, 0.15) !important;
         }
         [data-theme="dark"] .bg-info-subtle {
-            background-color: rgba(59, 130, 246, 0.2) !important;
+            background-color: rgba(75, 140, 212, 0.15) !important;
         }
 
         /* Feature comparison table in dark mode */
@@ -690,9 +697,9 @@
 
         /* Alert info */
         [data-theme="dark"] .alert-info {
-            background-color: rgba(59, 130, 246, 0.15) !important;
-            border-color: rgba(59, 130, 246, 0.4) !important;
-            color: #93c5fd !important;
+            background-color: rgba(75, 140, 212, 0.10) !important;
+            border-color: rgba(75, 140, 212, 0.25) !important;
+            color: #8ab4d8 !important;
         }
 
         /* Close button in dark mode */
@@ -726,15 +733,15 @@
         }
 
         [data-theme="dark"] .text-success {
-            color: #6ee7b7 !important;
+            color: #7abfa0 !important;
         }
 
         [data-theme="dark"] .text-danger {
-            color: #fca5a5 !important;
+            color: #c89090 !important;
         }
 
         [data-theme="dark"] .text-warning {
-            color: #fcd34d !important;
+            color: #c0a870 !important;
         }
 
         [data-theme="dark"] .text-primary {
@@ -1787,53 +1794,53 @@
             border: 1px solid #e5e7eb;
         }
 
-        /* Dark mode badge overrides - high contrast versions */
+        /* Dark mode badge overrides - muted, eye-friendly colors */
         [data-theme="dark"] .badge-role-super {
-            background: rgba(220, 38, 38, 0.2);
-            color: #fca5a5;
-            border-color: rgba(220, 38, 38, 0.4);
+            background: rgba(176, 64, 64, 0.15);
+            color: #c89090;
+            border-color: rgba(176, 64, 64, 0.30);
         }
 
         [data-theme="dark"] .badge-role-admin {
-            background: rgba(245, 158, 11, 0.2);
-            color: #fcd34d;
-            border-color: rgba(245, 158, 11, 0.4);
+            background: rgba(192, 112, 48, 0.15);
+            color: #c0a870;
+            border-color: rgba(192, 112, 48, 0.30);
         }
 
         [data-theme="dark"] .badge-role-manager {
-            background: rgba(59, 130, 246, 0.2);
-            color: #93c5fd;
-            border-color: rgba(59, 130, 246, 0.4);
+            background: rgba(75, 140, 212, 0.15);
+            color: #8ab4d8;
+            border-color: rgba(75, 140, 212, 0.30);
         }
 
         [data-theme="dark"] .badge-role-user {
-            background: rgba(107, 114, 128, 0.2);
-            color: #d1d5db;
-            border-color: rgba(107, 114, 128, 0.4);
+            background: rgba(107, 114, 128, 0.15);
+            color: #b0b5bc;
+            border-color: rgba(107, 114, 128, 0.30);
         }
 
         [data-theme="dark"] .badge-auth-ldap {
-            background: rgba(16, 185, 129, 0.2);
-            color: #6ee7b7;
-            border-color: rgba(16, 185, 129, 0.4);
+            background: rgba(42, 138, 96, 0.15);
+            color: #7abfa0;
+            border-color: rgba(42, 138, 96, 0.30);
         }
 
         [data-theme="dark"] .badge-auth-local {
-            background: rgba(100, 116, 139, 0.2);
-            color: #cbd5e1;
-            border-color: rgba(100, 116, 139, 0.4);
+            background: rgba(100, 116, 139, 0.15);
+            color: #a8b4c0;
+            border-color: rgba(100, 116, 139, 0.30);
         }
 
         [data-theme="dark"] .badge-status-active {
-            background: rgba(16, 185, 129, 0.2);
-            color: #6ee7b7;
-            border-color: rgba(16, 185, 129, 0.4);
+            background: rgba(42, 138, 96, 0.15);
+            color: #7abfa0;
+            border-color: rgba(42, 138, 96, 0.30);
         }
 
         [data-theme="dark"] .badge-status-inactive {
-            background: rgba(107, 114, 128, 0.2);
-            color: #9ca3af;
-            border-color: rgba(107, 114, 128, 0.4);
+            background: rgba(107, 114, 128, 0.15);
+            color: #8a9098;
+            border-color: rgba(107, 114, 128, 0.30);
         }
 
         /* Status LED indicator */
@@ -1855,6 +1862,19 @@
         .status-led-yellow {
             background: #f59e0b;
             box-shadow: 0 0 6px #f59e0b;
+        }
+
+        [data-theme="dark"] .status-led-green {
+            background: #2a8a60;
+            box-shadow: 0 0 4px rgba(42, 138, 96, 0.5);
+        }
+        [data-theme="dark"] .status-led-red {
+            background: #b04040;
+            box-shadow: 0 0 4px rgba(176, 64, 64, 0.5);
+        }
+        [data-theme="dark"] .status-led-yellow {
+            background: #9a7530;
+            box-shadow: 0 0 4px rgba(154, 117, 48, 0.5);
         }
 
         /* Priority Badges */

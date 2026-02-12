@@ -6,6 +6,7 @@
     <title>Login - {{ branding.app_name }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
     <link rel="icon" type="image/x-icon" href="/static/images/favicon.ico">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png">
@@ -40,6 +41,12 @@
         .login-logo i {
             font-size: 4rem;
             color: #1e40af;
+        }
+
+        .login-logo img {
+            width: 80px;
+            height: 80px;
+            object-fit: contain;
         }
 
         .login-logo h1 {
@@ -163,7 +170,7 @@
     <div class="login-container">
         <div class="login-card">
             <div class="login-logo">
-                <i class="bi bi-shield-lock-fill" id="logoIcon"></i>
+                <img src="/static/images/favicon-128x128.png" alt="SentriKat" id="logoIcon">
                 <h1>{{ branding.app_name }}</h1>
                 <p id="stepDescription">Enterprise Vulnerability Management</p>
             </div>
@@ -378,18 +385,15 @@
 
             if (step === 'login') {
                 document.getElementById('loginForm').classList.remove('d-none');
-                icon.className = 'bi bi-shield-lock-fill';
                 desc.textContent = 'Enterprise Vulnerability Management';
                 if (loginMsg) loginMsg.classList.remove('d-none');
             } else if (step === 'totp') {
                 document.getElementById('totpForm').classList.remove('d-none');
-                icon.className = 'bi bi-phone';
                 desc.textContent = 'Two-Factor Authentication';
                 if (loginMsg) loginMsg.classList.add('d-none');
                 document.getElementById('totpCode').focus();
             } else if (step === 'password') {
                 document.getElementById('passwordChangeForm').classList.remove('d-none');
-                icon.className = 'bi bi-key';
                 desc.textContent = 'Password Update Required';
                 if (loginMsg) loginMsg.classList.add('d-none');
                 document.getElementById('currentPassword').focus();
