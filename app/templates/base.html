@@ -643,10 +643,7 @@
             border-color: rgba(96, 165, 250, 0.4) !important;
         }
 
-        /* Table striped */
-        [data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) > * {
-            background-color: rgba(255, 255, 255, 0.02);
-        }
+        /* Table striped - see comprehensive table rules below */
 
         /* bg-opacity variants used with bg-success, bg-primary etc. */
         [data-theme="dark"] .bg-success.bg-opacity-10 {
@@ -686,26 +683,24 @@
             background-color: rgba(75, 140, 212, 0.15) !important;
         }
 
-        /* Feature comparison table in dark mode */
-        [data-theme="dark"] #featureComparisonBody .table {
-            color: var(--text-color);
-            --bs-table-bg: transparent;
-            --bs-table-striped-bg: rgba(255, 255, 255, 0.03);
-        }
-        [data-theme="dark"] #featureComparisonBody .table td,
-        [data-theme="dark"] #featureComparisonBody .table th {
-            border-color: var(--border-color);
-            background-color: inherit;
-        }
-        [data-theme="dark"] #featureComparisonBody .table thead {
-            --bs-table-bg: var(--gray-100);
-        }
-
         /* All tables in dark mode - override Bootstrap striping */
         [data-theme="dark"] .table {
-            --bs-table-bg: transparent;
-            --bs-table-striped-bg: rgba(255, 255, 255, 0.03);
-            --bs-table-hover-bg: rgba(255, 255, 255, 0.05);
+            --bs-table-bg: transparent !important;
+            --bs-table-striped-bg: rgba(255, 255, 255, 0.03) !important;
+            --bs-table-hover-bg: rgba(255, 255, 255, 0.05) !important;
+            --bs-table-accent-bg: rgba(255, 255, 255, 0.03) !important;
+            color: var(--text-color);
+        }
+        [data-theme="dark"] .table > :not(caption) > * > * {
+            background-color: transparent !important;
+            color: var(--text-color);
+            border-color: var(--border-color);
+        }
+        [data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) > * {
+            background-color: rgba(255, 255, 255, 0.03) !important;
+        }
+        [data-theme="dark"] .table > thead > tr > * {
+            background-color: var(--gray-100) !important;
         }
 
         /* Alert info */

@@ -356,41 +356,35 @@ def check_cpe_coverage():
 def check_license_status():
     """Check license validity and usage limits."""
     try:
-        from app.licensing import get_license_info
-        info = get_license_info()
+        from app.licensing import get_license
+        license_info = get_license()
 
-        if not info or not info.get('valid'):
-            _record('license_status', 'critical',
-                    'No valid license found',
-                    'invalid', {'license_info': info})
+        if not license_info or not license_info.is_valid:
+            edition = license_info.get_effective_edition() if license_info else 'unknown'
+            _record('license_status', 'ok',
+                    f'Running in {edition} mode',
+                    edition)
             return
 
-        plan = info.get('plan', 'unknown')
-        expires = info.get('expires_at')
+        plan = license_info.get_effective_edition()
+        expires = str(license_info.expires_at) if license_info.expires_at else None
         details = {'plan': plan, 'expires_at': expires}
+        days_left = license_info.days_until_expiry
 
-        if expires:
-            try:
-                exp_date = datetime.fromisoformat(expires.replace('Z', '+00:00'))
-                days_left = (exp_date - datetime.utcnow().replace(tzinfo=exp_date.tzinfo)).days
-                details['days_until_expiry'] = days_left
-
-                if days_left < 0:
-                    _record('license_status', 'critical',
-                            f'License expired {abs(days_left)} days ago',
-                            'expired', details)
-                elif days_left < 30:
-                    _record('license_status', 'warning',
-                            f'License expires in {days_left} days',
-                            f'{days_left}d left', details)
-                else:
-                    _record('license_status', 'ok',
-                            f'License valid ({plan}, {days_left}d remaining)',
-                            f'{plan}', details)
-            except (ValueError, TypeError):
-                _record('license_status', 'ok',
-                        f'License valid ({plan})',
-                        f'{plan}', details)
+        if license_info.is_expired:
+            _record('license_status', 'critical',
+                    f'License expired',
+                    'expired', details)
+        elif days_left is not None and days_left < 30:
+            details['days_until_expiry'] = days_left
+            _record('license_status', 'warning',
+                    f'License expires in {days_left} days',
+                    f'{days_left}d left', details)
+        elif days_left is not None:
+            details['days_until_expiry'] = days_left
+            _record('license_status', 'ok',
+                    f'License valid ({plan}, {days_left}d remaining)',
+                    f'{plan}', details)
         else:
             _record('license_status', 'ok',
                     f'License valid ({plan}, no expiration)',
@@ -411,16 +405,16 @@ def check_smtp_connectivity():
         smtp_host = None
         smtp_port = None
 
-        # Check org-level SMTP settings first, then global
-        setting_host = SystemSettings.query.filter_by(key='smtp_server').first()
+        # Check global SMTP settings (same keys used by email_alerts.py)
+        setting_host = SystemSettings.query.filter_by(key='smtp_host').first()
         setting_port = SystemSettings.query.filter_by(key='smtp_port').first()
 
         if setting_host and setting_host.value:
             smtp_host = setting_host.value
             smtp_port = int(setting_port.value) if setting_port and setting_port.value else 587
         else:
-            # Check environment
-            smtp_host = os.environ.get('SMTP_SERVER') or os.environ.get('MAIL_SERVER')
+            # Check environment (same env vars used by settings_api.py)
+            smtp_host = os.environ.get('SMTP_HOST') or os.environ.get('SMTP_SERVER') or os.environ.get('MAIL_SERVER')
             smtp_port = int(os.environ.get('SMTP_PORT', os.environ.get('MAIL_PORT', '587')))
 
         if not smtp_host:
