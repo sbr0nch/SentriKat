@@ -199,6 +199,51 @@
         min-width: 120px;
     }
 
+    /* --- Log Viewer --- */
+    .log-line {
+        padding: 1px 12px;
+        border-bottom: 1px solid rgba(128,128,128,0.08);
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    .log-line:hover {
+        background-color: rgba(59, 130, 246, 0.06);
+    }
+    .log-error {
+        color: #dc3545;
+        background-color: rgba(220, 53, 69, 0.04);
+    }
+    .log-warning {
+        color: #d97706;
+        background-color: rgba(217, 119, 6, 0.04);
+    }
+    .log-debug {
+        color: #6b7280;
+    }
+    [data-theme="dark"] .log-error {
+        color: #f87171;
+        background-color: rgba(248, 113, 113, 0.08);
+    }
+    [data-theme="dark"] .log-warning {
+        color: #fbbf24;
+        background-color: rgba(251, 191, 36, 0.06);
+    }
+    [data-theme="dark"] .log-debug {
+        color: #9ca3af;
+    }
+    [data-theme="dark"] .log-line:hover {
+        background-color: rgba(59, 130, 246, 0.1);
+    }
+    .log-line mark {
+        background-color: #fef08a;
+        color: inherit;
+        padding: 0 2px;
+        border-radius: 2px;
+    }
+    [data-theme="dark"] .log-line mark {
+        background-color: rgba(250, 204, 21, 0.3);
+    }
+
     /* --- Feature comparison collapse chevron rotation --- */
     [data-bs-target="#featureComparisonBody"] #featureComparisonChevron {
         transition: transform 0.2s ease;
@@ -1228,6 +1273,16 @@
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="health-settings-tab" type="button" onclick="showSettingsGroup('health', this)">
                         <i class="bi bi-heart-pulse me-2"></i>Health Checks
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="logs-settings-tab" type="button" onclick="showSettingsGroup('logs', this)">
+                        <i class="bi bi-journal-text me-2"></i>Logs
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="guide-settings-tab" type="button" onclick="showSettingsGroup('guide', this)">
+                        <i class="bi bi-book me-2"></i>Admin Guide
                     </button>
                 </li>
                 {% endif %}
@@ -3155,6 +3210,229 @@
                     </div>
                 </div>
 
+                <!-- Admin Guide -->
+                <div class="tab-pane fade" id="guideSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-book me-2"></i>Administration & Troubleshooting Guide
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-4">
+                                <!-- Log Files Section -->
+                                <div class="col-12">
+                                    <h5 class="fw-bold"><i class="bi bi-journal-text me-2 text-primary"></i>Log Files</h5>
+                                    <p class="text-muted mb-2">SentriKat writes structured logs to <code>/var/log/sentrikat/</code> (configurable via <code>LOG_DIR</code> env var).</p>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped mb-3">
+                                            <thead><tr><th>File</th><th>Contents</th><th>Level</th></tr></thead>
+                                            <tbody>
+                                                <tr><td><code>application.log</code></td><td>General application events, startup, sync operations</td><td>INFO+</td></tr>
+                                                <tr><td><code>error.log</code></td><td>Errors and critical failures only</td><td>ERROR+</td></tr>
+                                                <tr><td><code>security.log</code></td><td>Login attempts, permission denials, auth events</td><td>WARNING+</td></tr>
+                                                <tr><td><code>access.log</code></td><td>HTTP request log (method, URL, status, duration)</td><td>INFO</td></tr>
+                                                <tr><td><code>audit.log</code></td><td>Data modification trail (JSON format) &mdash; who changed what</td><td>INFO</td></tr>
+                                                <tr><td><code>performance.log</code></td><td>Slow queries and endpoints (JSON format)</td><td>INFO</td></tr>
+                                                <tr><td><code>ldap.log</code></td><td>LDAP/AD operations and sync events</td><td>INFO</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <p class="small text-muted mb-0">Logs rotate automatically (10-20 MB per file, up to 50 backups for audit logs). You can view them in the <a href="#" onclick="showSettingsGroup('logs', document.getElementById('logs-settings-tab'));return false;">Logs tab</a> above.</p>
+                                </div>
+
+                                <!-- Docker Commands Section -->
+                                <div class="col-12">
+                                    <h5 class="fw-bold"><i class="bi bi-terminal me-2 text-success"></i>Docker Commands</h5>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm mb-0">
+                                            <tbody>
+                                                <tr>
+                                                    <td style="width: 40%;"><code>docker-compose logs -f sentrikat</code></td>
+                                                    <td>Follow live application logs (stdout/stderr)</td>
+                                                </tr>
+                                                <tr>
+                                                    <td><code>docker-compose logs --tail=500 sentrikat</code></td>
+                                                    <td>Show last 500 lines of container output</td>
+                                                </tr>
+                                                <tr>
+                                                    <td><code>docker-compose exec sentrikat cat /var/log/sentrikat/error.log</code></td>
+                                                    <td>Read the error log directly inside the container</td>
+                                                </tr>
+                                                <tr>
+                                                    <td><code>docker-compose exec sentrikat tail -f /var/log/sentrikat/application.log</code></td>
+                                                    <td>Follow the application log in real-time</td>
+                                                </tr>
+                                                <tr>
+                                                    <td><code>docker-compose restart sentrikat</code></td>
+                                                    <td>Restart the application container</td>
+                                                </tr>
+                                                <tr>
+                                                    <td><code>docker-compose exec db psql -U sentrikat</code></td>
+                                                    <td>Open a PostgreSQL shell (for advanced troubleshooting)</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Health Checks Section -->
+                                <div class="col-12">
+                                    <h5 class="fw-bold"><i class="bi bi-heart-pulse me-2 text-danger"></i>Health Checks</h5>
+                                    <p class="text-muted mb-2">SentriKat runs background health checks every 30 minutes. View results in the <a href="#" onclick="showSettingsGroup('health', document.getElementById('health-settings-tab'));return false;">Health Checks tab</a>. You can also trigger them via the API:</p>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm mb-2">
+                                            <tbody>
+                                                <tr>
+                                                    <td style="width: 40%;"><code>POST /api/admin/health-checks/run</code></td>
+                                                    <td>Run all health checks and return results</td>
+                                                </tr>
+                                                <tr>
+                                                    <td><code>GET /api/admin/health-checks</code></td>
+                                                    <td>Get latest health check results (JSON)</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <p class="small text-muted mb-0">Health check notifications also appear in the notification banner at the top of the page when issues are detected.</p>
+                                </div>
+
+                                <!-- Common Troubleshooting Section -->
+                                <div class="col-12">
+                                    <h5 class="fw-bold"><i class="bi bi-wrench me-2 text-warning"></i>Common Troubleshooting</h5>
+                                    <div class="accordion" id="troubleshootingAccordion">
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#ts1">Health checks show "column does not exist" errors</button></h2>
+                                            <div id="ts1" class="accordion-collapse collapse" data-bs-parent="#troubleshootingAccordion">
+                                                <div class="accordion-body small">Database schema is out of date. Restart the container &mdash; SentriKat auto-applies schema migrations on startup. If the issue persists, check <code>error.log</code> for the specific column name and verify the migration list in <code>app/__init__.py</code>.</div>
+                                            </div>
+                                        </div>
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#ts2">Agents not reporting / stuck offline</button></h2>
+                                            <div id="ts2" class="accordion-collapse collapse" data-bs-parent="#troubleshootingAccordion">
+                                                <div class="accordion-body small">Check: (1) Agent API key is active and not expired &mdash; go to Integrations &gt; Push Agents. (2) Agent can reach the server URL. (3) Check <code>security.log</code> for 401/403 errors from agent IPs. (4) Verify the agent service is running on the host (<code>systemctl status sentrikat-agent</code> or check Task Scheduler on Windows).</div>
+                                            </div>
+                                        </div>
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#ts3">CVE sync failing or stale data</button></h2>
+                                            <div id="ts3" class="accordion-collapse collapse" data-bs-parent="#troubleshootingAccordion">
+                                                <div class="accordion-body small">Check: (1) Network connectivity from the container to the internet. (2) If behind a proxy, set <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> env vars in docker-compose.yml and configure proxy in Settings &gt; System &gt; General. (3) Check <code>application.log</code> for sync errors. (4) Try a manual sync from the Dashboard sync button.</div>
+                                            </div>
+                                        </div>
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#ts4">Email alerts not being sent</button></h2>
+                                            <div id="ts4" class="accordion-collapse collapse" data-bs-parent="#troubleshootingAccordion">
+                                                <div class="accordion-body small">Check: (1) SMTP is configured in Settings &gt; Email &amp; Alerts (check the health check status for SMTP). (2) Verify the SMTP host is reachable from inside the container: <code>docker-compose exec sentrikat python -c "import socket; print(socket.create_connection(('smtp-host', 587), 5))"</code>. (3) Check <code>error.log</code> for SMTP connection errors. (4) Ensure alert recipients are configured for the organization.</div>
+                                            </div>
+                                        </div>
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#ts5">Slow performance or high memory usage</button></h2>
+                                            <div id="ts5" class="accordion-collapse collapse" data-bs-parent="#troubleshootingAccordion">
+                                                <div class="accordion-body small">Check <code>performance.log</code> for slow endpoints and queries. Common fixes: (1) Ensure database has enough resources &mdash; check <code>docker stats</code>. (2) Review data retention settings (Settings &gt; System &gt; Data Retention) to prune old records. (3) Consider increasing container memory limits in docker-compose.yml. The health check for disk space and database response time can also help identify issues.</div>
+                                            </div>
+                                        </div>
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#ts6">500 Internal Server Error</button></h2>
+                                            <div id="ts6" class="accordion-collapse collapse" data-bs-parent="#troubleshootingAccordion">
+                                                <div class="accordion-body small">Check <code>error.log</code> for the full stack trace. Common causes: (1) Missing database columns &mdash; restart to apply migrations. (2) Database connection pool exhausted &mdash; restart the container. (3) Disk full &mdash; check disk space health check. Copy the traceback from the error log when reporting issues.</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- API Documentation Section -->
+                                <div class="col-12">
+                                    <h5 class="fw-bold"><i class="bi bi-code-slash me-2 text-info"></i>API Documentation</h5>
+                                    <p class="text-muted mb-2">Interactive API documentation is available at:</p>
+                                    <div class="d-flex gap-3">
+                                        <a href="/api/docs" target="_blank" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-file-earmark-code me-1"></i>Swagger UI (Interactive)
+                                        </a>
+                                        <a href="/api/spec.json" target="_blank" class="btn btn-outline-secondary btn-sm">
+                                            <i class="bi bi-filetype-json me-1"></i>OpenAPI Spec (JSON)
+                                        </a>
+                                    </div>
+                                </div>
+
+                                <!-- Key Environment Variables -->
+                                <div class="col-12">
+                                    <h5 class="fw-bold"><i class="bi bi-gear me-2 text-secondary"></i>Key Environment Variables</h5>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped mb-0">
+                                            <thead><tr><th>Variable</th><th>Description</th><th>Default</th></tr></thead>
+                                            <tbody>
+                                                <tr><td><code>SECRET_KEY</code></td><td>Flask session secret (change in production)</td><td>Random</td></tr>
+                                                <tr><td><code>ENCRYPTION_KEY</code></td><td>Fernet key for encrypting sensitive settings</td><td>Derived from SECRET_KEY</td></tr>
+                                                <tr><td><code>DATABASE_URL</code></td><td>PostgreSQL connection string</td><td>sqlite:///data/sentrikat.db</td></tr>
+                                                <tr><td><code>SENTRIKAT_LICENSE</code></td><td>License key (alternative to GUI activation)</td><td>&mdash;</td></tr>
+                                                <tr><td><code>LOG_DIR</code></td><td>Directory for log files</td><td>/var/log/sentrikat</td></tr>
+                                                <tr><td><code>SMTP_HOST</code></td><td>SMTP server hostname</td><td>&mdash;</td></tr>
+                                                <tr><td><code>SMTP_PORT</code></td><td>SMTP server port</td><td>587</td></tr>
+                                                <tr><td><code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code></td><td>Proxy for outbound connections (CVE sync, license validation)</td><td>&mdash;</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Log Viewer -->
+                <div class="tab-pane fade" id="logsSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-journal-text me-2"></i>System Logs</span>
+                            <div class="d-flex gap-2 align-items-center">
+                                <select class="form-select form-select-sm" id="logFileSelect" onchange="loadLogFile()" style="width: auto;">
+                                    <option value="application">Application</option>
+                                    <option value="error">Errors</option>
+                                    <option value="security">Security</option>
+                                    <option value="access">Access</option>
+                                    <option value="audit">Audit</option>
+                                    <option value="performance">Performance</option>
+                                    <option value="ldap">LDAP</option>
+                                </select>
+                                <select class="form-select form-select-sm" id="logLevelFilter" onchange="loadLogFile()" style="width: auto;">
+                                    <option value="">All Levels</option>
+                                    <option value="ERROR">ERROR</option>
+                                    <option value="WARNING">WARNING</option>
+                                    <option value="INFO">INFO</option>
+                                    <option value="DEBUG">DEBUG</option>
+                                </select>
+                                <div class="input-group input-group-sm" style="width: 220px;">
+                                    <input type="text" class="form-control" id="logSearchInput" placeholder="Search logs..." onkeydown="if(event.key==='Enter')loadLogFile()">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="loadLogFile()">
+                                        <i class="bi bi-search"></i>
+                                    </button>
+                                </div>
+                                <select class="form-select form-select-sm" id="logLinesCount" onchange="loadLogFile()" style="width: auto;">
+                                    <option value="100">100 lines</option>
+                                    <option value="200" selected>200 lines</option>
+                                    <option value="500">500 lines</option>
+                                    <option value="1000">1000 lines</option>
+                                    <option value="3000">3000 lines</option>
+                                </select>
+                                <button class="btn btn-outline-primary btn-sm" onclick="loadLogFile()" title="Refresh">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" onclick="downloadLogFile()" title="Download">
+                                    <i class="bi bi-download"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div id="logFileInfo" class="px-3 py-2 border-bottom small text-muted d-flex justify-content-between">
+                                <span id="logFileStats"></span>
+                                <span id="logFilePath"></span>
+                            </div>
+                            <div id="logViewerContainer" style="height: 600px; overflow-y: auto; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.78rem; line-height: 1.5;">
+                                <div class="text-center py-4">
+                                    <span class="text-muted">Select a log file to view</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Health Checks Settings -->
                 <div class="tab-pane fade" id="healthSettings" role="tabpanel">
                     <div class="card">
@@ -4376,6 +4654,82 @@ async function rebuildCpeDictionary() {
 
 // Load CPE dict & KB status when settings tab is active
 setTimeout(() => { loadCpeDictStatus(); loadKbStatus(); }, 2000);
+
+// ============================================================================
+// Log Viewer
+// ============================================================================
+
+async function loadLogFile() {
+    const container = document.getElementById('logViewerContainer');
+    const logName = document.getElementById('logFileSelect').value;
+    const level = document.getElementById('logLevelFilter').value;
+    const search = document.getElementById('logSearchInput').value;
+    const lines = document.getElementById('logLinesCount').value;
+
+    container.innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm text-primary"></div> Loading...</div>';
+
+    try {
+        const params = new URLSearchParams({lines});
+        if (search) params.set('search', search);
+        if (level) params.set('level', level);
+
+        const resp = await fetch(`/api/admin/logs/${logName}?${params}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        document.getElementById('logFileStats').textContent =
+            `Showing ${data.returned} of ${data.total} lines | File size: ${formatBytes(data.file_size || 0)}`;
+
+        if (!data.lines || data.lines.length === 0) {
+            container.innerHTML = '<div class="text-center py-4 text-muted"><i class="bi bi-journal me-2"></i>No log entries found</div>';
+            return;
+        }
+
+        const searchLower = search.toLowerCase();
+        const html = data.lines.map(line => {
+            let cls = 'log-line';
+            if (line.includes('ERROR') || line.includes('CRITICAL')) cls += ' log-error';
+            else if (line.includes('WARNING')) cls += ' log-warning';
+            else if (line.includes('DEBUG')) cls += ' log-debug';
+
+            let escaped = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            // Highlight search term
+            if (searchLower) {
+                const regex = new RegExp(`(${search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+                escaped = escaped.replace(regex, '<mark>$1</mark>');
+            }
+            return `<div class="${cls}">${escaped}</div>`;
+        }).join('');
+
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${e.message}</div>`;
+    }
+}
+
+function downloadLogFile() {
+    const logName = document.getElementById('logFileSelect').value;
+    window.open(`/api/admin/logs/${logName}/download`, '_blank');
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Auto-load logs when the logs tab becomes visible
+const _logsPane = document.getElementById('logsSettings');
+if (_logsPane) {
+    const observer = new MutationObserver(() => {
+        if (_logsPane.classList.contains('show') && _logsPane.classList.contains('active')) {
+            loadLogFile();
+        }
+    });
+    observer.observe(_logsPane, { attributes: true, attributeFilter: ['class'] });
+}
 
 // ============================================================================
 // Health Checks

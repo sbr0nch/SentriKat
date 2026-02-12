@@ -79,6 +79,8 @@ def _apply_schema_migrations(logger, db_uri):
         ('assets', 'pending_update', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
         ('assets', 'pending_update_requested_at', 'DATETIME', 'TIMESTAMP'),
         ('assets', 'pending_update_requested_by', 'VARCHAR(100)', 'VARCHAR(100)'),
+        # Inventory job retry tracking
+        ('inventory_jobs', 'retry_count', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

@@ -1723,6 +1723,7 @@ class InventoryJob(db.Model):
     items_updated = db.Column(db.Integer, default=0)
     items_failed = db.Column(db.Integer, default=0)
     error_message = db.Column(db.Text, nullable=True)
+    retry_count = db.Column(db.Integer, default=0)  # Number of retry attempts after stuck/failed
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)

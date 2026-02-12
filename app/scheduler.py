@@ -761,24 +761,40 @@ def stuck_job_recovery_job(app):
     Recover stuck inventory jobs.
 
     If a background worker crashes mid-processing, the job stays in 'processing'
-    status forever. This job marks them as 'failed' so they can be retried.
+    status forever. This job resets them to 'pending' for retry (up to 3 attempts)
+    or marks them as 'failed' if max retries exceeded.
     Runs every 10 minutes.
     """
+    MAX_RETRIES = 3
     with app.app_context():
         try:
             from app.models import InventoryJob
             cutoff = datetime.utcnow() - timedelta(minutes=30)
             stuck_jobs = InventoryJob.query.filter(
                 InventoryJob.status == 'processing',
-                InventoryJob.updated_at < cutoff
+                InventoryJob.started_at < cutoff
             ).all()
+            recovered = 0
+            failed = 0
             for job in stuck_jobs:
-                logger.warning(f"Recovering stuck job {job.id} (stuck since {job.updated_at})")
-                job.status = 'pending'  # Reset to pending for retry
-                job.error_message = 'Recovered from stuck processing state'
+                retry_count = job.retry_count if hasattr(job, 'retry_count') and job.retry_count else 0
+                if retry_count >= MAX_RETRIES:
+                    logger.warning(f"Job {job.id} exceeded max retries ({MAX_RETRIES}), marking as failed")
+                    job.status = 'failed'
+                    job.error_message = f'Failed after {MAX_RETRIES} retry attempts (stuck in processing)'
+                    job.completed_at = datetime.utcnow()
+                    failed += 1
+                else:
+                    logger.warning(f"Recovering stuck job {job.id} (stuck since {job.started_at}, retry {retry_count + 1}/{MAX_RETRIES})")
+                    job.status = 'pending'
+                    job.started_at = None
+                    job.error_message = f'Recovered from stuck state (retry {retry_count + 1})'
+                    if hasattr(job, 'retry_count'):
+                        job.retry_count = retry_count + 1
+                    recovered += 1
             if stuck_jobs:
                 db.session.commit()
-                logger.info(f"Recovered {len(stuck_jobs)} stuck inventory jobs")
+                logger.info(f"Stuck job recovery: {recovered} recovered, {failed} permanently failed")
         except Exception as e:
             logger.error(f"Stuck job recovery failed: {str(e)}", exc_info=True)
             try:

@@ -184,6 +184,132 @@ def run_health_checks_now():
         return jsonify({'error': str(e)}), 500
 
 
+# ============================================================================
+# Log Viewer API (Super Admin only)
+# ============================================================================
+
+LOG_FILES = {
+    'application': 'application.log',
+    'error': 'error.log',
+    'security': 'security.log',
+    'access': 'access.log',
+    'audit': 'audit.log',
+    'performance': 'performance.log',
+    'ldap': 'ldap.log',
+}
+
+def _get_log_dir():
+    """Get the log directory path."""
+    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    if not os.path.exists(log_dir):
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+    return log_dir
+
+
+@bp.route('/api/admin/logs', methods=['GET'])
+@login_required
+@admin_required
+def list_log_files():
+    """List available log files with sizes."""
+    log_dir = _get_log_dir()
+    files = []
+    for key, filename in LOG_FILES.items():
+        filepath = os.path.join(log_dir, filename)
+        if os.path.exists(filepath):
+            stat = os.stat(filepath)
+            files.append({
+                'key': key,
+                'filename': filename,
+                'size': stat.st_size,
+                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
+    return jsonify({'log_dir': log_dir, 'files': files})
+
+
+@bp.route('/api/admin/logs/<log_name>', methods=['GET'])
+@login_required
+@admin_required
+def view_log_file(log_name):
+    """
+    View a log file with tail/search support.
+    Query params:
+      lines: number of lines from end (default 200, max 5000)
+      search: filter lines containing this string (case-insensitive)
+      level: filter by log level (ERROR, WARNING, INFO, etc.)
+    """
+    if log_name not in LOG_FILES:
+        return jsonify({'error': 'Invalid log file'}), 400
+
+    log_dir = _get_log_dir()
+    filepath = os.path.join(log_dir, LOG_FILES[log_name])
+
+    if not os.path.exists(filepath):
+        return jsonify({'lines': [], 'total': 0, 'message': 'Log file not found or empty'})
+
+    max_lines = min(int(request.args.get('lines', 200)), 5000)
+    search = request.args.get('search', '').strip().lower()
+    level_filter = request.args.get('level', '').strip().upper()
+
+    try:
+        # Read file in reverse efficiently (tail behavior)
+        lines = []
+        file_size = os.path.getsize(filepath)
+
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            # For small files, read all at once
+            if file_size < 5 * 1024 * 1024:  # < 5MB
+                all_lines = f.readlines()
+            else:
+                # For large files, seek to approximate position near end
+                approx_pos = max(0, file_size - (max_lines * 500))  # ~500 bytes per line estimate
+                f.seek(approx_pos)
+                if approx_pos > 0:
+                    f.readline()  # Skip partial line
+                all_lines = f.readlines()
+
+        # Apply filters
+        for line in reversed(all_lines):
+            line = line.rstrip('\n')
+            if not line:
+                continue
+            if search and search not in line.lower():
+                continue
+            if level_filter and level_filter not in line:
+                continue
+            lines.append(line)
+            if len(lines) >= max_lines:
+                break
+
+        return jsonify({
+            'lines': lines,  # Already newest-first
+            'total': len(all_lines),
+            'returned': len(lines),
+            'file_size': file_size
+        })
+    except Exception as e:
+        logger.error(f"Error reading log file {log_name}: {e}")
+        return jsonify({'error': f'Error reading log: {str(e)[:200]}'}), 500
+
+
+@bp.route('/api/admin/logs/<log_name>/download', methods=['GET'])
+@login_required
+@admin_required
+def download_log_file(log_name):
+    """Download a log file."""
+    if log_name not in LOG_FILES:
+        return jsonify({'error': 'Invalid log file'}), 400
+
+    log_dir = _get_log_dir()
+    filepath = os.path.join(log_dir, LOG_FILES[log_name])
+
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'Log file not found'}), 404
+
+    return send_from_directory(log_dir, LOG_FILES[log_name],
+                               as_attachment=True,
+                               download_name=f'sentrikat-{log_name}-{datetime.utcnow().strftime("%Y%m%d")}.log')
+
+
 @bp.route('/api/system/notifications', methods=['GET'])
 @login_required
 def system_notifications():
@@ -310,6 +436,42 @@ def system_notifications():
                     'action': {'label': 'Review', 'url': '/admin#import-queue'},
                     'dismissible': True
                 })
+
+        # 7. Health check warnings/criticals - admin only
+        if is_admin:
+            try:
+                from app.models import HealthCheckResult
+                health_issues = HealthCheckResult.query.filter(
+                    HealthCheckResult.status.in_(['critical', 'warning'])
+                ).all()
+
+                critical_count = sum(1 for h in health_issues if h.status == 'critical')
+                warning_count = sum(1 for h in health_issues if h.status == 'warning')
+
+                if critical_count > 0:
+                    messages = [h.message for h in health_issues if h.status == 'critical']
+                    summary = messages[0] if len(messages) == 1 else f'{critical_count} critical issue{"s" if critical_count != 1 else ""}'
+                    notifications.append({
+                        'id': 'health_critical',
+                        'level': 'danger',
+                        'icon': 'bi-heart-pulse-fill',
+                        'message': f'System health: {summary}',
+                        'action': {'label': 'View', 'url': '/admin-panel#settings:health'},
+                        'dismissible': True
+                    })
+                elif warning_count > 0:
+                    messages = [h.message for h in health_issues if h.status == 'warning']
+                    summary = messages[0] if len(messages) == 1 else f'{warning_count} warning{"s" if warning_count != 1 else ""}'
+                    notifications.append({
+                        'id': 'health_warning',
+                        'level': 'warning',
+                        'icon': 'bi-heart-pulse',
+                        'message': f'System health: {summary}',
+                        'action': {'label': 'View', 'url': '/admin-panel#settings:health'},
+                        'dismissible': True
+                    })
+            except Exception:
+                pass
 
     except Exception as e:
         logger.error(f"Error fetching system notifications: {e}")
