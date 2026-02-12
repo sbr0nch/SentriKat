@@ -5,6 +5,7 @@ Supports: Internal SMTP, Gmail, Office365, and other SMTP providers
 
 import smtplib
 import json
+import logging
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -12,6 +13,8 @@ from datetime import datetime, date, time as dt_time
 from app.models import Organization, VulnerabilityMatch, AlertLog, Vulnerability
 from app import db
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 
 def get_app_url():

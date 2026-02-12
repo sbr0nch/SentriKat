@@ -12,7 +12,7 @@ Rate Limiting:
 - General queries: 100/minute per IP
 """
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, Response
 from datetime import datetime, timedelta
 from functools import wraps
 import logging

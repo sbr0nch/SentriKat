@@ -2016,7 +2016,7 @@ try:
                 name = name.replace('\"', '').replace('\\\\\\\\', '')
                 ver = ver.replace('\"', '') if ver else ''
                 vendor = vendor.replace('\"', '') if vendor else 'system_profiler'
-                print(f'{{{{\"vendor\":\"{vendor}\",\"product\":\"{name}\",\"version\":\"{ver}\"}}}},')
+                print(f'{{{{\"vendor\":\"{vendor}\",\"product\":\"{name}\",\"version\":\"{ver}\"}}}},')  # noqa: F821
 except Exception:
     pass
 " >> "$PRODUCTS_FILE" 2>/dev/null || true
