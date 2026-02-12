@@ -5,6 +5,7 @@ from app.cisa_sync import sync_cisa_kev
 from app import db
 from config import Config
 from datetime import datetime, timedelta
+import json
 import logging
 import os
 import threading
@@ -196,6 +197,17 @@ def start_scheduler(app):
         replace_existing=True
     )
     logger.info("Asset type auto-detection scheduled daily at 06:00")
+
+    # Schedule agent offline detection (every 15 minutes)
+    # Marks agents as offline/stale based on last check-in time
+    scheduler.add_job(
+        func=lambda: _run_with_lock('agent_offline_detection', agent_offline_detection_job, app),
+        trigger=IntervalTrigger(minutes=15),
+        id='agent_offline_detection',
+        name='Agent Offline Detection',
+        replace_existing=True
+    )
+    logger.info("Agent offline detection scheduled every 15 minutes")
 
     # Schedule unmapped CPE retry (weekly, Mondays at 05:00 - after Sunday CPE dict sync)
     scheduler.add_job(
@@ -870,3 +882,87 @@ def unmapped_cpe_retry_job(app):
             logger.info(f"CPE retry complete: {result}")
         except Exception as e:
             logger.error(f"Unmapped CPE retry failed: {str(e)}", exc_info=True)
+
+
+def agent_offline_detection_job(app):
+    """
+    Detect agents that have gone offline and log status change events.
+
+    Runs every 15 minutes. Transitions:
+    - online → offline: no check-in for 1 hour
+    - online/offline → stale: no check-in for 14 days (configurable)
+
+    Logs AgentEvent for each status transition so the Agent Activity page
+    and activity log capture offline/reconnection events automatically.
+    """
+    with app.app_context():
+        try:
+            from app.models import Asset, AgentEvent
+            from sqlalchemy import or_
+
+            now = datetime.utcnow()
+            offline_threshold = now - timedelta(hours=1)
+            stale_threshold = now - timedelta(days=14)
+
+            # Find assets going offline (online → offline)
+            going_offline = Asset.query.filter(
+                Asset.status == 'online',
+                Asset.last_checkin < offline_threshold
+            ).all()
+
+            for asset in going_offline:
+                asset.status = 'offline'
+                try:
+                    AgentEvent.log_event(
+                        organization_id=asset.organization_id,
+                        event_type='status_changed',
+                        asset_id=asset.id,
+                        old_value='online',
+                        new_value='offline',
+                        details=json.dumps({
+                            'reason': 'no_heartbeat',
+                            'last_checkin': asset.last_checkin.isoformat() if asset.last_checkin else None,
+                            'threshold_hours': 1
+                        })
+                    )
+                except Exception:
+                    pass
+
+            # Find assets going stale (online/offline → stale)
+            going_stale = Asset.query.filter(
+                Asset.status.in_(['online', 'offline']),
+                or_(Asset.last_checkin.is_(None), Asset.last_checkin < stale_threshold)
+            ).all()
+
+            for asset in going_stale:
+                old_status = asset.status
+                asset.status = 'stale'
+                try:
+                    AgentEvent.log_event(
+                        organization_id=asset.organization_id,
+                        event_type='status_changed',
+                        asset_id=asset.id,
+                        old_value=old_status,
+                        new_value='stale',
+                        details=json.dumps({
+                            'reason': 'no_heartbeat',
+                            'last_checkin': asset.last_checkin.isoformat() if asset.last_checkin else None,
+                            'threshold_days': 14
+                        })
+                    )
+                except Exception:
+                    pass
+
+            if going_offline or going_stale:
+                db.session.commit()
+                logger.info(
+                    f"Agent offline detection: {len(going_offline)} marked offline, "
+                    f"{len(going_stale)} marked stale"
+                )
+
+        except Exception as e:
+            logger.error(f"Agent offline detection failed: {str(e)}", exc_info=True)
+            try:
+                db.session.rollback()
+            except Exception:
+                pass

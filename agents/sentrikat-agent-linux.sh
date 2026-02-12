@@ -664,6 +664,79 @@ send_heartbeat() {
         --max-time 30 >/dev/null 2>&1
 }
 
+auto_update_agent() {
+    # Auto-update the agent script from the server
+    # Flow: download -> verify -> backup -> replace -> restart service
+    local target_version="$1"
+    local download_url="${SERVER_URL}/api/agent/download/linux"
+    local script_path="/usr/local/bin/sentrikat-agent"
+    local backup_path="${script_path}.backup.${AGENT_VERSION}"
+    local tmp_script
+
+    log_info "Auto-updating agent: ${AGENT_VERSION} -> ${target_version}"
+
+    # Download new script to temp file
+    tmp_script=$(mktemp)
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" -o "$tmp_script" \
+        -H "X-Agent-Key: $API_KEY" \
+        --max-time 60 "$download_url" 2>/dev/null)
+
+    if [[ "$http_code" != "200" ]]; then
+        log_error "Failed to download update (HTTP $http_code)"
+        rm -f "$tmp_script"
+        return 1
+    fi
+
+    # Verify the downloaded script is valid bash
+    if ! head -1 "$tmp_script" | grep -q '^#!/bin/bash'; then
+        log_error "Downloaded file is not a valid bash script"
+        rm -f "$tmp_script"
+        return 1
+    fi
+
+    # Verify it contains the expected version
+    if ! grep -q "AGENT_VERSION=" "$tmp_script"; then
+        log_error "Downloaded script missing AGENT_VERSION marker"
+        rm -f "$tmp_script"
+        return 1
+    fi
+
+    # Backup current script
+    if [[ -f "$script_path" ]]; then
+        cp "$script_path" "$backup_path" 2>/dev/null || true
+        log_info "Backed up current agent to $backup_path"
+    fi
+
+    # Replace the script
+    chmod +x "$tmp_script"
+    if mv "$tmp_script" "$script_path" 2>/dev/null; then
+        log_info "Agent updated successfully to ${target_version}"
+
+        # Restart the systemd service if installed
+        if systemctl is-active --quiet sentrikat-agent.timer 2>/dev/null; then
+            log_info "Restarting agent service..."
+            systemctl restart sentrikat-heartbeat.service 2>/dev/null || true
+        fi
+    else
+        # mv failed (permissions?), try with sudo
+        if command -v sudo &>/dev/null; then
+            sudo mv "$tmp_script" "$script_path" 2>/dev/null && \
+                log_info "Agent updated successfully (via sudo) to ${target_version}" || {
+                log_error "Failed to replace agent script"
+                rm -f "$tmp_script"
+                # Restore backup
+                [[ -f "$backup_path" ]] && mv "$backup_path" "$script_path" 2>/dev/null
+                return 1
+            }
+        else
+            log_error "Failed to replace agent script (permission denied)"
+            rm -f "$tmp_script"
+            return 1
+        fi
+    fi
+}
+
 check_commands() {
     # Poll the server for pending commands (heartbeat with command check)
     local endpoint="${SERVER_URL}/api/agent/commands?agent_id=${AGENT_ID}&hostname=$(hostname)&version=${AGENT_VERSION}&platform=linux"
@@ -708,7 +781,7 @@ check_commands() {
         local latest_version
         latest_version=$(echo "$response" | grep -o '"latest_version": "[^"]*"' | cut -d'"' -f4)
         log_warn "Agent update available: ${AGENT_VERSION} -> ${latest_version}"
-        log_info "Download from: ${SERVER_URL}/api/agent/download/linux"
+        auto_update_agent "$latest_version"
     fi
 
     return 1  # No scan needed
