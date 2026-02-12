@@ -1075,9 +1075,10 @@ def queue_inventory_job(organization, data, api_key_id=None):
 
     try:
         # Find or create asset first (so we have asset_id for the job)
+        # agent_id (BIOS UUID) is globally unique per unique constraint
         asset = None
         if agent_id:
-            asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
+            asset = Asset.query.filter_by(agent_id=agent_id).first()
             logger.debug(f"Found asset by agent_id: {asset}")
 
         if not asset:
@@ -1534,11 +1535,8 @@ def report_inventory():
     agent_id = data.get('agent', {}).get('id')
     existing_asset = None
     if agent_id:
-        # Scope agent_id lookup to organization for proper isolation
-        existing_asset = Asset.query.filter_by(
-            agent_id=agent_id,
-            organization_id=organization.id
-        ).first()
+        # agent_id (BIOS UUID) is globally unique per unique constraint
+        existing_asset = Asset.query.filter_by(agent_id=agent_id).first()
     if not existing_asset:
         existing_asset = Asset.query.filter_by(
             organization_id=organization.id,
@@ -1591,10 +1589,10 @@ def report_inventory():
         # Find or create asset
         agent_id = data.get('agent', {}).get('id')
 
-        # Try to find by agent_id first, then hostname
+        # Try to find by agent_id first (globally unique), then hostname
         asset = None
         if agent_id:
-            asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
+            asset = Asset.query.filter_by(agent_id=agent_id).first()
 
         if not asset:
             hostname_asset = Asset.query.filter_by(
@@ -1915,7 +1913,7 @@ def agent_heartbeat():
     # Find asset
     asset = None
     if agent_id:
-        asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
+        asset = Asset.query.filter_by(agent_id=agent_id).first()
     if not asset and hostname:
         asset = Asset.query.filter_by(
             organization_id=organization.id,
@@ -3531,7 +3529,7 @@ def get_agent_commands():
     # Find asset
     asset = None
     if agent_id:
-        asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
+        asset = Asset.query.filter_by(agent_id=agent_id).first()
     if not asset and hostname:
         asset = Asset.query.filter_by(
             organization_id=organization.id,
@@ -3663,7 +3661,7 @@ def get_agent_config():
     # Find asset
     asset = None
     if agent_id:
-        asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
+        asset = Asset.query.filter_by(agent_id=agent_id).first()
     if not asset and hostname:
         asset = Asset.query.filter_by(
             organization_id=organization.id,
