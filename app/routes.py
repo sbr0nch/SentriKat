@@ -724,7 +724,9 @@ def get_products():
     from app.models import product_organizations
     from sqlalchemy import select
     import logging
+    import time
     logger = logging.getLogger(__name__)
+    _t0 = time.monotonic()
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -862,8 +864,11 @@ def get_products():
 
     # If grouped mode requested, group by vendor+product_name
     if grouped:
+      try:
         from sqlalchemy import func as sa_func
+        _t1 = time.monotonic()
         products = query.all()
+        logger.info(f"get_products: query.all() returned {len(products)} products in {time.monotonic()-_t1:.2f}s")
         grouped_products = {}
 
         # Batch-query vulnerability match counts to avoid N+1 lazy loading
@@ -871,6 +876,7 @@ def get_products():
         vuln_counts = {}
         vuln_unacked = {}
         if all_pids:
+            _t2 = time.monotonic()
             # Total match count per product
             count_rows = db.session.query(
                 VulnerabilityMatch.product_id,
@@ -891,6 +897,7 @@ def get_products():
             ).group_by(VulnerabilityMatch.product_id).all()
             for pid, cnt in unacked_rows:
                 vuln_unacked[pid] = cnt
+            logger.info(f"get_products: vuln batch queries in {time.monotonic()-_t2:.2f}s ({len(all_pids)} products)")
 
         # Batch-query organization info to avoid N+1 on p.organization
         org_map = {}  # org_id -> display name
@@ -967,6 +974,7 @@ def get_products():
             grouped_products[key]['total_vulnerabilities'] += version_entry['vulnerability_count']
 
         # Batch query platforms and installation counts for all products
+        _t3 = time.monotonic()
         all_product_ids = [v['id'] for group in grouped_products.values() for v in group['versions']]
         if all_product_ids:
             # Get platform + count per product
@@ -1026,6 +1034,8 @@ def get_products():
                         group_endpoints.update(product_endpoints[pid])
                 group['endpoint_hostnames'] = sorted(list(group_endpoints))[:20]  # Limit to first 20
 
+        logger.info(f"get_products: installation/endpoint queries in {time.monotonic()-_t3:.2f}s")
+
         # Convert to list and clean up sets
         result = []
         for key, group in grouped_products.items():
@@ -1057,6 +1067,7 @@ def get_products():
             total = len(result)
             start = (page - 1) * per_page
             end = start + per_page
+            logger.info(f"get_products (grouped): {total} groups, page {page}, total time {time.monotonic()-_t0:.2f}s")
             return jsonify({
                 'products': result[start:end],
                 'total': total,
@@ -1065,8 +1076,12 @@ def get_products():
                 'pages': (total + per_page - 1) // per_page
             })
 
-        logger.info(f"get_products (grouped): returning {len(result)} product groups")
+        logger.info(f"get_products (grouped): returning {len(result)} product groups in {time.monotonic()-_t0:.2f}s")
         return jsonify(result)
+      except Exception as e:
+        logger.exception(f"get_products (grouped) FAILED after {time.monotonic()-_t0:.2f}s: {e}")
+        db.session.rollback()
+        return jsonify({'error': f'Failed to load products: {str(e)[:300]}'}), 500
 
     # If pagination requested, return paginated result
     if page:
