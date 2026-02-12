@@ -1538,6 +1538,7 @@
                                     <div class="col-md-6">
                                         <label for="globalSmtpFromEmail" class="form-label fw-semibold">From Email *</label>
                                         <input type="email" class="form-control" id="globalSmtpFromEmail" placeholder="noreply@company.com">
+                                        <small class="form-text text-muted">Sender address for all outgoing SentriKat emails (CVE alerts, reports, notifications)</small>
                                     </div>
 
                                     <div class="col-md-6">
@@ -3380,6 +3381,7 @@
                         <div class="col-md-6">
                             <label for="email" class="form-label fw-semibold">Email *</label>
                             <input type="email" class="form-control" id="email" required>
+                            <small class="form-text text-muted">User's login email. Also used for password reset and account notifications</small>
                         </div>
 
                         <div class="col-md-12">
@@ -3627,7 +3629,7 @@
                                 <div class="col-md-12">
                                     <label for="orgEmails" class="form-label fw-semibold">Notification Emails</label>
                                     <input type="text" class="form-control" id="orgEmails" placeholder="email1@company.com, email2@company.com">
-                                    <small class="form-text text-muted">Comma-separated email addresses for vulnerability alerts</small>
+                                    <small class="form-text text-muted">SentriKat sends CVE alerts, ransomware warnings, and vulnerability reports to these addresses. Comma-separated</small>
                                 </div>
 
                                 <div class="col-md-12">
@@ -3676,6 +3678,7 @@
                                 <div class="col-md-6">
                                     <label for="smtpFromEmail" class="form-label fw-semibold">From Email</label>
                                     <input type="email" class="form-control" id="smtpFromEmail" placeholder="noreply@company.com">
+                                    <small class="form-text text-muted">Overrides global SMTP sender for this organization's alerts</small>
                                 </div>
 
                                 <div class="col-md-6">

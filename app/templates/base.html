@@ -657,6 +657,37 @@
             color: var(--text-color) !important;
         }
 
+        /* Subtle badge variants for dark mode (CPE shields, status indicators) */
+        [data-theme="dark"] .bg-success-subtle {
+            background-color: rgba(16, 185, 129, 0.2) !important;
+        }
+        [data-theme="dark"] .bg-success-subtle.text-success,
+        [data-theme="dark"] .bg-success-subtle .text-success {
+            color: #6ee7b7 !important;
+        }
+        [data-theme="dark"] .bg-warning-subtle {
+            background-color: rgba(245, 158, 11, 0.2) !important;
+        }
+        [data-theme="dark"] .bg-warning-subtle.text-warning,
+        [data-theme="dark"] .bg-warning-subtle .text-warning {
+            color: #fcd34d !important;
+        }
+        [data-theme="dark"] .bg-danger-subtle {
+            background-color: rgba(220, 38, 38, 0.2) !important;
+        }
+        [data-theme="dark"] .bg-info-subtle {
+            background-color: rgba(59, 130, 246, 0.2) !important;
+        }
+
+        /* Feature comparison table in dark mode */
+        [data-theme="dark"] #featureComparisonBody .table {
+            color: var(--text-color);
+        }
+        [data-theme="dark"] #featureComparisonBody .table td,
+        [data-theme="dark"] #featureComparisonBody .table th {
+            border-color: var(--border-color);
+        }
+
         /* Alert info */
         [data-theme="dark"] .alert-info {
             background-color: rgba(59, 130, 246, 0.15) !important;

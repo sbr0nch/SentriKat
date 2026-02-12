@@ -3761,6 +3761,73 @@
         }
     }
 
+    // Tag management for endpoints
+    async function addEndpointTag(assetId) {
+        const input = document.getElementById('newEndpointTag');
+        if (!input) return;
+        const tag = input.value.trim();
+        if (!tag) return;
+
+        try {
+            // Get current tags
+            const getResp = await fetch(`/api/assets/${assetId}`);
+            if (!getResp.ok) throw new Error('Failed to fetch asset');
+            const asset = await getResp.json();
+            const tags = asset.tags || [];
+
+            if (tags.includes(tag)) {
+                showToast(`Tag "${tag}" already exists`, 'warning');
+                return;
+            }
+
+            tags.push(tag);
+            const resp = await fetch(`/api/assets/${assetId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tags: tags })
+            });
+            if (!resp.ok) throw new Error('Failed to update');
+
+            input.value = '';
+            // Refresh the tag display
+            const container = document.getElementById('endpointTagsContainer');
+            if (container) {
+                const badge = document.createElement('span');
+                badge.className = 'badge bg-secondary me-1 mb-1';
+                badge.innerHTML = `${escapeHtml(tag)} <a href="#" class="text-white text-decoration-none ms-1" onclick="removeEndpointTag(${assetId}, '${escapeHtml(tag.replace(/'/g, "\\'"))}'); return false;">&times;</a>`;
+                container.appendChild(badge);
+            }
+        } catch (error) {
+            showToast(`Failed to add tag: ${error.message}`, 'danger');
+        }
+    }
+
+    async function removeEndpointTag(assetId, tag) {
+        try {
+            const getResp = await fetch(`/api/assets/${assetId}`);
+            if (!getResp.ok) throw new Error('Failed to fetch asset');
+            const asset = await getResp.json();
+            const tags = (asset.tags || []).filter(t => t !== tag);
+
+            const resp = await fetch(`/api/assets/${assetId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tags: tags })
+            });
+            if (!resp.ok) throw new Error('Failed to update');
+
+            // Remove the badge from UI
+            const container = document.getElementById('endpointTagsContainer');
+            if (container) {
+                Array.from(container.querySelectorAll('.badge')).forEach(b => {
+                    if (b.textContent.trim().startsWith(tag)) b.remove();
+                });
+            }
+        } catch (error) {
+            showToast(`Failed to remove tag: ${error.message}`, 'danger');
+        }
+    }
+
     // Navigate from Products table to Endpoints tab filtered by a specific product
     function showEndpointsForProduct(vendor, productName) {
         endpointsProductFilter = { vendor: vendor, product_name: productName };
@@ -3861,7 +3928,18 @@
                                         </table>
                                     </div>
                                 </div>
-                                ${tags.length > 0 ? `<div class="mb-3">${tags.map(t => `<span class="badge bg-secondary me-1">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+                                <div class="mb-3">
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                        <h6 class="mb-0"><i class="bi bi-tags me-1"></i>Tags</h6>
+                                    </div>
+                                    <div id="endpointTagsContainer" data-asset-id="${asset.id}">
+                                        ${tags.map(t => `<span class="badge bg-secondary me-1 mb-1">${escapeHtml(t)} <a href="#" class="text-white text-decoration-none ms-1" onclick="removeEndpointTag(${asset.id}, '${escapeHtml(t.replace(/'/g, "\\'"))}'); return false;">&times;</a></span>`).join('')}
+                                    </div>
+                                    <div class="input-group input-group-sm mt-1" style="max-width: 300px;">
+                                        <input type="text" class="form-control" id="newEndpointTag" placeholder="Add tag..." onkeydown="if(event.key==='Enter'){addEndpointTag(${asset.id}); event.preventDefault();}">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="addEndpointTag(${asset.id})"><i class="bi bi-plus"></i></button>
+                                    </div>
+                                </div>
                                 <h6><i class="bi bi-box-seam me-1"></i>Installed Software (${products.length})</h6>
                                 <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
                                     <table class="table table-sm table-hover mb-0">
