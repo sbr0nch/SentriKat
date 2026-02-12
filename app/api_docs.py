@@ -1038,10 +1038,10 @@ def _get_api_paths():
         "/api/admin/worker/load-test-cleanup": {
             "delete": {
                 "tags": ["Worker Pool"],
-                "summary": "Clean up load test jobs",
-                "description": "Deletes all jobs with job_type='load_test'. Use after load testing is complete. Super admin only.",
+                "summary": "Clean up all load test data",
+                "description": "Deletes all load test jobs, synthetic products (vendor matching 'loadtest-vendor-*'), and their installations. Use after load testing is complete. Super admin only.",
                 "responses": {
-                    "200": {"description": "Load test jobs deleted"},
+                    "200": {"description": "Load test data deleted (jobs, products, installations)"},
                     "403": {"description": "Super admin required"}
                 }
             }
