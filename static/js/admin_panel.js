@@ -6783,6 +6783,9 @@ async function loadAgentKeys() {
                             <button class="btn btn-outline-success" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'linux')" title="Download Linux Agent">
                                 <i class="bi bi-ubuntu"></i>
                             </button>
+                            <button class="btn btn-outline-secondary" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'macos')" title="Download macOS Agent">
+                                <i class="bi bi-apple"></i>
+                            </button>
                             <button class="btn btn-outline-danger" onclick="deleteAgentKey(${key.id}, '${escapeHtml(key.name)}')" title="Delete key">
                                 <i class="bi bi-trash"></i>
                             </button>
@@ -7058,7 +7061,9 @@ async function downloadAgentWithKey(keyPrefix, platform) {
     const fullKey = recentlyCreatedKeys.get(keyPrefix);
     const hasKey = !!fullKey;
 
-    showToast(`Downloading ${platform === 'windows' ? 'Windows' : 'Linux'} agent${hasKey ? ' with embedded key' : ''}...`, 'info');
+    const platformNames = { windows: 'Windows', linux: 'Linux', macos: 'macOS' };
+    const platformName = platformNames[platform] || platform;
+    showToast(`Downloading ${platformName} agent${hasKey ? ' with embedded key' : ''}...`, 'info');
 
     try {
         // If we have the full key, embed it in the download
@@ -7074,11 +7079,12 @@ async function downloadAgentWithKey(keyPrefix, platform) {
         }
 
         const script = await response.text();
-        const filename = platform === 'windows' ? 'sentrikat-agent.ps1' : 'sentrikat-agent.sh';
+        const filenames = { windows: 'sentrikat-agent.ps1', linux: 'sentrikat-agent.sh', macos: 'sentrikat-agent-macos.sh' };
+        const filename = filenames[platform] || 'sentrikat-agent.sh';
         downloadScript(filename, script);
 
         if (hasKey) {
-            showToast(`${platform === 'windows' ? 'Windows' : 'Linux'} agent downloaded with API key embedded!`, 'success');
+            showToast(`${platformName} agent downloaded with API key embedded!`, 'success');
         } else {
             showToast(`Agent script downloaded. Replace YOUR_API_KEY with your key (only available at creation time).`, 'warning');
         }
