@@ -806,7 +806,7 @@ def approve_all_queue():
     """Approve all pending import queue items, optionally filtered by vendor or organization."""
     data = request.get_json() or {}
     vendor_filter = data.get('vendor')
-    org_filter = data.get('organization_id', type=None)
+    org_filter = data.get('organization_id')
 
     query = ImportQueue.query.filter_by(status='pending')
     if vendor_filter:
@@ -853,7 +853,7 @@ def reject_all_queue():
     """Reject all pending import queue items, optionally filtered by vendor or organization."""
     data = request.get_json() or {}
     vendor_filter = data.get('vendor')
-    org_filter = data.get('organization_id', type=None)
+    org_filter = data.get('organization_id')
 
     query = ImportQueue.query.filter_by(status='pending')
     if vendor_filter:
