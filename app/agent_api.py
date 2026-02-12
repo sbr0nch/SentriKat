@@ -19,7 +19,10 @@ import logging
 import threading
 import time
 import re
+import os
+import math
 import ipaddress
+from concurrent.futures import ThreadPoolExecutor
 
 from app import db, csrf, limiter
 from app.models import (
@@ -47,10 +50,19 @@ MAX_VERSION_LENGTH = 100
 MAX_PATH_LENGTH = 500
 MAX_PRODUCTS_PER_REQUEST = 10000  # Absolute maximum products in single request (agents send ALL)
 
-# Background worker settings
-WORKER_CHECK_INTERVAL = 5  # seconds between job checks
-_worker_thread = None
+# Background worker pool settings
+# WORKER_POOL_SIZE: Number of concurrent job processing threads.
+# Default: 4 (handles ~4 jobs simultaneously). For 10K+ agents, set to 8-16.
+# Each worker thread processes one inventory job at a time.
+WORKER_POOL_SIZE = int(os.environ.get('WORKER_POOL_SIZE', '4'))
+WORKER_CHECK_INTERVAL = 2  # seconds between job checks (reduced from 5 for faster pickup)
+MAX_JOB_RETRIES = 5  # Maximum retry attempts before permanent failure
+RETRY_BASE_DELAY = 10  # Base delay in seconds for exponential backoff (10, 20, 40, 80, 160)
+_worker_pool = None
+_worker_supervisor = None
 _worker_stop_event = threading.Event()
+_active_job_ids = set()  # Track which jobs are currently being processed
+_active_job_ids_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -808,111 +820,233 @@ def update_usage_metrics(organization_id, is_new_agent=False, products_count=0):
 
 
 # ============================================================================
-# Background Job Worker
+# Background Job Worker Pool
+#
+# Processes inventory jobs concurrently using a thread pool. Each worker
+# thread picks up a pending job, processes it, and returns to the pool.
+# A supervisor thread dispatches jobs to the pool workers.
+#
+# Scale: With WORKER_POOL_SIZE=4 (default), processes ~4 jobs simultaneously.
+# For 10,000+ agents, set WORKER_POOL_SIZE=8-16 via environment variable.
 # ============================================================================
 
-def _background_job_worker(app):
-    """
-    Background worker thread that processes pending inventory jobs.
-    Runs continuously until stop event is set.
+def _claim_job(job_id):
+    """Atomically claim a job for processing, preventing duplicate pickup."""
+    with _active_job_ids_lock:
+        if job_id in _active_job_ids:
+            return False
+        _active_job_ids.add(job_id)
+        return True
 
-    IMPORTANT: Each iteration creates a fresh database session to avoid
-    stale connection issues (psycopg2 connection pool problems).
-    """
-    logger.info("Background job worker started")
 
-    while not _worker_stop_event.is_set():
-        try:
-            # Create fresh app context for each iteration to avoid stale connections
-            with app.app_context():
+def _release_job(job_id):
+    """Release a job from the active set after processing."""
+    with _active_job_ids_lock:
+        _active_job_ids.discard(job_id)
+
+
+def _get_retry_delay(retry_count):
+    """Calculate exponential backoff delay for retry.
+    Returns seconds: 10, 20, 40, 80, 160 for retries 0-4."""
+    return RETRY_BASE_DELAY * (2 ** retry_count)
+
+
+def _process_single_job(app, job_id):
+    """
+    Process a single inventory job in a pool worker thread.
+    Each invocation creates its own app context and DB session.
+    """
+    try:
+        with app.app_context():
+            try:
+                job = InventoryJob.query.get(job_id)
+                if not job or job.status != 'pending':
+                    return  # Job was already picked up or cancelled
+
+                # Check if job should be delayed (exponential backoff)
+                retry_count = job.retry_count or 0
+                if retry_count > 0:
+                    delay = _get_retry_delay(retry_count - 1)
+                    # Check if enough time has passed since last failure
+                    if job.completed_at:
+                        elapsed = (datetime.utcnow() - job.completed_at).total_seconds()
+                        if elapsed < delay:
+                            # Not ready for retry yet, skip for now
+                            return
+
+                logger.info(f"Worker thread processing job {job_id} "
+                           f"(retry {retry_count}/{MAX_JOB_RETRIES})")
                 try:
-                    # Get next pending job
-                    job = InventoryJob.get_next_pending()
-
-                    if job:
-                        job_id = job.id  # Store ID before processing
-                        logger.info(f"Background worker processing job {job_id}")
-                        try:
-                            success = process_inventory_job(job)
-                            if success:
-                                logger.info(f"Background worker completed job {job_id}")
-                            else:
-                                logger.warning(f"Background worker: job {job_id} failed")
-                        except Exception as e:
-                            logger.error(f"Background worker error processing job {job_id}: {e}", exc_info=True)
-                            # Mark job as failed - refetch to avoid stale object
-                            try:
-                                job = InventoryJob.query.get(job_id)
-                                if job:
-                                    job.status = 'failed'
-                                    job.error_message = str(e)[:500]  # Truncate long errors
-                                    job.completed_at = datetime.utcnow()
-                                    db.session.commit()
-                            except Exception as commit_err:
-                                logger.error(f"Failed to mark job {job_id} as failed: {commit_err}")
-                                db.session.rollback()
+                    success = process_inventory_job(job)
+                    if success:
+                        logger.info(f"Worker completed job {job_id}")
                     else:
-                        # No pending jobs, sleep before checking again
-                        pass  # Will sleep after context exits
+                        logger.warning(f"Worker: job {job_id} returned failure")
+                        _handle_job_failure(job_id, "Processing returned failure")
 
-                finally:
-                    # Always clean up session to prevent connection leaks
+                except Exception as e:
+                    logger.error(f"Worker error on job {job_id}: {e}", exc_info=True)
+                    _handle_job_failure(job_id, str(e)[:500])
+
+            finally:
+                try:
+                    db.session.remove()
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.error(f"Worker thread fatal error on job {job_id}: {e}", exc_info=True)
+    finally:
+        _release_job(job_id)
+
+
+def _handle_job_failure(job_id, error_message):
+    """Handle a job failure with exponential backoff retry logic."""
+    try:
+        job = InventoryJob.query.get(job_id)
+        if not job:
+            return
+
+        retry_count = (job.retry_count or 0) + 1
+
+        if retry_count >= MAX_JOB_RETRIES:
+            # Permanent failure - exceeded max retries
+            job.status = 'failed'
+            job.error_message = (
+                f"Failed after {MAX_JOB_RETRIES} attempts. "
+                f"Last error: {error_message}"
+            )
+            job.completed_at = datetime.utcnow()
+            logger.error(f"Job {job_id} permanently failed after {MAX_JOB_RETRIES} retries")
+        else:
+            # Retry with backoff - put back to pending
+            delay = _get_retry_delay(retry_count - 1)
+            job.status = 'pending'
+            job.started_at = None
+            job.retry_count = retry_count
+            job.error_message = (
+                f"Retry {retry_count}/{MAX_JOB_RETRIES} "
+                f"(next attempt in ~{delay}s). Error: {error_message}"
+            )
+            job.completed_at = datetime.utcnow()  # Track when failure happened for backoff calc
+            logger.warning(
+                f"Job {job_id} failed, scheduling retry {retry_count}/{MAX_JOB_RETRIES} "
+                f"with {delay}s backoff"
+            )
+
+        db.session.commit()
+    except Exception as commit_err:
+        logger.error(f"Failed to update job {job_id} failure status: {commit_err}")
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+
+def _worker_pool_supervisor(app):
+    """
+    Supervisor thread that dispatches pending jobs to the worker pool.
+    Runs continuously, fetching batches of pending jobs and submitting
+    them to the thread pool for concurrent processing.
+    """
+    global _worker_pool
+
+    pool_size = WORKER_POOL_SIZE
+    logger.info(f"Worker pool supervisor started (pool_size={pool_size})")
+
+    _worker_pool = ThreadPoolExecutor(
+        max_workers=pool_size,
+        thread_name_prefix="InventoryWorker"
+    )
+
+    try:
+        while not _worker_stop_event.is_set():
+            try:
+                with app.app_context():
                     try:
-                        db.session.remove()
-                    except Exception:
-                        pass
+                        # How many slots are available in the pool?
+                        with _active_job_ids_lock:
+                            active_count = len(_active_job_ids)
 
-            # Sleep outside the app context to allow connection cleanup
+                        available_slots = max(0, pool_size - active_count)
+
+                        if available_slots > 0:
+                            # Fetch a batch of pending jobs (up to available slots)
+                            pending_jobs = InventoryJob.query.filter_by(
+                                status='pending'
+                            ).order_by(
+                                InventoryJob.priority.asc(),
+                                InventoryJob.created_at.asc()
+                            ).limit(available_slots).all()
+
+                            for job in pending_jobs:
+                                if _worker_stop_event.is_set():
+                                    break
+
+                                if _claim_job(job.id):
+                                    _worker_pool.submit(
+                                        _process_single_job, app, job.id
+                                    )
+
+                    finally:
+                        try:
+                            db.session.remove()
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                logger.error(f"Worker supervisor error: {e}", exc_info=True)
+
+            # Wait before next dispatch cycle
             if not _worker_stop_event.is_set():
                 _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
 
-        except Exception as e:
-            logger.error(f"Background worker unexpected error: {e}", exc_info=True)
-            # Sleep before retrying on error
-            if not _worker_stop_event.is_set():
-                _worker_stop_event.wait(WORKER_CHECK_INTERVAL)
+    finally:
+        logger.info("Worker pool supervisor shutting down...")
+        if _worker_pool:
+            _worker_pool.shutdown(wait=True, cancel_futures=False)
+            _worker_pool = None
 
-    logger.info("Background job worker stopped")
+    logger.info("Worker pool supervisor stopped")
 
 
 def start_background_worker(app):
-    """Start the background job worker if not already running."""
-    global _worker_thread
+    """Start the background worker pool if not already running."""
+    global _worker_supervisor
 
-    if _worker_thread is not None and _worker_thread.is_alive():
+    if _worker_supervisor is not None and _worker_supervisor.is_alive():
         return  # Already running
 
     _worker_stop_event.clear()
-    _worker_thread = threading.Thread(
-        target=_background_job_worker,
+    _worker_supervisor = threading.Thread(
+        target=_worker_pool_supervisor,
         args=(app,),
         daemon=True,
-        name="InventoryJobWorker"
+        name="InventoryPoolSupervisor"
     )
-    _worker_thread.start()
-    logger.info("Started background inventory job worker")
+    _worker_supervisor.start()
+    logger.info(f"Started background worker pool (size={WORKER_POOL_SIZE})")
 
 
 def stop_background_worker():
-    """Stop the background job worker."""
-    global _worker_thread
+    """Stop the background worker pool gracefully."""
+    global _worker_supervisor, _worker_pool
 
-    if _worker_thread is None:
+    if _worker_supervisor is None:
         return
 
     _worker_stop_event.set()
-    _worker_thread.join(timeout=10)
-    _worker_thread = None
-    logger.info("Stopped background inventory job worker")
+    _worker_supervisor.join(timeout=30)  # Longer timeout for pool shutdown
+    _worker_supervisor = None
+    logger.info("Stopped background worker pool")
 
 
 def ensure_worker_running():
-    """Ensure the background worker is running (call from request context)."""
-    if _worker_thread is None or not _worker_thread.is_alive():
+    """Ensure the background worker pool is running (call from request context)."""
+    if _worker_supervisor is None or not _worker_supervisor.is_alive():
         try:
             start_background_worker(current_app._get_current_object())
         except Exception as e:
-            logger.warning(f"Could not start background worker: {e}")
+            logger.warning(f"Could not start background worker pool: {e}")
 
 
 # ============================================================================
@@ -2752,16 +2886,21 @@ def get_worker_status():
     if not (user.is_super_admin() or user.is_org_admin() or user.is_admin):
         return jsonify({'error': 'Admin access required'}), 403
 
-    # Worker status - auto-restart if stopped
-    worker_alive = _worker_thread is not None and _worker_thread.is_alive()
+    # Worker pool status - auto-restart if stopped
+    worker_alive = _worker_supervisor is not None and _worker_supervisor.is_alive()
     if not worker_alive:
         try:
             start_background_worker(current_app._get_current_object())
-            worker_alive = _worker_thread is not None and _worker_thread.is_alive()
+            worker_alive = _worker_supervisor is not None and _worker_supervisor.is_alive()
             if worker_alive:
-                logger.info("Auto-restarted background worker via status check")
+                logger.info("Auto-restarted background worker pool via status check")
         except Exception as e:
-            logger.warning(f"Could not auto-restart background worker: {e}")
+            logger.warning(f"Could not auto-restart background worker pool: {e}")
+
+    # Active worker count
+    with _active_job_ids_lock:
+        active_workers = len(_active_job_ids)
+        active_job_list = list(_active_job_ids)
 
     # Queue statistics
     pending_jobs = InventoryJob.query.filter_by(status='pending').count()
@@ -2782,6 +2921,10 @@ def get_worker_status():
         'worker': {
             'status': 'running' if worker_alive else 'stopped',
             'is_alive': worker_alive,
+            'pool_size': WORKER_POOL_SIZE,
+            'active_workers': active_workers,
+            'active_job_ids': active_job_list,
+            'available_slots': max(0, WORKER_POOL_SIZE - active_workers),
             'check_interval_seconds': WORKER_CHECK_INTERVAL
         },
         'queue': {
@@ -2789,6 +2932,11 @@ def get_worker_status():
             'processing': processing_jobs,
             'completed_today': completed_today,
             'failed_today': failed_today
+        },
+        'retry': {
+            'max_retries': MAX_JOB_RETRIES,
+            'base_delay_seconds': RETRY_BASE_DELAY,
+            'backoff_strategy': 'exponential (10s, 20s, 40s, 80s, 160s)'
         },
         'latest_job': latest_job.to_dict() if latest_job else None,
         'config': {

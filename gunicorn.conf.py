@@ -8,9 +8,15 @@ Optimized for enterprise vulnerability management workloads:
 - Graceful timeout handling for long-running sync operations
 
 Override defaults via environment variables:
-  GUNICORN_WORKERS=4  (default: min(CPU*2+1, 8))
-  GUNICORN_THREADS=4  (default: 4 per worker)
+  GUNICORN_WORKERS=8   (default: min(CPU*2+1, 16))
+  GUNICORN_THREADS=4   (default: 4 per worker)
   GUNICORN_TIMEOUT=120
+
+Scaling guide:
+  Small  (< 100 agents):   GUNICORN_WORKERS=4,  GUNICORN_THREADS=4  (16 concurrent)
+  Medium (100-1000 agents): GUNICORN_WORKERS=8,  GUNICORN_THREADS=4  (32 concurrent)
+  Large  (1000-5000 agents):GUNICORN_WORKERS=12, GUNICORN_THREADS=8  (96 concurrent)
+  XLarge (5000-10000 agents):GUNICORN_WORKERS=16,GUNICORN_THREADS=8  (128 concurrent)
 """
 
 import os
@@ -32,11 +38,12 @@ bind = os.environ.get('GUNICORN_BIND') or '0.0.0.0:5000'
 worker_class = 'gthread'
 
 # Number of worker processes
-# Default: min(CPU_COUNT * 2 + 1, 8) - capped at 8 for memory safety
-# For small deployments (1-2 CPU): 3 workers
-# For medium deployments (4 CPU): 8 workers (capped)
+# Default: min(CPU_COUNT * 2 + 1, 16) - cap raised for high-agent deployments
+# For small deployments (1-2 CPU): 3-5 workers
+# For medium deployments (4 CPU): 8-9 workers
+# For large deployments (8+ CPU): 16 workers
 _cpu_count = multiprocessing.cpu_count()
-_default_workers = min(_cpu_count * 2 + 1, 8)
+_default_workers = min(_cpu_count * 2 + 1, 16)
 workers = _env_int('GUNICORN_WORKERS', _default_workers)
 
 # Threads per worker - allows concurrent request handling within each worker

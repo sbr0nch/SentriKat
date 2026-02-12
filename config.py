@@ -58,17 +58,32 @@ class Config:
         SQLALCHEMY_DATABASE_URI = 'postgresql://sentrikat:sentrikat@db:5432/sentrikat'
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    # Connection pool tuned for gthread workers (threads share pool within each worker process)
-    # pool_size per worker, with overflow for burst traffic during sync operations
+
+    # Connection pool tuned for gthread workers (threads share pool within each worker process).
+    # Scale these up for high-agent deployments (1000+ agents).
+    #
+    # Total max DB connections = GUNICORN_WORKERS * (DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW)
+    # Example: 8 workers * (10 + 20) = 240 max connections
+    # PostgreSQL default max_connections = 100, so increase it too if scaling up.
+    #
+    # The background worker pool (WORKER_POOL_SIZE threads) shares the pool of whichever
+    # Gunicorn worker started it. Size the pool to accommodate:
+    #   pool_size >= GUNICORN_THREADS + WORKER_POOL_SIZE
+    _db_pool_size = int(os.environ.get('DB_POOL_SIZE', '10'))
+    _db_pool_max_overflow = int(os.environ.get('DB_POOL_MAX_OVERFLOW', '20'))
+    _db_pool_timeout = int(os.environ.get('DB_POOL_TIMEOUT', '30'))
+    _db_pool_recycle = int(os.environ.get('DB_POOL_RECYCLE', '1800'))
+    _db_statement_timeout = int(os.environ.get('DB_STATEMENT_TIMEOUT', '60000'))
+
     SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_size': 5,              # Base connections per worker
-        'max_overflow': 10,          # Extra connections for burst traffic
-        'pool_timeout': 30,          # Wait up to 30s for a connection
-        'pool_recycle': 1800,        # Recycle connections every 30 min (prevents stale connections)
+        'pool_size': _db_pool_size,
+        'max_overflow': _db_pool_max_overflow,
+        'pool_timeout': _db_pool_timeout,
+        'pool_recycle': _db_pool_recycle,
         'pool_pre_ping': True,       # Verify connections are alive before use
         'connect_args': {
             'connect_timeout': 10,   # Connection timeout
-            'options': '-c statement_timeout=60000'  # 60s query timeout
+            'options': f'-c statement_timeout={_db_statement_timeout}'
         }
     }
 
