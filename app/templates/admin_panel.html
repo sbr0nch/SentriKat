@@ -3338,6 +3338,40 @@
                                     </div>
                                 </div>
 
+                                <!-- Scaling & Performance Section -->
+                                <div class="col-12">
+                                    <h5 class="fw-bold"><i class="bi bi-speedometer2 me-2 text-success"></i>Scaling &amp; Performance</h5>
+                                    <p class="text-muted mb-2">SentriKat uses a <strong>concurrent worker pool</strong> for processing inventory jobs. Tune these settings based on your deployment size:</p>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped mb-2">
+                                            <thead><tr><th>Deployment</th><th>Agents</th><th>GUNICORN_WORKERS</th><th>WORKER_POOL_SIZE</th><th>DB_POOL_SIZE</th><th>PG_MAX_CONNECTIONS</th></tr></thead>
+                                            <tbody>
+                                                <tr><td>Small</td><td>&lt; 100</td><td>4</td><td>2</td><td>5</td><td>100</td></tr>
+                                                <tr><td>Medium</td><td>100 &ndash; 1K</td><td>8</td><td>4</td><td>10</td><td>300</td></tr>
+                                                <tr><td>Large</td><td>1K &ndash; 5K</td><td>12</td><td>8</td><td>15</td><td>500</td></tr>
+                                                <tr class="table-success"><td><strong>Enterprise</strong></td><td>5K &ndash; 10K+</td><td>16</td><td>16</td><td>20</td><td>800</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="small text-muted mb-2">
+                                        <strong>Worker Pool:</strong> Processes inventory jobs concurrently (not one at a time).
+                                        <code>WORKER_POOL_SIZE=8</code> means 8 jobs processed simultaneously.<br>
+                                        <strong>Retry:</strong> Failed jobs retry up to 5 times with exponential backoff (10s, 20s, 40s, 80s, 160s).<br>
+                                        <strong>Rule of thumb:</strong> 1 CPU core per 2 Gunicorn workers, 256MB RAM per worker.
+                                    </div>
+                                    <div class="d-flex gap-2 mb-2">
+                                        <a href="/api/admin/worker-status" target="_blank" class="btn btn-outline-success btn-sm">
+                                            <i class="bi bi-activity me-1"></i>Worker Pool Status (API)
+                                        </a>
+                                    </div>
+                                    <div class="alert alert-info small py-2 mb-0">
+                                        <i class="bi bi-lightbulb me-1"></i><strong>Load Testing:</strong>
+                                        Use <code>POST /api/admin/worker/simulate-load</code> to stress-test the worker pool without real agents.
+                                        Example: <code>{"num_jobs": 200, "products_per_job": 100}</code> creates 200 synthetic jobs.
+                                        Clean up with <code>DELETE /api/admin/worker/load-test-cleanup</code>.
+                                    </div>
+                                </div>
+
                                 <!-- API Documentation Section -->
                                 <div class="col-12">
                                     <h5 class="fw-bold"><i class="bi bi-code-slash me-2 text-info"></i>API Documentation</h5>
@@ -3361,12 +3395,19 @@
                                             <tbody>
                                                 <tr><td><code>SECRET_KEY</code></td><td>Flask session secret (change in production)</td><td>Random</td></tr>
                                                 <tr><td><code>ENCRYPTION_KEY</code></td><td>Fernet key for encrypting sensitive settings</td><td>Derived from SECRET_KEY</td></tr>
-                                                <tr><td><code>DATABASE_URL</code></td><td>PostgreSQL connection string</td><td>sqlite:///data/sentrikat.db</td></tr>
+                                                <tr><td><code>DATABASE_URL</code></td><td>PostgreSQL connection string</td><td>postgresql://...@db:5432/sentrikat</td></tr>
                                                 <tr><td><code>SENTRIKAT_LICENSE</code></td><td>License key (alternative to GUI activation)</td><td>&mdash;</td></tr>
                                                 <tr><td><code>LOG_DIR</code></td><td>Directory for log files</td><td>/var/log/sentrikat</td></tr>
                                                 <tr><td><code>SMTP_HOST</code></td><td>SMTP server hostname</td><td>&mdash;</td></tr>
-                                                <tr><td><code>SMTP_PORT</code></td><td>SMTP server port</td><td>587</td></tr>
-                                                <tr><td><code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code></td><td>Proxy for outbound connections (CVE sync, license validation)</td><td>&mdash;</td></tr>
+                                                <tr><td><code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code></td><td>Proxy for outbound connections</td><td>&mdash;</td></tr>
+                                                <tr class="table-info"><td colspan="3"><strong>Performance Tuning</strong></td></tr>
+                                                <tr><td><code>GUNICORN_WORKERS</code></td><td>Web server worker processes</td><td>auto (CPU*2+1, max 16)</td></tr>
+                                                <tr><td><code>GUNICORN_THREADS</code></td><td>Threads per Gunicorn worker</td><td>4</td></tr>
+                                                <tr><td><code>WORKER_POOL_SIZE</code></td><td>Concurrent inventory job workers</td><td>4</td></tr>
+                                                <tr><td><code>DB_POOL_SIZE</code></td><td>DB connections per Gunicorn worker</td><td>10</td></tr>
+                                                <tr><td><code>DB_POOL_MAX_OVERFLOW</code></td><td>Extra burst DB connections</td><td>20</td></tr>
+                                                <tr><td><code>PG_MAX_CONNECTIONS</code></td><td>PostgreSQL max connections</td><td>300</td></tr>
+                                                <tr><td><code>PG_SHARED_BUFFERS</code></td><td>PostgreSQL shared memory cache</td><td>256MB</td></tr>
                                             </tbody>
                                         </table>
                                     </div>

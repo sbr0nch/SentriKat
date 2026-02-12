@@ -67,6 +67,7 @@ All responses are JSON. Errors include an `error` field with a description.
             {"name": "Integrations", "description": "Issue tracker and notification integrations"},
             {"name": "Health Checks", "description": "System health monitoring and diagnostics"},
             {"name": "Notifications", "description": "In-app system notifications"},
+            {"name": "Worker Pool", "description": "Background job processing pool status and management"},
             {"name": "Logs", "description": "System log viewing and download"},
             {"name": "Audit", "description": "Audit trail and compliance logs"}
         ],
@@ -942,6 +943,106 @@ def _get_api_paths():
                 "responses": {
                     "200": {"description": "Exported audit log data"},
                     "403": {"description": "Professional license required"}
+                }
+            }
+        },
+
+        # =====================================================================
+        # Worker Pool & Scalability
+        # =====================================================================
+        "/api/admin/worker-status": {
+            "get": {
+                "tags": ["Worker Pool"],
+                "summary": "Get worker pool status",
+                "description": "Returns detailed status of the background job processing pool including active workers, queue depth, retry configuration, and processing statistics.",
+                "responses": {
+                    "200": {
+                        "description": "Worker pool status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "worker": {
+                                            "type": "object",
+                                            "properties": {
+                                                "status": {"type": "string", "enum": ["running", "stopped"]},
+                                                "pool_size": {"type": "integer", "description": "Configured WORKER_POOL_SIZE"},
+                                                "active_workers": {"type": "integer", "description": "Currently busy workers"},
+                                                "available_slots": {"type": "integer", "description": "Free worker slots"},
+                                                "active_job_ids": {"type": "array", "items": {"type": "integer"}}
+                                            }
+                                        },
+                                        "queue": {
+                                            "type": "object",
+                                            "properties": {
+                                                "pending": {"type": "integer"},
+                                                "processing": {"type": "integer"},
+                                                "completed_today": {"type": "integer"},
+                                                "failed_today": {"type": "integer"}
+                                            }
+                                        },
+                                        "retry": {
+                                            "type": "object",
+                                            "properties": {
+                                                "max_retries": {"type": "integer"},
+                                                "base_delay_seconds": {"type": "integer"},
+                                                "backoff_strategy": {"type": "string"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {"description": "Admin access required"}
+                }
+            }
+        },
+        "/api/admin/worker/start": {
+            "post": {
+                "tags": ["Worker Pool"],
+                "summary": "Start worker pool",
+                "description": "Manually start the background worker pool if it is stopped. Super admin only.",
+                "responses": {
+                    "200": {"description": "Worker pool started"},
+                    "403": {"description": "Super admin required"}
+                }
+            }
+        },
+        "/api/admin/worker/simulate-load": {
+            "post": {
+                "tags": ["Worker Pool"],
+                "summary": "Simulate agent load (testing)",
+                "description": "Creates synthetic inventory jobs to stress-test the worker pool without real agents. Jobs are tagged as 'load_test' for easy cleanup. Super admin only.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "num_jobs": {"type": "integer", "default": 50, "maximum": 1000, "description": "Number of synthetic jobs to create"},
+                                    "products_per_job": {"type": "integer", "default": 100, "maximum": 500, "description": "Synthetic products per job"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {"description": "Load test jobs created with monitoring instructions"},
+                    "400": {"description": "No organization or asset found"},
+                    "403": {"description": "Super admin required"}
+                }
+            }
+        },
+        "/api/admin/worker/load-test-cleanup": {
+            "delete": {
+                "tags": ["Worker Pool"],
+                "summary": "Clean up load test jobs",
+                "description": "Deletes all jobs with job_type='load_test'. Use after load testing is complete. Super admin only.",
+                "responses": {
+                    "200": {"description": "Load test jobs deleted"},
+                    "403": {"description": "Super admin required"}
                 }
             }
         },

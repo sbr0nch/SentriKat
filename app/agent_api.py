@@ -2970,6 +2970,135 @@ def start_worker():
 
 
 # ============================================================================
+# Load Simulation (Testing)
+# ============================================================================
+
+@agent_bp.route('/api/admin/worker/simulate-load', methods=['POST'])
+@admin_required
+@limiter.limit("5/minute")
+def simulate_load():
+    """
+    Simulate agent inventory load for testing worker pool scalability.
+    Creates fake inventory jobs to stress-test the background processing pipeline.
+
+    POST body:
+      {
+        "num_jobs": 50,        // Number of fake jobs to create (max 1000)
+        "products_per_job": 100 // Fake products per job (max 500)
+      }
+
+    This is safe: jobs contain synthetic data and are tagged with
+    job_type='load_test' for easy identification and cleanup.
+    """
+    from app.auth import get_current_user
+    user = get_current_user()
+    if not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    data = request.get_json() or {}
+    num_jobs = min(int(data.get('num_jobs', 50)), 1000)
+    products_per_job = min(int(data.get('products_per_job', 100)), 500)
+
+    # Need at least one org and one asset
+    org = Organization.query.first()
+    if not org:
+        return jsonify({'error': 'No organization found. Create one first.'}), 400
+
+    asset = Asset.query.filter_by(organization_id=org.id).first()
+    if not asset:
+        return jsonify({'error': 'No asset found. Register an agent first.'}), 400
+
+    # Generate synthetic products
+    synthetic_products = []
+    for i in range(products_per_job):
+        synthetic_products.append({
+            'vendor': f'loadtest-vendor-{i % 20}',
+            'product': f'loadtest-product-{i}',
+            'version': f'{(i % 10) + 1}.0.{i % 100}'
+        })
+
+    payload = json.dumps({
+        'hostname': asset.hostname,
+        'products': synthetic_products,
+        'load_test': True
+    })
+
+    created_jobs = []
+    try:
+        for i in range(num_jobs):
+            job = InventoryJob(
+                organization_id=org.id,
+                asset_id=asset.id,
+                job_type='load_test',
+                status='pending',
+                payload=payload,
+                total_items=products_per_job,
+                priority=9  # Low priority so real jobs process first
+            )
+            db.session.add(job)
+            created_jobs.append(job)
+
+        db.session.commit()
+
+        # Ensure worker pool is running
+        ensure_worker_running()
+
+        logger.info(
+            f"Load test: created {num_jobs} synthetic jobs "
+            f"({products_per_job} products each) by {user.username}"
+        )
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Created {num_jobs} load test jobs',
+            'details': {
+                'jobs_created': num_jobs,
+                'products_per_job': products_per_job,
+                'total_products': num_jobs * products_per_job,
+                'job_ids': [j.id for j in created_jobs[:20]],  # First 20 IDs
+                'priority': 9,
+                'organization': org.display_name,
+                'asset': asset.hostname
+            },
+            'monitor': 'Check progress at GET /api/admin/worker-status',
+            'cleanup': 'DELETE /api/admin/worker/load-test-cleanup when done'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("Load test creation failed")
+        return jsonify({'error': f'Failed to create test jobs: {str(e)[:200]}'}), 500
+
+
+@agent_bp.route('/api/admin/worker/load-test-cleanup', methods=['DELETE'])
+@admin_required
+@limiter.limit("5/minute")
+def cleanup_load_test():
+    """
+    Clean up all load test jobs (job_type='load_test').
+    Removes completed, failed, and pending test jobs.
+    """
+    from app.auth import get_current_user
+    user = get_current_user()
+    if not user.is_super_admin():
+        return jsonify({'error': 'Super admin access required'}), 403
+
+    try:
+        count = InventoryJob.query.filter_by(job_type='load_test').count()
+        InventoryJob.query.filter_by(job_type='load_test').delete()
+        db.session.commit()
+        logger.info(f"Load test cleanup: deleted {count} test jobs by {user.username}")
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Cleaned up {count} load test jobs'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Cleanup failed: {str(e)[:200]}'}), 500
+
+
+# ============================================================================
 # License Management & Dashboard Endpoints
 # ============================================================================
 
