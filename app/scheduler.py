@@ -765,27 +765,39 @@ def stuck_job_recovery_job(app):
     or marks them as 'failed' if max retries exceeded.
     Runs every 10 minutes.
     """
-    MAX_RETRIES = 3
     with app.app_context():
         try:
             from app.models import InventoryJob
+            from app.agent_api import MAX_JOB_RETRIES, _active_job_ids, _active_job_ids_lock
+
             cutoff = datetime.utcnow() - timedelta(minutes=30)
             stuck_jobs = InventoryJob.query.filter(
                 InventoryJob.status == 'processing',
                 InventoryJob.started_at < cutoff
             ).all()
+
+            # Get set of actively processing job IDs to avoid false positives
+            with _active_job_ids_lock:
+                active_ids = set(_active_job_ids)
+
             recovered = 0
             failed = 0
+            skipped = 0
             for job in stuck_jobs:
+                # Skip jobs that are actively being processed by the worker pool
+                if job.id in active_ids:
+                    skipped += 1
+                    continue
+
                 retry_count = job.retry_count if hasattr(job, 'retry_count') and job.retry_count else 0
-                if retry_count >= MAX_RETRIES:
-                    logger.warning(f"Job {job.id} exceeded max retries ({MAX_RETRIES}), marking as failed")
+                if retry_count >= MAX_JOB_RETRIES:
+                    logger.warning(f"Job {job.id} exceeded max retries ({MAX_JOB_RETRIES}), marking as failed")
                     job.status = 'failed'
-                    job.error_message = f'Failed after {MAX_RETRIES} retry attempts (stuck in processing)'
+                    job.error_message = f'Failed after {MAX_JOB_RETRIES} retry attempts (stuck in processing)'
                     job.completed_at = datetime.utcnow()
                     failed += 1
                 else:
-                    logger.warning(f"Recovering stuck job {job.id} (stuck since {job.started_at}, retry {retry_count + 1}/{MAX_RETRIES})")
+                    logger.warning(f"Recovering stuck job {job.id} (stuck since {job.started_at}, retry {retry_count + 1}/{MAX_JOB_RETRIES})")
                     job.status = 'pending'
                     job.started_at = None
                     job.error_message = f'Recovered from stuck state (retry {retry_count + 1})'
@@ -794,7 +806,7 @@ def stuck_job_recovery_job(app):
                     recovered += 1
             if stuck_jobs:
                 db.session.commit()
-                logger.info(f"Stuck job recovery: {recovered} recovered, {failed} permanently failed")
+                logger.info(f"Stuck job recovery: {recovered} recovered, {failed} permanently failed, {skipped} still active")
         except Exception as e:
             logger.error(f"Stuck job recovery failed: {str(e)}", exc_info=True)
             try:

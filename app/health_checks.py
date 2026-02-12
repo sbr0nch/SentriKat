@@ -39,14 +39,20 @@ HEALTH_CHECKS = {
     },
     'worker_thread': {
         'category': 'system',
-        'label': 'Background Worker',
-        'description': 'Verifies the inventory processing worker is alive',
+        'label': 'Worker Pool',
+        'description': 'Verifies the inventory processing worker pool is alive and healthy',
         'default_enabled': True,
     },
     'stuck_jobs': {
         'category': 'system',
         'label': 'Stuck Inventory Jobs',
         'description': 'Checks for inventory jobs stuck in processing state',
+        'default_enabled': True,
+    },
+    'queue_throughput': {
+        'category': 'system',
+        'label': 'Queue Throughput',
+        'description': 'Monitors job queue growth rate vs processing capacity',
         'default_enabled': True,
     },
     'cve_sync_freshness': {
@@ -184,30 +190,60 @@ def check_disk_space():
 
 
 def check_worker_thread():
-    """Check if the background inventory worker is running."""
+    """Check if the background worker pool is running and healthy."""
     try:
-        from app.agent_api import _worker_thread
-        if _worker_thread and _worker_thread.is_alive():
-            _record('worker_thread', 'ok', 'Background worker is running', 'running')
-        else:
-            # Check if there are pending jobs
-            pending = InventoryJob.query.filter_by(status='pending').count()
+        from app.agent_api import (
+            _worker_supervisor, _worker_pool, _active_job_ids,
+            _active_job_ids_lock, WORKER_POOL_SIZE
+        )
+
+        supervisor_alive = _worker_supervisor is not None and _worker_supervisor.is_alive()
+        pool_exists = _worker_pool is not None
+
+        with _active_job_ids_lock:
+            active_count = len(_active_job_ids)
+
+        pending = InventoryJob.query.filter_by(status='pending').count()
+        processing = InventoryJob.query.filter_by(status='processing').count()
+
+        details = {
+            'pool_size': WORKER_POOL_SIZE,
+            'active_workers': active_count,
+            'available_slots': max(0, WORKER_POOL_SIZE - active_count),
+            'pending_jobs': pending,
+            'processing_jobs': processing,
+            'supervisor_alive': supervisor_alive,
+            'pool_initialized': pool_exists
+        }
+
+        if not supervisor_alive:
             if pending > 0:
                 _record('worker_thread', 'critical',
-                        f'Background worker is stopped but {pending} jobs pending',
-                        'stopped', {'pending_jobs': pending})
+                        f'Worker pool stopped! {pending} jobs pending, {processing} processing',
+                        'stopped', details)
             else:
                 _record('worker_thread', 'warning',
-                        'Background worker is not running (no pending jobs)',
-                        'stopped', {'pending_jobs': 0})
+                        'Worker pool is not running (no pending jobs)',
+                        'stopped', details)
+        elif active_count >= WORKER_POOL_SIZE and pending > 10:
+            _record('worker_thread', 'warning',
+                    f'Worker pool at capacity ({active_count}/{WORKER_POOL_SIZE} busy, '
+                    f'{pending} queued). Consider increasing WORKER_POOL_SIZE.',
+                    f'{active_count}/{WORKER_POOL_SIZE}', details)
+        else:
+            _record('worker_thread', 'ok',
+                    f'Worker pool healthy ({active_count}/{WORKER_POOL_SIZE} active, '
+                    f'{pending} queued)',
+                    f'{active_count}/{WORKER_POOL_SIZE}', details)
+
     except ImportError:
-        _record('worker_thread', 'warning', 'Cannot check worker status', 'unknown')
+        _record('worker_thread', 'warning', 'Cannot check worker pool status', 'unknown')
     except Exception as e:
         try:
             db.session.rollback()
         except Exception:
             pass
-        _record('worker_thread', 'error', f'Error checking worker: {str(e)[:200]}')
+        _record('worker_thread', 'error', f'Error checking worker pool: {str(e)[:200]}')
 
 
 def check_stuck_jobs():
@@ -447,6 +483,87 @@ def check_smtp_connectivity():
                 f'SMTP check failed: {str(e)[:200]}')
 
 
+def check_queue_throughput():
+    """
+    Monitor job queue growth rate vs processing capacity.
+    Detects when the system can't keep up with incoming jobs.
+    """
+    try:
+        from app.agent_api import WORKER_POOL_SIZE
+
+        # Count jobs created in last hour
+        one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+        jobs_created_last_hour = InventoryJob.query.filter(
+            InventoryJob.created_at >= one_hour_ago
+        ).count()
+
+        # Count jobs completed in last hour
+        jobs_completed_last_hour = InventoryJob.query.filter(
+            InventoryJob.status == 'completed',
+            InventoryJob.completed_at >= one_hour_ago
+        ).count()
+
+        # Count jobs failed in last hour
+        jobs_failed_last_hour = InventoryJob.query.filter(
+            InventoryJob.status == 'failed',
+            InventoryJob.completed_at >= one_hour_ago
+        ).count()
+
+        # Current queue depth
+        pending = InventoryJob.query.filter_by(status='pending').count()
+
+        # Calculate throughput ratio
+        throughput_ratio = (
+            jobs_completed_last_hour / jobs_created_last_hour
+            if jobs_created_last_hour > 0 else 1.0
+        )
+
+        details = {
+            'jobs_created_last_hour': jobs_created_last_hour,
+            'jobs_completed_last_hour': jobs_completed_last_hour,
+            'jobs_failed_last_hour': jobs_failed_last_hour,
+            'pending_queue_depth': pending,
+            'throughput_ratio': round(throughput_ratio, 2),
+            'pool_size': WORKER_POOL_SIZE,
+            'failure_rate': round(
+                jobs_failed_last_hour / max(1, jobs_created_last_hour) * 100, 1
+            )
+        }
+
+        if jobs_failed_last_hour > 10:
+            _record('queue_throughput', 'critical',
+                    f'{jobs_failed_last_hour} jobs failed in last hour! '
+                    f'Check error logs for root cause.',
+                    f'{jobs_failed_last_hour} failures', details)
+        elif pending > 100 and throughput_ratio < 0.5:
+            _record('queue_throughput', 'critical',
+                    f'Queue growing faster than processing! {pending} pending, '
+                    f'only {jobs_completed_last_hour} completed vs {jobs_created_last_hour} '
+                    f'created in last hour. Increase WORKER_POOL_SIZE.',
+                    f'{pending} backlog', details)
+        elif pending > 50 and throughput_ratio < 0.8:
+            _record('queue_throughput', 'warning',
+                    f'Queue building up: {pending} pending. Processed '
+                    f'{jobs_completed_last_hour}/{jobs_created_last_hour} jobs in last hour.',
+                    f'{pending} pending', details)
+        else:
+            msg = f'{jobs_completed_last_hour} completed'
+            if jobs_created_last_hour > 0:
+                msg += f' / {jobs_created_last_hour} created in last hour'
+            if pending > 0:
+                msg += f' ({pending} pending)'
+            _record('queue_throughput', 'ok', msg,
+                    f'{jobs_completed_last_hour} processed', details)
+
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        _record('queue_throughput', 'error',
+                f'Error checking throughput: {str(e)[:200]}')
+
+
 def check_pending_import_queue():
     """Check for excessive items in the import queue."""
     try:
@@ -483,6 +600,7 @@ CHECK_FUNCTIONS = {
     'disk_space': check_disk_space,
     'worker_thread': check_worker_thread,
     'stuck_jobs': check_stuck_jobs,
+    'queue_throughput': check_queue_throughput,
     'cve_sync_freshness': check_cve_sync_freshness,
     'agent_health': check_agent_health,
     'cpe_coverage': check_cpe_coverage,

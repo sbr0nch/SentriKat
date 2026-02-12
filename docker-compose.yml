@@ -7,6 +7,15 @@ services:
       POSTGRES_USER: sentrikat
       POSTGRES_PASSWORD: ${DB_PASSWORD:-sentrikat}
       POSTGRES_DB: sentrikat
+    # PostgreSQL tuning for high-agent deployments.
+    # max_connections should be >= GUNICORN_WORKERS * (DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW) + 10
+    # Default: 300 (supports up to 8 workers * 30 pool + headroom)
+    command: >
+      postgres
+      -c max_connections=${PG_MAX_CONNECTIONS:-300}
+      -c shared_buffers=${PG_SHARED_BUFFERS:-256MB}
+      -c effective_cache_size=${PG_EFFECTIVE_CACHE:-768MB}
+      -c work_mem=${PG_WORK_MEM:-4MB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -49,6 +58,14 @@ services:
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-}
       - GUNICORN_THREADS=${GUNICORN_THREADS:-4}
       - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
+      # Background worker pool for concurrent inventory job processing
+      - WORKER_POOL_SIZE=${WORKER_POOL_SIZE:-4}
+      # Database connection pool tuning (per Gunicorn worker process)
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-10}
+      - DB_POOL_MAX_OVERFLOW=${DB_POOL_MAX_OVERFLOW:-20}
+      - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
+      - DB_POOL_RECYCLE=${DB_POOL_RECYCLE:-1800}
+      - DB_STATEMENT_TIMEOUT=${DB_STATEMENT_TIMEOUT:-60000}
     volumes:
       - sentrikat_data:/app/data
       # Custom CA certificates for trusting internal/corporate PKI
