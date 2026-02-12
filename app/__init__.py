@@ -75,6 +75,10 @@ def _apply_schema_migrations(logger, db_uri):
         ('agent_licenses', 'client_count', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
         ('agent_licenses', 'peak_servers', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
         ('agent_licenses', 'peak_clients', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
+        # Agent remote update push columns
+        ('assets', 'pending_update', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('assets', 'pending_update_requested_at', 'DATETIME', 'TIMESTAMP'),
+        ('assets', 'pending_update_requested_by', 'VARCHAR(100)', 'VARCHAR(100)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

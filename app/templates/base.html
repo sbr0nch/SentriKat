@@ -689,10 +689,23 @@
         /* Feature comparison table in dark mode */
         [data-theme="dark"] #featureComparisonBody .table {
             color: var(--text-color);
+            --bs-table-bg: transparent;
+            --bs-table-striped-bg: rgba(255, 255, 255, 0.03);
         }
         [data-theme="dark"] #featureComparisonBody .table td,
         [data-theme="dark"] #featureComparisonBody .table th {
             border-color: var(--border-color);
+            background-color: inherit;
+        }
+        [data-theme="dark"] #featureComparisonBody .table thead {
+            --bs-table-bg: var(--gray-100);
+        }
+
+        /* All tables in dark mode - override Bootstrap striping */
+        [data-theme="dark"] .table {
+            --bs-table-bg: transparent;
+            --bs-table-striped-bg: rgba(255, 255, 255, 0.03);
+            --bs-table-hover-bg: rgba(255, 255, 255, 0.05);
         }
 
         /* Alert info */
@@ -847,7 +860,7 @@
         }
 
         [data-theme="dark"] .navbar-brand img {
-            filter: brightness(0) invert(1);
+            filter: invert(1);
         }
 
         /* Content wrapper - holds sidebar + main content */
@@ -3128,6 +3141,10 @@
                         <a href="/admin-panel#settings:license" class="sidebar-sublink" data-hash="settings:license">
                             <i class="bi bi-key"></i>
                             License
+                        </a>
+                        <a href="/admin-panel#settings:health" class="sidebar-sublink" data-hash="settings:health">
+                            <i class="bi bi-heart-pulse"></i>
+                            Health Checks
                         </a>
                     </div>
                 </div>

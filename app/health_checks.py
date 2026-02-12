@@ -109,9 +109,22 @@ def is_health_checks_enabled():
 
 
 def _record(check_name, status, message, value=None, details=None):
-    """Helper to record a health check result."""
-    category = HEALTH_CHECKS.get(check_name, {}).get('category', 'system')
-    HealthCheckResult.record(check_name, category, status, message, value, details)
+    """Helper to record a health check result with transaction safety."""
+    try:
+        category = HEALTH_CHECKS.get(check_name, {}).get('category', 'system')
+        HealthCheckResult.record(check_name, category, status, message, value, details)
+    except Exception:
+        # If the session is in a failed state, rollback and retry once
+        try:
+            db.session.rollback()
+            category = HEALTH_CHECKS.get(check_name, {}).get('category', 'system')
+            HealthCheckResult.record(check_name, category, status, message, value, details)
+        except Exception as retry_err:
+            logger.error(f"Failed to record health check '{check_name}' even after rollback: {retry_err}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
 
 
 # ============================================================================
@@ -133,6 +146,10 @@ def check_database():
             _record('database', 'ok', f'Database healthy ({elapsed_ms:.0f}ms)',
                     f'{elapsed_ms:.0f}ms', {'response_time_ms': elapsed_ms})
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('database', 'critical', f'Database unreachable: {str(e)[:200]}',
                 'unreachable', {'error': str(e)[:500]})
 
@@ -186,6 +203,10 @@ def check_worker_thread():
     except ImportError:
         _record('worker_thread', 'warning', 'Cannot check worker status', 'unknown')
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('worker_thread', 'error', f'Error checking worker: {str(e)[:200]}')
 
 
@@ -216,6 +237,10 @@ def check_stuck_jobs():
                     f'{pending} pending',
                     {'stuck_count': 0, 'pending_count': pending})
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('stuck_jobs', 'error', f'Error checking jobs: {str(e)[:200]}')
 
 
@@ -251,6 +276,10 @@ def check_cve_sync_freshness():
                     f'{age_hours:.0f}h ago',
                     {'last_sync': last_sync.sync_date.isoformat(), 'age_hours': round(age_hours)})
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('cve_sync_freshness', 'error', f'Error checking sync: {str(e)[:200]}')
 
 
@@ -282,6 +311,10 @@ def check_agent_health():
                     f'{online}/{total} agents online',
                     f'{online}/{total}', details)
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('agent_health', 'error', f'Error checking agents: {str(e)[:200]}')
 
 
@@ -313,6 +346,10 @@ def check_cpe_coverage():
                     f'CPE coverage: {coverage:.0f}% ({mapped}/{total_products})',
                     f'{coverage:.0f}%', details)
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('cpe_coverage', 'error', f'Error checking CPE coverage: {str(e)[:200]}')
 
 
@@ -361,6 +398,10 @@ def check_license_status():
     except ImportError:
         _record('license_status', 'ok', 'License check not available', 'N/A')
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('license_status', 'error', f'Error checking license: {str(e)[:200]}')
 
 
@@ -404,6 +445,10 @@ def check_smtp_connectivity():
                     'unreachable',
                     {'host': smtp_host, 'port': smtp_port, 'error_code': result})
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('smtp_connectivity', 'error',
                 f'SMTP check failed: {str(e)[:200]}')
 
@@ -426,6 +471,10 @@ def check_pending_import_queue():
                     f'{pending} items in Import Queue',
                     f'{pending} pending', details)
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         _record('pending_import_queue', 'error',
                 f'Error checking import queue: {str(e)[:200]}')
 
@@ -472,6 +521,11 @@ def run_all_health_checks():
                 results[check_name] = result.status
         except Exception as e:
             logger.error(f"Health check '{check_name}' failed: {e}")
+            # Rollback failed transaction before attempting to record error
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
             _record(check_name, 'error', f'Check failed: {str(e)[:200]}')
             results[check_name] = 'error'
 
