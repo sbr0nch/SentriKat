@@ -33,13 +33,20 @@ In SentriKat web interface:
 
 ### 2. Deploy the Agent
 
+All agents support two modes:
+- **One-shot mode** (default): Run once, collect and send inventory, then exit. No installation needed.
+- **Service mode** (`--install`): Set up as a persistent background service with recurring scans and heartbeats.
+
 #### Windows (PowerShell)
 
 ```powershell
-# Test run (verbose)
+# One-shot run (no installation required, run as Administrator)
+powershell -ExecutionPolicy Bypass -File .\sentrikat-agent-windows.ps1
+
+# Test run with verbose output
 .\sentrikat-agent-windows.ps1 -ServerUrl "https://sentrikat.example.com" -ApiKey "sk_agent_xxx" -Verbose
 
-# Install as scheduled task (runs every 4 hours)
+# Install as scheduled task (runs every 4 hours + heartbeat every 5 min)
 .\sentrikat-agent-windows.ps1 -Install -ServerUrl "https://sentrikat.example.com" -ApiKey "sk_agent_xxx"
 
 # Uninstall
@@ -52,10 +59,13 @@ In SentriKat web interface:
 # Make executable
 chmod +x sentrikat-agent-linux.sh
 
-# Test run (verbose)
+# One-shot run (no installation required)
+sudo ./sentrikat-agent-linux.sh
+
+# Test run with verbose output
 ./sentrikat-agent-linux.sh --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx" --verbose
 
-# Install as systemd service (runs every 4 hours)
+# Install as systemd service (runs every 4 hours + heartbeat every 5 min)
 sudo ./sentrikat-agent-linux.sh --install --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
 
 # Check status
@@ -64,6 +74,36 @@ systemctl status sentrikat-agent.timer
 # Uninstall
 sudo ./sentrikat-agent-linux.sh --uninstall
 ```
+
+#### macOS (Bash)
+
+```bash
+# Make executable
+chmod +x sentrikat-agent-macos.sh
+
+# One-shot run (no installation required)
+sudo ./sentrikat-agent-macos.sh
+
+# Test run with verbose output
+./sentrikat-agent-macos.sh --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx" --verbose
+
+# Install as LaunchDaemon (runs every 4 hours + heartbeat every 5 min)
+sudo ./sentrikat-agent-macos.sh --install --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
+
+# Check status
+sudo launchctl list | grep sentrikat
+
+# Uninstall
+sudo ./sentrikat-agent-macos.sh --uninstall
+```
+
+### Multi-Organization Deployment
+
+When creating an API key, you can optionally select **additional organizations**. Software reported by agents using that key will appear in all selected organizations independently (without mixing data between them). This is useful when:
+
+- A single infrastructure serves multiple departments or clients
+- You want the same inventory visible to different teams
+- A managed service provider deploys agents for multiple customers
 
 ## Configuration
 

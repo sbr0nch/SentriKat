@@ -3,7 +3,7 @@ from app import db, csrf, limiter
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 import os
-from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory, ContainerImage, ContainerVulnerability
+from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory, ContainerImage, ContainerVulnerability, SystemSettings
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
@@ -79,6 +79,109 @@ def health_check():
         return jsonify(health), 503
 
     return jsonify(health), 200
+
+
+# =============================================================================
+# Background Health Checks API
+# =============================================================================
+
+@bp.route('/api/admin/health-checks', methods=['GET'])
+@login_required
+@admin_required
+def get_health_checks():
+    """Get all health check results and configuration."""
+    from app.health_checks import get_health_check_config, is_health_checks_enabled
+    try:
+        config = get_health_check_config()
+        globally_enabled = is_health_checks_enabled()
+
+        # Get notification email setting
+        notify_email = ''
+        setting = SystemSettings.query.filter_by(key='health_check_notify_email').first()
+        if setting:
+            notify_email = setting.value or ''
+
+        return jsonify({
+            'enabled': globally_enabled,
+            'notify_email': notify_email,
+            'checks': config
+        })
+    except Exception as e:
+        logger.exception("Error loading health checks")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/admin/health-checks/settings', methods=['PUT'])
+@login_required
+@admin_required
+def update_health_check_settings():
+    """Update health check configuration (enable/disable checks, notification email)."""
+    from app.models import SystemSettings
+    try:
+        data = request.get_json()
+
+        # Update global enable/disable
+        if 'enabled' in data:
+            setting = SystemSettings.query.filter_by(key='health_checks_enabled').first()
+            if setting:
+                setting.value = 'true' if data['enabled'] else 'false'
+            else:
+                db.session.add(SystemSettings(
+                    key='health_checks_enabled',
+                    value='true' if data['enabled'] else 'false',
+                    category='health'
+                ))
+
+        # Update individual check enable/disable
+        if 'checks' in data and isinstance(data['checks'], dict):
+            for check_name, enabled in data['checks'].items():
+                key = f'health_check_{check_name}_enabled'
+                setting = SystemSettings.query.filter_by(key=key).first()
+                if setting:
+                    setting.value = 'true' if enabled else 'false'
+                else:
+                    db.session.add(SystemSettings(
+                        key=key,
+                        value='true' if enabled else 'false',
+                        category='health'
+                    ))
+
+        # Update notification email
+        if 'notify_email' in data:
+            setting = SystemSettings.query.filter_by(key='health_check_notify_email').first()
+            if setting:
+                setting.value = data['notify_email']
+            else:
+                db.session.add(SystemSettings(
+                    key='health_check_notify_email',
+                    value=data['notify_email'],
+                    category='health'
+                ))
+
+        db.session.commit()
+        return jsonify({'status': 'success', 'message': 'Health check settings updated'})
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("Error updating health check settings")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/admin/health-checks/run', methods=['POST'])
+@login_required
+@admin_required
+def run_health_checks_now():
+    """Manually trigger all enabled health checks."""
+    from app.health_checks import run_all_health_checks
+    try:
+        results = run_all_health_checks()
+        return jsonify({
+            'status': 'success',
+            'results': results,
+            'message': f'{len(results)} health checks completed'
+        })
+    except Exception as e:
+        logger.exception("Error running health checks")
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/api/system/notifications', methods=['GET'])

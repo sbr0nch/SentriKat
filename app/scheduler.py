@@ -219,6 +219,16 @@ def start_scheduler(app):
     )
     logger.info("Unmapped CPE retry scheduled weekly (Mondays 05:00)")
 
+    # Schedule background health checks (every 30 minutes)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('health_checks', health_check_job, app),
+        trigger=IntervalTrigger(minutes=30),
+        id='background_health_checks',
+        name='Background Health Checks',
+        replace_existing=True
+    )
+    logger.info("Background health checks scheduled every 30 minutes")
+
     # Warm up the CVE known products cache on startup
     try:
         from app.cve_known_products import refresh_known_cve_products
@@ -966,3 +976,21 @@ def agent_offline_detection_job(app):
                 db.session.rollback()
             except Exception:
                 pass
+
+
+def health_check_job(app):
+    """
+    Run all enabled background health checks.
+    Results are stored in HealthCheckResult and notifications sent for problems.
+    """
+    with app.app_context():
+        try:
+            from app.health_checks import run_all_health_checks
+            results = run_all_health_checks()
+            if results.get('skipped'):
+                logger.debug("Health checks skipped (disabled)")
+                return
+            problems = sum(1 for v in results.values() if v in ('warning', 'critical', 'error'))
+            logger.info(f"Health checks completed: {len(results)} checks, {problems} issues")
+        except Exception as e:
+            logger.error(f"Health check job failed: {str(e)}", exc_info=True)

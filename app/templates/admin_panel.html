@@ -1225,6 +1225,11 @@
                         <i class="bi bi-key me-2"></i>License
                     </button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="health-settings-tab" type="button" onclick="showSettingsGroup('health', this)">
+                        <i class="bi bi-heart-pulse me-2"></i>Health Checks
+                    </button>
+                </li>
                 {% endif %}
             </ul>
 
@@ -3149,6 +3154,51 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Health Checks Settings -->
+                <div class="tab-pane fade" id="healthSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-heart-pulse me-2"></i>Background Health Checks</span>
+                            <div>
+                                <button class="btn btn-outline-primary btn-sm me-2" onclick="runHealthChecksNow()">
+                                    <i class="bi bi-play-circle me-1"></i>Run Now
+                                </button>
+                                <div class="form-check form-switch d-inline-flex align-items-center mb-0">
+                                    <input class="form-check-input" type="checkbox" id="healthChecksGlobalToggle" onchange="toggleHealthChecksGlobal(this.checked)">
+                                    <label class="form-check-label ms-2 fw-semibold" for="healthChecksGlobalToggle">Enabled</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted mb-3">
+                                SentriKat runs background health checks every 30 minutes to monitor system components.
+                                Problems and warnings are reported via email notifications and shown here.
+                            </p>
+
+                            <!-- Notification Email -->
+                            <div class="mb-4">
+                                <label for="healthCheckNotifyEmail" class="form-label fw-semibold">Notification Email</label>
+                                <div class="input-group">
+                                    <input type="email" class="form-control" id="healthCheckNotifyEmail" placeholder="admin@example.com">
+                                    <button class="btn btn-outline-primary" type="button" onclick="saveHealthCheckSettings()">
+                                        <i class="bi bi-check-lg me-1"></i>Save
+                                    </button>
+                                </div>
+                                <small class="text-muted">Receive email alerts when health checks detect problems (leave empty to disable email notifications)</small>
+                            </div>
+
+                            <!-- Health Check Results -->
+                            <div id="healthCheckResults">
+                                <div class="text-center py-4">
+                                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                                    <span class="ms-2">Loading health check results...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {% endif %}
             </div>
         </div>
@@ -3172,11 +3222,18 @@
                         <input type="text" class="form-control" id="agentKeyName" required placeholder="e.g., Production Servers">
                     </div>
                     <div class="mb-3">
-                        <label for="agentKeyOrg" class="form-label fw-semibold">Organization</label>
+                        <label for="agentKeyOrg" class="form-label fw-semibold">Primary Organization</label>
                         <select class="form-select" id="agentKeyOrg" required>
                             <option value="">Select organization...</option>
                         </select>
-                        <small class="text-muted">Agents using this key will report to this organization</small>
+                        <small class="text-muted">Primary organization for this agent key. The asset will be registered here.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Additional Organizations <span class="badge bg-secondary-subtle text-secondary">Optional</span></label>
+                        <div id="agentKeyAdditionalOrgs" class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
+                            <small class="text-muted">Select a primary organization first</small>
+                        </div>
+                        <small class="text-muted">Software reported by this agent will also appear in these organizations (without mixing data between them)</small>
                     </div>
                     <div class="mb-3">
                         <label for="agentKeyMaxAssets" class="form-label fw-semibold">Max Assets</label>
@@ -4319,5 +4376,180 @@ async function rebuildCpeDictionary() {
 
 // Load CPE dict & KB status when settings tab is active
 setTimeout(() => { loadCpeDictStatus(); loadKbStatus(); }, 2000);
+
+// ============================================================================
+// Health Checks
+// ============================================================================
+
+async function loadHealthChecks() {
+    const container = document.getElementById('healthCheckResults');
+    if (!container) return;
+
+    try {
+        const resp = await fetch('/api/admin/health-checks');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        // Update global toggle
+        const globalToggle = document.getElementById('healthChecksGlobalToggle');
+        if (globalToggle) globalToggle.checked = data.enabled !== false;
+
+        // Update notification email
+        const emailInput = document.getElementById('healthCheckNotifyEmail');
+        if (emailInput) emailInput.value = data.notify_email || '';
+
+        const checks = data.checks || [];
+        if (checks.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No health checks configured</p>';
+            return;
+        }
+
+        // Group by category
+        const categories = {};
+        checks.forEach(c => {
+            if (!categories[c.category]) categories[c.category] = [];
+            categories[c.category].push(c);
+        });
+
+        const categoryLabels = {
+            system: 'System',
+            sync: 'Data Sync',
+            agents: 'Agents',
+            security: 'Security',
+            database: 'Database'
+        };
+
+        const statusIcons = {
+            ok: '<i class="bi bi-check-circle-fill text-success"></i>',
+            warning: '<i class="bi bi-exclamation-triangle-fill text-warning"></i>',
+            critical: '<i class="bi bi-x-octagon-fill text-danger"></i>',
+            error: '<i class="bi bi-bug-fill text-danger"></i>',
+            unknown: '<i class="bi bi-question-circle text-muted"></i>'
+        };
+
+        const statusBadges = {
+            ok: 'bg-success',
+            warning: 'bg-warning text-dark',
+            critical: 'bg-danger',
+            error: 'bg-danger',
+            unknown: 'bg-secondary'
+        };
+
+        let html = '';
+        for (const [category, categoryChecks] of Object.entries(categories)) {
+            html += `<h6 class="text-muted border-bottom pb-2 mt-3 mb-3">
+                <i class="bi bi-folder me-1"></i>${categoryLabels[category] || category}
+            </h6>`;
+
+            categoryChecks.forEach(check => {
+                const result = check.last_result;
+                const status = result ? result.status : 'unknown';
+                const message = result ? result.message : 'Not checked yet';
+                const value = result ? result.value : '-';
+                const checkedAt = result && result.checked_at
+                    ? new Date(result.checked_at).toLocaleString()
+                    : 'Never';
+
+                html += `
+                <div class="d-flex align-items-center justify-content-between py-2 px-3 mb-2 rounded border ${status === 'critical' ? 'border-danger' : status === 'warning' ? 'border-warning' : ''}">
+                    <div class="d-flex align-items-center flex-grow-1">
+                        <div class="form-check form-switch me-3">
+                            <input class="form-check-input health-check-toggle" type="checkbox"
+                                   data-check="${check.name}" id="hc_${check.name}"
+                                   ${check.enabled ? 'checked' : ''}
+                                   onchange="toggleSingleHealthCheck('${check.name}', this.checked)">
+                        </div>
+                        <div>
+                            <div class="fw-semibold">
+                                ${statusIcons[status] || statusIcons.unknown}
+                                <span class="ms-1">${check.label}</span>
+                                ${value && value !== '-' ? '<span class="badge ' + (statusBadges[status] || 'bg-secondary') + ' ms-2">' + value + '</span>' : ''}
+                            </div>
+                            <small class="text-muted">${message}</small>
+                        </div>
+                    </div>
+                    <small class="text-muted ms-3 text-nowrap" title="Last checked">${checkedAt}</small>
+                </div>`;
+            });
+        }
+
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>Error loading health checks: ${e.message}</div>`;
+    }
+}
+
+async function toggleHealthChecksGlobal(enabled) {
+    try {
+        const resp = await fetch('/api/admin/health-checks/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (typeof showToast === 'function') {
+            showToast(enabled ? 'Health checks enabled' : 'Health checks disabled', 'success');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Error: ' + e.message, 'danger');
+    }
+}
+
+async function toggleSingleHealthCheck(checkName, enabled) {
+    try {
+        const checks = {};
+        checks[checkName] = enabled;
+        const resp = await fetch('/api/admin/health-checks/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checks })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Error: ' + e.message, 'danger');
+    }
+}
+
+async function saveHealthCheckSettings() {
+    const email = document.getElementById('healthCheckNotifyEmail')?.value || '';
+    try {
+        const resp = await fetch('/api/admin/health-checks/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notify_email: email })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (typeof showToast === 'function') showToast('Health check settings saved', 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Error saving settings: ' + e.message, 'danger');
+    }
+}
+
+async function runHealthChecksNow() {
+    const btn = event?.target?.closest('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running...'; }
+    try {
+        const resp = await fetch('/api/admin/health-checks/run', { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (typeof showToast === 'function') showToast(data.message || 'Health checks completed', 'success');
+        loadHealthChecks();
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Error: ' + e.message, 'danger');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-circle me-1"></i>Run Now'; }
+    }
+}
+
+// Auto-load health checks when the tab becomes visible
+const _healthObserver = new MutationObserver(() => {
+    const pane = document.getElementById('healthSettings');
+    if (pane && pane.classList.contains('active')) {
+        loadHealthChecks();
+        _healthObserver.disconnect();
+    }
+});
+const _healthPane = document.getElementById('healthSettings');
+if (_healthPane) _healthObserver.observe(_healthPane, { attributes: true, attributeFilter: ['class'] });
 </script>
 {% endblock %}

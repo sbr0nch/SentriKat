@@ -19,7 +19,9 @@
 11. [CPE Management](#cpe-management)
 12. [SAML SSO](#saml-sso)
 13. [Vendor Advisory Sync](#vendor-advisory-sync)
-13. [Licensing](#licensing)
+14. [Licensing](#licensing)
+15. [Health Checks](#health-checks)
+16. [Agent API Keys (Multi-Org)](#agent-api-keys-multi-org)
 
 ---
 
@@ -1061,6 +1063,131 @@ Check vendor advisory feeds for patches related to a specific CVE.
   "count": 1
 }
 ```
+
+---
+
+## Health Checks
+
+Background health monitoring system that checks all system components and reports problems.
+
+### Get Health Check Status
+
+```http
+GET /api/admin/health-checks
+Authorization: Session (Super Admin)
+```
+
+**Response**:
+```json
+{
+  "enabled": true,
+  "notify_email": "admin@example.com",
+  "checks": [
+    {
+      "name": "database",
+      "label": "Database Connectivity",
+      "description": "Verifies the database is reachable and responsive",
+      "category": "system",
+      "enabled": true,
+      "last_result": {
+        "status": "ok",
+        "message": "Database healthy (12ms)",
+        "value": "12ms",
+        "checked_at": "2025-01-15T10:30:00"
+      }
+    }
+  ]
+}
+```
+
+Available checks: `database`, `disk_space`, `worker_thread`, `stuck_jobs`, `cve_sync_freshness`, `agent_health`, `cpe_coverage`, `license_status`, `smtp_connectivity`, `pending_import_queue`.
+
+### Update Health Check Settings
+
+```http
+PUT /api/admin/health-checks/settings
+Content-Type: application/json
+Authorization: Session (Super Admin)
+
+{
+  "enabled": true,
+  "notify_email": "ops@example.com",
+  "checks": {
+    "database": true,
+    "smtp_connectivity": false
+  }
+}
+```
+
+### Run Health Checks Now
+
+```http
+POST /api/admin/health-checks/run
+Authorization: Session (Super Admin)
+```
+
+---
+
+## Agent API Keys (Multi-Org)
+
+### Create Agent API Key
+
+```http
+POST /api/agent-keys
+Content-Type: application/json
+Authorization: Session (Org Admin or Super Admin)
+
+{
+  "name": "Production Servers",
+  "organization_id": 1,
+  "additional_organization_ids": [2, 3],
+  "auto_approve": true,
+  "max_assets": 0,
+  "expires_days": 365
+}
+```
+
+The `additional_organization_ids` field is optional. When provided, software reported by agents using this key will be assigned to all specified organizations independently.
+
+**Response**:
+```json
+{
+  "id": 5,
+  "name": "Production Servers",
+  "organization_id": 1,
+  "organization_name": "Main Org",
+  "additional_organizations": [
+    {"id": 2, "name": "Dev Team"},
+    {"id": 3, "name": "QA Team"}
+  ],
+  "all_organization_ids": [1, 2, 3],
+  "api_key": "sk_agent_xxxx...",
+  "warning": "Save this key now. It will not be shown again."
+}
+```
+
+### Agent Update Push
+
+Push software updates to agents remotely.
+
+```http
+POST /api/admin/assets/{id}/trigger-update
+Authorization: Session (Admin)
+```
+
+```http
+POST /api/admin/assets/trigger-update-all
+Authorization: Session (Admin)
+```
+
+### Agent Version Summary
+
+```http
+GET /api/admin/agents/version-summary
+Authorization: Session (Admin)
+```
+
+---
 
 ### VulnerabilityMatch Confidence Fields
 
