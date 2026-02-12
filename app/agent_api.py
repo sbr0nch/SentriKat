@@ -1771,8 +1771,10 @@ def agent_heartbeat():
     # Update checkin and agent version
     asset.last_checkin = datetime.utcnow()
     asset.status = 'online'
-    if data.get('agent_version'):
-        asset.agent_version = data.get('agent_version')
+    previous_version = asset.agent_version
+    new_version = data.get('agent_version')
+    if new_version:
+        asset.agent_version = new_version
     try:
         # Log reconnection event when transitioning from offline/stale to online
         if previous_status in ('offline', 'stale'):
@@ -1789,6 +1791,23 @@ def agent_heartbeat():
                 )
             except Exception:
                 pass
+
+        # Log agent_updated event when version changes
+        if new_version and previous_version and new_version != previous_version:
+            try:
+                AgentEvent.log_event(
+                    organization_id=asset.organization_id,
+                    event_type='agent_updated',
+                    asset_id=asset.id,
+                    old_value=previous_version,
+                    new_value=new_version,
+                    details=json.dumps({'message': f'Agent updated from v{previous_version} to v{new_version}'}),
+                    source_ip=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent', '')[:500]
+                )
+            except Exception:
+                pass
+
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -2101,6 +2120,14 @@ def list_assets():
         for asset in pagination.items:
             try:
                 asset_dict = asset.to_dict()
+                # Add latest agent version for update status display
+                asset_platform = (asset.os_name or '').lower()
+                if 'windows' in asset_platform:
+                    asset_dict['latest_agent_version'] = LATEST_AGENT_VERSIONS.get('windows', '1.0.0')
+                elif 'macos' in asset_platform or 'mac os' in asset_platform or 'darwin' in asset_platform:
+                    asset_dict['latest_agent_version'] = LATEST_AGENT_VERSIONS.get('macos', '1.0.0')
+                else:
+                    asset_dict['latest_agent_version'] = LATEST_AGENT_VERSIONS.get('linux', '1.0.0')
                 # Add latest job info so UI can show "N products pending review"
                 job_info = latest_jobs.get(asset.id)
                 if job_info:
@@ -3166,6 +3193,7 @@ def get_agent_commands():
         # Update last checkin (heartbeat) and agent version
         asset.last_checkin = datetime.utcnow()
         asset.status = 'online'
+        previous_version = asset.agent_version
         if agent_version and agent_version != '1.0.0':
             asset.agent_version = agent_version
 
@@ -3179,6 +3207,22 @@ def get_agent_commands():
                     old_value=previous_status,
                     new_value='online',
                     details=json.dumps({'reason': 'command_poll_reconnect'}),
+                    source_ip=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent', '')[:500]
+                )
+            except Exception:
+                pass
+
+        # Log agent_updated event when version changes
+        if agent_version and agent_version != '1.0.0' and previous_version and agent_version != previous_version:
+            try:
+                AgentEvent.log_event(
+                    organization_id=asset.organization_id,
+                    event_type='agent_updated',
+                    asset_id=asset.id,
+                    old_value=previous_version,
+                    new_value=agent_version,
+                    details=json.dumps({'message': f'Agent updated from v{previous_version} to v{agent_version}'}),
                     source_ip=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500]
                 )
@@ -3207,18 +3251,36 @@ def get_agent_commands():
                 }
             })
 
+        # Check for admin-triggered update push
+        if asset.pending_update:
+            latest_version = LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
+            commands.append({
+                'command': 'update_available',
+                'current_version': agent_version,
+                'latest_version': latest_version,
+                'download_url': f'/api/agent/download/{platform}',
+                'message': f'Update pushed by administrator',
+                'forced': True
+            })
+            # Clear the pending update flag
+            asset.pending_update = False
+            asset.pending_update_requested_at = None
+            asset.pending_update_requested_by = None
+
         db.session.commit()
 
-    # Check for agent update
+    # Check for agent update (automatic version comparison)
     latest_version = LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
     if _version_compare(agent_version, latest_version) < 0:
-        commands.append({
-            'command': 'update_available',
-            'current_version': agent_version,
-            'latest_version': latest_version,
-            'download_url': f'/api/agent/download/{platform}',
-            'message': f'Agent update available: {agent_version} → {latest_version}'
-        })
+        # Only send if we didn't already send a forced update above
+        if not any(c.get('command') == 'update_available' for c in commands):
+            commands.append({
+                'command': 'update_available',
+                'current_version': agent_version,
+                'latest_version': latest_version,
+                'download_url': f'/api/agent/download/{platform}',
+                'message': f'Agent update available: {agent_version} → {latest_version}'
+            })
 
     return jsonify({
         'commands': commands,
@@ -3513,6 +3575,171 @@ def trigger_all_assets_scan():
         'status': 'success',
         'message': f'Scan requested for {count} agents',
         'agents_triggered': count
+    })
+
+
+@agent_bp.route('/api/admin/assets/<int:asset_id>/trigger-update', methods=['POST'])
+@login_required
+@limiter.limit("30/minute")
+def trigger_asset_update(asset_id):
+    """
+    Push an agent update to a specific endpoint.
+    The agent will receive the update_available command on its next poll.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    asset = Asset.query.get_or_404(asset_id)
+
+    # Check permission
+    if not user.is_super_admin():
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if asset.organization_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    # Set pending update flag
+    asset.pending_update = True
+    asset.pending_update_requested_at = datetime.utcnow()
+    asset.pending_update_requested_by = user.username
+    db.session.commit()
+
+    # Log event
+    AgentEvent.log_event(
+        organization_id=asset.organization_id,
+        asset_id=asset.id,
+        event_type='update_requested',
+        details={'message': f'Agent update pushed by {user.username}'},
+        source_ip=request.remote_addr
+    )
+    db.session.commit()
+
+    return jsonify({
+        'status': 'success',
+        'message': f'Update pushed to {asset.hostname}. Agent will update on next poll.',
+        'asset_id': asset.id,
+        'hostname': asset.hostname
+    })
+
+
+@agent_bp.route('/api/admin/assets/trigger-update-all', methods=['POST'])
+@login_required
+@limiter.limit("5/minute")
+def trigger_all_assets_update():
+    """
+    Push agent updates to all endpoints in an organization (or all organizations for super admins).
+    Only targets agents that have a known agent_version (i.e., managed agents, not manual).
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+    data = request.get_json() or {}
+
+    org_id = data.get('organization_id')
+
+    # Determine which organizations the user can trigger
+    if user.is_super_admin():
+        if org_id:
+            query = Asset.query.filter_by(organization_id=org_id, active=True)
+        else:
+            query = Asset.query.filter_by(active=True)
+    else:
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if org_id and org_id not in user_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+        if org_id:
+            query = Asset.query.filter_by(organization_id=org_id, active=True)
+        else:
+            query = Asset.query.filter(
+                Asset.organization_id.in_(user_org_ids),
+                Asset.active == True
+            )
+
+    # Only target managed agents (those with an agent_version)
+    query = query.filter(Asset.agent_version.isnot(None), Asset.agent_version != '')
+
+    # Update all matching assets
+    count = query.update({
+        'pending_update': True,
+        'pending_update_requested_at': datetime.utcnow(),
+        'pending_update_requested_by': user.username
+    }, synchronize_session=False)
+
+    db.session.commit()
+
+    return jsonify({
+        'status': 'success',
+        'message': f'Update pushed to {count} agents',
+        'agents_triggered': count
+    })
+
+
+@agent_bp.route('/api/admin/agents/version-summary', methods=['GET'])
+@login_required
+@limiter.limit("30/minute")
+def agent_version_summary():
+    """
+    Get a summary of agent versions across all endpoints.
+    Returns counts of up-to-date, outdated, and unmanaged agents.
+    """
+    from app.auth import get_current_user
+
+    user = get_current_user()
+
+    # Build query based on user permissions
+    if user.is_super_admin():
+        query = Asset.query.filter_by(active=True)
+    else:
+        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
+        query = Asset.query.filter(
+            Asset.organization_id.in_(user_org_ids),
+            Asset.active == True
+        )
+
+    assets = query.all()
+    total = len(assets)
+    managed = 0
+    up_to_date = 0
+    outdated = 0
+    pending_updates = 0
+    version_breakdown = {}
+
+    for asset in assets:
+        if not asset.agent_version:
+            continue
+        managed += 1
+
+        # Determine platform
+        os_name = (asset.os_name or '').lower()
+        if 'windows' in os_name:
+            platform = 'windows'
+        elif 'macos' in os_name or 'mac os' in os_name or 'darwin' in os_name:
+            platform = 'macos'
+        else:
+            platform = 'linux'
+
+        latest = LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
+        if _version_compare(asset.agent_version, latest) >= 0:
+            up_to_date += 1
+        else:
+            outdated += 1
+
+        if asset.pending_update:
+            pending_updates += 1
+
+        # Track version distribution
+        ver = asset.agent_version
+        version_breakdown[ver] = version_breakdown.get(ver, 0) + 1
+
+    return jsonify({
+        'total': total,
+        'managed': managed,
+        'unmanaged': total - managed,
+        'up_to_date': up_to_date,
+        'outdated': outdated,
+        'pending_updates': pending_updates,
+        'latest_versions': LATEST_AGENT_VERSIONS,
+        'version_breakdown': version_breakdown
     })
 
 
