@@ -311,6 +311,42 @@ def system_notifications():
                     'dismissible': True
                 })
 
+        # 7. Health check warnings/criticals - admin only
+        if is_admin:
+            try:
+                from app.models import HealthCheckResult
+                health_issues = HealthCheckResult.query.filter(
+                    HealthCheckResult.status.in_(['critical', 'warning'])
+                ).all()
+
+                critical_count = sum(1 for h in health_issues if h.status == 'critical')
+                warning_count = sum(1 for h in health_issues if h.status == 'warning')
+
+                if critical_count > 0:
+                    messages = [h.message for h in health_issues if h.status == 'critical']
+                    summary = messages[0] if len(messages) == 1 else f'{critical_count} critical issue{"s" if critical_count != 1 else ""}'
+                    notifications.append({
+                        'id': 'health_critical',
+                        'level': 'danger',
+                        'icon': 'bi-heart-pulse-fill',
+                        'message': f'System health: {summary}',
+                        'action': {'label': 'View', 'url': '/admin-panel#settings:health'},
+                        'dismissible': True
+                    })
+                elif warning_count > 0:
+                    messages = [h.message for h in health_issues if h.status == 'warning']
+                    summary = messages[0] if len(messages) == 1 else f'{warning_count} warning{"s" if warning_count != 1 else ""}'
+                    notifications.append({
+                        'id': 'health_warning',
+                        'level': 'warning',
+                        'icon': 'bi-heart-pulse',
+                        'message': f'System health: {summary}',
+                        'action': {'label': 'View', 'url': '/admin-panel#settings:health'},
+                        'dismissible': True
+                    })
+            except Exception:
+                pass
+
     except Exception as e:
         logger.error(f"Error fetching system notifications: {e}")
 
