@@ -913,10 +913,21 @@
         try {
             const response = await fetch(`/api/products?${params.toString()}`);
             if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`Server error (${response.status}). Try refreshing the page.`);
+                let errMsg = `Server error (${response.status})`;
+                try {
+                    const errData = await response.json();
+                    if (errData.error) errMsg = errData.error;
+                } catch (_) {
+                    // Response wasn't JSON
+                }
+                throw new Error(errMsg);
             }
             const data = await response.json();
+
+            // Check for error in response body
+            if (data.error) {
+                throw new Error(data.error);
+            }
 
             // Handle paginated response
             const products = data.products || data;
