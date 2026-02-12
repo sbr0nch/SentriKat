@@ -15,12 +15,16 @@ import uuid
 import logging
 from functools import wraps
 
+from sqlalchemy.exc import IntegrityError
+
 from app import db, csrf
 from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User
-from app.auth import admin_required, login_required
+from app.auth import admin_required, login_required, get_current_user
 from app.licensing import requires_professional
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('integrations', __name__)
 csrf.exempt(bp)  # API endpoints use session auth, not CSRF tokens
@@ -35,6 +39,17 @@ def get_integration_by_api_key(api_key):
     if not api_key:
         return None
     return Integration.query.filter_by(api_key=api_key, is_active=True).first()
+
+
+def validate_org_access(user, org_id):
+    """Validate that a user has access to the given organization.
+    Returns (org, error_response) tuple. If error_response is not None, return it."""
+    org = Organization.query.get(org_id)
+    if not org:
+        return None, (jsonify({'error': 'Organization not found'}), 404)
+    if not user.is_super_admin() and not user.has_access_to_org(org_id):
+        return None, (jsonify({'error': 'Permission denied for this organization'}), 403)
+    return org, None
 
 
 def api_key_or_login_required(f):
@@ -229,7 +244,12 @@ def import_software():
                 'status': 'queued'
             })
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Import software commit failed: {e}")
+        return jsonify({'error': 'Database error during import'}), 500
 
     # Update integration sync status
     if integration:
@@ -237,7 +257,11 @@ def import_software():
         integration.last_sync_status = 'success'
         integration.last_sync_count = len(software_list)
         integration.last_sync_message = f"Imported {results['queued']} queued, {results['auto_approved']} auto-approved, {results['duplicates']} duplicates"
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to update integration sync status: {e}")
 
     return jsonify(results)
 
@@ -447,7 +471,12 @@ def import_sbom():
         else:
             results['queued'] += 1
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"SBOM import commit failed: {e}")
+        return jsonify({'error': 'Database error during SBOM import'}), 500
 
     return jsonify(results)
 
@@ -585,13 +614,18 @@ def create_product_from_queue(queue_item):
 
         # Add to product_organizations many-to-many table for proper org tracking
         if queue_item.organization_id:
-            from app.models import Organization
             org = Organization.query.get(queue_item.organization_id)
             if org and org not in product.organizations:
                 product.organizations.append(org)
 
         return product
+    except IntegrityError as e:
+        db.session.rollback()
+        logger.warning(f"Duplicate product from queue: {queue_item.vendor} {queue_item.product_name}: {e}")
+        return None
     except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to create product from queue item {queue_item.id}: {e}")
         return None
 
 
@@ -636,7 +670,14 @@ def get_import_queue():
 @requires_professional('Integrations')
 def get_import_queue_count():
     """Get count of pending import queue items."""
-    pending_count = ImportQueue.query.filter_by(status='pending').count()
+    user = get_current_user()
+    query = ImportQueue.query.filter_by(status='pending')
+
+    if user and not user.is_super_admin():
+        accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
+        query = query.filter(ImportQueue.organization_id.in_(accessible_org_ids))
+
+    pending_count = query.count()
     return jsonify({'pending': pending_count})
 
 
@@ -663,13 +704,23 @@ def update_queue_item(item_id):
     if 'selected_version' in data:
         item.selected_version = data['selected_version'] or None
     if 'organization_id' in data:
+        user = get_current_user()
+        if user:
+            _, err = validate_org_access(user, data['organization_id'])
+            if err:
+                return err
         item.organization_id = data['organization_id']
     if 'cpe_vendor' in data:
         item.cpe_vendor = data['cpe_vendor']
     if 'cpe_product' in data:
         item.cpe_product = data['cpe_product']
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to update queue item {item_id}: {e}")
+        return jsonify({'error': 'Database error'}), 500
     return jsonify(item.to_dict())
 
 
@@ -689,6 +740,11 @@ def approve_queue_item(item_id):
     if 'selected_version' in data:
         item.selected_version = data['selected_version']
     if 'organization_id' in data:
+        user = get_current_user()
+        if user:
+            _, err = validate_org_access(user, data['organization_id'])
+            if err:
+                return err
         item.organization_id = data['organization_id']
 
     # Create the product
@@ -702,14 +758,31 @@ def approve_queue_item(item_id):
     item.processed_at = datetime.utcnow()
     item.processed_by = session.get('user_id')
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        # Check if another request already approved this item
+        item = ImportQueue.query.get(item_id)
+        if item and item.status == 'approved':
+            return jsonify({
+                'success': True,
+                'product_id': item.product_id,
+                'item': item.to_dict(),
+                'message': 'Item was already approved'
+            })
+        return jsonify({'error': 'Conflict during approval'}), 409
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to approve queue item {item_id}: {e}")
+        return jsonify({'error': 'Database error'}), 500
 
     # Trigger vulnerability matching
     try:
         from app.filters import match_vulnerabilities_to_products
         match_vulnerabilities_to_products([product])
     except Exception as match_err:
-        logging.getLogger(__name__).warning(f"Vulnerability matching failed for product {product.id}: {match_err}")
+        logger.warning(f"Vulnerability matching failed for product {product.id}: {match_err}")
 
     return jsonify({
         'success': True,
@@ -732,7 +805,12 @@ def reject_queue_item(item_id):
     item.processed_at = datetime.utcnow()
     item.processed_by = session.get('user_id')
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to reject queue item {item_id}: {e}")
+        return jsonify({'error': 'Database error'}), 500
 
     return jsonify({'success': True, 'item': item.to_dict()})
 
@@ -756,6 +834,14 @@ def bulk_process_queue():
 
     if not item_ids:
         return jsonify({'error': 'No items specified'}), 400
+
+    # Validate org access if organization_id override is provided
+    if organization_id:
+        user = get_current_user()
+        if user:
+            _, err = validate_org_access(user, organization_id)
+            if err:
+                return err
 
     results = {'processed': 0, 'errors': 0, 'products': []}
 
@@ -785,7 +871,12 @@ def bulk_process_queue():
             item.processed_by = session.get('user_id')
             results['processed'] += 1
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bulk process commit failed: {e}")
+        return jsonify({'error': 'Database error during bulk processing'}), 500
 
     # Trigger vulnerability matching for approved products
     if results['products']:
@@ -793,8 +884,8 @@ def bulk_process_queue():
             from app.filters import match_vulnerabilities_to_products
             products = Product.query.filter(Product.id.in_(results['products'])).all()
             match_vulnerabilities_to_products(products)
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Vulnerability matching failed during bulk process: {e}")
 
     return jsonify(results)
 
@@ -832,7 +923,12 @@ def approve_all_queue():
         else:
             results['errors'] += 1
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Approve-all commit failed: {e}")
+        return jsonify({'error': 'Database error during batch approval'}), 500
 
     # Trigger vulnerability matching in batches
     if results['products']:
@@ -840,8 +936,8 @@ def approve_all_queue():
             from app.filters import match_vulnerabilities_to_products
             products = Product.query.filter(Product.id.in_(results['products'])).all()
             match_vulnerabilities_to_products(products)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Vulnerability matching failed during approve-all: {e}")
 
     return jsonify(results)
 
@@ -865,12 +961,17 @@ def reject_all_queue():
     if count == 0:
         return jsonify({'processed': 0, 'message': 'No pending items to reject'})
 
-    query.update({
-        ImportQueue.status: 'rejected',
-        ImportQueue.processed_at: datetime.utcnow(),
-        ImportQueue.processed_by: session.get('user_id')
-    }, synchronize_session='fetch')
-    db.session.commit()
+    try:
+        query.update({
+            ImportQueue.status: 'rejected',
+            ImportQueue.processed_at: datetime.utcnow(),
+            ImportQueue.processed_by: session.get('user_id')
+        }, synchronize_session='fetch')
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Reject-all commit failed: {e}")
+        return jsonify({'error': 'Database error during batch rejection'}), 500
 
     return jsonify({'processed': count})
 
@@ -881,12 +982,20 @@ def reject_all_queue():
 def get_queue_vendors():
     """Get list of vendors with pending items and their counts."""
     from sqlalchemy import func
-    vendor_counts = db.session.query(
+
+    user = get_current_user()
+    query = db.session.query(
         ImportQueue.vendor,
         func.count(ImportQueue.id)
     ).filter_by(
         status='pending'
-    ).group_by(
+    )
+
+    if user and not user.is_super_admin():
+        accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
+        query = query.filter(ImportQueue.organization_id.in_(accessible_org_ids))
+
+    vendor_counts = query.group_by(
         ImportQueue.vendor
     ).order_by(
         func.count(ImportQueue.id).desc()
@@ -909,8 +1018,6 @@ def get_queue_vendors():
 @requires_professional('Integrations')
 def get_integrations():
     """Get all integrations."""
-    from app.auth import get_current_user
-
     user = get_current_user()
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
@@ -985,13 +1092,22 @@ def create_integration():
     if integration_type not in valid_types:
         return jsonify({'error': f'Invalid type. Valid types: {", ".join(valid_types)}'}), 400
 
+    # Validate organization_id if provided
+    org_id = data.get('organization_id')
+    if org_id:
+        user = get_current_user()
+        if user:
+            _, err = validate_org_access(user, org_id)
+            if err:
+                return err
+
     # Generate API key for push integrations
     api_key = secrets.token_urlsafe(32)
 
     integration = Integration(
         name=name,
         integration_type=integration_type,
-        organization_id=data.get('organization_id'),
+        organization_id=org_id,
         auto_approve=data.get('auto_approve', False),
         sync_enabled=data.get('sync_enabled', True),
         sync_interval_hours=data.get('sync_interval_hours', 6),
@@ -1005,7 +1121,12 @@ def create_integration():
         integration.set_config(config)
 
     db.session.add(integration)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to create integration: {e}")
+        return jsonify({'error': 'Failed to create integration'}), 500
 
     return jsonify(integration.to_dict(include_sensitive=True)), 201
 
@@ -1024,6 +1145,11 @@ def update_integration(integration_id):
     if 'name' in data:
         integration.name = data['name'].strip()
     if 'organization_id' in data:
+        user = get_current_user()
+        if user:
+            _, err = validate_org_access(user, data['organization_id'])
+            if err:
+                return err
         integration.organization_id = data['organization_id']
     if 'auto_approve' in data:
         integration.auto_approve = data['auto_approve']
@@ -1034,7 +1160,12 @@ def update_integration(integration_id):
     if 'config' in data:
         integration.set_config(data['config'])
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to update integration {integration_id}: {e}")
+        return jsonify({'error': 'Failed to update integration'}), 500
 
     return jsonify(integration.to_dict(include_sensitive=True))
 
@@ -1047,7 +1178,12 @@ def delete_integration(integration_id):
     integration = Integration.query.get_or_404(integration_id)
 
     integration.is_active = False
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to delete integration {integration_id}: {e}")
+        return jsonify({'error': 'Failed to delete integration'}), 500
 
     return jsonify({'success': True})
 
@@ -1060,7 +1196,12 @@ def regenerate_api_key(integration_id):
     integration = Integration.query.get_or_404(integration_id)
 
     integration.api_key = secrets.token_urlsafe(32)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to regenerate API key for integration {integration_id}: {e}")
+        return jsonify({'error': 'Failed to regenerate API key'}), 500
 
     return jsonify({
         'success': True,
@@ -1112,7 +1253,10 @@ def trigger_sync(integration_id):
         integration.last_sync_status = 'failed'
         integration.last_sync_message = str(e)
         integration.last_sync_at = datetime.utcnow()
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
         return jsonify({
             'success': False,
             'error': str(e)
@@ -1170,7 +1314,12 @@ def register_agent():
         if data.get('system_info'):
             existing.set_system_info(data['system_info'])
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to update agent {existing.agent_id}: {e}")
+            return jsonify({'error': 'Failed to update agent'}), 500
 
         return jsonify({
             'success': True,
@@ -1196,7 +1345,26 @@ def register_agent():
         agent.set_system_info(data['system_info'])
 
     db.session.add(agent)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        # Race condition: another request registered same agent
+        existing = AgentRegistration.query.filter_by(
+            hostname=hostname,
+            integration_id=integration.id
+        ).first()
+        if existing:
+            return jsonify({
+                'success': True,
+                'agent_id': existing.agent_id,
+                'message': 'Agent already registered'
+            })
+        return jsonify({'error': 'Agent registration conflict'}), 409
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to register agent: {e}")
+        return jsonify({'error': 'Failed to register agent'}), 500
 
     return jsonify({
         'success': True,
@@ -1257,7 +1425,12 @@ def agent_report():
     # Store original request.integration and call import logic
     results = process_software_import(integration, import_data)
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to process agent report for {agent_id}: {e}")
+        return jsonify({'error': 'Failed to process inventory'}), 500
 
     return jsonify({
         'success': True,
@@ -1345,9 +1518,15 @@ def process_software_import(integration, data):
 @requires_professional('Integrations')
 def get_agents():
     """Get all registered agents."""
+    user = get_current_user()
     integration_id = request.args.get('integration_id', type=int)
 
     query = AgentRegistration.query.filter_by(is_active=True)
+
+    # Non-super-admins only see agents in their accessible orgs
+    if user and not user.is_super_admin():
+        accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
+        query = query.filter(AgentRegistration.organization_id.in_(accessible_org_ids))
 
     if integration_id:
         query = query.filter_by(integration_id=integration_id)
@@ -1364,7 +1543,12 @@ def delete_agent(agent_id):
     """Delete (deactivate) an agent."""
     agent = AgentRegistration.query.get_or_404(agent_id)
     agent.is_active = False
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to delete agent {agent_id}: {e}")
+        return jsonify({'error': 'Failed to delete agent'}), 500
     return jsonify({'success': True})
 
 
