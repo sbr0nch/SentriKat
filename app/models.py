@@ -10,6 +10,13 @@ product_organizations = db.Table('product_organizations',
     db.Column('assigned_at', db.DateTime, default=datetime.utcnow)
 )
 
+# Association table for many-to-many relationship between agent API keys and organizations
+agent_api_key_organizations = db.Table('agent_api_key_organizations',
+    db.Column('api_key_id', db.Integer, db.ForeignKey('agent_api_keys.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('organization_id', db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('assigned_at', db.DateTime, default=datetime.utcnow)
+)
+
 
 class UserOrganization(db.Model):
     """
@@ -1607,6 +1614,27 @@ class AgentApiKey(db.Model):
     # Relationships
     organization = db.relationship('Organization', backref=db.backref('agent_api_keys', lazy='dynamic'))
     creator = db.relationship('User', backref='created_api_keys')
+    additional_organizations = db.relationship(
+        'Organization',
+        secondary='agent_api_key_organizations',
+        backref=db.backref('shared_agent_api_keys', lazy='dynamic'),
+        lazy='dynamic'
+    )
+
+    def get_all_organization_ids(self):
+        """Get all organization IDs this key reports to (primary + additional)."""
+        org_ids = {self.organization_id}
+        for org in self.additional_organizations.all():
+            org_ids.add(org.id)
+        return list(org_ids)
+
+    def get_all_organizations(self):
+        """Get all Organization objects this key reports to."""
+        orgs = [self.organization] if self.organization else []
+        for org in self.additional_organizations.all():
+            if org.id != self.organization_id:
+                orgs.append(org)
+        return orgs
 
     @staticmethod
     def generate_key():
@@ -1638,6 +1666,15 @@ class AgentApiKey(db.Model):
             return []
 
     def to_dict(self, include_key=False):
+        additional_orgs = []
+        try:
+            additional_orgs = [
+                {'id': org.id, 'name': org.display_name or org.name}
+                for org in self.additional_organizations.all()
+            ]
+        except Exception:
+            pass
+        all_org_ids = self.get_all_organization_ids()
         result = {
             'id': self.id,
             'organization_id': self.organization_id,
@@ -1652,7 +1689,9 @@ class AgentApiKey(db.Model):
             'usage_count': self.usage_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
-            'is_valid': self.is_valid()
+            'is_valid': self.is_valid(),
+            'additional_organizations': additional_orgs,
+            'all_organization_ids': all_org_ids
         }
         return result
 
@@ -2885,4 +2924,60 @@ class ContainerVulnerability(db.Model):
             'primary_url': self.primary_url,
             'acknowledged': self.acknowledged,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class HealthCheckResult(db.Model):
+    """
+    Stores results from background health checks.
+    Each check is identified by a unique check_name.
+    """
+    __tablename__ = 'health_check_results'
+
+    id = db.Column(db.Integer, primary_key=True)
+    check_name = db.Column(db.String(100), nullable=False, index=True)
+    category = db.Column(db.String(50), nullable=False, default='system')  # system, database, agents, sync, security
+    status = db.Column(db.String(20), nullable=False, default='unknown')  # ok, warning, critical, error, unknown
+    message = db.Column(db.Text, nullable=True)
+    details = db.Column(db.Text, nullable=True)  # JSON with check-specific data
+    value = db.Column(db.String(200), nullable=True)  # Metric value (e.g. "85%", "3 stale")
+    checked_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        db.Index('idx_health_check_name_time', 'check_name', 'checked_at'),
+    )
+
+    @staticmethod
+    def record(check_name, category, status, message, value=None, details=None):
+        """Record a health check result, replacing any previous result for this check."""
+        existing = HealthCheckResult.query.filter_by(check_name=check_name).first()
+        if existing:
+            existing.category = category
+            existing.status = status
+            existing.message = message
+            existing.value = value
+            existing.details = json.dumps(details) if details else None
+            existing.checked_at = datetime.utcnow()
+        else:
+            result = HealthCheckResult(
+                check_name=check_name,
+                category=category,
+                status=status,
+                message=message,
+                value=value,
+                details=json.dumps(details) if details else None
+            )
+            db.session.add(result)
+        db.session.commit()
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'check_name': self.check_name,
+            'category': self.category,
+            'status': self.status,
+            'message': self.message,
+            'value': self.value,
+            'details': json.loads(self.details) if self.details else None,
+            'checked_at': self.checked_at.isoformat() if self.checked_at else None,
         }

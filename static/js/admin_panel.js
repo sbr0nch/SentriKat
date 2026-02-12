@@ -5877,7 +5877,8 @@ const SETTINGS_GROUPS = {
     syslog:     ['syslogSettings'],
     compliance: ['auditLogs', 'complianceReports'],
     appearance: ['brandingSettings'],
-    license:    ['licenseSettings']
+    license:    ['licenseSettings'],
+    health:     ['healthSettings']
 };
 
 // System sub-tab definitions: maps sub-tab name to pane ID
@@ -5943,6 +5944,8 @@ function showSettingsGroup(groupName, btn) {
             if (typeof loadSyslogSettings === 'function') loadSyslogSettings();
         } else if (groupName === 'license') {
             if (typeof loadLicenseInfo === 'function') loadLicenseInfo();
+        } else if (groupName === 'health') {
+            if (typeof loadHealthChecks === 'function') loadHealthChecks();
         }
     }
 
@@ -6752,7 +6755,12 @@ async function loadAgentKeys() {
                         <strong>${escapeHtml(key.name)}</strong>
                         <br><small class="text-muted font-monospace">${escapeHtml(key.key_prefix || '')}...</small>
                     </td>
-                    <td data-column="organization">${escapeHtml(key.organization_name || 'Unknown')}</td>
+                    <td data-column="organization">
+                        ${escapeHtml(key.organization_name || 'Unknown')}
+                        ${key.additional_organizations && key.additional_organizations.length > 0
+                            ? '<br><small class="text-muted">+ ' + key.additional_organizations.map(o => escapeHtml(o.name)).join(', ') + '</small>'
+                            : ''}
+                    </td>
                     <td data-column="mode">
                         ${key.auto_approve
                             ? '<span class="badge bg-success" title="Products are added directly to inventory"><i class="bi bi-check-circle me-1"></i>Auto</span>'
@@ -6800,23 +6808,54 @@ async function loadAgentKeys() {
 async function showCreateAgentKeyModal() {
     // Populate organizations dropdown
     const orgSelect = SK.DOM.get('agentKeyOrg');
-    if (orgSelect && organizations.length > 0) {
-        orgSelect.innerHTML = '<option value="">Select organization...</option>' +
-            organizations.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
-    } else {
+    if (!orgSelect) return;
+
+    if (!(organizations && organizations.length > 0)) {
         // Load organizations if not loaded
         try {
             const response = await fetch('/api/organizations');
             if (response.ok) {
                 const data = await response.json();
                 organizations = Array.isArray(data) ? data : (data.organizations || []);
-                orgSelect.innerHTML = '<option value="">Select organization...</option>' +
-                    organizations.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
             }
         } catch (error) {
             console.error('Error loading organizations:', error);
         }
     }
+
+    orgSelect.innerHTML = '<option value="">Select organization...</option>' +
+        organizations.map(org => `<option value="${org.id}">${escapeHtml(org.display_name || org.name)}</option>`).join('');
+
+    // Reset additional orgs
+    const additionalOrgsDiv = SK.DOM.get('agentKeyAdditionalOrgs');
+    if (additionalOrgsDiv) {
+        additionalOrgsDiv.innerHTML = '<small class="text-muted">Select a primary organization first</small>';
+    }
+
+    // Update additional orgs when primary org changes
+    orgSelect.onchange = function() {
+        const primaryId = orgSelect.value;
+        if (!additionalOrgsDiv) return;
+        if (!primaryId || organizations.length <= 1) {
+            additionalOrgsDiv.innerHTML = organizations.length <= 1
+                ? '<small class="text-muted">Only one organization available</small>'
+                : '<small class="text-muted">Select a primary organization first</small>';
+            return;
+        }
+        const otherOrgs = organizations.filter(o => String(o.id) !== String(primaryId));
+        if (otherOrgs.length === 0) {
+            additionalOrgsDiv.innerHTML = '<small class="text-muted">No additional organizations available</small>';
+            return;
+        }
+        additionalOrgsDiv.innerHTML = otherOrgs.map(org => `
+            <div class="form-check">
+                <input class="form-check-input agent-key-extra-org" type="checkbox" value="${org.id}" id="agentKeyExtraOrg${org.id}">
+                <label class="form-check-label" for="agentKeyExtraOrg${org.id}">
+                    ${escapeHtml(org.display_name || org.name)}
+                </label>
+            </div>
+        `).join('');
+    };
 
     // Reset form
     SK.DOM.get('agentKeyForm').reset();
@@ -6832,6 +6871,12 @@ async function createAgentKey() {
     const maxAssets = parseInt(SK.DOM.getValue('agentKeyMaxAssets')) || 0;
     const expiresAt = SK.DOM.getValue('agentKeyExpires') || null;
     const autoApprove = SK.DOM.get('agentKeyAutoApprove')?.checked || false;
+
+    // Collect additional organizations
+    const additionalOrgIds = [];
+    document.querySelectorAll('.agent-key-extra-org:checked').forEach(cb => {
+        additionalOrgIds.push(parseInt(cb.value));
+    });
 
     if (!name) {
         showToast('Please enter a key name', 'warning');
@@ -6850,6 +6895,7 @@ async function createAgentKey() {
             body: JSON.stringify({
                 name,
                 organization_id: parseInt(orgId),
+                additional_organization_ids: additionalOrgIds,
                 max_assets: maxAssets,
                 expires_at: expiresAt,
                 auto_approve: autoApprove

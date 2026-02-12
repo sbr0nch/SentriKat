@@ -12,7 +12,7 @@ Rate Limiting:
 - General queries: 100/minute per IP
 """
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, Response
 from datetime import datetime, timedelta
 from functools import wraps
 import logging
@@ -1107,13 +1107,20 @@ def process_inventory_job(job):
             db.session.commit()
             return False
 
-        # Check auto_approve setting from API key
+        # Check auto_approve setting from API key and get all target orgs
         auto_approve = True  # Default to True for backward compatibility
+        all_target_orgs = [organization]  # Start with primary org
         if job.api_key_id:
             api_key = AgentApiKey.query.get(job.api_key_id)
             if api_key:
                 auto_approve = api_key.auto_approve
                 logger.info(f"Job {job_id}: API key auto_approve={auto_approve}")
+                # Get additional organizations for multi-org deployment
+                additional_orgs = api_key.get_all_organizations()
+                all_target_orgs = additional_orgs if additional_orgs else [organization]
+                if len(all_target_orgs) > 1:
+                    org_names = [o.display_name for o in all_target_orgs]
+                    logger.info(f"Job {job_id}: Multi-org deployment to [{', '.join(org_names)}]")
 
         products_created = 0
         products_updated = 0
@@ -1145,7 +1152,7 @@ def process_inventory_job(job):
                 ).first()
 
                 if not product:
-                    # Check if this product is excluded (banned) for this organization
+                    # Check if this product is excluded (banned) for any target org
                     from app.models import ProductExclusion
                     if ProductExclusion.is_excluded(organization.id, vendor, product_name, version):
                         logger.debug(f"Skipping excluded product: {vendor} {product_name} for org {organization.id}")
@@ -1154,6 +1161,7 @@ def process_inventory_job(job):
 
                     # Check auto_approve: if False, queue or auto-link instead of creating
                     if not auto_approve:
+                        # Queue to import queue for the primary org
                         result = _queue_to_import_queue(organization.id, vendor, product_name, version, asset.hostname)
                         if result == 'queued':
                             products_queued += 1
@@ -1180,8 +1188,10 @@ def process_inventory_job(job):
                     db.session.flush()
                     products_created += 1
 
-                    if organization not in product.organizations.all():
-                        product.organizations.append(organization)
+                    # Assign product to ALL target organizations (multi-org support)
+                    for target_org in all_target_orgs:
+                        if target_org not in product.organizations.all():
+                            product.organizations.append(target_org)
                 else:
                     # Update last_agent_report timestamp
                     product.last_agent_report = datetime.utcnow()
@@ -1193,8 +1203,10 @@ def process_inventory_job(job):
                         logger.info(f"Re-enabled auto-disabled product: {vendor} {product_name}")
 
                     products_updated += 1
-                    if organization not in product.organizations.all():
-                        product.organizations.append(organization)
+                    # Assign product to ALL target organizations (multi-org support)
+                    for target_org in all_target_orgs:
+                        if target_org not in product.organizations.all():
+                            product.organizations.append(target_org)
 
                 # Find or create installation
                 installation = ProductInstallation.query.filter_by(
@@ -1530,11 +1542,19 @@ def report_inventory():
 
         db.session.flush()  # Get asset ID
 
-        # Check auto_approve setting from API key
+        # Check auto_approve setting from API key and get all target orgs
         auto_approve = True  # Default to True for backward compatibility
+        all_target_orgs = [organization]  # Start with primary org
         if agent_key and hasattr(agent_key, 'auto_approve'):
             auto_approve = agent_key.auto_approve
             logger.info(f"Sync inventory: API key auto_approve={auto_approve}")
+            # Get additional organizations for multi-org deployment
+            if hasattr(agent_key, 'get_all_organizations'):
+                additional_orgs = agent_key.get_all_organizations()
+                all_target_orgs = additional_orgs if additional_orgs else [organization]
+                if len(all_target_orgs) > 1:
+                    org_names = [o.display_name for o in all_target_orgs]
+                    logger.info(f"Sync inventory: Multi-org deployment to [{', '.join(org_names)}]")
 
         # Process products
         products_created = 0
@@ -1596,9 +1616,10 @@ def report_inventory():
                 db.session.flush()
                 products_created += 1
 
-                # Assign to organization
-                if organization not in product.organizations.all():
-                    product.organizations.append(organization)
+                # Assign to ALL target organizations (multi-org support)
+                for target_org in all_target_orgs:
+                    if target_org not in product.organizations.all():
+                        product.organizations.append(target_org)
             else:
                 # Update last_agent_report timestamp
                 product.last_agent_report = datetime.utcnow()
@@ -1610,9 +1631,10 @@ def report_inventory():
                     logger.info(f"Re-enabled auto-disabled product: {vendor} {product_name}")
 
                 products_updated += 1
-                # Ensure product is assigned to this organization
-                if organization not in product.organizations.all():
-                    product.organizations.append(organization)
+                # Ensure product is assigned to ALL target organizations (multi-org support)
+                for target_org in all_target_orgs:
+                    if target_org not in product.organizations.all():
+                        product.organizations.append(target_org)
 
             # Find or create product installation
             installation = ProductInstallation.query.filter_by(
@@ -2385,23 +2407,33 @@ def list_agent_keys():
 @login_required
 @requires_professional('Agent Keys')
 def create_agent_key():
-    """Create a new agent API key."""
+    """Create a new agent API key. Supports multi-org deployment."""
     from app.auth import get_current_user
 
     user = get_current_user()
 
     data = request.get_json()
     org_id = data.get('organization_id')
+    additional_org_ids = data.get('additional_organization_ids', [])
     name = data.get('name')
 
     if not org_id or not name:
         return jsonify({'error': 'organization_id and name required'}), 400
 
-    # Check permission
+    # Validate additional_org_ids is a list of ints
+    if additional_org_ids and not isinstance(additional_org_ids, list):
+        return jsonify({'error': 'additional_organization_ids must be a list'}), 400
+
+    # Check permission for primary org
     if not user.is_super_admin():
         user_org = user.org_memberships.filter_by(organization_id=org_id).first()
         if not user_org or user_org.role != 'org_admin':
             return jsonify({'error': 'Organization admin access required'}), 403
+        # Non-super-admin can only add orgs they are admin of
+        for extra_id in additional_org_ids:
+            extra_membership = user.org_memberships.filter_by(organization_id=extra_id).first()
+            if not extra_membership or extra_membership.role != 'org_admin':
+                return jsonify({'error': f'Organization admin access required for org {extra_id}'}), 403
 
     # CHECK GLOBAL API KEY LIMIT (from signed license - tamper-proof)
     can_add, limit, message = check_agent_api_key_limit()
@@ -2412,7 +2444,7 @@ def create_agent_key():
             'message': message,
             'current_keys': agent_usage['api_keys']['current'],
             'max_keys': agent_usage['api_keys']['limit'],
-            'global_limit': True,  # Indicate this is a global limit
+            'global_limit': True,
             'hint': 'Please upgrade your license to create more API keys'
         }), 403
 
@@ -2427,7 +2459,7 @@ def create_agent_key():
         key_hash=key_hash,
         key_prefix=key_prefix,
         max_assets=data.get('max_assets'),
-        auto_approve=data.get('auto_approve', False),  # Auto-add products without Import Queue
+        auto_approve=data.get('auto_approve', False),
         created_by=user.id
     )
 
@@ -2436,9 +2468,24 @@ def create_agent_key():
         agent_key.expires_at = datetime.utcnow() + timedelta(days=data['expires_days'])
 
     db.session.add(agent_key)
+    db.session.flush()  # Get the ID before adding M2M relationships
+
+    # Add additional organizations (multi-org deployment)
+    if additional_org_ids:
+        for extra_id in additional_org_ids:
+            extra_id = int(extra_id)
+            if extra_id == int(org_id):
+                continue  # Skip primary org
+            extra_org = Organization.query.get(extra_id)
+            if extra_org:
+                agent_key.additional_organizations.append(extra_org)
+
     db.session.commit()
 
-    logger.info(f"Agent API key created: {name} by {user.username}")
+    org_names = [agent_key.organization.display_name]
+    for org in agent_key.additional_organizations.all():
+        org_names.append(org.display_name)
+    logger.info(f"Agent API key created: {name} for orgs [{', '.join(org_names)}] by {user.username}")
 
     # Return the raw key ONLY THIS ONE TIME
     result = agent_key.to_dict()

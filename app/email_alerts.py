@@ -5,12 +5,16 @@ Supports: Internal SMTP, Gmail, Office365, and other SMTP providers
 
 import smtplib
 import json
+import logging
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date, time as dt_time
 from app.models import Organization, VulnerabilityMatch, AlertLog, Vulnerability
 from app import db
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 
 def get_app_url():
@@ -661,6 +665,62 @@ class EmailAlertManager:
             server.quit()
             return {'success': True, 'message': '✓ SMTP connection successful'}
         except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def send_generic_alert(recipients, subject, body):
+        """Send a generic text alert email (used by health checks, etc.)."""
+        try:
+            # Get global SMTP config from first organization or env vars
+            smtp_config = None
+            try:
+                from app.models import Organization
+                org = Organization.query.first()
+                if org:
+                    smtp_config = org.get_smtp_config()
+            except Exception:
+                pass
+
+            if not smtp_config or not smtp_config.get('host'):
+                # Try environment variables
+                host = os.environ.get('SMTP_SERVER') or os.environ.get('MAIL_SERVER')
+                if host:
+                    smtp_config = {
+                        'host': host,
+                        'port': int(os.environ.get('SMTP_PORT', os.environ.get('MAIL_PORT', '587'))),
+                        'username': os.environ.get('SMTP_USERNAME', os.environ.get('MAIL_USERNAME', '')),
+                        'password': os.environ.get('SMTP_PASSWORD', os.environ.get('MAIL_PASSWORD', '')),
+                        'use_tls': os.environ.get('SMTP_USE_TLS', 'true').lower() == 'true',
+                        'use_ssl': os.environ.get('SMTP_USE_SSL', 'false').lower() == 'true',
+                        'from_email': os.environ.get('SMTP_FROM_EMAIL', os.environ.get('MAIL_DEFAULT_SENDER', 'sentrikat@localhost')),
+                        'from_name': 'SentriKat'
+                    }
+
+            if not smtp_config or not smtp_config.get('host'):
+                logger.warning("Cannot send generic alert: SMTP not configured")
+                return {'success': False, 'error': 'SMTP not configured'}
+
+            app_url = get_app_url()
+            html_body = f"""
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #1e293b; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
+                    <h2 style="margin: 0; font-size: 18px;">SentriKat Alert</h2>
+                </div>
+                <div style="background: #fff; border: 1px solid #e2e8f0; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+                    <h3 style="color: #1e293b; margin-top: 0;">{subject}</h3>
+                    <pre style="background: #f8fafc; padding: 16px; border-radius: 6px; font-size: 13px; white-space: pre-wrap; border: 1px solid #e2e8f0;">{body}</pre>
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+                    <p style="font-size: 12px; color: #94a3b8; text-align: center;">
+                        <a href="{app_url}" style="color: #3b82f6;">Open SentriKat Dashboard</a>
+                    </p>
+                </div>
+            </div>
+            """
+
+            EmailAlertManager._send_email(smtp_config, recipients, subject, html_body)
+            return {'success': True}
+        except Exception as e:
+            logger.error(f"Failed to send generic alert: {e}")
             return {'success': False, 'error': str(e)}
 
 
