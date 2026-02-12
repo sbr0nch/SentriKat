@@ -273,6 +273,8 @@
                         <option value="auth_failed">Auth Failed</option>
                         <option value="status_changed">Status Changed</option>
                         <option value="container_scan">Container Scan</option>
+                        <option value="agent_updated">Agent Updated</option>
+                        <option value="update_requested">Update Requested</option>
                     </select>
                 </div>
                 <div class="card-body p-0" id="eventsContainer" style="max-height: 500px; overflow-y: auto;">
@@ -298,6 +300,8 @@
                             <option value="inventory_reported">Inventory</option>
                             <option value="status_changed">Status Changed</option>
                             <option value="container_scan">Container Scan</option>
+                            <option value="agent_updated">Agent Updated</option>
+                            <option value="update_requested">Update Requested</option>
                             <option value="license_exceeded">License Exceeded</option>
                             <option value="ip_blocked">IP Blocked</option>
                             <option value="auth_failed">Auth Failed</option>
@@ -524,6 +528,9 @@ function getEventIcon(eventType) {
         heartbeat: { icon: 'bi-heart-pulse-fill', iconClass: 'heartbeat' },
         status_changed: { icon: 'bi-arrow-left-right', iconClass: 'warning' },
         container_scan: { icon: 'bi-box-seam', iconClass: 'inventory' },
+        agent_updated: { icon: 'bi-cloud-check-fill', iconClass: 'registered' },
+        update_requested: { icon: 'bi-cloud-arrow-up-fill', iconClass: 'warning' },
+        scan_requested: { icon: 'bi-play-circle-fill', iconClass: 'inventory' },
         license_exceeded: { icon: 'bi-exclamation-triangle-fill', iconClass: 'error' },
         license_warning: { icon: 'bi-exclamation-circle-fill', iconClass: 'warning' },
         ip_blocked: { icon: 'bi-shield-x', iconClass: 'blocked' },
@@ -561,6 +568,12 @@ function getEventDescription(event) {
             const imgs = details.images_processed || 0;
             const vulns = details.total_vulnerabilities || 0;
             return `Container scan: ${imgs} images, ${vulns} vulnerabilities (${details.scanner || 'trivy'})`;
+        case 'agent_updated':
+            return `Agent updated: v${event.old_value || '?'} → v${event.new_value || '?'}`;
+        case 'update_requested':
+            return `Agent update pushed${details.message ? ': ' + details.message : ''}`;
+        case 'scan_requested':
+            return `Immediate scan requested${details.message ? ': ' + details.message : ''}`;
         case 'decommissioned':
             return 'Agent decommissioned';
         default:
@@ -711,6 +724,9 @@ function getLogTypeBadge(eventType) {
         heartbeat: '<span class="badge bg-secondary bg-opacity-50"><i class="bi bi-heart-pulse me-1"></i>Heartbeat</span>',
         status_changed: '<span class="badge bg-warning text-dark"><i class="bi bi-arrow-left-right me-1"></i>Status</span>',
         container_scan: '<span class="badge bg-info bg-opacity-75"><i class="bi bi-box-seam me-1"></i>Container</span>',
+        agent_updated: '<span class="badge bg-success"><i class="bi bi-cloud-check me-1"></i>Updated</span>',
+        update_requested: '<span class="badge bg-warning text-dark"><i class="bi bi-cloud-arrow-up me-1"></i>Update Push</span>',
+        scan_requested: '<span class="badge bg-primary bg-opacity-75"><i class="bi bi-play-circle me-1"></i>Scan Push</span>',
         license_exceeded: '<span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>License</span>',
         license_warning: '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>License</span>',
         ip_blocked: '<span class="badge bg-danger"><i class="bi bi-shield-x me-1"></i>Blocked</span>',

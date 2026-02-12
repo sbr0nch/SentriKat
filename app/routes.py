@@ -1082,13 +1082,14 @@ def update_product(product_id):
 @limiter.limit("500 per minute")  # Allow bulk delete operations
 def delete_product(product_id):
     """
-    Delete a product or remove it from current organization.
+    Delete a product or remove it from specific organizations.
 
     Query params:
     - exclude: If 'true', add product to exclusion list to prevent re-adding by agents
+    - scope: 'all' (default for super admin), or comma-separated org IDs (e.g. '1,3,5')
 
     Permissions:
-    - Super Admin: Deletes product globally from all organizations
+    - Super Admin: Deletes from all orgs or specific orgs based on scope param
     - Org Admin/Manager: Removes product from their org only.
       If product is in multiple orgs, it stays in others.
       If product is only in their org, it gets deleted globally.
@@ -1102,6 +1103,7 @@ def delete_product(product_id):
 
     # Check if we should exclude this product from future agent scans
     exclude_from_scans = request.args.get('exclude', 'false').lower() == 'true'
+    scope = request.args.get('scope', 'all')  # 'all' or comma-separated org IDs
 
     # Get user's current organization
     user_org_id = session.get('organization_id') or current_user.organization_id
@@ -1124,11 +1126,21 @@ def delete_product(product_id):
     }
 
     try:
-        # If exclude requested, add to exclusion list for relevant orgs
-        if exclude_from_scans:
-            if current_user.is_super_admin():
-                # Exclude for all organizations this product was in
-                for org_id in product_org_ids:
+        if current_user.is_super_admin():
+            # Determine target orgs based on scope
+            if scope == 'all':
+                target_org_ids = product_org_ids[:]
+            else:
+                try:
+                    target_org_ids = [int(x.strip()) for x in scope.split(',') if x.strip()]
+                    # Validate all target orgs are actually in product's orgs
+                    target_org_ids = [oid for oid in target_org_ids if oid in product_org_ids]
+                except (ValueError, TypeError):
+                    target_org_ids = product_org_ids[:]
+
+            # Add exclusions for targeted orgs
+            if exclude_from_scans:
+                for org_id in target_org_ids:
                     existing = ProductExclusion.query.filter_by(
                         organization_id=org_id,
                         vendor=product.vendor,
@@ -1140,13 +1152,54 @@ def delete_product(product_id):
                             organization_id=org_id,
                             vendor=product.vendor,
                             product_name=product.product_name,
-                            version=None,  # Exclude all versions
+                            version=None,
                             reason='Deleted by admin',
                             excluded_by=current_user_id
                         )
                         db.session.add(exclusion)
+
+            remaining_org_ids = [oid for oid in product_org_ids if oid not in target_org_ids]
+
+            if not remaining_org_ids:
+                # Removing from ALL orgs = full delete
+                ProductInstallation.query.filter_by(product_id=product_id).delete()
+                VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
+                ProductVersionHistory.query.filter_by(product_id=product_id).delete()
+                db.session.delete(product)
+                db.session.commit()
+
+                log_audit_event(
+                    'DELETE',
+                    'products',
+                    product_id,
+                    old_value=product_info,
+                    details=f"Super admin deleted product {product_info['vendor']} {product_info['name']} globally" + (" (excluded from future scans)" if exclude_from_scans else "")
+                )
+                return jsonify({'success': True, 'message': 'Product deleted globally' + (' and excluded from future agent scans' if exclude_from_scans else '')})
             else:
-                # Exclude only for user's organization
+                # Partial removal: unlink from targeted orgs only
+                for org_id in target_org_ids:
+                    org = Organization.query.get(org_id)
+                    if org and org in product.organizations:
+                        product.organizations.remove(org)
+                db.session.commit()
+
+                org_names = [Organization.query.get(oid).display_name for oid in target_org_ids if Organization.query.get(oid)]
+                log_audit_event(
+                    'REMOVE_ORG',
+                    'products',
+                    product_id,
+                    old_value={'removed_org_ids': target_org_ids},
+                    details=f"Super admin removed product {product.vendor} {product.product_name} from: {', '.join(org_names)}" + (" (excluded)" if exclude_from_scans else "")
+                )
+                return jsonify({
+                    'success': True,
+                    'message': f'Product removed from {len(target_org_ids)} organization(s), still exists in {len(remaining_org_ids)} other(s)'
+                })
+
+        else:
+            # Org admin/manager: remove from their org only
+            if exclude_from_scans:
                 existing = ProductExclusion.query.filter_by(
                     organization_id=user_org_id,
                     vendor=product.vendor,
@@ -1164,26 +1217,6 @@ def delete_product(product_id):
                     )
                     db.session.add(exclusion)
 
-        if current_user.is_super_admin():
-            # Super admin: delete product globally
-            # Delete all related records first (foreign key constraints)
-            ProductInstallation.query.filter_by(product_id=product_id).delete()
-            VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
-            ProductVersionHistory.query.filter_by(product_id=product_id).delete()
-            db.session.delete(product)
-            db.session.commit()
-
-            log_audit_event(
-                'DELETE',
-                'products',
-                product_id,
-                old_value=product_info,
-                details=f"Super admin deleted product {product_info['vendor']} {product_info['name']} globally" + (" (excluded from future scans)" if exclude_from_scans else "")
-            )
-            return jsonify({'success': True, 'message': 'Product deleted globally' + (' and excluded from future agent scans' if exclude_from_scans else '')})
-
-        else:
-            # Org admin/manager: remove from their org only
             user_org = Organization.query.get(user_org_id)
 
             if len(product_org_ids) > 1:
@@ -1206,7 +1239,6 @@ def delete_product(product_id):
                     })
             else:
                 # Product only in this org - delete it globally
-                # Delete all related records first (foreign key constraints)
                 ProductInstallation.query.filter_by(product_id=product_id).delete()
                 VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
                 ProductVersionHistory.query.filter_by(product_id=product_id).delete()
@@ -1228,6 +1260,144 @@ def delete_product(product_id):
     except Exception as e:
         db.session.rollback()
         logger.exception("Failed to delete product")
+        return jsonify({'success': False, 'error': ERROR_MSGS['database']}), 500
+
+
+@bp.route('/api/products/batch-delete', methods=['POST'])
+@manager_required
+@limiter.limit("30 per minute")
+def batch_delete_products():
+    """
+    Delete multiple products in a single server-side transaction.
+    Much faster than individual DELETE calls.
+
+    Body:
+    - product_ids: list of product IDs to delete
+    - exclude: boolean, add to exclusion list
+    - scope: 'all' or comma-separated org IDs (super admin only)
+    """
+    from app.logging_config import log_audit_event
+    from app.models import ProductExclusion
+
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    data = request.get_json() or {}
+
+    product_ids = data.get('product_ids', [])
+    if not product_ids or not isinstance(product_ids, list):
+        return jsonify({'error': 'product_ids is required (list of IDs)'}), 400
+
+    # Cap at 500 per batch
+    product_ids = product_ids[:500]
+    exclude_from_scans = data.get('exclude', False)
+    scope = data.get('scope', 'all')
+
+    user_org_id = session.get('organization_id') or current_user.organization_id
+    is_super = current_user.is_super_admin()
+
+    deleted = 0
+    removed = 0
+    errors = 0
+
+    try:
+        for pid in product_ids:
+            try:
+                product = Product.query.get(pid)
+                if not product:
+                    continue
+
+                product_org_ids = [org.id for org in product.organizations.all()]
+
+                # Permission check for non-super-admins
+                if not is_super and user_org_id not in product_org_ids:
+                    errors += 1
+                    continue
+
+                # Add exclusion if requested
+                if exclude_from_scans:
+                    target_orgs = product_org_ids if is_super else [user_org_id]
+                    for org_id in target_orgs:
+                        existing = ProductExclusion.query.filter_by(
+                            organization_id=org_id,
+                            vendor=product.vendor,
+                            product_name=product.product_name,
+                            version=None
+                        ).first()
+                        if not existing:
+                            db.session.add(ProductExclusion(
+                                organization_id=org_id,
+                                vendor=product.vendor,
+                                product_name=product.product_name,
+                                version=None,
+                                reason='Batch deleted by admin',
+                                excluded_by=current_user_id
+                            ))
+
+                if is_super:
+                    # Determine target orgs
+                    if scope == 'all':
+                        target_org_ids = product_org_ids[:]
+                    else:
+                        try:
+                            target_org_ids = [int(x.strip()) for x in scope.split(',') if x.strip()]
+                            target_org_ids = [oid for oid in target_org_ids if oid in product_org_ids]
+                        except (ValueError, TypeError):
+                            target_org_ids = product_org_ids[:]
+
+                    remaining = [oid for oid in product_org_ids if oid not in target_org_ids]
+
+                    if not remaining:
+                        # Full delete
+                        ProductInstallation.query.filter_by(product_id=pid).delete()
+                        VulnerabilityMatch.query.filter_by(product_id=pid).delete()
+                        ProductVersionHistory.query.filter_by(product_id=pid).delete()
+                        db.session.delete(product)
+                        deleted += 1
+                    else:
+                        # Partial removal
+                        for org_id in target_org_ids:
+                            org = Organization.query.get(org_id)
+                            if org and org in product.organizations:
+                                product.organizations.remove(org)
+                        removed += 1
+                else:
+                    # Org admin: remove from their org
+                    user_org = Organization.query.get(user_org_id)
+                    if len(product_org_ids) > 1:
+                        if user_org in product.organizations:
+                            product.organizations.remove(user_org)
+                        removed += 1
+                    else:
+                        ProductInstallation.query.filter_by(product_id=pid).delete()
+                        VulnerabilityMatch.query.filter_by(product_id=pid).delete()
+                        ProductVersionHistory.query.filter_by(product_id=pid).delete()
+                        db.session.delete(product)
+                        deleted += 1
+
+            except Exception as e:
+                logger.warning(f"Error deleting product {pid}: {e}")
+                errors += 1
+
+        db.session.commit()
+
+        log_audit_event(
+            'BATCH_DELETE',
+            'products',
+            None,
+            details=f"{current_user.username} batch-deleted {deleted} products, removed {removed} from org(s), {errors} errors"
+        )
+
+        return jsonify({
+            'success': True,
+            'deleted': deleted,
+            'removed': removed,
+            'errors': errors,
+            'message': f'Deleted {deleted}, removed {removed} from org(s)' + (f', {errors} errors' if errors else '')
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("Failed batch delete")
         return jsonify({'success': False, 'error': ERROR_MSGS['database']}), 500
 
 

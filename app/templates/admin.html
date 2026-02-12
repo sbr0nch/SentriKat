@@ -213,6 +213,26 @@
 
     <!-- Endpoints Tab -->
     <div class="tab-pane" id="endpointsPane" role="tabpanel">
+        <!-- Agent Version Overview Bar -->
+        <div id="agentVersionSummary" class="card mb-3" style="display: none;">
+            <div class="card-body py-2">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="fw-semibold"><i class="bi bi-cpu me-1"></i>Agent Versions</span>
+                        <span class="badge bg-success" id="agentSummaryUpToDate" title="Up to date">0 current</span>
+                        <span class="badge bg-warning text-dark" id="agentSummaryOutdated" title="Outdated agents">0 outdated</span>
+                        <span class="badge bg-secondary" id="agentSummaryUnmanaged" title="No agent installed">0 unmanaged</span>
+                        <span class="badge bg-info text-dark" id="agentSummaryPending" title="Update pending" style="display: none;">0 pending</span>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <small class="text-muted" id="agentLatestVersionLabel"></small>
+                        <button class="btn btn-outline-warning btn-sm" id="btnPushUpdateAll" onclick="pushUpdateAllAgents()" title="Push update to all outdated agents" style="display: none;">
+                            <i class="bi bi-cloud-arrow-up me-1"></i>Push Update All
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div id="endpointsProductFilter" style="display: none;" class="mb-2"></div>
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -1397,80 +1417,57 @@
     }
 
     async function deleteProduct(productId, productName) {
-        const confirmed = await showConfirm(
-            `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove the product and all its vulnerability matches.`,
-            'Delete Product',
-            'Delete',
-            'btn-danger'
-        );
+        const isSuperAdmin = window.currentUserInfo && window.currentUserInfo.role === 'super_admin';
 
-        if (!confirmed) {
-            return;
-        }
+        if (isSuperAdmin) {
+            // Super admin: show org selector modal
+            await showDeleteProductModal([productId], productName);
+        } else {
+            // Org admin/manager: simple confirm
+            const confirmed = await showConfirm(
+                `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove the product from your organization and all its vulnerability matches.`,
+                'Delete Product',
+                'Delete',
+                'btn-danger'
+            );
+            if (!confirmed) return;
 
-        showLoading();
-        try {
-            const response = await fetch(`/api/products/${productId}`, {
-                method: 'DELETE'
-            });
-
-            if (response.ok) {
-                showToast('✓ Product deleted successfully', 'success');
-                loadProducts();
-            } else {
-                showToast('✗ Error deleting product', 'danger');
+            showLoading();
+            try {
+                const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
+                if (response.ok) {
+                    const data = await response.json();
+                    showToast(data.message || 'Product deleted successfully', 'success');
+                    loadProducts();
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    showToast(err.error || 'Error deleting product', 'danger');
+                }
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'danger');
+            } finally {
+                hideLoading();
             }
-        } catch (error) {
-            showToast(`✗ Error: ${error.message}`, 'danger');
-        } finally {
-            hideLoading();
         }
     }
 
     // Delete all versions of a product group
     async function deleteProductGroup(versionIds, productName) {
-        const ids = versionIds.split(',').filter(id => id);
-        const versionCount = ids.length;
+        const ids = versionIds.split(',').filter(id => id).map(Number);
+        const isSuperAdmin = window.currentUserInfo && window.currentUserInfo.role === 'super_admin';
 
-        const confirmed = await showConfirm(
-            `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove <strong>${versionCount} version(s)</strong> and all vulnerability matches.`,
-            'Delete Product',
-            'Delete All',
-            'btn-danger'
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
-        showLoading();
-        let deleted = 0;
-        let errors = 0;
-
-        for (const id of ids) {
-            try {
-                const response = await fetch(`/api/products/${id}`, {
-                    method: 'DELETE'
-                });
-                if (response.ok) {
-                    deleted++;
-                } else {
-                    errors++;
-                }
-            } catch (error) {
-                errors++;
-            }
-        }
-
-        hideLoading();
-
-        if (errors === 0) {
-            showToast(`✓ Deleted ${deleted} version(s) successfully`, 'success');
+        if (isSuperAdmin) {
+            await showDeleteProductModal(ids, productName);
         } else {
-            showToast(`Deleted ${deleted} version(s), ${errors} failed`, 'warning');
+            const confirmed = await showConfirm(
+                `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove <strong>${ids.length} version(s)</strong> and all vulnerability matches.`,
+                'Delete Product',
+                'Delete All',
+                'btn-danger'
+            );
+            if (!confirmed) return;
+            await executeBatchDelete(ids, 'all');
         }
-
-        loadProducts();
     }
 
     // Toggle selection for a group of products
@@ -2285,77 +2282,152 @@
 
     async function bulkDelete() {
         if (selectedProducts.size === 0) return;
+        const productIds = Array.from(selectedProducts.keys()).map(Number);
+        const isSuperAdmin = window.currentUserInfo && window.currentUserInfo.role === 'super_admin';
 
-        // Build list of products to delete
-        const products = Array.from(selectedProducts.values());
-        let message = `<strong>⚠️ DELETE ${selectedProducts.size} product(s)?</strong><br><br>`;
-        message += `<ul class="mb-0">`;
-        products.slice(0, 5).forEach(p => {
-            message += `<li>${escapeHtml(p.name)}</li>`;
-        });
-        if (products.length > 5) message += `<li>...and ${products.length - 5} more</li>`;
-        message += `</ul><br>This action cannot be undone.`;
+        if (isSuperAdmin) {
+            const products = Array.from(selectedProducts.values());
+            const label = products.length <= 3
+                ? products.map(p => p.name).join(', ')
+                : `${products.length} products`;
+            await showDeleteProductModal(productIds, label);
+        } else {
+            const products = Array.from(selectedProducts.values());
+            let message = `<strong>Delete ${selectedProducts.size} product(s)?</strong><br><br>`;
+            message += `<ul class="mb-0">`;
+            products.slice(0, 5).forEach(p => { message += `<li>${escapeHtml(p.name)}</li>`; });
+            if (products.length > 5) message += `<li>...and ${products.length - 5} more</li>`;
+            message += `</ul><br>This action cannot be undone.`;
 
-        const confirmed = await showConfirm(
-            message,
-            'Delete Products',
-            'Delete All',
-            'btn-danger'
-        );
+            const confirmed = await showConfirm(message, 'Delete Products', 'Delete All', 'btn-danger');
+            if (!confirmed) return;
+            await executeBatchDelete(productIds, 'all');
+        }
+    }
 
-        if (!confirmed) return;
-
+    // Batch delete via server-side endpoint (much faster than individual calls)
+    async function executeBatchDelete(productIds, scope, exclude = false) {
         showLoading();
-        const productIds = Array.from(selectedProducts.keys());
-        let successCount = 0;
-        let failCount = 0;
-
         try {
-            // Process in batches of 10 to avoid overwhelming the server
-            const batchSize = 10;
-            let rateLimited = false;
-
-            for (let i = 0; i < productIds.length; i += batchSize) {
-                // If we got rate limited, stop processing
-                if (rateLimited) break;
-
-                const batch = productIds.slice(i, i + batchSize);
-                const results = await Promise.all(
-                    batch.map(async (productId) => {
-                        try {
-                            const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
-                            if (response.status === 429) {
-                                rateLimited = true;
-                                return { ok: false, rateLimited: true };
-                            }
-                            return { ok: response.ok, rateLimited: false };
-                        } catch {
-                            return { ok: false, rateLimited: false };
-                        }
-                    })
-                );
-                successCount += results.filter(r => r.ok).length;
-                failCount += results.filter(r => !r.ok && !r.rateLimited).length;
+            const response = await fetch('/api/products/batch-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    product_ids: productIds,
+                    scope: scope,
+                    exclude: exclude
+                })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${response.status}`);
             }
-
-            if (rateLimited) {
-                showToast(`Rate limit reached. Deleted ${successCount} products. Please wait a minute and try again.`, 'warning');
-            } else if (failCount === 0) {
-                showToast(`${successCount} product(s) deleted successfully`, 'success');
-            } else if (successCount === 0) {
-                showToast(`Failed to delete ${failCount} product(s)`, 'danger');
-            } else {
-                showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
-            }
+            const data = await response.json();
+            showToast(data.message || `Deleted ${data.deleted} product(s)`, 'success');
             clearSelection();
-            // Brief delay before reloading to let cascade deletes finish on the server
-            await new Promise(resolve => setTimeout(resolve, 500));
             loadProducts();
         } catch (error) {
             showToast(`Error: ${error.message}`, 'danger');
         } finally {
             hideLoading();
         }
+    }
+
+    // Show delete modal with org selector for super admins
+    async function showDeleteProductModal(productIds, productLabel) {
+        // Fetch available organizations
+        let orgs = [];
+        try {
+            const response = await fetch('/api/organizations');
+            if (response.ok) orgs = await response.json();
+        } catch (e) { /* ignore */ }
+
+        const orgOptions = orgs.map(o =>
+            `<div class="form-check">
+                <input class="form-check-input delete-org-check" type="checkbox" value="${o.id}" id="delOrg${o.id}" checked>
+                <label class="form-check-label" for="delOrg${o.id}">${escapeHtml(o.display_name || o.name)}</label>
+            </div>`
+        ).join('');
+
+        const html = `
+            <div class="modal fade" id="deleteProductModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header bg-danger text-white">
+                            <h5 class="modal-title"><i class="bi bi-trash me-2"></i>Delete Product</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p>Delete <strong>${escapeHtml(productLabel)}</strong></p>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Delete scope:</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="deleteScope" id="deleteScopeAll" value="all" checked onchange="document.getElementById('deleteOrgList').style.display='none'">
+                                    <label class="form-check-label" for="deleteScopeAll">
+                                        <strong>All organizations</strong> <small class="text-muted">(delete globally)</small>
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="deleteScope" id="deleteScopeSelected" value="selected" onchange="document.getElementById('deleteOrgList').style.display='block'">
+                                    <label class="form-check-label" for="deleteScopeSelected">
+                                        <strong>Specific organizations only</strong> <small class="text-muted">(remove from selected, keep in others)</small>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="deleteOrgList" style="display: none;" class="ms-4 mb-3 border rounded p-2" style="max-height: 200px; overflow-y: auto;">
+                                <div class="mb-2">
+                                    <small class="text-muted">Select organizations to remove from:</small>
+                                </div>
+                                ${orgOptions || '<span class="text-muted">No organizations found</span>'}
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="deleteExcludeCheck">
+                                <label class="form-check-label" for="deleteExcludeCheck">
+                                    Also exclude from future agent scans
+                                </label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="confirmDeleteProduct()">
+                                <i class="bi bi-trash me-1"></i>Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+        // Store product IDs for the confirm handler
+        window._pendingDeleteIds = productIds;
+
+        document.getElementById('deleteProductModal')?.remove();
+        document.body.insertAdjacentHTML('beforeend', html);
+        const modal = new bootstrap.Modal(document.getElementById('deleteProductModal'));
+        modal.show();
+        document.getElementById('deleteProductModal').addEventListener('hidden.bs.modal', function() { this.remove(); });
+    }
+
+    async function confirmDeleteProduct() {
+        const productIds = window._pendingDeleteIds || [];
+        const scopeAll = document.getElementById('deleteScopeAll')?.checked;
+        const exclude = document.getElementById('deleteExcludeCheck')?.checked || false;
+
+        let scope = 'all';
+        if (!scopeAll) {
+            const checked = document.querySelectorAll('.delete-org-check:checked');
+            const orgIds = Array.from(checked).map(cb => cb.value);
+            if (orgIds.length === 0) {
+                showToast('Select at least one organization', 'warning');
+                return;
+            }
+            scope = orgIds.join(',');
+        }
+
+        // Close modal
+        const modalEl = document.getElementById('deleteProductModal');
+        if (modalEl) bootstrap.Modal.getInstance(modalEl)?.hide();
+
+        await executeBatchDelete(productIds, scope, exclude);
     }
 
     // Organization management functions
@@ -3602,9 +3674,19 @@
                     const lastSeen = asset.last_seen || asset.last_checkin || asset.last_inventory_at;
                     const lastSeenDisplay = lastSeen ? formatRelativeTime(lastSeen) : '<span class="text-muted">Never</span>';
                     const agentVer = asset.agent_version || '';
-                    const agentBadge = agentVer
-                        ? `<span class="badge bg-info text-dark" title="Agent v${escapeHtml(agentVer)}"><i class="bi bi-cpu me-1"></i>v${escapeHtml(agentVer)}</span>`
-                        : '<span class="text-muted small">Manual</span>';
+                    const latestVer = asset.latest_agent_version || '';
+                    let agentBadge = '<span class="text-muted small">Manual</span>';
+                    if (agentVer) {
+                        const isOutdated = latestVer && agentVer !== latestVer && compareVersions(agentVer, latestVer) < 0;
+                        if (isOutdated) {
+                            agentBadge = `<span class="badge bg-warning text-dark" title="Outdated: v${escapeHtml(agentVer)} (latest: v${escapeHtml(latestVer)})"><i class="bi bi-exclamation-triangle me-1"></i>v${escapeHtml(agentVer)}</span>`;
+                        } else {
+                            agentBadge = `<span class="badge bg-success" title="Agent v${escapeHtml(agentVer)} (up to date)"><i class="bi bi-check-circle me-1"></i>v${escapeHtml(agentVer)}</span>`;
+                        }
+                        if (asset.pending_update) {
+                            agentBadge += ' <span class="badge bg-info text-dark" title="Update pending"><i class="bi bi-clock-history"></i></span>';
+                        }
+                    }
 
                     return `<tr>
                         <td><strong>${escapeHtml(asset.hostname)}</strong></td>
@@ -3620,6 +3702,9 @@
                                 <button class="btn btn-outline-primary btn-sm" onclick="showEndpointDetail(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="View details & installed software">
                                     <i class="bi bi-info-circle"></i>
                                 </button>
+                                ${agentVer && latestVer && agentVer !== latestVer && compareVersions(agentVer, latestVer) < 0 && !asset.pending_update ? `<button class="btn btn-outline-warning btn-sm" onclick="pushUpdateToAgent(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Push agent update">
+                                    <i class="bi bi-cloud-arrow-up"></i>
+                                </button>` : ''}
                                 <button class="btn btn-outline-danger btn-sm" onclick="deleteEndpoint(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Delete endpoint">
                                     <i class="bi bi-trash"></i>
                                 </button>
@@ -3673,6 +3758,73 @@
             loadEndpoints(endpointsPage);
         } catch (error) {
             showToast(`Failed to delete endpoint: ${escapeHtml(error.message)}`, 'danger');
+        }
+    }
+
+    // Tag management for endpoints
+    async function addEndpointTag(assetId) {
+        const input = document.getElementById('newEndpointTag');
+        if (!input) return;
+        const tag = input.value.trim();
+        if (!tag) return;
+
+        try {
+            // Get current tags
+            const getResp = await fetch(`/api/assets/${assetId}`);
+            if (!getResp.ok) throw new Error('Failed to fetch asset');
+            const asset = await getResp.json();
+            const tags = asset.tags || [];
+
+            if (tags.includes(tag)) {
+                showToast(`Tag "${tag}" already exists`, 'warning');
+                return;
+            }
+
+            tags.push(tag);
+            const resp = await fetch(`/api/assets/${assetId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tags: tags })
+            });
+            if (!resp.ok) throw new Error('Failed to update');
+
+            input.value = '';
+            // Refresh the tag display
+            const container = document.getElementById('endpointTagsContainer');
+            if (container) {
+                const badge = document.createElement('span');
+                badge.className = 'badge bg-secondary me-1 mb-1';
+                badge.innerHTML = `${escapeHtml(tag)} <a href="#" class="text-white text-decoration-none ms-1" onclick="removeEndpointTag(${assetId}, '${escapeHtml(tag.replace(/'/g, "\\'"))}'); return false;">&times;</a>`;
+                container.appendChild(badge);
+            }
+        } catch (error) {
+            showToast(`Failed to add tag: ${error.message}`, 'danger');
+        }
+    }
+
+    async function removeEndpointTag(assetId, tag) {
+        try {
+            const getResp = await fetch(`/api/assets/${assetId}`);
+            if (!getResp.ok) throw new Error('Failed to fetch asset');
+            const asset = await getResp.json();
+            const tags = (asset.tags || []).filter(t => t !== tag);
+
+            const resp = await fetch(`/api/assets/${assetId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tags: tags })
+            });
+            if (!resp.ok) throw new Error('Failed to update');
+
+            // Remove the badge from UI
+            const container = document.getElementById('endpointTagsContainer');
+            if (container) {
+                Array.from(container.querySelectorAll('.badge')).forEach(b => {
+                    if (b.textContent.trim().startsWith(tag)) b.remove();
+                });
+            }
+        } catch (error) {
+            showToast(`Failed to remove tag: ${error.message}`, 'danger');
         }
     }
 
@@ -3753,14 +3905,41 @@
                                         <table class="table table-sm table-borderless mb-0">
                                             <tr><td class="text-muted" style="width:130px;">Status</td><td>${statusBadge}</td></tr>
                                             <tr><td class="text-muted">Last Seen</td><td>${lastSeenStr}</td></tr>
-                                            <tr><td class="text-muted">Agent</td><td>${asset.agent_version ? `v${escapeHtml(asset.agent_version)}` : 'Manual'}</td></tr>
+                                            <tr><td class="text-muted">Agent</td><td>${asset.agent_version ? (() => {
+                                const av = asset.agent_version;
+                                const lv = asset.latest_agent_version || '';
+                                const outdated = lv && av !== lv && compareVersions(av, lv) < 0;
+                                let html = `v${escapeHtml(av)}`;
+                                if (outdated) {
+                                    html += ` <span class="badge bg-warning text-dark">outdated</span> <small class="text-muted">(latest: v${escapeHtml(lv)})</small>`;
+                                    if (!asset.pending_update) {
+                                        html += ` <button class="btn btn-outline-warning btn-sm py-0 px-1 ms-1" onclick="pushUpdateToAgent(${asset.id}, '${escapeHtml(String(asset.hostname || '').replace(/'/g, "\\'")}')"><i class="bi bi-cloud-arrow-up me-1"></i>Push Update</button>`;
+                                    } else {
+                                        html += ` <span class="badge bg-info text-dark ms-1"><i class="bi bi-clock-history me-1"></i>Update pending</span>`;
+                                    }
+                                } else {
+                                    html += ` <span class="badge bg-success">current</span>`;
+                                }
+                                return html;
+                            })() : 'Manual'}</td></tr>
                                             <tr><td class="text-muted">Organization</td><td>${escapeHtml(asset.organization_name || '-')}</td></tr>
                                             <tr><td class="text-muted">Environment</td><td>${escapeHtml(asset.environment || '-')}</td></tr>
                                             <tr><td class="text-muted">Owner</td><td>${escapeHtml(asset.owner || '-')}</td></tr>
                                         </table>
                                     </div>
                                 </div>
-                                ${tags.length > 0 ? `<div class="mb-3">${tags.map(t => `<span class="badge bg-secondary me-1">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+                                <div class="mb-3">
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                        <h6 class="mb-0"><i class="bi bi-tags me-1"></i>Tags</h6>
+                                    </div>
+                                    <div id="endpointTagsContainer" data-asset-id="${asset.id}">
+                                        ${tags.map(t => `<span class="badge bg-secondary me-1 mb-1">${escapeHtml(t)} <a href="#" class="text-white text-decoration-none ms-1" onclick="removeEndpointTag(${asset.id}, '${escapeHtml(t.replace(/'/g, "\\'"))}'); return false;">&times;</a></span>`).join('')}
+                                    </div>
+                                    <div class="input-group input-group-sm mt-1" style="max-width: 300px;">
+                                        <input type="text" class="form-control" id="newEndpointTag" placeholder="Add tag..." onkeydown="if(event.key==='Enter'){addEndpointTag(${asset.id}); event.preventDefault();}">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="addEndpointTag(${asset.id})"><i class="bi bi-plus"></i></button>
+                                    </div>
+                                </div>
                                 <h6><i class="bi bi-box-seam me-1"></i>Installed Software (${products.length})</h6>
                                 <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
                                     <table class="table table-sm table-hover mb-0">
@@ -3798,9 +3977,107 @@
         }
     }
 
+    // Version comparison utility
+    function compareVersions(a, b) {
+        const pa = (a || '0').split('.').map(Number);
+        const pb = (b || '0').split('.').map(Number);
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+            const na = pa[i] || 0;
+            const nb = pb[i] || 0;
+            if (na > nb) return 1;
+            if (na < nb) return -1;
+        }
+        return 0;
+    }
+
+    // Load agent version summary bar
+    async function loadAgentVersionSummary() {
+        try {
+            const response = await fetch('/api/admin/agents/version-summary');
+            if (!response.ok) return;
+            const data = await response.json();
+
+            const summaryEl = document.getElementById('agentVersionSummary');
+            if (!summaryEl) return;
+
+            document.getElementById('agentSummaryUpToDate').textContent = `${data.up_to_date} current`;
+            document.getElementById('agentSummaryOutdated').textContent = `${data.outdated} outdated`;
+            document.getElementById('agentSummaryUnmanaged').textContent = `${data.unmanaged} unmanaged`;
+
+            const pendingEl = document.getElementById('agentSummaryPending');
+            if (data.pending_updates > 0) {
+                pendingEl.textContent = `${data.pending_updates} pending`;
+                pendingEl.style.display = 'inline-block';
+            } else {
+                pendingEl.style.display = 'none';
+            }
+
+            // Show latest version labels
+            const versions = data.latest_versions || {};
+            const labelParts = Object.entries(versions).map(([p, v]) => `${p}: v${v}`);
+            document.getElementById('agentLatestVersionLabel').textContent = `Latest: ${labelParts.join(', ')}`;
+
+            // Show/hide "Push Update All" button
+            const btnAll = document.getElementById('btnPushUpdateAll');
+            if (data.outdated > 0) {
+                btnAll.style.display = 'inline-block';
+                btnAll.innerHTML = `<i class="bi bi-cloud-arrow-up me-1"></i>Push Update All (${data.outdated})`;
+            } else {
+                btnAll.style.display = 'none';
+            }
+
+            summaryEl.style.display = 'block';
+        } catch (e) {
+            console.error('Error loading agent version summary:', e);
+        }
+    }
+
+    // Push update to a single agent
+    async function pushUpdateToAgent(assetId, hostname) {
+        try {
+            const response = await fetch(`/api/admin/assets/${assetId}/trigger-update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || `HTTP ${response.status}`);
+            }
+            const data = await response.json();
+            showToast(data.message || `Update pushed to ${hostname}`, 'success');
+            loadEndpoints(endpointsPage);
+            loadAgentVersionSummary();
+        } catch (error) {
+            showToast(`Failed to push update: ${error.message}`, 'danger');
+        }
+    }
+
+    // Push update to all outdated agents
+    async function pushUpdateAllAgents() {
+        if (!confirm('Push agent update to all outdated endpoints? Agents will download and install the update on their next poll (within 5 minutes).')) return;
+        try {
+            const response = await fetch('/api/admin/assets/trigger-update-all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || `HTTP ${response.status}`);
+            }
+            const data = await response.json();
+            showToast(data.message || `Update pushed to ${data.agents_triggered} agents`, 'success');
+            loadEndpoints(endpointsPage);
+            loadAgentVersionSummary();
+        } catch (error) {
+            showToast(`Failed to push updates: ${error.message}`, 'danger');
+        }
+    }
+
     // Load endpoints when tab is shown (lazy load)
     document.getElementById('endpoints-tab')?.addEventListener('shown.bs.tab', function() {
         if (!endpointsLoaded) loadEndpoints();
+        loadAgentVersionSummary();
     });
     // Also load if the tab is already active on page load (hash navigation)
     document.addEventListener('DOMContentLoaded', function() {

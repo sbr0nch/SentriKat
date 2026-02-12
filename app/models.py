@@ -1364,6 +1364,9 @@ class Asset(db.Model):
     scan_interval_override = db.Column(db.Integer, nullable=True)  # Override interval in minutes (null = use agent default)
     pending_scan_requested_at = db.Column(db.DateTime, nullable=True)  # When scan was requested
     pending_scan_requested_by = db.Column(db.String(100), nullable=True)  # Who requested the scan
+    pending_update = db.Column(db.Boolean, default=False)  # True = force agent to check for update on next poll
+    pending_update_requested_at = db.Column(db.DateTime, nullable=True)
+    pending_update_requested_by = db.Column(db.String(100), nullable=True)
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -1454,7 +1457,9 @@ class Asset(db.Model):
             # Agent Command & Control
             'pending_scan': self.pending_scan or False,
             'scan_interval_override': self.scan_interval_override,
-            'pending_scan_requested_at': self.pending_scan_requested_at.isoformat() if self.pending_scan_requested_at else None
+            'pending_scan_requested_at': self.pending_scan_requested_at.isoformat() if self.pending_scan_requested_at else None,
+            'pending_update': self.pending_update or False,
+            'latest_agent_version': None,  # Set by API layer
         }
 
         if include_products:
