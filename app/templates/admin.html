@@ -1417,80 +1417,57 @@
     }
 
     async function deleteProduct(productId, productName) {
-        const confirmed = await showConfirm(
-            `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove the product and all its vulnerability matches.`,
-            'Delete Product',
-            'Delete',
-            'btn-danger'
-        );
+        const isSuperAdmin = window.currentUserInfo && window.currentUserInfo.role === 'super_admin';
 
-        if (!confirmed) {
-            return;
-        }
+        if (isSuperAdmin) {
+            // Super admin: show org selector modal
+            await showDeleteProductModal([productId], productName);
+        } else {
+            // Org admin/manager: simple confirm
+            const confirmed = await showConfirm(
+                `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove the product from your organization and all its vulnerability matches.`,
+                'Delete Product',
+                'Delete',
+                'btn-danger'
+            );
+            if (!confirmed) return;
 
-        showLoading();
-        try {
-            const response = await fetch(`/api/products/${productId}`, {
-                method: 'DELETE'
-            });
-
-            if (response.ok) {
-                showToast('✓ Product deleted successfully', 'success');
-                loadProducts();
-            } else {
-                showToast('✗ Error deleting product', 'danger');
+            showLoading();
+            try {
+                const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
+                if (response.ok) {
+                    const data = await response.json();
+                    showToast(data.message || 'Product deleted successfully', 'success');
+                    loadProducts();
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    showToast(err.error || 'Error deleting product', 'danger');
+                }
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'danger');
+            } finally {
+                hideLoading();
             }
-        } catch (error) {
-            showToast(`✗ Error: ${error.message}`, 'danger');
-        } finally {
-            hideLoading();
         }
     }
 
     // Delete all versions of a product group
     async function deleteProductGroup(versionIds, productName) {
-        const ids = versionIds.split(',').filter(id => id);
-        const versionCount = ids.length;
+        const ids = versionIds.split(',').filter(id => id).map(Number);
+        const isSuperAdmin = window.currentUserInfo && window.currentUserInfo.role === 'super_admin';
 
-        const confirmed = await showConfirm(
-            `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove <strong>${versionCount} version(s)</strong> and all vulnerability matches.`,
-            'Delete Product',
-            'Delete All',
-            'btn-danger'
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
-        showLoading();
-        let deleted = 0;
-        let errors = 0;
-
-        for (const id of ids) {
-            try {
-                const response = await fetch(`/api/products/${id}`, {
-                    method: 'DELETE'
-                });
-                if (response.ok) {
-                    deleted++;
-                } else {
-                    errors++;
-                }
-            } catch (error) {
-                errors++;
-            }
-        }
-
-        hideLoading();
-
-        if (errors === 0) {
-            showToast(`✓ Deleted ${deleted} version(s) successfully`, 'success');
+        if (isSuperAdmin) {
+            await showDeleteProductModal(ids, productName);
         } else {
-            showToast(`Deleted ${deleted} version(s), ${errors} failed`, 'warning');
+            const confirmed = await showConfirm(
+                `Are you sure you want to delete "<strong>${escapeHtml(productName)}</strong>"?<br><br>This will remove <strong>${ids.length} version(s)</strong> and all vulnerability matches.`,
+                'Delete Product',
+                'Delete All',
+                'btn-danger'
+            );
+            if (!confirmed) return;
+            await executeBatchDelete(ids, 'all');
         }
-
-        loadProducts();
     }
 
     // Toggle selection for a group of products
@@ -2305,77 +2282,152 @@
 
     async function bulkDelete() {
         if (selectedProducts.size === 0) return;
+        const productIds = Array.from(selectedProducts.keys()).map(Number);
+        const isSuperAdmin = window.currentUserInfo && window.currentUserInfo.role === 'super_admin';
 
-        // Build list of products to delete
-        const products = Array.from(selectedProducts.values());
-        let message = `<strong>⚠️ DELETE ${selectedProducts.size} product(s)?</strong><br><br>`;
-        message += `<ul class="mb-0">`;
-        products.slice(0, 5).forEach(p => {
-            message += `<li>${escapeHtml(p.name)}</li>`;
-        });
-        if (products.length > 5) message += `<li>...and ${products.length - 5} more</li>`;
-        message += `</ul><br>This action cannot be undone.`;
+        if (isSuperAdmin) {
+            const products = Array.from(selectedProducts.values());
+            const label = products.length <= 3
+                ? products.map(p => p.name).join(', ')
+                : `${products.length} products`;
+            await showDeleteProductModal(productIds, label);
+        } else {
+            const products = Array.from(selectedProducts.values());
+            let message = `<strong>Delete ${selectedProducts.size} product(s)?</strong><br><br>`;
+            message += `<ul class="mb-0">`;
+            products.slice(0, 5).forEach(p => { message += `<li>${escapeHtml(p.name)}</li>`; });
+            if (products.length > 5) message += `<li>...and ${products.length - 5} more</li>`;
+            message += `</ul><br>This action cannot be undone.`;
 
-        const confirmed = await showConfirm(
-            message,
-            'Delete Products',
-            'Delete All',
-            'btn-danger'
-        );
+            const confirmed = await showConfirm(message, 'Delete Products', 'Delete All', 'btn-danger');
+            if (!confirmed) return;
+            await executeBatchDelete(productIds, 'all');
+        }
+    }
 
-        if (!confirmed) return;
-
+    // Batch delete via server-side endpoint (much faster than individual calls)
+    async function executeBatchDelete(productIds, scope, exclude = false) {
         showLoading();
-        const productIds = Array.from(selectedProducts.keys());
-        let successCount = 0;
-        let failCount = 0;
-
         try {
-            // Process in batches of 10 to avoid overwhelming the server
-            const batchSize = 10;
-            let rateLimited = false;
-
-            for (let i = 0; i < productIds.length; i += batchSize) {
-                // If we got rate limited, stop processing
-                if (rateLimited) break;
-
-                const batch = productIds.slice(i, i + batchSize);
-                const results = await Promise.all(
-                    batch.map(async (productId) => {
-                        try {
-                            const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
-                            if (response.status === 429) {
-                                rateLimited = true;
-                                return { ok: false, rateLimited: true };
-                            }
-                            return { ok: response.ok, rateLimited: false };
-                        } catch {
-                            return { ok: false, rateLimited: false };
-                        }
-                    })
-                );
-                successCount += results.filter(r => r.ok).length;
-                failCount += results.filter(r => !r.ok && !r.rateLimited).length;
+            const response = await fetch('/api/products/batch-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    product_ids: productIds,
+                    scope: scope,
+                    exclude: exclude
+                })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${response.status}`);
             }
-
-            if (rateLimited) {
-                showToast(`Rate limit reached. Deleted ${successCount} products. Please wait a minute and try again.`, 'warning');
-            } else if (failCount === 0) {
-                showToast(`${successCount} product(s) deleted successfully`, 'success');
-            } else if (successCount === 0) {
-                showToast(`Failed to delete ${failCount} product(s)`, 'danger');
-            } else {
-                showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
-            }
+            const data = await response.json();
+            showToast(data.message || `Deleted ${data.deleted} product(s)`, 'success');
             clearSelection();
-            // Brief delay before reloading to let cascade deletes finish on the server
-            await new Promise(resolve => setTimeout(resolve, 500));
             loadProducts();
         } catch (error) {
             showToast(`Error: ${error.message}`, 'danger');
         } finally {
             hideLoading();
         }
+    }
+
+    // Show delete modal with org selector for super admins
+    async function showDeleteProductModal(productIds, productLabel) {
+        // Fetch available organizations
+        let orgs = [];
+        try {
+            const response = await fetch('/api/organizations');
+            if (response.ok) orgs = await response.json();
+        } catch (e) { /* ignore */ }
+
+        const orgOptions = orgs.map(o =>
+            `<div class="form-check">
+                <input class="form-check-input delete-org-check" type="checkbox" value="${o.id}" id="delOrg${o.id}" checked>
+                <label class="form-check-label" for="delOrg${o.id}">${escapeHtml(o.display_name || o.name)}</label>
+            </div>`
+        ).join('');
+
+        const html = `
+            <div class="modal fade" id="deleteProductModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header bg-danger text-white">
+                            <h5 class="modal-title"><i class="bi bi-trash me-2"></i>Delete Product</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p>Delete <strong>${escapeHtml(productLabel)}</strong></p>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Delete scope:</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="deleteScope" id="deleteScopeAll" value="all" checked onchange="document.getElementById('deleteOrgList').style.display='none'">
+                                    <label class="form-check-label" for="deleteScopeAll">
+                                        <strong>All organizations</strong> <small class="text-muted">(delete globally)</small>
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="deleteScope" id="deleteScopeSelected" value="selected" onchange="document.getElementById('deleteOrgList').style.display='block'">
+                                    <label class="form-check-label" for="deleteScopeSelected">
+                                        <strong>Specific organizations only</strong> <small class="text-muted">(remove from selected, keep in others)</small>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="deleteOrgList" style="display: none;" class="ms-4 mb-3 border rounded p-2" style="max-height: 200px; overflow-y: auto;">
+                                <div class="mb-2">
+                                    <small class="text-muted">Select organizations to remove from:</small>
+                                </div>
+                                ${orgOptions || '<span class="text-muted">No organizations found</span>'}
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="deleteExcludeCheck">
+                                <label class="form-check-label" for="deleteExcludeCheck">
+                                    Also exclude from future agent scans
+                                </label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="confirmDeleteProduct()">
+                                <i class="bi bi-trash me-1"></i>Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+        // Store product IDs for the confirm handler
+        window._pendingDeleteIds = productIds;
+
+        document.getElementById('deleteProductModal')?.remove();
+        document.body.insertAdjacentHTML('beforeend', html);
+        const modal = new bootstrap.Modal(document.getElementById('deleteProductModal'));
+        modal.show();
+        document.getElementById('deleteProductModal').addEventListener('hidden.bs.modal', function() { this.remove(); });
+    }
+
+    async function confirmDeleteProduct() {
+        const productIds = window._pendingDeleteIds || [];
+        const scopeAll = document.getElementById('deleteScopeAll')?.checked;
+        const exclude = document.getElementById('deleteExcludeCheck')?.checked || false;
+
+        let scope = 'all';
+        if (!scopeAll) {
+            const checked = document.querySelectorAll('.delete-org-check:checked');
+            const orgIds = Array.from(checked).map(cb => cb.value);
+            if (orgIds.length === 0) {
+                showToast('Select at least one organization', 'warning');
+                return;
+            }
+            scope = orgIds.join(',');
+        }
+
+        // Close modal
+        const modalEl = document.getElementById('deleteProductModal');
+        if (modalEl) bootstrap.Modal.getInstance(modalEl)?.hide();
+
+        await executeBatchDelete(productIds, scope, exclude);
     }
 
     // Organization management functions

@@ -411,6 +411,7 @@ function Send-Heartbeat {
     $payload = @{
         hostname = $SystemInfo.hostname
         agent_id = $SystemInfo.agent.id
+        agent_version = $AgentVersion
     }
 
     $headers = @{

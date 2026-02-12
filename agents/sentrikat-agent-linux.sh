@@ -660,7 +660,7 @@ send_heartbeat() {
     curl -s -X POST "$endpoint" \
         -H "X-Agent-Key: $API_KEY" \
         -H "Content-Type: application/json" \
-        -d "{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\"}" \
+        -d "{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\"}" \
         --max-time 30 >/dev/null 2>&1
 }
 

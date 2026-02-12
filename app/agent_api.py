@@ -943,7 +943,7 @@ def queue_inventory_job(organization, data, api_key_id=None):
         # Find or create asset first (so we have asset_id for the job)
         asset = None
         if agent_id:
-            asset = Asset.query.filter_by(agent_id=agent_id).first()
+            asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
             logger.debug(f"Found asset by agent_id: {asset}")
 
         if not asset:
@@ -1388,7 +1388,11 @@ def report_inventory():
     agent_id = data.get('agent', {}).get('id')
     existing_asset = None
     if agent_id:
-        existing_asset = Asset.query.filter_by(agent_id=agent_id).first()
+        # Scope agent_id lookup to organization for proper isolation
+        existing_asset = Asset.query.filter_by(
+            agent_id=agent_id,
+            organization_id=organization.id
+        ).first()
     if not existing_asset:
         existing_asset = Asset.query.filter_by(
             organization_id=organization.id,
@@ -1444,7 +1448,7 @@ def report_inventory():
         # Try to find by agent_id first, then hostname
         asset = None
         if agent_id:
-            asset = Asset.query.filter_by(agent_id=agent_id).first()
+            asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
 
         if not asset:
             hostname_asset = Asset.query.filter_by(
@@ -1755,7 +1759,7 @@ def agent_heartbeat():
     # Find asset
     asset = None
     if agent_id:
-        asset = Asset.query.filter_by(agent_id=agent_id).first()
+        asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
     if not asset and hostname:
         asset = Asset.query.filter_by(
             organization_id=organization.id,
@@ -1827,6 +1831,7 @@ def agent_heartbeat():
 # ============================================================================
 
 @agent_bp.route('/api/agent/jobs/<int:job_id>', methods=['GET'])
+@limiter.limit("120/minute", key_func=get_agent_key_for_limit)
 @agent_auth_required
 def get_job_status(job_id):
     """
@@ -1847,6 +1852,7 @@ def get_job_status(job_id):
 
 
 @agent_bp.route('/api/agent/jobs', methods=['GET'])
+@limiter.limit("60/minute", key_func=get_agent_key_for_limit)
 @agent_auth_required
 def list_jobs():
     """List inventory jobs for the organization."""
@@ -3177,7 +3183,7 @@ def get_agent_commands():
     # Find asset
     asset = None
     if agent_id:
-        asset = Asset.query.filter_by(agent_id=agent_id).first()
+        asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
     if not asset and hostname:
         asset = Asset.query.filter_by(
             organization_id=organization.id,
@@ -3309,7 +3315,7 @@ def get_agent_config():
     # Find asset
     asset = None
     if agent_id:
-        asset = Asset.query.filter_by(agent_id=agent_id).first()
+        asset = Asset.query.filter_by(agent_id=agent_id, organization_id=organization.id).first()
     if not asset and hostname:
         asset = Asset.query.filter_by(
             organization_id=organization.id,

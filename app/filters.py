@@ -382,10 +382,18 @@ def check_match(vulnerability, product):
 
     return result_reasons, result_method, result_confidence
 
-def match_vulnerabilities_to_products():
-    """Match all active vulnerabilities against active products"""
-    # Get all active products
-    products = Product.query.filter_by(active=True).all()
+def match_vulnerabilities_to_products(target_products=None):
+    """Match all active vulnerabilities against active products.
+
+    Args:
+        target_products: Optional list of Product objects to match against.
+                         If None, matches all active products.
+    """
+    # Get products to match
+    if target_products:
+        products = target_products
+    else:
+        products = Product.query.filter_by(active=True).all()
 
     # Get all vulnerabilities
     vulnerabilities = Vulnerability.query.all()
