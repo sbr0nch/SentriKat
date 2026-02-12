@@ -64,7 +64,11 @@ All responses are JSON. Errors include an `error` field with a description.
             {"name": "Settings", "description": "System configuration"},
             {"name": "License", "description": "License management"},
             {"name": "Reports", "description": "Compliance and vulnerability reports"},
-            {"name": "Integrations", "description": "Issue tracker and notification integrations"}
+            {"name": "Integrations", "description": "Issue tracker and notification integrations"},
+            {"name": "Health Checks", "description": "System health monitoring and diagnostics"},
+            {"name": "Notifications", "description": "In-app system notifications"},
+            {"name": "Logs", "description": "System log viewing and download"},
+            {"name": "Audit", "description": "Audit trail and compliance logs"}
         ],
         "paths": _get_api_paths(),
         "components": {
@@ -667,7 +671,7 @@ def _get_api_paths():
                 }
             }
         },
-        "/api/integrations/create-ticket": {
+        "/api/integrations/create-ticket/{vuln_id}": {
             "post": {
                 "tags": ["Integrations"],
                 "summary": "Create issue ticket",
@@ -692,6 +696,268 @@ def _get_api_paths():
                     "200": {"description": "Ticket created"},
                     "403": {"description": "Professional license required"}
                 }
+            }
+        },
+
+        # =====================================================================
+        # Health Checks
+        # =====================================================================
+        "/api/admin/health-checks": {
+            "get": {
+                "tags": ["Health Checks"],
+                "summary": "Get health check results",
+                "description": "Returns the latest results for all health checks including database, disk, agents, sync, license, SMTP, and more.",
+                "responses": {
+                    "200": {
+                        "description": "Health check results",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "results": {
+                                            "type": "array",
+                                            "items": {"$ref": "#/components/schemas/HealthCheckResult"}
+                                        },
+                                        "overall_status": {"type": "string", "enum": ["ok", "warning", "critical", "error"]}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/health-checks/run": {
+            "post": {
+                "tags": ["Health Checks"],
+                "summary": "Run all health checks now",
+                "description": "Manually trigger all enabled health checks. Returns results after completion.",
+                "responses": {
+                    "200": {"description": "Health checks completed"},
+                    "500": {"description": "Error running health checks"}
+                }
+            }
+        },
+        "/api/admin/health-checks/settings": {
+            "get": {
+                "tags": ["Health Checks"],
+                "summary": "Get health check settings",
+                "description": "Returns global enable/disable state, notification email, and per-check enable state.",
+                "responses": {
+                    "200": {"description": "Health check settings"}
+                }
+            },
+            "post": {
+                "tags": ["Health Checks"],
+                "summary": "Update health check settings",
+                "description": "Update global toggle, notification email, and per-check enable/disable.",
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "enabled": {"type": "boolean", "description": "Global enable/disable"},
+                                    "notify_email": {"type": "string", "description": "Email for health notifications"},
+                                    "checks": {"type": "object", "description": "Per-check enable/disable map"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {"description": "Settings updated"},
+                    "500": {"description": "Error updating settings"}
+                }
+            }
+        },
+
+        # =====================================================================
+        # System Notifications
+        # =====================================================================
+        "/api/system/notifications": {
+            "get": {
+                "tags": ["Notifications"],
+                "summary": "Get active system notifications",
+                "description": "Returns contextual notifications for the notification banner (stale data, license warnings, health issues, pending imports, etc.). Admins see all; regular users see a subset.",
+                "responses": {
+                    "200": {
+                        "description": "System notifications",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "notifications": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "id": {"type": "string"},
+                                                    "level": {"type": "string", "enum": ["info", "warning", "danger", "success"]},
+                                                    "icon": {"type": "string"},
+                                                    "message": {"type": "string"},
+                                                    "dismissible": {"type": "boolean"},
+                                                    "action": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "label": {"type": "string"},
+                                                            "url": {"type": "string"}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+
+        # =====================================================================
+        # Log Viewer (Admin)
+        # =====================================================================
+        "/api/admin/logs": {
+            "get": {
+                "tags": ["Logs"],
+                "summary": "List available log files",
+                "description": "Returns all available log files with sizes and last modified timestamps.",
+                "responses": {
+                    "200": {
+                        "description": "Log file list",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "log_dir": {"type": "string"},
+                                        "files": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "key": {"type": "string"},
+                                                    "filename": {"type": "string"},
+                                                    "size": {"type": "integer"},
+                                                    "modified": {"type": "string", "format": "date-time"}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/logs/{log_name}": {
+            "get": {
+                "tags": ["Logs"],
+                "summary": "View log file contents",
+                "description": "Read log file with tail behavior (newest lines first). Supports filtering by search term and log level.",
+                "parameters": [
+                    {"name": "log_name", "in": "path", "required": True, "schema": {"type": "string", "enum": ["application", "error", "security", "access", "audit", "performance", "ldap"]}},
+                    {"name": "lines", "in": "query", "schema": {"type": "integer", "default": 200, "maximum": 5000}, "description": "Number of lines to return (from end of file)"},
+                    {"name": "search", "in": "query", "schema": {"type": "string"}, "description": "Filter lines containing this string (case-insensitive)"},
+                    {"name": "level", "in": "query", "schema": {"type": "string", "enum": ["ERROR", "WARNING", "INFO", "DEBUG"]}, "description": "Filter by log level"}
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Log lines (newest first)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "lines": {"type": "array", "items": {"type": "string"}},
+                                        "total": {"type": "integer"},
+                                        "returned": {"type": "integer"},
+                                        "file_size": {"type": "integer"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/logs/{log_name}/download": {
+            "get": {
+                "tags": ["Logs"],
+                "summary": "Download log file",
+                "description": "Download the full log file as an attachment.",
+                "parameters": [
+                    {"name": "log_name", "in": "path", "required": True, "schema": {"type": "string", "enum": ["application", "error", "security", "access", "audit", "performance", "ldap"]}}
+                ],
+                "responses": {
+                    "200": {"description": "Log file download"},
+                    "404": {"description": "Log file not found"}
+                }
+            }
+        },
+
+        # =====================================================================
+        # Audit Logs
+        # =====================================================================
+        "/api/audit-logs": {
+            "get": {
+                "tags": ["Audit"],
+                "summary": "Get audit log entries",
+                "description": "Returns paginated audit trail of data modifications. Super admin only.",
+                "parameters": [
+                    {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}},
+                    {"name": "per_page", "in": "query", "schema": {"type": "integer", "default": 50}},
+                    {"name": "action", "in": "query", "schema": {"type": "string"}, "description": "Filter by action type"},
+                    {"name": "resource", "in": "query", "schema": {"type": "string"}, "description": "Filter by resource type"},
+                    {"name": "user_id", "in": "query", "schema": {"type": "integer"}},
+                    {"name": "search", "in": "query", "schema": {"type": "string"}, "description": "Search in log messages"},
+                    {"name": "start_date", "in": "query", "schema": {"type": "string", "format": "date"}},
+                    {"name": "end_date", "in": "query", "schema": {"type": "string", "format": "date"}},
+                    {"name": "sort", "in": "query", "schema": {"type": "string", "default": "timestamp"}},
+                    {"name": "order", "in": "query", "schema": {"type": "string", "enum": ["asc", "desc"], "default": "desc"}}
+                ],
+                "responses": {
+                    "200": {"description": "Paginated audit log entries"},
+                    "403": {"description": "Super admin required"}
+                }
+            }
+        },
+        "/api/audit-logs/export": {
+            "get": {
+                "tags": ["Audit"],
+                "summary": "Export audit logs",
+                "description": "Export audit logs as CSV or JSON. Professional license required.",
+                "parameters": [
+                    {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["csv", "json"], "default": "csv"}},
+                    {"name": "action", "in": "query", "schema": {"type": "string"}},
+                    {"name": "start_date", "in": "query", "schema": {"type": "string", "format": "date"}},
+                    {"name": "end_date", "in": "query", "schema": {"type": "string", "format": "date"}}
+                ],
+                "responses": {
+                    "200": {"description": "Exported audit log data"},
+                    "403": {"description": "Professional license required"}
+                }
+            }
+        },
+
+        # =====================================================================
+        # Version Info
+        # =====================================================================
+        "/api/version": {
+            "get": {
+                "tags": ["Settings"],
+                "summary": "Get application version",
+                "description": "Returns SentriKat version, API version, edition, and system info.",
+                "responses": {
+                    "200": {"description": "Version information"}
+                },
+                "security": []
             }
         }
     }
@@ -897,6 +1163,18 @@ def _get_schemas():
                 },
                 "features": {"type": "array", "items": {"type": "string"}},
                 "installation_id": {"type": "string"}
+            }
+        },
+        "HealthCheckResult": {
+            "type": "object",
+            "properties": {
+                "check_name": {"type": "string", "example": "database"},
+                "category": {"type": "string", "enum": ["system", "data_sync", "agents"]},
+                "status": {"type": "string", "enum": ["ok", "warning", "critical", "error"]},
+                "message": {"type": "string"},
+                "value": {"type": "string", "description": "Short display value (e.g. '42ms', '95%')"},
+                "details": {"type": "object", "description": "Additional structured data"},
+                "checked_at": {"type": "string", "format": "date-time"}
             }
         }
     }

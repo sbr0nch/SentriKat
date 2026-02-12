@@ -5878,7 +5878,9 @@ const SETTINGS_GROUPS = {
     compliance: ['auditLogs', 'complianceReports'],
     appearance: ['brandingSettings'],
     license:    ['licenseSettings'],
-    health:     ['healthSettings']
+    health:     ['healthSettings'],
+    logs:       ['logsSettings'],
+    guide:      ['guideSettings']
 };
 
 // System sub-tab definitions: maps sub-tab name to pane ID
@@ -5946,6 +5948,8 @@ function showSettingsGroup(groupName, btn) {
             if (typeof loadLicenseInfo === 'function') loadLicenseInfo();
         } else if (groupName === 'health') {
             if (typeof loadHealthChecks === 'function') loadHealthChecks();
+        } else if (groupName === 'logs') {
+            if (typeof loadLogFile === 'function') loadLogFile();
         }
     }
 
