@@ -3075,8 +3075,8 @@ def simulate_load():
 @limiter.limit("5/minute")
 def cleanup_load_test():
     """
-    Clean up all load test jobs (job_type='load_test').
-    Removes completed, failed, and pending test jobs.
+    Clean up all load test data: jobs, products, and installations.
+    Removes everything created by the load test simulation.
     """
     from app.auth import get_current_user
     user = get_current_user()
@@ -3084,14 +3084,38 @@ def cleanup_load_test():
         return jsonify({'error': 'Super admin access required'}), 403
 
     try:
-        count = InventoryJob.query.filter_by(job_type='load_test').count()
+        # 1. Delete load test jobs
+        job_count = InventoryJob.query.filter_by(job_type='load_test').count()
         InventoryJob.query.filter_by(job_type='load_test').delete()
+
+        # 2. Delete synthetic products created by load test (vendor starts with 'loadtest-vendor-')
+        #    ProductInstallation has ondelete='CASCADE' so installations are removed automatically
+        loadtest_products = Product.query.filter(
+            Product.vendor.like('loadtest-vendor-%')
+        ).all()
+        product_count = len(loadtest_products)
+        installation_count = 0
+        for product in loadtest_products:
+            installation_count += ProductInstallation.query.filter_by(
+                product_id=product.id
+            ).delete()
+            db.session.delete(product)
+
         db.session.commit()
-        logger.info(f"Load test cleanup: deleted {count} test jobs by {user.username}")
+        logger.info(
+            f"Load test cleanup by {user.username}: "
+            f"{job_count} jobs, {product_count} products, "
+            f"{installation_count} installations deleted"
+        )
 
         return jsonify({
             'status': 'success',
-            'message': f'Cleaned up {count} load test jobs'
+            'message': f'Cleaned up {job_count} jobs, {product_count} products, {installation_count} installations',
+            'details': {
+                'jobs_deleted': job_count,
+                'products_deleted': product_count,
+                'installations_deleted': installation_count
+            }
         })
     except Exception as e:
         db.session.rollback()
