@@ -430,6 +430,57 @@ function Send-Heartbeat {
     }
 }
 
+function Update-Agent {
+    param($Config, [string]$TargetVersion)
+
+    # Auto-update the agent script from the server
+    # Flow: download -> verify -> backup -> replace -> log
+    $downloadUrl = "$($Config.ServerUrl)/api/agent/download/windows"
+    $scriptPath = "$env:ProgramData\SentriKat\sentrikat-agent.ps1"
+    $backupPath = "$env:ProgramData\SentriKat\sentrikat-agent.backup.$AgentVersion.ps1"
+
+    Write-Log "Auto-updating agent: $AgentVersion -> $TargetVersion"
+
+    try {
+        $headers = @{
+            "X-Agent-Key" = $Config.ApiKey
+            "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
+        }
+
+        # Download new script to temp file
+        $tmpFile = [System.IO.Path]::GetTempFileName() + ".ps1"
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $tmpFile -TimeoutSec 60
+
+        # Verify downloaded script is valid PowerShell (contains expected marker)
+        $content = Get-Content $tmpFile -Raw
+        if ($content -notmatch 'AgentVersion') {
+            Write-Log "Downloaded file missing AgentVersion marker - aborting update" -Level "ERROR"
+            Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+            return
+        }
+
+        # Backup current script
+        if (Test-Path $scriptPath) {
+            Copy-Item $scriptPath $backupPath -Force
+            Write-Log "Backed up current agent to $backupPath"
+        }
+
+        # Replace the script
+        Move-Item $tmpFile $scriptPath -Force
+        Write-Log "Agent updated successfully to $TargetVersion"
+    }
+    catch {
+        Write-Log "Agent update failed: $_" -Level "ERROR"
+        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+        # Restore backup if available
+        if (Test-Path $backupPath) {
+            Copy-Item $backupPath $scriptPath -Force
+            Write-Log "Restored backup agent"
+        }
+    }
+}
+
 function Check-Commands {
     param($Config, $SystemInfo)
 
@@ -470,7 +521,7 @@ function Check-Commands {
                 }
                 "update_available" {
                     Write-Log "Agent update available: $($cmd.current_version) -> $($cmd.latest_version)" -Level "WARN"
-                    Write-Log "Download from: $($Config.ServerUrl)/api/agent/download/windows"
+                    Update-Agent -Config $Config -TargetVersion $cmd.latest_version
                 }
             }
         }

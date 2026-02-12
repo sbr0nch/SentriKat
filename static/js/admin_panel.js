@@ -6461,9 +6461,25 @@ async function checkForUpdates() {
     const container = document.getElementById('updateCheckContainer');
     if (!container) return;
 
+    // Show loading indicator
+    container.innerHTML = `
+        <small class="text-muted">
+            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+            Checking for updates...
+        </small>
+    `;
+
     try {
         const response = await fetch('/api/updates/check');
-        if (!response.ok) return;
+        if (!response.ok) {
+            container.innerHTML = `
+                <small class="text-danger">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    Update check failed (HTTP ${response.status})
+                </small>
+            `;
+            return;
+        }
 
         const data = await response.json();
         if (data.update_available) {
@@ -6486,13 +6502,27 @@ async function checkForUpdates() {
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
             `;
-        } else if (!data.error) {
+        } else if (data.error) {
             container.innerHTML = `
-                <small class="text-success"><i class="bi bi-check-circle me-1"></i>Up to date</small>
+                <small class="text-warning">
+                    <i class="bi bi-exclamation-circle me-1"></i>
+                    ${escapeHtml(data.error)}
+                </small>
+            `;
+        } else {
+            container.innerHTML = `
+                <small class="text-success">
+                    <i class="bi bi-check-circle me-1"></i>Up to date (v${escapeHtml(data.current_version || '')})
+                </small>
             `;
         }
     } catch (e) {
-        // Silently fail - offline or network issue
+        container.innerHTML = `
+            <small class="text-danger">
+                <i class="bi bi-wifi-off me-1"></i>
+                Could not reach update server (network error)
+            </small>
+        `;
     }
 }
 
@@ -6909,8 +6939,10 @@ async function downloadAgentFromModal(platform) {
         return;
     }
 
+    const platformNames = { windows: 'Windows', linux: 'Linux', macos: 'macOS' };
+    const platformName = platformNames[platform] || platform;
     const apiKey = keyInput.value;
-    showToast(`Downloading ${platform === 'windows' ? 'Windows' : 'Linux'} agent with embedded key...`, 'info');
+    showToast(`Downloading ${platformName} agent with embedded key...`, 'info');
 
     try {
         const url = `/api/agents/script/${platform}?api_key=${encodeURIComponent(apiKey)}`;
@@ -6921,10 +6953,11 @@ async function downloadAgentFromModal(platform) {
         }
 
         const script = await response.text();
-        const filename = platform === 'windows' ? 'sentrikat-agent.ps1' : 'sentrikat-agent.sh';
+        const filenames = { windows: 'sentrikat-agent.ps1', linux: 'sentrikat-agent.sh', macos: 'sentrikat-agent-macos.sh' };
+        const filename = filenames[platform] || 'sentrikat-agent.sh';
         downloadScript(filename, script);
 
-        showToast(`${platform === 'windows' ? 'Windows' : 'Linux'} agent downloaded with API key embedded!`, 'success');
+        showToast(`${platformName} agent downloaded with API key embedded!`, 'success');
     } catch (error) {
         showToast(`Error downloading agent: ${error.message}`, 'danger');
     }
@@ -8027,7 +8060,20 @@ async function loadIntegrationsSummary() {
         if (endpointsTotal) endpointsTotal.textContent = data.push_agents?.endpoints || 0;
 
         const pendingImports = SK.DOM.get('statPendingImports');
-        if (pendingImports) pendingImports.textContent = data.import_queue?.pending || 0;
+        if (pendingImports) {
+            const count = data.import_queue?.pending || 0;
+            pendingImports.textContent = count;
+            // Color the count: yellow if pending items exist, green if clear
+            if (count > 0) {
+                pendingImports.classList.add('text-warning');
+                pendingImports.classList.remove('text-success');
+                pendingImports.title = `${count} items awaiting review in Import Queue. Use Approve All to accept, or set API keys to Auto-Approve mode.`;
+            } else {
+                pendingImports.classList.add('text-success');
+                pendingImports.classList.remove('text-warning');
+                pendingImports.title = 'No pending items';
+            }
+        }
 
         const recentCheckins = SK.DOM.get('statRecentCheckins');
         if (recentCheckins) recentCheckins.textContent = data.activity?.recent_checkins || 0;

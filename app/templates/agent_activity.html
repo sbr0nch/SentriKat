@@ -272,12 +272,81 @@
                         <option value="ip_blocked">IP Blocked</option>
                         <option value="auth_failed">Auth Failed</option>
                         <option value="status_changed">Status Changed</option>
+                        <option value="container_scan">Container Scan</option>
                     </select>
                 </div>
                 <div class="card-body p-0" id="eventsContainer" style="max-height: 500px; overflow-y: auto;">
                     <div class="text-center py-4">
                         <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
                         <span class="text-muted ms-2 small">Loading events...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Professional Agent Activity Log -->
+    <div class="row g-3 mt-1">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-journal-text me-2"></i>Agent Activity Log</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <select class="form-select form-select-sm" id="logEventTypeFilter" onchange="loadActivityLog()" style="width: auto;">
+                            <option value="">All Types</option>
+                            <option value="registered">Registered</option>
+                            <option value="inventory_reported">Inventory</option>
+                            <option value="status_changed">Status Changed</option>
+                            <option value="container_scan">Container Scan</option>
+                            <option value="license_exceeded">License Exceeded</option>
+                            <option value="ip_blocked">IP Blocked</option>
+                            <option value="auth_failed">Auth Failed</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="logDaysFilter" onchange="loadActivityLog()" style="width: auto;">
+                            <option value="1">Last 24h</option>
+                            <option value="3">Last 3 days</option>
+                            <option value="7" selected>Last 7 days</option>
+                            <option value="14">Last 14 days</option>
+                            <option value="30">Last 30 days</option>
+                        </select>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="loadActivityLog()" title="Refresh log">
+                            <i class="bi bi-arrow-repeat"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm mb-0 align-middle" style="font-size: 0.82rem;">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 150px;">Timestamp</th>
+                                    <th style="width: 130px;">Type</th>
+                                    <th style="width: 140px;">Hostname</th>
+                                    <th>Details</th>
+                                    <th style="width: 120px;">Source IP</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activityLogBody">
+                                <tr>
+                                    <td colspan="5" class="text-center py-4">
+                                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                        <span class="text-muted ms-2 small">Loading activity log...</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer d-flex justify-content-between align-items-center py-2">
+                    <small class="text-muted" id="logSummary">-</small>
+                    <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-outline-secondary btn-sm py-0 px-2" id="logPrevPage" onclick="changeLogPage(-1)" disabled>
+                            <i class="bi bi-chevron-left"></i>
+                        </button>
+                        <small class="text-muted" id="logPageInfo">Page 1</small>
+                        <button class="btn btn-outline-secondary btn-sm py-0 px-2" id="logNextPage" onclick="changeLogPage(1)" disabled>
+                            <i class="bi bi-chevron-right"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -454,6 +523,7 @@ function getEventIcon(eventType) {
         inventory_reported: { icon: 'bi-box-seam-fill', iconClass: 'inventory' },
         heartbeat: { icon: 'bi-heart-pulse-fill', iconClass: 'heartbeat' },
         status_changed: { icon: 'bi-arrow-left-right', iconClass: 'warning' },
+        container_scan: { icon: 'bi-box-seam', iconClass: 'inventory' },
         license_exceeded: { icon: 'bi-exclamation-triangle-fill', iconClass: 'error' },
         license_warning: { icon: 'bi-exclamation-circle-fill', iconClass: 'warning' },
         ip_blocked: { icon: 'bi-shield-x', iconClass: 'blocked' },
@@ -487,6 +557,10 @@ function getEventDescription(event) {
             return `Connection blocked from ${details.blocked_ip || 'unknown IP'}`;
         case 'auth_failed':
             return `Authentication failed: ${details.reason || 'invalid key'}`;
+        case 'container_scan':
+            const imgs = details.images_processed || 0;
+            const vulns = details.total_vulnerabilities || 0;
+            return `Container scan: ${imgs} images, ${vulns} vulnerabilities (${details.scanner || 'trivy'})`;
         case 'decommissioned':
             return 'Agent decommissioned';
         default:
@@ -529,7 +603,8 @@ async function refreshAll() {
     await Promise.all([
         loadWorkerStatus(),
         loadJobs(),
-        loadEvents()
+        loadEvents(),
+        loadActivityLog()
     ]);
 
     indicator.classList.remove('refreshing');
@@ -557,8 +632,106 @@ function stopAutoRefresh() {
     }
 }
 
+// ============================================================================
+// Activity Log (paginated table at bottom)
+// ============================================================================
+
+let logCurrentPage = 1;
+const LOG_PER_PAGE = 50;
+
+async function loadActivityLog() {
+    const typeFilter = document.getElementById('logEventTypeFilter').value;
+    const days = document.getElementById('logDaysFilter').value;
+
+    let url = `/api/admin/events?per_page=${LOG_PER_PAGE}&page=${logCurrentPage}&days=${days}`;
+    if (typeFilter) url += `&event_type=${typeFilter}`;
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        const tbody = document.getElementById('activityLogBody');
+
+        if (!data.events || data.events.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="5" class="text-center py-4 text-muted small">
+                    <i class="bi bi-journal me-1"></i>No activity in the selected period
+                </td></tr>`;
+            document.getElementById('logSummary').textContent = '0 events';
+            document.getElementById('logPageInfo').textContent = 'Page 0 / 0';
+            document.getElementById('logPrevPage').disabled = true;
+            document.getElementById('logNextPage').disabled = true;
+            return;
+        }
+
+        tbody.innerHTML = data.events.map(event => {
+            const { icon, iconClass } = getEventIcon(event.event_type);
+            const typeBadge = getLogTypeBadge(event.event_type);
+            const hostname = event.asset_hostname || '-';
+            const description = getEventDescription(event);
+            const ts = event.created_at ? formatLogTimestamp(event.created_at) : '-';
+            const ip = event.source_ip || '-';
+
+            return `
+                <tr>
+                    <td class="text-muted small font-monospace">${ts}</td>
+                    <td>${typeBadge}</td>
+                    <td class="fw-semibold small">${escapeHtml(hostname)}</td>
+                    <td class="small">${description}</td>
+                    <td class="text-muted small font-monospace">${escapeHtml(ip)}</td>
+                </tr>`;
+        }).join('');
+
+        // Update pagination
+        const totalPages = data.pages || 1;
+        document.getElementById('logSummary').textContent = `${data.total} events total`;
+        document.getElementById('logPageInfo').textContent = `Page ${data.page} / ${totalPages}`;
+        document.getElementById('logPrevPage').disabled = data.page <= 1;
+        document.getElementById('logNextPage').disabled = data.page >= totalPages;
+
+    } catch (err) {
+        console.error('Failed to load activity log:', err);
+        document.getElementById('activityLogBody').innerHTML = `
+            <tr><td colspan="5" class="text-center py-3 text-danger small">
+                <i class="bi bi-exclamation-triangle me-1"></i>Failed to load activity log
+            </td></tr>`;
+    }
+}
+
+function changeLogPage(delta) {
+    logCurrentPage = Math.max(1, logCurrentPage + delta);
+    loadActivityLog();
+}
+
+function getLogTypeBadge(eventType) {
+    const map = {
+        registered: '<span class="badge bg-success bg-opacity-75"><i class="bi bi-plus-circle me-1"></i>Registered</span>',
+        inventory_reported: '<span class="badge bg-info bg-opacity-75"><i class="bi bi-box-seam me-1"></i>Inventory</span>',
+        heartbeat: '<span class="badge bg-secondary bg-opacity-50"><i class="bi bi-heart-pulse me-1"></i>Heartbeat</span>',
+        status_changed: '<span class="badge bg-warning text-dark"><i class="bi bi-arrow-left-right me-1"></i>Status</span>',
+        container_scan: '<span class="badge bg-info bg-opacity-75"><i class="bi bi-box-seam me-1"></i>Container</span>',
+        license_exceeded: '<span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>License</span>',
+        license_warning: '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>License</span>',
+        ip_blocked: '<span class="badge bg-danger"><i class="bi bi-shield-x me-1"></i>Blocked</span>',
+        auth_failed: '<span class="badge bg-danger"><i class="bi bi-lock me-1"></i>Auth Fail</span>',
+        decommissioned: '<span class="badge bg-dark"><i class="bi bi-trash3 me-1"></i>Removed</span>',
+    };
+    return map[eventType] || `<span class="badge bg-secondary">${eventType}</span>`;
+}
+
+function formatLogTimestamp(dateStr) {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr + (dateStr.endsWith('Z') ? '' : 'Z'));
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 // Start on page load
-document.addEventListener('DOMContentLoaded', startAutoRefresh);
+document.addEventListener('DOMContentLoaded', () => {
+    startAutoRefresh();
+    loadActivityLog();
+});
 
 // Pause when tab is hidden to save resources
 document.addEventListener('visibilitychange', () => {

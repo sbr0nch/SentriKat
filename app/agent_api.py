@@ -1765,10 +1765,30 @@ def agent_heartbeat():
     if not asset:
         return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
 
-    # Update checkin
+    # Track status transition for event logging
+    previous_status = asset.status
+
+    # Update checkin and agent version
     asset.last_checkin = datetime.utcnow()
     asset.status = 'online'
+    if data.get('agent_version'):
+        asset.agent_version = data.get('agent_version')
     try:
+        # Log reconnection event when transitioning from offline/stale to online
+        if previous_status in ('offline', 'stale'):
+            try:
+                AgentEvent.log_event(
+                    organization_id=asset.organization_id,
+                    event_type='status_changed',
+                    asset_id=asset.id,
+                    old_value=previous_status,
+                    new_value='online',
+                    details=json.dumps({'reason': 'heartbeat_reconnect'}),
+                    source_ip=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent', '')[:500]
+                )
+            except Exception:
+                pass
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -3099,8 +3119,9 @@ def get_license_tiers():
 
 # Current latest agent versions (update when releasing new versions)
 LATEST_AGENT_VERSIONS = {
-    'linux': '1.1.0',
-    'windows': '1.1.0'
+    'linux': '1.4.0',
+    'windows': '1.1.0',
+    'macos': '1.4.0'
 }
 
 
@@ -3139,9 +3160,30 @@ def get_agent_commands():
     commands = []
 
     if asset:
-        # Update last checkin (heartbeat)
+        # Track status transition for event logging
+        previous_status = asset.status
+
+        # Update last checkin (heartbeat) and agent version
         asset.last_checkin = datetime.utcnow()
         asset.status = 'online'
+        if agent_version and agent_version != '1.0.0':
+            asset.agent_version = agent_version
+
+        # Log reconnection event when transitioning from offline/stale to online
+        if previous_status in ('offline', 'stale'):
+            try:
+                AgentEvent.log_event(
+                    organization_id=asset.organization_id,
+                    event_type='status_changed',
+                    asset_id=asset.id,
+                    old_value=previous_status,
+                    new_value='online',
+                    details=json.dumps({'reason': 'command_poll_reconnect'}),
+                    source_ip=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent', '')[:500]
+                )
+            except Exception:
+                pass
 
         # Check for pending scan request
         if asset.pending_scan:
@@ -3240,6 +3282,55 @@ def get_agent_version():
         'release_notes_url': '/docs/agent-changelog',
         'server_time': datetime.utcnow().isoformat()
     })
+
+
+@agent_bp.route('/api/agent/download/<platform>', methods=['GET'])
+@limiter.limit("10/minute", key_func=get_agent_key_for_limit)
+@agent_auth_required
+def download_agent_script(platform):
+    """
+    Download the latest agent script for auto-update.
+
+    The agent calls this endpoint when it receives an 'update_available' command.
+    Returns the full agent script file for the requested platform.
+
+    Flow:
+    1. Agent polls /api/agent/commands -> receives 'update_available'
+    2. Agent downloads new script from this endpoint
+    3. Agent backs up current script, replaces with new one
+    4. Agent restarts its service/daemon to apply the update
+    """
+    import os
+
+    platform = platform.lower().strip()
+    script_map = {
+        'linux': 'sentrikat-agent-linux.sh',
+        'macos': 'sentrikat-agent-macos.sh',
+        'windows': 'sentrikat-agent-windows.ps1',
+    }
+
+    filename = script_map.get(platform)
+    if not filename:
+        return jsonify({'error': f'Unknown platform: {platform}. Use: linux, macos, windows'}), 400
+
+    agents_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'agents')
+    script_path = os.path.join(agents_dir, filename)
+
+    if not os.path.exists(script_path):
+        return jsonify({'error': f'Agent script not available for {platform}'}), 404
+
+    with open(script_path, 'r') as f:
+        script_content = f.read()
+
+    content_type = 'application/octet-stream'
+    return Response(
+        script_content,
+        mimetype=content_type,
+        headers={
+            'Content-Disposition': f'attachment; filename={filename}',
+            'X-Agent-Version': LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
+        }
+    )
 
 
 def _version_compare(v1, v2):
@@ -3684,6 +3775,28 @@ def report_container_scan():
             f"Container scan from {hostname}: {images_processed} images, "
             f"{total_vulns_found} vulnerabilities found"
         )
+
+        # Log container scan event
+        try:
+            AgentEvent.log_event(
+                organization_id=organization.id,
+                event_type='container_scan',
+                asset_id=asset.id if asset else None,
+                api_key_id=agent_key.id if agent_key else None,
+                details=json.dumps({
+                    'images_processed': images_processed,
+                    'images_created': images_created,
+                    'images_updated': images_updated,
+                    'total_vulnerabilities': total_vulns_found,
+                    'scanner': scanner,
+                    'scanner_version': scanner_version
+                }),
+                source_ip=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', '')[:500]
+            )
+            db.session.commit()
+        except Exception:
+            pass
 
         return jsonify({
             'status': 'success',

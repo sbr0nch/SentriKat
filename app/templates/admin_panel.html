@@ -3245,10 +3245,13 @@
                         <p class="small text-muted mb-3">Download a ready-to-run agent script with this API key already embedded:</p>
                         <div class="d-flex gap-2">
                             <button type="button" class="btn btn-outline-primary flex-fill" onclick="downloadAgentFromModal('windows')">
-                                <i class="bi bi-windows me-2"></i>Windows Agent
+                                <i class="bi bi-windows me-2"></i>Windows
                             </button>
                             <button type="button" class="btn btn-outline-success flex-fill" onclick="downloadAgentFromModal('linux')">
-                                <i class="bi bi-ubuntu me-2"></i>Linux Agent
+                                <i class="bi bi-ubuntu me-2"></i>Linux
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary flex-fill" onclick="downloadAgentFromModal('macos')">
+                                <i class="bi bi-apple me-2"></i>macOS
                             </button>
                         </div>
                         <!-- Quick Start Instructions -->
@@ -3260,8 +3263,12 @@
                                     powershell -ExecutionPolicy Bypass -File .\sentrikat-agent.ps1
                                 </div>
                                 <p class="mb-1 text-muted"><strong>Linux</strong>:</p>
-                                <div class="bg-dark text-light rounded p-2 mb-0 font-monospace" style="font-size: 0.75rem;">
+                                <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
                                     chmod +x sentrikat-agent.sh && sudo ./sentrikat-agent.sh
+                                </div>
+                                <p class="mb-1 text-muted"><strong>macOS</strong>:</p>
+                                <div class="bg-dark text-light rounded p-2 mb-0 font-monospace" style="font-size: 0.75rem;">
+                                    chmod +x sentrikat-agent-macos.sh && sudo ./sentrikat-agent-macos.sh
                                 </div>
                             </div>
                         </div>
