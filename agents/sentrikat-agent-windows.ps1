@@ -787,18 +787,136 @@ function Install-ScheduledTask {
     Write-Host "  - Heartbeat: every $HeartbeatIntervalMinutes minutes (checks for commands)"
 }
 
+function Install-WindowsService {
+    param($Config)
+
+    Write-Log "Installing SentriKat as a Windows service..."
+
+    # Save config
+    Save-AgentConfig $Config
+
+    $scriptPath = $MyInvocation.PSCommandPath
+    if (!$scriptPath) {
+        $scriptPath = "$env:ProgramData\SentriKat\sentrikat-agent.ps1"
+        Copy-Item $PSCommandPath $scriptPath -Force
+    }
+
+    $serviceName = "SentriKatAgent"
+    $serviceDisplayName = "SentriKat Agent"
+    $serviceDescription = "SentriKat Software Inventory Agent - Collects and reports installed software inventory and checks for commands."
+
+    # Remove existing service if present
+    $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Log "Removing existing SentriKat service..."
+        Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+        & sc.exe delete $serviceName | Out-Null
+        Start-Sleep -Seconds 2
+    }
+
+    # Also remove scheduled tasks if they exist (switching from task to service mode)
+    Unregister-ScheduledTask -TaskName "SentriKat Agent" -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Confirm:$false -ErrorAction SilentlyContinue
+
+    # Create a service wrapper script that runs the agent in a loop
+    $wrapperPath = "$env:ProgramData\SentriKat\sentrikat-service.ps1"
+    $wrapperContent = @"
+# SentriKat Agent Service Wrapper
+# This script runs as a Windows service via sc.exe
+# It manages both inventory scans and heartbeat polling
+
+`$ErrorActionPreference = "Continue"
+`$AgentScript = "$scriptPath"
+`$HeartbeatInterval = $HeartbeatIntervalMinutes
+`$ScanInterval = $($Config.IntervalMinutes)
+`$LogFile = "$env:ProgramData\SentriKat\service.log"
+
+function Write-ServiceLog(`$msg) {
+    `$ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path `$LogFile -Value "[`$ts] `$msg" -ErrorAction SilentlyContinue
+}
+
+Write-ServiceLog "SentriKat service wrapper started"
+
+`$lastScan = [DateTime]::MinValue
+`$lastHeartbeat = [DateTime]::MinValue
+
+while (`$true) {
+    try {
+        `$now = Get-Date
+
+        # Run heartbeat every `$HeartbeatInterval minutes
+        if ((`$now - `$lastHeartbeat).TotalMinutes -ge `$HeartbeatInterval) {
+            Write-ServiceLog "Running heartbeat..."
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `$AgentScript -Heartbeat 2>&1 | Out-Null
+            `$lastHeartbeat = `$now
+        }
+
+        # Run full scan every `$ScanInterval minutes
+        if ((`$now - `$lastScan).TotalMinutes -ge `$ScanInterval) {
+            Write-ServiceLog "Running full inventory scan..."
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `$AgentScript -RunOnce 2>&1 | Out-Null
+            `$lastScan = `$now
+        }
+
+        Start-Sleep -Seconds 60
+    } catch {
+        Write-ServiceLog "Error: `$_"
+        Start-Sleep -Seconds 30
+    }
+}
+"@
+    Set-Content -Path $wrapperPath -Value $wrapperContent -Force
+
+    # Create the service using sc.exe with powershell.exe as the binary
+    $binPath = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapperPath`""
+
+    & sc.exe create $serviceName binPath= $binPath start= auto DisplayName= $serviceDisplayName
+    & sc.exe description $serviceName $serviceDescription
+    & sc.exe failure $serviceName reset= 86400 actions= restart/60000/restart/120000/restart/300000
+
+    # Start the service
+    Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+
+    $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq 'Running') {
+        Write-Log "Windows service '$serviceDisplayName' installed and running"
+        Write-Host "SentriKat Agent installed as Windows service:"
+        Write-Host "  - Service name: $serviceName"
+        Write-Host "  - Full scan: every $($Config.IntervalMinutes) minutes"
+        Write-Host "  - Heartbeat: every $HeartbeatIntervalMinutes minutes"
+        Write-Host "  - View in services.msc or: Get-Service $serviceName"
+    } else {
+        Write-Log "Windows service created but may need manual start" -Level "WARN"
+        Write-Host "SentriKat Agent service created. Start manually:"
+        Write-Host "  Start-Service $serviceName"
+    }
+}
+
 function Uninstall-Agent {
     Write-Log "Uninstalling agent..."
+
+    # Remove Windows service if exists
+    $serviceName = "SentriKatAgent"
+    $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($existing) {
+        Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+        & sc.exe delete $serviceName | Out-Null
+        Write-Log "Windows service removed"
+    }
 
     # Remove scheduled tasks
     Unregister-ScheduledTask -TaskName "SentriKat Agent" -Confirm:$false -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Confirm:$false -ErrorAction SilentlyContinue
 
+    # Remove service wrapper script
+    Remove-Item "$env:ProgramData\SentriKat\sentrikat-service.ps1" -Force -ErrorAction SilentlyContinue
+
     # Remove config and logs (optional)
     # Remove-Item "$env:ProgramData\SentriKat" -Recurse -Force -ErrorAction SilentlyContinue
 
     Write-Log "Agent uninstalled"
-    Write-Host "SentriKat Agent uninstalled"
+    Write-Host "SentriKat Agent uninstalled (service and scheduled tasks removed)"
 }
 
 # ============================================================================
@@ -819,6 +937,11 @@ function Main {
     }
 
     # Handle installation
+    if ($InstallService) {
+        Install-WindowsService $config
+        return
+    }
+
     if ($Install) {
         Install-ScheduledTask $config
         return
