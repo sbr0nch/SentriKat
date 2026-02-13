@@ -1,6 +1,18 @@
 #!/bin/bash
 set -e
 
+# ── STORAGE_ROOT: derive LOG_DIR, DATA_DIR, BACKUP_DIR if not set ──
+# Allows operators to point all heavy data at a single mount (e.g. /data)
+if [ -n "$STORAGE_ROOT" ]; then
+    export LOG_DIR="${LOG_DIR:-${STORAGE_ROOT}/logs}"
+    export DATA_DIR="${DATA_DIR:-${STORAGE_ROOT}/data}"
+    export BACKUP_DIR="${BACKUP_DIR:-${STORAGE_ROOT}/backups}"
+    # Ensure directories exist
+    mkdir -p "$LOG_DIR" "$DATA_DIR" "$BACKUP_DIR" 2>/dev/null || true
+    echo "STORAGE_ROOT=${STORAGE_ROOT} — derived paths:"
+    echo "  LOG_DIR=${LOG_DIR}  DATA_DIR=${DATA_DIR}  BACKUP_DIR=${BACKUP_DIR}"
+fi
+
 # Install custom CA certificates if present
 CUSTOM_CERTS_DIR="/app/custom-certs"
 
@@ -47,8 +59,8 @@ else
 fi
 
 # Auto-generate ENCRYPTION_KEY if not set
-# Persists to /app/data/.encryption_key so it survives container rebuilds
-ENCRYPTION_KEY_FILE="/app/data/.encryption_key"
+# Persists to DATA_DIR/.encryption_key so it survives container rebuilds
+ENCRYPTION_KEY_FILE="${DATA_DIR:-/app/data}/.encryption_key"
 
 if [ -z "$ENCRYPTION_KEY" ]; then
     if [ -f "$ENCRYPTION_KEY_FILE" ]; then

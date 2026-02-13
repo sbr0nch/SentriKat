@@ -58,6 +58,9 @@ services:
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-}
       - GUNICORN_THREADS=${GUNICORN_THREADS:-4}
       - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
+      # Storage root for all persistent data (logs, uploads, backups)
+      # Set STORAGE_ROOT to redirect heavy data to a separate drive/mount
+      - STORAGE_ROOT=${STORAGE_ROOT:-}
       # Background worker pool for concurrent inventory job processing
       - WORKER_POOL_SIZE=${WORKER_POOL_SIZE:-4}
       # Database connection pool tuning (per Gunicorn worker process)
