@@ -5953,6 +5953,8 @@ function showSettingsGroup(groupName, btn) {
             if (typeof loadHealthChecks === 'function') loadHealthChecks();
         } else if (groupName === 'logs') {
             if (typeof loadLogFile === 'function') loadLogFile();
+        } else if (groupName === 'appearance') {
+            if (typeof loadBrandingSettings === 'function') loadBrandingSettings();
         }
     }
 
@@ -6379,7 +6381,7 @@ function displayLicenseInfo(data) {
                 <td class="text-muted">Products</td>
                 <td>${formatLimit(usage.products || 0, limits.max_products)}</td>
             </tr>
-            ${agents.current > 0 || limits.max_agents > 0 ? `
+            ${agents.current > 0 || limits.max_agents !== 0 ? `
             <tr>
                 <td colspan="2" class="pt-2"><small class="text-muted fw-bold">Agents</small></td>
             </tr>

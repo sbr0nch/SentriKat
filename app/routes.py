@@ -51,6 +51,33 @@ def serve_upload(filename):
     return send_from_directory(uploads_dir, filename)
 
 
+@bp.route('/branding/logo')
+def serve_branding_logo():
+    """Serve the custom branding logo without authentication.
+
+    This public endpoint is needed so the login page can display custom logos.
+    Only serves files named custom_logo.* from the uploads directory.
+    """
+    from app.models import SystemSettings
+    setting = SystemSettings.query.filter_by(key='logo_url').first()
+    if not setting or not setting.value or '/uploads/' not in setting.value:
+        # No custom logo set — redirect to default
+        return redirect('/static/images/favicon-128x128.png')
+
+    filename = os.path.basename(setting.value)
+    # Only serve custom_logo files
+    if not filename.startswith('custom_logo.') or '..' in filename:
+        return redirect('/static/images/favicon-128x128.png')
+
+    data_dir = os.environ.get('DATA_DIR', '/app/data')
+    uploads_dir = os.path.join(data_dir, 'uploads')
+    filepath = os.path.join(uploads_dir, filename)
+    if not os.path.exists(filepath):
+        return redirect('/static/images/favicon-128x128.png')
+
+    return send_from_directory(uploads_dir, filename)
+
+
 # =============================================================================
 # Health & Status Endpoints (No authentication required)
 # =============================================================================
