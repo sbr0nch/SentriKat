@@ -3032,7 +3032,8 @@
                     </div>
                 </div>
 
-                <!-- User Management Section (visible for admins) -->
+                <!-- User Management Section (visible for admins, Professional license only) -->
+                {% if license and license.is_professional() %}
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Management</div>
@@ -3068,6 +3069,7 @@
                         <span class="link-text">Organizations</span>
                     </a>
                 </div>
+                {% endif %}
                 {% endif %}
 
                 <!-- Integrations Section (PRO license required) -->
@@ -3118,18 +3120,22 @@
                             Authentication
                         </a>
                         {% endif %}
+                        {% if license and license.is_professional() %}
                         <a href="/admin-panel#settings:email" class="sidebar-sublink" data-hash="settings:email">
                             <i class="bi bi-envelope"></i>
                             Email & Alerts
                         </a>
+                        {% endif %}
                         <a href="/admin-panel#settings:system" class="sidebar-sublink" data-hash="settings:system">
                             <i class="bi bi-gear"></i>
                             System
                         </a>
+                        {% if license and license.is_professional() %}
                         <a href="/admin-panel#settings:compliance" class="sidebar-sublink" data-hash="settings:compliance">
                             <i class="bi bi-clipboard-check"></i>
                             Compliance
                         </a>
+                        {% endif %}
                         {% if license and license.is_professional() %}
                         <a href="/admin-panel#settings:appearance" class="sidebar-sublink" data-hash="settings:appearance">
                             <i class="bi bi-palette"></i>
