@@ -3303,6 +3303,118 @@
                                     <p class="small text-muted mb-0">Health check notifications also appear in the notification banner at the top of the page when issues are detected.</p>
                                 </div>
 
+                                <!-- Agent Management Section -->
+                                <div class="col-12">
+                                    <h5 class="fw-bold"><i class="bi bi-cpu me-2 text-primary"></i>Agent Management</h5>
+                                    <p class="text-muted mb-2">Discovery agents are lightweight scripts that scan endpoints for installed software and report back to SentriKat. The server URL and API key are <strong>embedded automatically</strong> when you download from <a href="#" onclick="showSettingsGroup('integrations', document.getElementById('integrations-settings-tab'));return false;">Integrations &gt; Push Agents</a>.</p>
+
+                                    <div class="accordion" id="agentManagementAccordion">
+                                        <!-- Windows -->
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header">
+                                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#agentWindows">
+                                                    <i class="bi bi-windows text-primary me-2"></i>Windows Agent
+                                                </button>
+                                            </h2>
+                                            <div id="agentWindows" class="accordion-collapse collapse" data-bs-parent="#agentManagementAccordion">
+                                                <div class="accordion-body small">
+                                                    <p class="fw-semibold mb-1">Install (run-once test):</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">powershell -ExecutionPolicy Bypass -File .\sentrikat-agent.ps1</div>
+
+                                                    <p class="fw-semibold mb-1">Install (scheduled task &mdash; runs every hour as SYSTEM):</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
+                                                        mkdir C:\SentriKat<br>
+                                                        copy sentrikat-agent.ps1 C:\SentriKat\<br>
+                                                        schtasks /create /tn "SentriKat Agent" /tr "powershell -ExecutionPolicy Bypass -File C:\SentriKat\sentrikat-agent.ps1" /sc hourly /ru SYSTEM
+                                                    </div>
+
+                                                    <p class="fw-semibold mb-1 text-danger">Uninstall:</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
+                                                        schtasks /delete /tn "SentriKat Agent" /f<br>
+                                                        rmdir /s /q C:\SentriKat
+                                                    </div>
+                                                    <p class="text-muted mb-0">Optionally remove the endpoint from <strong>Inventory &gt; Endpoints</strong> in this panel.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Linux -->
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header">
+                                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#agentLinux">
+                                                    <i class="bi bi-ubuntu text-success me-2"></i>Linux Agent
+                                                </button>
+                                            </h2>
+                                            <div id="agentLinux" class="accordion-collapse collapse" data-bs-parent="#agentManagementAccordion">
+                                                <div class="accordion-body small">
+                                                    <p class="fw-semibold mb-1">Install (run-once test):</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">chmod +x sentrikat-agent.sh &amp;&amp; sudo ./sentrikat-agent.sh</div>
+
+                                                    <p class="fw-semibold mb-1">Install (cron &mdash; runs every 4 hours):</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
+                                                        sudo mkdir -p /opt/sentrikat<br>
+                                                        sudo cp sentrikat-agent.sh /opt/sentrikat/<br>
+                                                        sudo chmod +x /opt/sentrikat/sentrikat-agent.sh<br>
+                                                        (crontab -l 2&gt;/dev/null; echo "0 */4 * * * /opt/sentrikat/sentrikat-agent.sh &gt;&gt; /var/log/sentrikat-agent.log 2&gt;&amp;1") | crontab -
+                                                    </div>
+
+                                                    <p class="fw-semibold mb-1 text-danger">Uninstall:</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
+                                                        crontab -l | grep -v sentrikat-agent | crontab -<br>
+                                                        sudo rm -rf /opt/sentrikat /var/log/sentrikat-agent.log
+                                                    </div>
+                                                    <p class="text-muted mb-0">Optionally remove the endpoint from <strong>Inventory &gt; Endpoints</strong> in this panel.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- macOS -->
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header">
+                                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#agentMacos">
+                                                    <i class="bi bi-apple text-dark me-2"></i>macOS Agent
+                                                </button>
+                                            </h2>
+                                            <div id="agentMacos" class="accordion-collapse collapse" data-bs-parent="#agentManagementAccordion">
+                                                <div class="accordion-body small">
+                                                    <p class="fw-semibold mb-1">Install (run-once test):</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">chmod +x sentrikat-agent-macos.sh &amp;&amp; sudo ./sentrikat-agent-macos.sh</div>
+
+                                                    <p class="fw-semibold mb-1">Install (launchd &mdash; runs every 4 hours):</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
+                                                        sudo mkdir -p /opt/sentrikat<br>
+                                                        sudo cp sentrikat-agent-macos.sh /opt/sentrikat/<br>
+                                                        sudo chmod +x /opt/sentrikat/sentrikat-agent-macos.sh<br>
+                                                        # Create LaunchDaemon plist:<br>
+                                                        sudo tee /Library/LaunchDaemons/com.sentrikat.agent.plist &lt;&lt;EOF<br>
+                                                        &lt;?xml version="1.0"?&gt;<br>
+                                                        &lt;plist version="1.0"&gt;&lt;dict&gt;<br>
+                                                        &nbsp;&nbsp;&lt;key&gt;Label&lt;/key&gt;&lt;string&gt;com.sentrikat.agent&lt;/string&gt;<br>
+                                                        &nbsp;&nbsp;&lt;key&gt;ProgramArguments&lt;/key&gt;&lt;array&gt;&lt;string&gt;/opt/sentrikat/sentrikat-agent-macos.sh&lt;/string&gt;&lt;/array&gt;<br>
+                                                        &nbsp;&nbsp;&lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;<br>
+                                                        &nbsp;&nbsp;&lt;key&gt;StartInterval&lt;/key&gt;&lt;integer&gt;14400&lt;/integer&gt;<br>
+                                                        &lt;/dict&gt;&lt;/plist&gt;<br>
+                                                        EOF<br>
+                                                        sudo launchctl load /Library/LaunchDaemons/com.sentrikat.agent.plist
+                                                    </div>
+
+                                                    <p class="fw-semibold mb-1 text-danger">Uninstall:</p>
+                                                    <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
+                                                        sudo launchctl unload /Library/LaunchDaemons/com.sentrikat.agent.plist<br>
+                                                        sudo rm /Library/LaunchDaemons/com.sentrikat.agent.plist<br>
+                                                        sudo rm -rf /opt/sentrikat
+                                                    </div>
+                                                    <p class="text-muted mb-0">Optionally remove the endpoint from <strong>Inventory &gt; Endpoints</strong> in this panel.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="alert alert-info small py-2 mt-2 mb-0">
+                                        <i class="bi bi-info-circle me-1"></i><strong>Note:</strong> The downloaded scripts have the server URL and API key pre-embedded. No <code>-ServerUrl</code> or <code>-ApiKey</code> parameters are needed. Just run the script directly.
+                                    </div>
+                                </div>
+
                                 <!-- Common Troubleshooting Section -->
                                 <div class="col-12">
                                     <h5 class="fw-bold"><i class="bi bi-wrench me-2 text-warning"></i>Common Troubleshooting</h5>
