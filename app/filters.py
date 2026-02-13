@@ -507,13 +507,18 @@ def get_filtered_vulnerabilities(filters=None):
     )
 
     if filters:
-        # Filter by organization - fetch IDs first
+        # Filter by organization - combine many-to-many AND legacy FK
         if filters.get('organization_id'):
-            org_product_ids = db.session.execute(
+            org_id = filters['organization_id']
+            # Many-to-many assignments
+            m2m_ids = db.session.execute(
                 select(product_organizations.c.product_id).where(
-                    product_organizations.c.organization_id == filters['organization_id']
+                    product_organizations.c.organization_id == org_id
                 )
             ).scalars().all()
+            # Legacy FK assignments
+            legacy_ids = [p.id for p in Product.query.filter_by(organization_id=org_id).all()]
+            org_product_ids = list(set(m2m_ids + legacy_ids))
             if org_product_ids:
                 query = query.filter(VulnerabilityMatch.product_id.in_(org_product_ids))
             else:
