@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 saml_bp = Blueprint('saml', __name__)
 
+# Exempt SAML API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(saml_bp)
+
 
 # ============================================================================
 # SAML Configuration API (Admin only)
@@ -154,7 +157,6 @@ def get_sp_metadata():
 
 
 @saml_bp.route('/saml/login', methods=['GET'])
-@csrf.exempt
 def saml_login():
     """
     Initiate SAML login flow.
@@ -180,7 +182,6 @@ def saml_login():
 
 
 @saml_bp.route('/saml/acs', methods=['POST'])
-@csrf.exempt
 def saml_acs():
     """
     Assertion Consumer Service - IdP posts SAML response here.
@@ -238,7 +239,6 @@ def saml_acs():
 
 
 @saml_bp.route('/saml/sls', methods=['GET', 'POST'])
-@csrf.exempt
 def saml_sls():
     """
     Single Logout Service - Handle IdP-initiated logout.

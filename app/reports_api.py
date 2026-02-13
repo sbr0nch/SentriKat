@@ -4,13 +4,16 @@ API endpoints for scheduled reports management.
 
 from flask import Blueprint, request, jsonify, session, send_file, Response
 from app.models import ScheduledReport, Organization, User
-from app import db
+from app import db, csrf
 from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('reports_api', __name__)
+
+# Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
+csrf.exempt(bp)
 
 
 def login_required(f):
