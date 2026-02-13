@@ -523,3 +523,136 @@ class TestMatchVulnerabilitiesToProducts:
             vulnerability_id=sample_vulnerability.id
         ).first()
         assert match is None, "Invalid match should have been removed"
+
+
+class TestGetFilteredVulnerabilitiesDualPath:
+    """
+    Regression tests for get_filtered_vulnerabilities() ensuring it handles
+    both legacy organization_id FK and many-to-many product_organizations.
+    """
+
+    def _create_orgs_and_products(self, db_session):
+        """Helper: create two orgs, products via legacy FK and m2m, plus vuln matches."""
+        from app.models import (
+            Organization, Product, Vulnerability, VulnerabilityMatch,
+            product_organizations
+        )
+        from datetime import date
+
+        org1 = Organization(name='org_legacy', display_name='Legacy Org', active=True)
+        org2 = Organization(name='org_m2m', display_name='M2M Org', active=True)
+        db_session.add_all([org1, org2])
+        db_session.flush()
+
+        # Product assigned ONLY via legacy FK (no m2m entry)
+        legacy_product = Product(
+            vendor='Apache', product_name='Tomcat', version='9.0.1',
+            criticality='high', active=True, organization_id=org1.id,
+            cpe_vendor='apache', cpe_product='tomcat', match_type='auto'
+        )
+        # Product assigned ONLY via m2m (no legacy FK)
+        m2m_product = Product(
+            vendor='Microsoft', product_name='Edge', version='120',
+            criticality='medium', active=True, organization_id=None,
+            cpe_vendor='microsoft', cpe_product='edge', match_type='auto'
+        )
+        # Product assigned via BOTH paths
+        both_product = Product(
+            vendor='Mozilla', product_name='Firefox', version='121',
+            criticality='medium', active=True, organization_id=org1.id,
+            cpe_vendor='mozilla', cpe_product='firefox', match_type='auto'
+        )
+        db_session.add_all([legacy_product, m2m_product, both_product])
+        db_session.flush()
+
+        # Add m2m assignments
+        db_session.execute(product_organizations.insert().values(
+            product_id=m2m_product.id, organization_id=org2.id
+        ))
+        db_session.execute(product_organizations.insert().values(
+            product_id=both_product.id, organization_id=org1.id
+        ))
+
+        # Create vulnerabilities + matches for each product
+        vuln = Vulnerability(
+            cve_id='CVE-2024-9999', vendor_project='Apache', product='Tomcat',
+            vulnerability_name='Test Vuln', date_added=date.today(),
+            short_description='Test', required_action='Update', cvss_score=9.0,
+            severity='CRITICAL'
+        )
+        db_session.add(vuln)
+        db_session.flush()
+
+        for prod in [legacy_product, m2m_product, both_product]:
+            db_session.add(VulnerabilityMatch(
+                product_id=prod.id, vulnerability_id=vuln.id,
+                match_method='cpe', match_confidence='high',
+                match_reason='Test match'
+            ))
+        db_session.commit()
+
+        return {
+            'org1': org1, 'org2': org2,
+            'legacy_product': legacy_product,
+            'm2m_product': m2m_product,
+            'both_product': both_product,
+            'vuln': vuln
+        }
+
+    def test_legacy_only_product_appears_in_org_filter(self, app, db_session):
+        """Products assigned ONLY via legacy FK must appear when filtering by org."""
+        from app.filters import get_filtered_vulnerabilities
+
+        data = self._create_orgs_and_products(db_session)
+        results = get_filtered_vulnerabilities({'organization_id': data['org1'].id})
+
+        product_ids = [r.product_id for r in results]
+        assert data['legacy_product'].id in product_ids, \
+            "Legacy-only product should appear in vulnerability results"
+
+    def test_m2m_only_product_appears_in_org_filter(self, app, db_session):
+        """Products assigned ONLY via m2m must appear when filtering by org."""
+        from app.filters import get_filtered_vulnerabilities
+
+        data = self._create_orgs_and_products(db_session)
+        results = get_filtered_vulnerabilities({'organization_id': data['org2'].id})
+
+        product_ids = [r.product_id for r in results]
+        assert data['m2m_product'].id in product_ids, \
+            "M2M-only product should appear in vulnerability results"
+
+    def test_both_path_product_appears_in_org_filter(self, app, db_session):
+        """Products assigned via BOTH paths must appear (no duplicates)."""
+        from app.filters import get_filtered_vulnerabilities
+
+        data = self._create_orgs_and_products(db_session)
+        results = get_filtered_vulnerabilities({'organization_id': data['org1'].id})
+
+        product_ids = [r.product_id for r in results]
+        assert data['both_product'].id in product_ids, \
+            "Dual-path product should appear in vulnerability results"
+
+    def test_other_org_products_excluded(self, app, db_session):
+        """Products NOT in the filtered org must NOT appear."""
+        from app.filters import get_filtered_vulnerabilities
+
+        data = self._create_orgs_and_products(db_session)
+        # Filter for org2 — should NOT see legacy_product (org1 only) or both_product (org1)
+        results = get_filtered_vulnerabilities({'organization_id': data['org2'].id})
+
+        product_ids = [r.product_id for r in results]
+        assert data['legacy_product'].id not in product_ids, \
+            "Other org's legacy product should NOT appear"
+
+    def test_empty_org_returns_empty(self, app, db_session):
+        """An org with no products should return empty results."""
+        from app.models import Organization
+        from app.filters import get_filtered_vulnerabilities
+
+        self._create_orgs_and_products(db_session)
+        empty_org = Organization(name='empty_org', display_name='Empty', active=True)
+        db_session.add(empty_org)
+        db_session.commit()
+
+        results = get_filtered_vulnerabilities({'organization_id': empty_org.id})
+        assert results == [], "Empty org should return no vulnerability results"

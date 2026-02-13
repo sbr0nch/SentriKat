@@ -353,3 +353,130 @@ class TestAssetIsolation:
                 # Should only see org1's assets
                 assert 'server1.org1.local' in hostnames
                 assert 'server2.org2.local' not in hostnames
+
+
+class TestLegacyM2mDualPath:
+    """
+    Regression tests ensuring both legacy organization_id FK and
+    many-to-many product_organizations are handled consistently
+    across all product operations.
+    """
+
+    def _setup_dual_path(self, db_session):
+        """Create products using legacy-only, m2m-only, and both assignment paths."""
+        from app.models import (
+            User, Organization, Product, product_organizations
+        )
+
+        org = Organization(name='dualtest', display_name='Dual Test Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+
+        manager = User(
+            username='dualmanager', email='mgr@dual.test',
+            role='manager', is_active=True, auth_type='local',
+            organization_id=org.id
+        )
+        manager.set_password('dualpass123')
+        db_session.add(manager)
+
+        # Legacy-only product
+        legacy_prod = Product(
+            vendor='LegacyVendor', product_name='LegacyApp', version='1.0',
+            criticality='high', active=True, organization_id=org.id
+        )
+        # M2M-only product
+        m2m_prod = Product(
+            vendor='M2MVendor', product_name='M2MApp', version='2.0',
+            criticality='medium', active=True, organization_id=None
+        )
+        # Both-paths product
+        both_prod = Product(
+            vendor='BothVendor', product_name='BothApp', version='3.0',
+            criticality='low', active=True, organization_id=org.id
+        )
+        db_session.add_all([legacy_prod, m2m_prod, both_prod])
+        db_session.flush()
+
+        # Add m2m assignments
+        db_session.execute(product_organizations.insert().values(
+            product_id=m2m_prod.id, organization_id=org.id
+        ))
+        db_session.execute(product_organizations.insert().values(
+            product_id=both_prod.id, organization_id=org.id
+        ))
+        db_session.commit()
+
+        return {
+            'org': org, 'manager': manager,
+            'legacy_prod': legacy_prod,
+            'm2m_prod': m2m_prod,
+            'both_prod': both_prod
+        }
+
+    def test_product_listing_includes_legacy_only(self, app, client, db_session):
+        """GET /api/products must include products assigned only via legacy FK."""
+        data = self._setup_dual_path(db_session)
+
+        client.post('/api/auth/login', json={
+            'username': 'dualmanager', 'password': 'dualpass123'
+        })
+
+        response = client.get('/api/products')
+        assert response.status_code == 200
+
+        products = response.get_json()
+        names = [p['product_name'] for p in products]
+        assert 'LegacyApp' in names, "Legacy-only product missing from listing"
+        assert 'M2MApp' in names, "M2M-only product missing from listing"
+        assert 'BothApp' in names, "Dual-path product missing from listing"
+
+    def test_product_to_dict_legacy_fallback(self, app, db_session):
+        """Product.to_dict() must include legacy org when no m2m entries exist."""
+        data = self._setup_dual_path(db_session)
+
+        result = data['legacy_prod'].to_dict()
+        org_ids = [o['id'] for o in result.get('organizations', [])]
+        assert data['org'].id in org_ids, \
+            "Legacy org should appear in to_dict() organizations"
+
+    def test_batch_delete_legacy_only_product(self, app, client, db_session):
+        """Batch delete must handle products assigned only via legacy FK."""
+        data = self._setup_dual_path(db_session)
+        from app.models import Product
+
+        # Login as the manager
+        client.post('/api/auth/login', json={
+            'username': 'dualmanager', 'password': 'dualpass123'
+        })
+
+        # Delete the legacy-only product
+        response = client.post('/api/products/batch-delete', json={
+            'product_ids': [data['legacy_prod'].id]
+        })
+        assert response.status_code == 200
+
+        result = response.get_json()
+        assert result.get('errors', 0) == 0, \
+            f"Expected 0 errors, got {result.get('errors')}"
+        assert result.get('deleted', 0) + result.get('removed', 0) >= 1, \
+            "Expected at least 1 deleted or removed"
+
+        # Verify product is gone
+        assert Product.query.get(data['legacy_prod'].id) is None, \
+            "Legacy-only product should have been deleted"
+
+    def test_single_delete_legacy_only_product(self, app, client, db_session):
+        """Single DELETE endpoint must handle legacy-only products."""
+        data = self._setup_dual_path(db_session)
+        from app.models import Product
+
+        client.post('/api/auth/login', json={
+            'username': 'dualmanager', 'password': 'dualpass123'
+        })
+
+        response = client.delete(f'/api/products/{data["legacy_prod"].id}')
+        assert response.status_code == 200
+
+        assert Product.query.get(data['legacy_prod'].id) is None, \
+            "Legacy-only product should have been deleted via single DELETE"
