@@ -17,7 +17,16 @@
 set -e
 
 # Configuration
-BACKUP_DIR="${1:-./backups}"
+# Priority: CLI argument > BACKUP_DIR env var > STORAGE_ROOT/backups > ./backups
+if [ -n "$1" ]; then
+    BACKUP_DIR="$1"
+elif [ -n "$BACKUP_DIR" ]; then
+    BACKUP_DIR="$BACKUP_DIR"
+elif [ -n "$STORAGE_ROOT" ]; then
+    BACKUP_DIR="${STORAGE_ROOT}/backups"
+else
+    BACKUP_DIR="./backups"
+fi
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/sentrikat_backup_${TIMESTAMP}.sql"
 

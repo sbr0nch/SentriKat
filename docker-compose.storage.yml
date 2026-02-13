@@ -1,0 +1,31 @@
+# =============================================================================
+# docker-compose.storage.yml — Bind-mount override for custom storage paths
+# =============================================================================
+#
+# USE THIS when you want PostgreSQL data and app data on a specific disk/mount
+# instead of Docker named volumes.
+#
+# REQUIRES: STORAGE_ROOT set in .env (e.g. STORAGE_ROOT=/data/sentrikat)
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.storage.yml up -d
+#
+# This will store:
+#   ${STORAGE_ROOT}/postgres/   — PostgreSQL database files
+#   ${STORAGE_ROOT}/data/       — Uploads, encryption keys, branding
+#   ${STORAGE_ROOT}/logs/       — Application logs (via STORAGE_ROOT in entrypoint)
+#   ${STORAGE_ROOT}/backups/    — Database backups (via STORAGE_ROOT in backup script)
+#
+# NOTE: Ensure the STORAGE_ROOT directory exists and is writable before starting.
+#       Run:  mkdir -p ${STORAGE_ROOT}/{postgres,data,logs,backups}
+# =============================================================================
+
+services:
+  db:
+    volumes:
+      - ${STORAGE_ROOT}/postgres:/var/lib/postgresql/data
+
+  sentrikat:
+    volumes:
+      - ${STORAGE_ROOT}/data:/app/data
+      - ./certs:/app/custom-certs:ro
