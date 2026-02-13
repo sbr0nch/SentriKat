@@ -916,14 +916,22 @@ flatpak list   # Flatpak apps
 ## 9.4 Deployment
 
 ```bash
-# Windows (as Administrator):
+# Windows — Install as Windows service (recommended, visible in services.msc):
 Invoke-WebRequest -Uri "https://sentrikat/api/agent/script/windows" -OutFile agent.ps1
-.\agent.ps1 -Install -Key "sk_agent_xxx"
+.\agent.ps1 -InstallService -ServerUrl "https://sentrikat.example.com" -ApiKey "sk_agent_xxx"
 
-# Linux (as root):
+# Windows — Install as scheduled task (alternative):
+.\agent.ps1 -Install -ServerUrl "https://sentrikat.example.com" -ApiKey "sk_agent_xxx"
+
+# Linux (as root — installs as systemd service):
 curl -o agent.sh https://sentrikat/api/agent/script/linux
 chmod +x agent.sh
-./agent.sh --install --key "sk_agent_xxx"
+sudo ./agent.sh --install --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
+
+# macOS (as root — installs as LaunchDaemon):
+curl -o agent.sh https://sentrikat/api/agent/script/macos
+chmod +x agent.sh
+sudo ./agent.sh --install --server-url "https://sentrikat.example.com" --api-key "sk_agent_xxx"
 ```
 
 ---
