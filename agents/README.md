@@ -33,9 +33,10 @@ In SentriKat web interface:
 
 ### 2. Deploy the Agent
 
-All agents support two modes:
+All agents support multiple modes:
 - **One-shot mode** (default): Run once, collect and send inventory, then exit. No installation needed.
 - **Service mode** (`--install`): Set up as a persistent background service with recurring scans and heartbeats.
+- **Windows Service mode** (`-InstallService`, Windows only): Register as a Windows service visible in `services.msc` with auto-restart on failure.
 
 #### Windows (PowerShell)
 
@@ -49,7 +50,13 @@ powershell -ExecutionPolicy Bypass -File .\sentrikat-agent-windows.ps1
 # Install as scheduled task (runs every 4 hours + heartbeat every 5 min)
 .\sentrikat-agent-windows.ps1 -Install -ServerUrl "https://sentrikat.example.com" -ApiKey "sk_agent_xxx"
 
-# Uninstall
+# Install as Windows service (visible in services.msc, auto-restart on failure)
+.\sentrikat-agent-windows.ps1 -InstallService -ServerUrl "https://sentrikat.example.com" -ApiKey "sk_agent_xxx"
+
+# Check service status
+Get-Service SentriKatAgent
+
+# Uninstall (removes both service and scheduled tasks)
 .\sentrikat-agent-windows.ps1 -Uninstall
 ```
 
@@ -112,6 +119,9 @@ Configuration is stored at: `C:\ProgramData\SentriKat\config.json`
 
 ### Linux
 Configuration is stored at: `/etc/sentrikat/agent.conf`
+
+### macOS
+Configuration is stored at: `/Library/Application Support/SentriKat/agent.conf`
 
 ### Config Options
 
@@ -176,6 +186,8 @@ The agent communicates with the following SentriKat API endpoints:
 |----------|--------|-------------|
 | `/api/agent/inventory` | POST | Submit software inventory |
 | `/api/agent/heartbeat` | POST | Send keepalive signal |
+| `/api/agent/commands` | GET | Poll for pending commands (scan, update) |
+| `/api/agent/download/{platform}` | GET | Download latest agent script for auto-update |
 | `/api/agent/jobs/{id}` | GET | Check async job status |
 
 ## Security

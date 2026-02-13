@@ -274,10 +274,32 @@ If online activation fails (firewall), use manual activation:
 1. Go to **Administration > Agent Keys**
 2. Click **"Create API Key"**
 3. **Copy the key** (shown only once!)
-4. Open PowerShell and run:
+
+#### Option A: Install the real agent (recommended)
+
+Download the agent script and install as a Windows service:
 
 ```powershell
-# Test agent registration + inventory
+# Install as Windows service (visible in services.msc, auto-restart on failure)
+.\sentrikat-agent-windows.ps1 -InstallService -ServerUrl "https://YOUR_SERVER" -ApiKey "YOUR_KEY_HERE"
+
+# Verify it's running
+Get-Service SentriKatAgent
+
+# Alternative: Install as scheduled task instead
+.\sentrikat-agent-windows.ps1 -Install -ServerUrl "https://YOUR_SERVER" -ApiKey "YOUR_KEY_HERE"
+```
+
+The agent will automatically:
+- Run an initial inventory scan immediately
+- Send heartbeats every 5 minutes
+- Rescan every 4 hours (configurable)
+- Auto-update when new agent versions are pushed
+
+#### Option B: Simulate with API call (quick test)
+
+```powershell
+# Test agent registration + inventory via direct API call
 $headers = @{
     "X-Agent-Key" = "YOUR_KEY_HERE"
     "Content-Type" = "application/json"
@@ -299,7 +321,7 @@ $body = @{
 Invoke-RestMethod -Uri "http://localhost/api/agent/inventory" -Method POST -Headers $headers -Body $body
 ```
 
-5. Check **Inventory > Connected Endpoints** - "WIN-SERVER-01" should appear
+5. Check **Inventory > Connected Endpoints** - your endpoint should appear
 6. Check that new products from agent show up
 
 ### 7D. Deploy Linux Agent (if available)
