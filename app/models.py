@@ -1489,7 +1489,7 @@ class ProductInstallation(db.Model):
     __tablename__ = 'product_installations'
 
     id = db.Column(db.Integer, primary_key=True)
-    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id', ondelete='CASCADE'), nullable=False, index=True)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Version on this specific asset (may differ from Product.version)
@@ -2144,7 +2144,7 @@ class ProductVersionHistory(db.Model):
     __tablename__ = 'product_version_history'
 
     id = db.Column(db.Integer, primary_key=True)
-    installation_id = db.Column(db.Integer, db.ForeignKey('product_installations.id'), nullable=False, index=True)
+    installation_id = db.Column(db.Integer, db.ForeignKey('product_installations.id', ondelete='CASCADE'), nullable=False, index=True)
     asset_id = db.Column(db.Integer, db.ForeignKey('assets.id', ondelete='CASCADE'), nullable=False, index=True)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
 

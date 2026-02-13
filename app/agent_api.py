@@ -2408,7 +2408,7 @@ def get_asset(asset_id):
 @agent_bp.route('/api/assets/<int:asset_id>', methods=['DELETE'])
 @login_required
 def delete_asset(asset_id):
-    """Delete an asset and its product installations."""
+    """Delete an asset and all related data (installations, history, events, etc.)."""
     from app.auth import get_current_user
 
     user = get_current_user()
@@ -2422,8 +2422,23 @@ def delete_asset(asset_id):
             return jsonify({'error': 'Manager access required'}), 403
 
     hostname = asset.hostname
-    db.session.delete(asset)
-    db.session.commit()
+
+    try:
+        # Explicitly delete related records to avoid FK constraint violations
+        # on databases where CASCADE was not applied to existing tables
+        ProductVersionHistory.query.filter_by(asset_id=asset_id).delete()
+        ProductInstallation.query.filter_by(asset_id=asset_id).delete()
+        AgentEvent.query.filter_by(asset_id=asset_id).delete()
+        StaleAssetNotification.query.filter_by(asset_id=asset_id).delete()
+        InventoryJob.query.filter_by(asset_id=asset_id).delete()
+        ContainerImage.query.filter_by(asset_id=asset_id).delete()
+
+        db.session.delete(asset)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to delete asset {hostname} (id={asset_id}): {e}")
+        return jsonify({'error': f'Failed to delete endpoint: {str(e)}'}), 500
 
     logger.info(f"Asset deleted: {hostname} by user {user.username}")
 
@@ -3571,7 +3586,7 @@ def get_license_tiers():
 # Current latest agent versions (update when releasing new versions)
 LATEST_AGENT_VERSIONS = {
     'linux': '1.4.0',
-    'windows': '1.1.0',
+    'windows': '1.4.0',
     'macos': '1.4.0'
 }
 

@@ -3862,16 +3862,52 @@
         }
     }
 
-    async function deleteEndpoint(assetId, hostname) {
-        if (!confirm(`Delete endpoint "${hostname}"? This will remove the asset and its inventory data.`)) return;
-        try {
-            const response = await fetch(`/api/assets/${assetId}`, { method: 'DELETE' });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            showToast(`Endpoint "${hostname}" deleted`, 'success');
-            loadEndpoints(endpointsPage);
-        } catch (error) {
-            showToast(`Failed to delete endpoint: ${escapeHtml(error.message)}`, 'danger');
-        }
+    function deleteEndpoint(assetId, hostname) {
+        // Show styled Bootstrap modal for delete confirmation
+        document.getElementById('deleteEndpointModal')?.remove();
+        const html = `
+            <div class="modal fade" id="deleteEndpointModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header bg-danger text-white">
+                            <h5 class="modal-title"><i class="bi bi-trash me-2"></i>Delete Endpoint</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p>Are you sure you want to delete <strong>${escapeHtml(hostname)}</strong>?</p>
+                            <p class="text-muted mb-0"><small>This will permanently remove the endpoint and all its inventory data, version history, and agent events.</small></p>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-danger" id="confirmDeleteEndpointBtn">
+                                <i class="bi bi-trash me-1"></i>Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        document.body.insertAdjacentHTML('beforeend', html);
+        const modalEl = document.getElementById('deleteEndpointModal');
+        const modal = new bootstrap.Modal(modalEl);
+        document.getElementById('confirmDeleteEndpointBtn').onclick = async function() {
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Deleting...';
+            try {
+                const response = await fetch(`/api/assets/${assetId}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+                modal.hide();
+                showToast(`Endpoint "${escapeHtml(hostname)}" deleted`, 'success');
+                loadEndpoints(endpointsPage);
+            } catch (error) {
+                modal.hide();
+                showToast(`Failed to delete endpoint: ${escapeHtml(error.message)}`, 'danger');
+            }
+        };
+        modalEl.addEventListener('hidden.bs.modal', function() { this.remove(); });
+        modal.show();
     }
 
     // Tag management for endpoints
