@@ -1685,6 +1685,117 @@ def batch_delete_products():
         return jsonify({'success': False, 'error': ERROR_MSGS['database']}), 500
 
 
+# ============================================================================
+# Product Exclusions Management
+# ============================================================================
+
+@bp.route('/api/product-exclusions', methods=['GET'])
+@login_required
+def get_product_exclusions():
+    """List all product exclusions for the user's organizations."""
+    from app.auth import get_current_user
+    from app.models import ProductExclusion
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    query = ProductExclusion.query
+    if not user.is_super_admin():
+        accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
+        query = query.filter(ProductExclusion.organization_id.in_(accessible_org_ids))
+
+    search = request.args.get('search', '').strip()
+    if search:
+        search_filter = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                ProductExclusion.vendor.ilike(search_filter),
+                ProductExclusion.product_name.ilike(search_filter)
+            )
+        )
+
+    exclusions = query.order_by(ProductExclusion.created_at.desc()).all()
+    return jsonify({'exclusions': [e.to_dict() for e in exclusions]})
+
+
+@bp.route('/api/product-exclusions/<int:exclusion_id>', methods=['DELETE'])
+@manager_required
+@limiter.limit("30 per minute")
+def delete_product_exclusion(exclusion_id):
+    """Remove a product exclusion (allow the product to be imported again)."""
+    from app.auth import get_current_user
+    from app.models import ProductExclusion
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    exclusion = ProductExclusion.query.get_or_404(exclusion_id)
+
+    if not user.is_super_admin():
+        accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
+        if exclusion.organization_id not in accessible_org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    db.session.delete(exclusion)
+    db.session.commit()
+    return jsonify({'success': True, 'message': f'Exclusion removed for {exclusion.vendor} {exclusion.product_name}'})
+
+
+@bp.route('/api/product-exclusions', methods=['POST'])
+@manager_required
+@limiter.limit("30 per minute")
+def create_product_exclusion():
+    """Manually create a product exclusion."""
+    from app.auth import get_current_user
+    from app.models import ProductExclusion
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    vendor = data.get('vendor', '').strip()
+    product_name = data.get('product_name', '').strip()
+    org_id = data.get('organization_id')
+    reason = data.get('reason', '').strip() or 'Manually excluded'
+
+    if not vendor or not product_name:
+        return jsonify({'error': 'vendor and product_name required'}), 400
+
+    if not user.is_super_admin():
+        accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
+        if org_id and org_id not in accessible_org_ids:
+            return jsonify({'error': 'Access denied to this organization'}), 403
+        if not org_id:
+            org_id = accessible_org_ids[0] if accessible_org_ids else None
+
+    if not org_id:
+        return jsonify({'error': 'organization_id required'}), 400
+
+    existing = ProductExclusion.query.filter_by(
+        organization_id=org_id, vendor=vendor, product_name=product_name, version=None
+    ).first()
+    if existing:
+        return jsonify({'error': 'Exclusion already exists'}), 409
+
+    exclusion = ProductExclusion(
+        organization_id=org_id,
+        vendor=vendor,
+        product_name=product_name,
+        version=None,
+        reason=reason,
+        excluded_by=user.id
+    )
+    db.session.add(exclusion)
+    db.session.commit()
+    return jsonify({'success': True, 'exclusion': exclusion.to_dict()}), 201
+
+
 @bp.route('/api/products/purge', methods=['POST'])
 @admin_required
 @limiter.limit("5 per minute")
