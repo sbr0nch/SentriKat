@@ -1388,8 +1388,10 @@ def delete_product(product_id):
     # Get user's current organization
     user_org_id = session.get('organization_id') or current_user.organization_id
 
-    # Get all organizations this product is assigned to
+    # Get all organizations this product is assigned to (many-to-many + legacy fallback)
     product_org_ids = [org.id for org in product.organizations.all()]
+    if product.organization_id and product.organization_id not in product_org_ids:
+        product_org_ids.append(product.organization_id)
 
     # Permission check: non-super-admins can only manage products in their org
     if not current_user.is_super_admin():
@@ -1587,6 +1589,8 @@ def batch_delete_products():
                     continue
 
                 product_org_ids = [org.id for org in product.organizations.all()]
+                if product.organization_id and product.organization_id not in product_org_ids:
+                    product_org_ids.append(product.organization_id)
 
                 # Permission check for non-super-admins
                 if not is_super and user_org_id not in product_org_ids:
