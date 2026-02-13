@@ -1166,6 +1166,28 @@ The `additional_organization_ids` field is optional. When provided, software rep
 }
 ```
 
+### Agent Command & Control
+
+Agents poll for pending commands (scan requests, updates) via the commands endpoint.
+
+```http
+GET /api/agent/commands?agent_id=xxx&hostname=yyy&platform=windows&agent_version=1.4.0
+Authorization: X-Agent-Key
+```
+
+Returns pending commands: `scan_now`, `update_available`, `update_config`.
+
+### Agent Script Download (Auto-Update)
+
+Agents download the latest script when an update is available.
+
+```http
+GET /api/agent/download/{platform}
+Authorization: X-Agent-Key
+```
+
+Platforms: `linux`, `windows`, `macos`. Returns the script file with `X-Agent-Version` header.
+
 ### Agent Update Push
 
 Push software updates to agents remotely.
@@ -1186,6 +1208,8 @@ Authorization: Session (Admin)
 GET /api/admin/agents/version-summary
 Authorization: Session (Admin)
 ```
+
+Returns total agents, up-to-date count, outdated count, pending updates, version breakdown by platform.
 
 ---
 

@@ -3633,20 +3633,23 @@
                         </div>
                         <!-- Quick Start Instructions -->
                         <div class="mt-3 pt-3 border-top">
-                            <p class="small fw-semibold mb-2"><i class="bi bi-terminal me-1"></i>Quick Start</p>
+                            <p class="small fw-semibold mb-2"><i class="bi bi-terminal me-1"></i>Quick Start — Install as persistent service</p>
                             <div class="small">
                                 <p class="mb-1 text-muted"><strong>Windows</strong> (run as Administrator):</p>
-                                <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
-                                    powershell -ExecutionPolicy Bypass -File .\sentrikat-agent.ps1
+                                <div class="bg-dark text-light rounded p-2 mb-1 font-monospace" style="font-size: 0.75rem;">
+                                    .\sentrikat-agent.ps1 -InstallService -ServerUrl "YOUR_SERVER_URL" -ApiKey "YOUR_KEY"
                                 </div>
+                                <p class="mb-2 text-muted" style="font-size: 0.7rem;"><i class="bi bi-info-circle me-1"></i>Registers as a Windows service (visible in services.msc). Or use <code>-Install</code> for scheduled tasks instead.</p>
                                 <p class="mb-1 text-muted"><strong>Linux</strong>:</p>
-                                <div class="bg-dark text-light rounded p-2 mb-2 font-monospace" style="font-size: 0.75rem;">
-                                    chmod +x sentrikat-agent.sh && sudo ./sentrikat-agent.sh
+                                <div class="bg-dark text-light rounded p-2 mb-1 font-monospace" style="font-size: 0.75rem;">
+                                    chmod +x sentrikat-agent.sh && sudo ./sentrikat-agent.sh --install --server-url "YOUR_SERVER_URL" --api-key "YOUR_KEY"
                                 </div>
+                                <p class="mb-2 text-muted" style="font-size: 0.7rem;"><i class="bi bi-info-circle me-1"></i>Registers as a systemd service with automatic heartbeat.</p>
                                 <p class="mb-1 text-muted"><strong>macOS</strong>:</p>
-                                <div class="bg-dark text-light rounded p-2 mb-0 font-monospace" style="font-size: 0.75rem;">
-                                    chmod +x sentrikat-agent-macos.sh && sudo ./sentrikat-agent-macos.sh
+                                <div class="bg-dark text-light rounded p-2 mb-1 font-monospace" style="font-size: 0.75rem;">
+                                    chmod +x sentrikat-agent-macos.sh && sudo ./sentrikat-agent-macos.sh --install --server-url "YOUR_SERVER_URL" --api-key "YOUR_KEY"
                                 </div>
+                                <p class="mb-0 text-muted" style="font-size: 0.7rem;"><i class="bi bi-info-circle me-1"></i>Registers as a LaunchDaemon with automatic heartbeat.</p>
                             </div>
                         </div>
                     </div>
