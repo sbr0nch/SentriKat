@@ -3185,7 +3185,8 @@ async function saveBrandingSettings() {
         app_name: SK.DOM.getValue('appName') || 'SentriKat',
         login_message: SK.DOM.getValue('loginMessage') || '',
         support_email: SK.DOM.getValue('supportEmail') || '',
-        show_version: SK.DOM.getChecked('showVersion')
+        show_version: SK.DOM.getChecked('showVersion'),
+        report_branding_enabled: SK.DOM.getChecked('reportBrandingEnabled')
     };
 
     try {
@@ -3215,6 +3216,7 @@ async function loadBrandingSettings() {
             const loginMessage = SK.DOM.get('loginMessage');
             const supportEmail = SK.DOM.get('supportEmail');
             const showVersion = SK.DOM.get('showVersion');
+            const reportBrandingEnabled = SK.DOM.get('reportBrandingEnabled');
             const logoPreview = SK.DOM.get('currentLogoPreview');
             const deleteLogoBtn = SK.DOM.get('deleteLogoBtn');
 
@@ -3222,6 +3224,7 @@ async function loadBrandingSettings() {
             if (loginMessage) loginMessage.value = settings.login_message || '';
             if (supportEmail) supportEmail.value = settings.support_email || '';
             if (showVersion) showVersion.checked = settings.show_version !== false;
+            if (reportBrandingEnabled) reportBrandingEnabled.checked = settings.report_branding_enabled !== false;
 
             // Show custom logo if set
             if (settings.logo_url && logoPreview) {

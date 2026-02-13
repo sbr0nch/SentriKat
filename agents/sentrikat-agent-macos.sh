@@ -130,7 +130,11 @@ get_system_info() {
     local os_version
     local kernel
 
-    hostname=$(scutil --get ComputerName 2>/dev/null || hostname -s 2>/dev/null || hostname)
+    # Use hostname -s first (always alphanumeric-safe), then sanitize scutil fallback
+    # scutil --get ComputerName can contain spaces/special chars which fail server validation
+    hostname=$(hostname -s 2>/dev/null || hostname 2>/dev/null || scutil --get ComputerName 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+    # Strip any leading hyphens/dots (server requires alphanumeric start)
+    hostname="${hostname#[.-]}"
     fqdn=$(hostname -f 2>/dev/null || scutil --get HostName 2>/dev/null || hostname)
 
     # Get primary IP address (route to external)
@@ -536,7 +540,7 @@ scan_container_images() {
     local trivy_version
     trivy_version=$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo 'unknown')
     local my_hostname
-    my_hostname=$(scutil --get ComputerName 2>/dev/null || hostname)
+    my_hostname=$(hostname -s 2>/dev/null || hostname 2>/dev/null || scutil --get ComputerName 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
 
     local tmpfile
     tmpfile=$(mktemp)
@@ -624,13 +628,13 @@ send_heartbeat() {
     curl -s -X POST "$endpoint" \
         -H "X-Agent-Key: $API_KEY" \
         -H "Content-Type: application/json" \
-        -d "{\"hostname\": \"$(scutil --get ComputerName 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\"}" \
+        -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\"}" \
         --max-time 30 >/dev/null 2>&1
 }
 
 check_commands() {
     local hostname
-    hostname=$(scutil --get ComputerName 2>/dev/null || hostname)
+    hostname=$(hostname -s 2>/dev/null || hostname)
     local endpoint="${SERVER_URL}/api/agent/commands?agent_id=${AGENT_ID}&hostname=${hostname}&version=${AGENT_VERSION}&platform=macos"
 
     log_info "Checking for commands from server..."
@@ -647,6 +651,17 @@ check_commands() {
     if echo "$response" | grep -q '"command": "scan_now"'; then
         log_info "Received scan_now command - triggering immediate inventory scan"
         return 0
+    fi
+
+    if echo "$response" | grep -q '"command": "update_config"'; then
+        local new_interval
+        new_interval=$(echo "$response" | grep -o '"scan_interval_minutes": [0-9]*' | grep -o '[0-9]*')
+        if [[ -n "$new_interval" && "$new_interval" -gt 0 ]]; then
+            log_info "Received update_config command - setting scan interval to ${new_interval} minutes"
+            INTERVAL_HOURS=$(( new_interval / 60 ))
+            [[ "$INTERVAL_HOURS" -lt 1 ]] && INTERVAL_HOURS=1
+            save_config
+        fi
     fi
 
     if echo "$response" | grep -q '"command": "update_available"'; then

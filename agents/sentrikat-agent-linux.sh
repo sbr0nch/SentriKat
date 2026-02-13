@@ -5,7 +5,7 @@
 # Silent daemon agent that collects software inventory from Linux endpoints
 # and reports to a SentriKat server. Designed to run as a systemd service.
 #
-# Version: 1.0.0
+# Version: 1.4.0
 # Requires: bash, curl, jq (optional for JSON parsing)
 #
 # Usage:

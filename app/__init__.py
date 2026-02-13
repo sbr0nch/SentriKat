@@ -243,7 +243,8 @@ def create_app(config_class=Config):
             'login_message': '',
             'support_email': '',
             'show_version': True,
-            'logo_url': '/static/images/favicon-128x128.png'  # Default logo
+            'logo_url': '/static/images/favicon-128x128.png',  # Default logo
+            'report_branding_enabled': True
         }
         try:
             app_name = SystemSettings.query.filter_by(key='app_name').first()
@@ -251,6 +252,7 @@ def create_app(config_class=Config):
             support_email = SystemSettings.query.filter_by(key='support_email').first()
             show_version = SystemSettings.query.filter_by(key='show_version').first()
             logo_url = SystemSettings.query.filter_by(key='logo_url').first()
+            report_branding = SystemSettings.query.filter_by(key='report_branding_enabled').first()
 
             if app_name and app_name.value:
                 branding['app_name'] = app_name.value
@@ -262,6 +264,8 @@ def create_app(config_class=Config):
                 branding['show_version'] = show_version.value != 'false'
             if logo_url and logo_url.value:
                 branding['logo_url'] = logo_url.value
+            if report_branding:
+                branding['report_branding_enabled'] = report_branding.value != 'false'
         except Exception:
             # Rollback to prevent session corruption on DB errors
             try:
