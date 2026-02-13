@@ -7091,7 +7091,7 @@ async function downloadAgentWithKey(keyPrefix, platform) {
         if (hasKey) {
             showToast(`${platformName} agent downloaded with API key embedded!`, 'success');
         } else {
-            showToast(`Agent script downloaded. Replace YOUR_API_KEY with your key (only available at creation time).`, 'warning');
+            showToast(`Agent script downloaded. Server URL is embedded. Note: API key could not be embedded (key is only available at creation time). You will be prompted for the key when running the script.`, 'warning');
         }
     } catch (error) {
         showToast(`Error downloading agent: ${error.message}`, 'danger');
