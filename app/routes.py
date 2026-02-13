@@ -1375,7 +1375,7 @@ def delete_product(product_id):
       If product is only in their org, it gets deleted globally.
     """
     from app.logging_config import log_audit_event
-    from app.models import ProductExclusion
+    from app.models import ProductExclusion, product_organizations
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -1447,6 +1447,12 @@ def delete_product(product_id):
                 ProductInstallation.query.filter_by(product_id=product_id).delete()
                 VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
                 ProductVersionHistory.query.filter_by(product_id=product_id).delete()
+                # Clean up many-to-many org links before deleting product
+                db.session.execute(
+                    product_organizations.delete().where(
+                        product_organizations.c.product_id == product_id
+                    )
+                )
                 db.session.delete(product)
                 db.session.commit()
 
@@ -1524,6 +1530,11 @@ def delete_product(product_id):
                 ProductInstallation.query.filter_by(product_id=product_id).delete()
                 VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
                 ProductVersionHistory.query.filter_by(product_id=product_id).delete()
+                db.session.execute(
+                    product_organizations.delete().where(
+                        product_organizations.c.product_id == product_id
+                    )
+                )
                 db.session.delete(product)
                 db.session.commit()
 
@@ -1559,7 +1570,7 @@ def batch_delete_products():
     - scope: 'all' or comma-separated org IDs (super admin only)
     """
     from app.logging_config import log_audit_event
-    from app.models import ProductExclusion
+    from app.models import ProductExclusion, product_organizations
 
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -1635,6 +1646,11 @@ def batch_delete_products():
                         ProductInstallation.query.filter_by(product_id=pid).delete()
                         VulnerabilityMatch.query.filter_by(product_id=pid).delete()
                         ProductVersionHistory.query.filter_by(product_id=pid).delete()
+                        db.session.execute(
+                            product_organizations.delete().where(
+                                product_organizations.c.product_id == pid
+                            )
+                        )
                         db.session.delete(product)
                         deleted += 1
                     else:
@@ -1655,6 +1671,11 @@ def batch_delete_products():
                         ProductInstallation.query.filter_by(product_id=pid).delete()
                         VulnerabilityMatch.query.filter_by(product_id=pid).delete()
                         ProductVersionHistory.query.filter_by(product_id=pid).delete()
+                        db.session.execute(
+                            product_organizations.delete().where(
+                                product_organizations.c.product_id == pid
+                            )
+                        )
                         db.session.delete(product)
                         deleted += 1
 
@@ -1915,7 +1936,7 @@ def purge_products():
     except Exception as e:
         db.session.rollback()
         logger.exception("Failed to purge products")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Database operation failed. Check server logs for details.'}), 500
 
 
 @bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
@@ -2081,9 +2102,15 @@ def remove_product_organization(product_id, org_id):
             deleted_product_name = product.product_name
 
             # Delete all related records first (foreign key constraints)
+            from app.models import product_organizations
             ProductInstallation.query.filter_by(product_id=product_id).delete()
             VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
             ProductVersionHistory.query.filter_by(product_id=product_id).delete()
+            db.session.execute(
+                product_organizations.delete().where(
+                    product_organizations.c.product_id == product_id
+                )
+            )
 
             db.session.delete(product)
             db.session.commit()

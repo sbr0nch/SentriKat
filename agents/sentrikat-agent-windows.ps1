@@ -8,7 +8,7 @@
     or Scheduled Task.
 
 .NOTES
-    Version: 1.0.0
+    Version: 1.4.0
     Author: SentriKat
     Requires: PowerShell 5.1+, Windows 10/Server 2016+
 

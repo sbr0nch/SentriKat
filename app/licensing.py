@@ -1025,7 +1025,7 @@ def get_agent_usage():
 # License Server Heartbeat
 # ============================================================================
 
-LICENSE_SERVER_URL = os.environ.get('SENTRIKAT_LICENSE_SERVER', 'https://portal.sentrikat.com/api')
+LICENSE_SERVER_URL = os.environ.get('SENTRIKAT_LICENSE_SERVER', 'https://license.sentrikat.com/api')
 
 def license_heartbeat():
     """
@@ -1310,7 +1310,7 @@ def activate_license_online():
 
     except _requests.ConnectionError:
         return jsonify({
-            'error': 'Cannot reach the license server (portal.sentrikat.com). '
+            'error': 'Cannot reach the license server (license.sentrikat.com). '
                      'Check your internet connection and firewall settings. '
                      'If online activation is not possible, use offline activation instead.'
         }), 503

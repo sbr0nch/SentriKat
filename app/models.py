@@ -631,8 +631,8 @@ class VulnerabilityMatch(db.Model):
     __tablename__ = 'vulnerability_matches'
 
     id = db.Column(db.Integer, primary_key=True)
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False, index=True)
-    vulnerability_id = db.Column(db.Integer, db.ForeignKey('vulnerabilities.id'), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
+    vulnerability_id = db.Column(db.Integer, db.ForeignKey('vulnerabilities.id', ondelete='CASCADE'), nullable=False, index=True)
     match_reason = db.Column(db.String(200), nullable=True)  # Why it matched (vendor, product, keyword)
     acknowledged = db.Column(db.Boolean, default=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

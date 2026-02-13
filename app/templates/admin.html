@@ -1186,7 +1186,7 @@
             tbody.innerHTML = `
                 <tr>
                     <td colspan="10" class="text-center text-danger py-4">
-                        <i class="bi bi-exclamation-triangle"></i> Error loading products: ${error.message}
+                        <i class="bi bi-exclamation-triangle"></i> Error loading products: ${escapeHtml(error.message)}
                     </td>
                 </tr>
             `;
@@ -1799,7 +1799,7 @@
             tbody.innerHTML = `
                 <tr>
                     <td colspan="4" class="text-center text-danger py-4">
-                        <i class="bi bi-exclamation-triangle"></i> Error loading catalog: ${error.message}
+                        <i class="bi bi-exclamation-triangle"></i> Error loading catalog: ${escapeHtml(error.message)}
                     </td>
                 </tr>
             `;
@@ -3189,7 +3189,7 @@
             const data = await response.json();
 
             if (!response.ok) {
-                resultsList.innerHTML = `<div class="p-3 text-danger small">${data.error || 'Search failed'}</div>`;
+                resultsList.innerHTML = `<div class="p-3 text-danger small">${escapeHtml(data.error || 'Search failed')}</div>`;
                 return;
             }
 
@@ -3239,7 +3239,7 @@
             resultsList.innerHTML = html;
 
         } catch (error) {
-            resultsList.innerHTML = `<div class="p-3 text-danger small">Error: ${error.message}</div>`;
+            resultsList.innerHTML = `<div class="p-3 text-danger small">Error: ${escapeHtml(error.message)}</div>`;
         }
     }
 
@@ -3435,10 +3435,10 @@
                         `, 'success');
                         loadProducts();
                     } else {
-                        showAdminResult('Error', `<p class="text-danger">${data.message}</p>`, 'error');
+                        showAdminResult('Error', `<p class="text-danger">${escapeHtml(data.message)}</p>`, 'error');
                     }
                 } catch (error) {
-                    showAdminResult('Error', `<p class="text-danger">Failed to apply CPE mappings: ${error.message}</p>`, 'error');
+                    showAdminResult('Error', `<p class="text-danger">Failed to apply CPE mappings: ${escapeHtml(error.message)}</p>`, 'error');
                 }
             }
         );
@@ -3484,10 +3484,10 @@
                         `, 'success');
                         loadProducts();
                     } else {
-                        showAdminResult('Error', `<p class="text-danger">${data.message}</p>`, 'error');
+                        showAdminResult('Error', `<p class="text-danger">${escapeHtml(data.message)}</p>`, 'error');
                     }
                 } catch (error) {
-                    showAdminResult('Error', `<p class="text-danger">Failed to rematch: ${error.message}</p>`, 'error');
+                    showAdminResult('Error', `<p class="text-danger">Failed to rematch: ${escapeHtml(error.message)}</p>`, 'error');
                 }
             }
         );
@@ -3537,10 +3537,10 @@
                     ${suggestionsHtml}
                 `, 'info');
             } else {
-                showAdminResult('Error', `<p class="text-danger">${data.message}</p>`, 'error');
+                showAdminResult('Error', `<p class="text-danger">${escapeHtml(data.message)}</p>`, 'error');
             }
         } catch (error) {
-            showAdminResult('Error', `<p class="text-danger">Failed to get CPE stats: ${error.message}</p>`, 'error');
+            showAdminResult('Error', `<p class="text-danger">Failed to get CPE stats: ${escapeHtml(error.message)}</p>`, 'error');
         }
     }
 

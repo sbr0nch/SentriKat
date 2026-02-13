@@ -479,6 +479,8 @@ class VulnerabilityReportGenerator:
         Returns:
             BytesIO: PDF file buffer
         """
+        from app.models import product_organizations as po_table
+
         # Get organization name
         org_name = "All Organizations"
         if self.organization_id:
@@ -487,13 +489,33 @@ class VulnerabilityReportGenerator:
                 org_name = org.display_name
 
         # Get the selected matches with eager loading to avoid N+1 queries
-        # Note: Product.organizations is a dynamic relationship and can't be eager loaded
-        matches = VulnerabilityMatch.query.options(
+        # SECURITY: Filter by organization to prevent IDOR (users accessing other orgs' data)
+        query = VulnerabilityMatch.query.options(
             selectinload(VulnerabilityMatch.vulnerability),
             selectinload(VulnerabilityMatch.product)
+        ).join(
+            Product, VulnerabilityMatch.product_id == Product.id
         ).filter(
             VulnerabilityMatch.id.in_(match_ids)
-        ).all()
+        )
+
+        if self.organization_id:
+            # Filter to products visible to this organization (legacy FK or many-to-many)
+            from sqlalchemy import or_, exists, select
+            org_link_exists = exists(
+                select(po_table.c.product_id).where(
+                    po_table.c.product_id == Product.id,
+                    po_table.c.organization_id == self.organization_id
+                )
+            )
+            query = query.filter(
+                or_(
+                    Product.organization_id == self.organization_id,
+                    org_link_exists
+                )
+            )
+
+        matches = query.all()
 
         if not matches:
             # Create empty report

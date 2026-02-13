@@ -194,11 +194,23 @@ def cleanup_orphaned_products(dry_run=False):
     count = orphaned.count()
 
     if count > 0 and not dry_run:
+        from app.models import product_organizations, VulnerabilityMatch, ProductVersionHistory
         # Don't delete products that were manually created or have catalog entries
         # Only delete auto-discovered products with no references
-        orphaned.filter(
+        deletable = orphaned.filter(
             Product.service_catalog_id.is_(None)  # Not linked to catalog
-        ).delete(synchronize_session=False)
+        )
+        deletable_ids = [p.id for p in deletable.with_entities(Product.id).all()]
+        if deletable_ids:
+            # Clean up related records before deleting products
+            VulnerabilityMatch.query.filter(VulnerabilityMatch.product_id.in_(deletable_ids)).delete(synchronize_session=False)
+            ProductVersionHistory.query.filter(ProductVersionHistory.product_id.in_(deletable_ids)).delete(synchronize_session=False)
+            db.session.execute(
+                product_organizations.delete().where(
+                    product_organizations.c.product_id.in_(deletable_ids)
+                )
+            )
+            Product.query.filter(Product.id.in_(deletable_ids)).delete(synchronize_session=False)
         db.session.commit()
         logger.info(f"Removed {count} orphaned products")
 

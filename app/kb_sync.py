@@ -43,10 +43,10 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# KB server URL (same portal as licensing, different endpoints)
+# KB server URL (same server as licensing, different endpoints)
 KB_SERVER_URL = os.environ.get(
     'SENTRIKAT_KB_SERVER',
-    os.environ.get('SENTRIKAT_LICENSE_SERVER', 'https://portal.sentrikat.com/api')
+    os.environ.get('SENTRIKAT_LICENSE_SERVER', 'https://license.sentrikat.com/api')
 )
 
 # Feature toggles
