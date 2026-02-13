@@ -6381,7 +6381,7 @@ function displayLicenseInfo(data) {
                 <td class="text-muted">Products</td>
                 <td>${formatLimit(usage.products || 0, limits.max_products)}</td>
             </tr>
-            ${agents.current > 0 || limits.max_agents > 0 ? `
+            ${agents.current > 0 || limits.max_agents !== 0 ? `
             <tr>
                 <td colspan="2" class="pt-2"><small class="text-muted fw-bold">Agents</small></td>
             </tr>
