@@ -198,16 +198,16 @@ def start_scheduler(app):
     )
     logger.info("Asset type auto-detection scheduled daily at 06:00")
 
-    # Schedule agent offline detection (every 15 minutes)
+    # Schedule agent offline detection (every 5 minutes)
     # Marks agents as offline/stale based on last check-in time
     scheduler.add_job(
         func=lambda: _run_with_lock('agent_offline_detection', agent_offline_detection_job, app),
-        trigger=IntervalTrigger(minutes=15),
+        trigger=IntervalTrigger(minutes=5),
         id='agent_offline_detection',
         name='Agent Offline Detection',
         replace_existing=True
     )
-    logger.info("Agent offline detection scheduled every 15 minutes")
+    logger.info("Agent offline detection scheduled every 5 minutes")
 
     # Schedule unmapped CPE retry (weekly, Mondays at 05:00 - after Sunday CPE dict sync)
     scheduler.add_job(
@@ -926,8 +926,8 @@ def agent_offline_detection_job(app):
     """
     Detect agents that have gone offline and log status change events.
 
-    Runs every 15 minutes. Transitions:
-    - online → offline: no check-in for 1 hour
+    Runs every 5 minutes. Transitions:
+    - online → offline: no check-in for 15 minutes
     - online/offline → stale: no check-in for 14 days (configurable)
 
     Logs AgentEvent for each status transition so the Agent Activity page
@@ -939,7 +939,7 @@ def agent_offline_detection_job(app):
             from sqlalchemy import or_
 
             now = datetime.utcnow()
-            offline_threshold = now - timedelta(hours=1)
+            offline_threshold = now - timedelta(minutes=15)
             stale_threshold = now - timedelta(days=14)
 
             # Find assets going offline (online → offline)
@@ -960,7 +960,7 @@ def agent_offline_detection_job(app):
                         details=json.dumps({
                             'reason': 'no_heartbeat',
                             'last_checkin': asset.last_checkin.isoformat() if asset.last_checkin else None,
-                            'threshold_hours': 1
+                            'threshold_minutes': 15
                         })
                     )
                 except Exception:

@@ -1257,11 +1257,20 @@ def process_inventory_job(job):
                     org_names = [o.display_name for o in all_target_orgs]
                     logger.info(f"Job {job_id}: Multi-org deployment to [{', '.join(org_names)}]")
 
+        # Snapshot existing agent-reported installations for diffing
+        existing_installations = {
+            inst.id: inst for inst in ProductInstallation.query.filter_by(
+                asset_id=asset.id, detected_by='agent'
+            ).all()
+        }
+        seen_installation_ids = set()
+
         products_created = 0
         products_updated = 0
         products_queued = 0  # Track items sent to import queue
         installations_created = 0
         installations_updated = 0
+        installations_removed = 0
         items_failed = 0
         items_processed = 0
 
@@ -1363,8 +1372,11 @@ def process_inventory_job(job):
                         detected_on_os=platform  # Track which OS this came from
                     )
                     db.session.add(installation)
+                    db.session.flush()
                     installations_created += 1
+                    seen_installation_ids.add(installation.id)
                 else:
+                    seen_installation_ids.add(installation.id)
                     installation.version = version
                     installation.install_path = product_data.get('path')
                     installation.distro_package_version = product_data.get('distro_package_version') or installation.distro_package_version
@@ -1392,6 +1404,28 @@ def process_inventory_job(job):
                     organization = Organization.query.get(org_id)
                 except Exception:
                     pass
+
+        # Remove installations NOT seen in this scan (software was uninstalled)
+        if existing_installations:
+            removed_ids = set(existing_installations.keys()) - seen_installation_ids
+            for removed_id in removed_ids:
+                try:
+                    removed_inst = ProductInstallation.query.get(removed_id)
+                    if removed_inst:
+                        ProductVersionHistory.record_change(
+                            installation_id=removed_inst.id,
+                            asset_id=asset_id,
+                            product_id=removed_inst.product_id,
+                            old_version=removed_inst.version,
+                            new_version='(uninstalled)',
+                            detected_by='agent'
+                        )
+                        db.session.delete(removed_inst)
+                        installations_removed += 1
+                except Exception as e:
+                    logger.warning(f"Error removing uninstalled product in job {job_id}: {e}")
+            if removed_ids:
+                logger.info(f"Job {job_id}: Removed {len(removed_ids)} uninstalled products")
 
         # Update asset inventory and checkin timestamps
         asset = Asset.query.get(asset_id)  # Re-fetch to ensure fresh object
@@ -1688,12 +1722,22 @@ def report_inventory():
                     org_names = [o.display_name for o in all_target_orgs]
                     logger.info(f"Sync inventory: Multi-org deployment to [{', '.join(org_names)}]")
 
+        # Snapshot existing installations for this asset BEFORE processing.
+        # After processing, any installation NOT seen in this scan is removed (uninstalled).
+        existing_installations = {
+            inst.id: inst for inst in ProductInstallation.query.filter_by(
+                asset_id=asset.id, detected_by='agent'
+            ).all()
+        }
+        seen_installation_ids = set()
+
         # Process products
         products_created = 0
         products_updated = 0
         products_queued = 0  # Track items sent to import queue
         installations_created = 0
         installations_updated = 0
+        installations_removed = 0
 
         for product_data in products:
             vendor = product_data.get('vendor')
@@ -1790,6 +1834,7 @@ def report_inventory():
                 db.session.add(installation)
                 db.session.flush()  # Get installation ID for version history
                 installations_created += 1
+                seen_installation_ids.add(installation.id)
 
                 # Record version history for new installation
                 ProductVersionHistory.record_change(
@@ -1801,6 +1846,8 @@ def report_inventory():
                     detected_by='agent'
                 )
             else:
+                seen_installation_ids.add(installation.id)
+
                 # Track version changes
                 old_version = installation.version
                 if old_version != version and version:
@@ -1820,6 +1867,28 @@ def report_inventory():
                 installation.last_seen_at = datetime.utcnow()
                 installations_updated += 1
 
+        # Remove installations NOT seen in this scan (software was uninstalled)
+        if not is_new_agent and existing_installations:
+            removed_ids = set(existing_installations.keys()) - seen_installation_ids
+            for removed_id in removed_ids:
+                removed_inst = existing_installations[removed_id]
+                # Record uninstall in version history
+                try:
+                    ProductVersionHistory.record_change(
+                        installation_id=removed_inst.id,
+                        asset_id=asset.id,
+                        product_id=removed_inst.product_id,
+                        old_version=removed_inst.version,
+                        new_version='(uninstalled)',
+                        detected_by='agent'
+                    )
+                except Exception:
+                    pass
+                db.session.delete(removed_inst)
+                installations_removed += 1
+            if removed_ids:
+                logger.info(f"Removed {len(removed_ids)} uninstalled products from {hostname}")
+
         # Log inventory event
         AgentEvent.log_event(
             organization_id=organization.id,
@@ -1830,7 +1899,8 @@ def report_inventory():
                 'hostname': hostname,
                 'products_count': len(products),
                 'products_created': products_created,
-                'installations_created': installations_created
+                'installations_created': installations_created,
+                'installations_removed': installations_removed
             },
             source_ip=source_ip,
             user_agent=user_agent
@@ -1860,7 +1930,8 @@ def report_inventory():
         logger.info(
             f"Inventory reported for {hostname}: "
             f"{products_created} products created, {products_updated} updated, "
-            f"{installations_created} installations created, {installations_updated} updated"
+            f"{installations_created} installations created, {installations_updated} updated, "
+            f"{installations_removed} removed"
         )
 
         # Build response with license warning if applicable
@@ -1873,6 +1944,7 @@ def report_inventory():
                 'products_updated': products_updated,
                 'installations_created': installations_created,
                 'installations_updated': installations_updated,
+                'installations_removed': installations_removed,
                 'total_products': len(products)
             }
         }

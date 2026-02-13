@@ -642,6 +642,7 @@ def get_import_queue():
     integration_id = request.args.get('integration_id', type=int)
     org_id = request.args.get('organization_id', type=int)
     vendor = request.args.get('vendor', '').strip()
+    search = request.args.get('search', '').strip()
     limit = request.args.get('limit', 100, type=int)
     offset = request.args.get('offset', 0, type=int)
 
@@ -655,6 +656,14 @@ def get_import_queue():
         query = query.filter_by(organization_id=org_id)
     if vendor:
         query = query.filter(ImportQueue.vendor == vendor)
+    if search:
+        search_filter = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                ImportQueue.vendor.ilike(search_filter),
+                ImportQueue.product_name.ilike(search_filter)
+            )
+        )
 
     total = query.count()
     items = query.order_by(ImportQueue.created_at.desc()).offset(offset).limit(limit).all()

@@ -434,6 +434,7 @@ class ProductExclusion(db.Model):
         return {
             'id': self.id,
             'organization_id': self.organization_id,
+            'organization_name': self.organization.display_name if self.organization else None,
             'vendor': self.vendor,
             'product_name': self.product_name,
             'version': self.version,
@@ -2150,7 +2151,7 @@ class ProductVersionHistory(db.Model):
     # Version info
     previous_version = db.Column(db.String(100), nullable=True)
     new_version = db.Column(db.String(100), nullable=False)
-    change_type = db.Column(db.String(20), default='update')  # install, update, downgrade, reinstall
+    change_type = db.Column(db.String(20), default='update')  # install, update, downgrade, reinstall, uninstall
 
     # Detection info
     detected_by = db.Column(db.String(50), default='agent')  # agent, scan, manual
@@ -2210,7 +2211,9 @@ class ProductVersionHistory(db.Model):
     def record_change(installation_id, asset_id, product_id, old_version, new_version, detected_by='agent'):
         """Record a version change with upgrade/downgrade detection."""
         # Determine change type
-        if not old_version:
+        if new_version == '(uninstalled)':
+            change_type = 'uninstall'
+        elif not old_version:
             change_type = 'install'
         elif old_version == new_version:
             change_type = 'reinstall'
