@@ -1470,6 +1470,9 @@ def delete_product(product_id):
                     org = Organization.query.get(org_id)
                     if org and org in product.organizations:
                         product.organizations.remove(org)
+                    # Also clear legacy organization_id if it matches
+                    if product.organization_id == org_id:
+                        product.organization_id = None
                 db.session.commit()
 
                 org_names = [Organization.query.get(oid).display_name for oid in target_org_ids if Organization.query.get(oid)]
@@ -1511,20 +1514,23 @@ def delete_product(product_id):
                 # Product is in multiple orgs - just remove from this org
                 if user_org in product.organizations:
                     product.organizations.remove(user_org)
-                    db.session.commit()
+                # Also clear legacy organization_id if it matches
+                if product.organization_id == user_org_id:
+                    product.organization_id = None
+                db.session.commit()
 
-                    exclude_msg = ' and excluded from future agent scans' if exclude_from_scans else ''
-                    log_audit_event(
-                        'REMOVE_ORG',
-                        'products',
-                        product_id,
-                        old_value={'organization_id': user_org_id},
-                        details=f"Removed product {product.vendor} {product.product_name} from {user_org.display_name}" + (" (excluded)" if exclude_from_scans else "")
-                    )
-                    return jsonify({
-                        'success': True,
-                        'message': f'Product removed from {user_org.display_name} (still exists in other organizations)' + exclude_msg
-                    })
+                exclude_msg = ' and excluded from future agent scans' if exclude_from_scans else ''
+                log_audit_event(
+                    'REMOVE_ORG',
+                    'products',
+                    product_id,
+                    old_value={'organization_id': user_org_id},
+                    details=f"Removed product {product.vendor} {product.product_name} from {user_org.display_name}" + (" (excluded)" if exclude_from_scans else "")
+                )
+                return jsonify({
+                    'success': True,
+                    'message': f'Product removed from {user_org.display_name} (still exists in other organizations)' + exclude_msg
+                })
             else:
                 # Product only in this org - delete it globally
                 ProductInstallation.query.filter_by(product_id=product_id).delete()
@@ -1659,6 +1665,9 @@ def batch_delete_products():
                             org = Organization.query.get(org_id)
                             if org and org in product.organizations:
                                 product.organizations.remove(org)
+                            # Also clear legacy organization_id if it matches
+                            if product.organization_id == org_id:
+                                product.organization_id = None
                         removed += 1
                 else:
                     # Org admin: remove from their org
@@ -1666,6 +1675,9 @@ def batch_delete_products():
                     if len(product_org_ids) > 1:
                         if user_org in product.organizations:
                             product.organizations.remove(user_org)
+                        # Also clear legacy organization_id if it matches
+                        if product.organization_id == user_org_id:
+                            product.organization_id = None
                         removed += 1
                     else:
                         ProductInstallation.query.filter_by(product_id=pid).delete()
