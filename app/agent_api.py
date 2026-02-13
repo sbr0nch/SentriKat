@@ -1029,7 +1029,7 @@ def start_background_worker(app):
 
 def stop_background_worker():
     """Stop the background worker pool gracefully."""
-    global _worker_supervisor, _worker_pool
+    global _worker_supervisor
 
     if _worker_supervisor is None:
         return

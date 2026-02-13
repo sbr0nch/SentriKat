@@ -293,17 +293,29 @@ class VulnerabilityReportGenerator:
         elements.append(vuln_table)
         elements.append(Spacer(1, 15))
 
+    def _get_branding(self):
+        """Load branding settings for report output"""
+        try:
+            from app.settings_api import get_setting
+            app_name = get_setting('app_name', 'SentriKat')
+            report_branding = get_setting('report_branding_enabled', 'true') == 'true'
+            return app_name, report_branding
+        except Exception:
+            return 'SentriKat', True
+
     def _create_footer(self, elements, generated_at):
         """Create report footer"""
+        app_name, report_branding = self._get_branding()
         elements.append(Spacer(1, 30))
         elements.append(Paragraph(
             f"Report generated on {generated_at.strftime('%Y-%m-%d %H:%M:%S')}",
             self.styles['SmallText']
         ))
-        elements.append(Paragraph(
-            "SentriKat - Enterprise Vulnerability Management",
-            self.styles['SmallText']
-        ))
+        if report_branding:
+            elements.append(Paragraph(
+                f"{app_name} - Enterprise Vulnerability Management",
+                self.styles['SmallText']
+            ))
 
     def generate_monthly_report(self, year=None, month=None):
         """

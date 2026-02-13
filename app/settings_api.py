@@ -983,7 +983,8 @@ def get_branding_settings():
         'login_message': get_setting('login_message', ''),
         'support_email': get_setting('support_email', ''),
         'show_version': get_setting('show_version', 'true') == 'true',
-        'logo_url': get_setting('logo_url', '/static/images/favicon-128x128.png')
+        'logo_url': get_setting('logo_url', '/static/images/favicon-128x128.png'),
+        'report_branding_enabled': get_setting('report_branding_enabled', 'true') == 'true'
     }
     return jsonify(settings)
 
@@ -999,6 +1000,7 @@ def save_branding_settings():
         set_setting('login_message', data.get('login_message', ''), 'branding', 'Login page message')
         set_setting('support_email', data.get('support_email', ''), 'branding', 'Support email address')
         set_setting('show_version', 'true' if data.get('show_version') else 'false', 'branding', 'Show version in footer')
+        set_setting('report_branding_enabled', 'true' if data.get('report_branding_enabled', True) else 'false', 'branding', 'Show branding in compliance reports')
 
         return jsonify({'success': True, 'message': 'Branding settings saved successfully'})
     except Exception as e:
