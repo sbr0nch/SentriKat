@@ -5953,6 +5953,8 @@ function showSettingsGroup(groupName, btn) {
             if (typeof loadHealthChecks === 'function') loadHealthChecks();
         } else if (groupName === 'logs') {
             if (typeof loadLogFile === 'function') loadLogFile();
+        } else if (groupName === 'appearance') {
+            if (typeof loadBrandingSettings === 'function') loadBrandingSettings();
         }
     }
 
