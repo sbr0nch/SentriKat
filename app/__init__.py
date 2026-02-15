@@ -81,6 +81,8 @@ def _apply_schema_migrations(logger, db_uri):
         ('assets', 'pending_update_requested_by', 'VARCHAR(100)', 'VARCHAR(100)'),
         # Inventory job retry tracking
         ('inventory_jobs', 'retry_count', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
+        # Multi-source CVSS provenance tracking
+        ('vulnerabilities', 'cvss_source', 'VARCHAR(30)', 'VARCHAR(30)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

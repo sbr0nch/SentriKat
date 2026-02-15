@@ -50,11 +50,11 @@ SentriKat's go-to-market strategy focuses on capturing the underserved mid-marke
 
 ### For IT/Security Teams
 
-> "Track and remediate vulnerabilities in minutes, not months. SentriKat auto-discovers your software, matches it to CISA KEV, and alerts you before due dates."
+> "Track and remediate vulnerabilities in minutes, not months. SentriKat auto-discovers your software, matches it against 6+ intelligence sources (CISA KEV, NVD, CVE.org, ENISA EUVD, EPSS, OSV), and alerts you before due dates."
 
 ### For C-Level/Compliance
 
-> "Demonstrate CISA BOD 22-01 compliance with automated tracking, reports, and audit trails. No expensive enterprise tools required."
+> "Demonstrate CISA BOD 22-01 and NIS2 compliance with automated tracking, European vulnerability intelligence (ENISA EUVD), reports, and audit trails. No expensive enterprise tools required."
 
 ### For MSSPs
 

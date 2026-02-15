@@ -49,7 +49,15 @@ This isn't a nice feature. It's a fundamentally different approach. A CISO who o
 
 **Why this matters commercially:** CISA BOD 22-01 mandates 14-30 day remediation of KEV vulnerabilities. This is a regulatory hammer that creates urgent, specific demand for exactly what we do.
 
-**2. Vendor Backport Detection (Unique Feature)**
+**2. Multi-Source Vulnerability Intelligence (Nobody Else Does This Either)**
+
+Every competitor relies on a single vulnerability database (typically NVD) for CVSS scores and enrichment data. When the NVD went into crisis in 2024 (44% of CVEs unenriched, funding cuts, backlog spiraling), their products degraded. SentriKat uses a 3-source fallback chain: NVD → CVE.org/Vulnrichment → ENISA EUVD. If one source goes down, the next picks up automatically. Every score carries a provenance tag.
+
+This also integrates the ENISA European Vulnerability Database (EUVD) -- the NIS2-mandated EU vulnerability database. For European customers subject to NIS2, this is a compliance signal that no competitor can match: their vulnerability intelligence includes European-sovereign data sources, not just US government APIs.
+
+**Why this matters commercially:** NIS2 now covers ~160,000 EU entities. For procurement decisions at these organizations, demonstrating European data sources isn't optional -- it's increasingly a checkbox requirement.
+
+**3. Vendor Backport Detection (Unique Feature)**
 
 When Ubuntu patches OpenSSL by backporting a fix to version `3.0.2-0ubuntu1.15`, Tenable and Qualys still flag it as vulnerable because NVD says "3.0.2 is affected." SentriKat checks 4 vendor advisory feeds (OSV.dev, Red Hat, MSRC, Debian) and automatically resolves the false positive with distro-native version comparison.
 

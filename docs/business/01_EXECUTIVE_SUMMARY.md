@@ -37,20 +37,22 @@ Organizations face a critical cybersecurity challenge:
 SentriKat is an **automated vulnerability management platform** that:
 
 1. **Discovers** installed software via push agents (Windows/Linux)
-2. **Correlates** software with known vulnerabilities (CISA KEV, NVD)
+2. **Correlates** software with known vulnerabilities using multi-source intelligence (CISA KEV, NVD, CVE.org/Vulnrichment, ENISA EUVD, EPSS, OSV)
 3. **Alerts** security teams via email, Slack, Teams, Jira
 4. **Tracks** remediation with due dates and acknowledgements
-5. **Reports** compliance status for audits (CISA BOD 22-01)
+5. **Reports** compliance status for audits (CISA BOD 22-01, NIS2)
 
 ### Key Differentiators
 
 | Feature | SentriKat | Competitors |
 |---------|-----------|-------------|
 | CISA KEV Focus | Native | Add-on |
+| Multi-Source Intelligence | 6+ sources, auto-fallback | Single source (NVD) |
+| European Data (ENISA EUVD) | Integrated | Not available |
 | Agent Deployment | Script-based, 5 min | Complex, hours |
 | Pricing | Per-agent, affordable | Per-seat, expensive |
 | Self-Hosted | Yes | Cloud-only often |
-| Offline Mode | Yes (no phone home) | Requires internet |
+| NVD Outage Resilience | Auto-fallback to CVE.org/EUVD | Degraded or broken |
 
 ---
 

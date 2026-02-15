@@ -36,14 +36,14 @@
 
 ## What is SentriKat?
 
-SentriKat is an **Enterprise Vulnerability Management Platform** that helps organizations track and remediate security vulnerabilities in their software inventory. It automatically correlates installed software with known vulnerabilities from authoritative sources (CISA KEV, NVD) and provides actionable alerts.
+SentriKat is an **Enterprise Vulnerability Management Platform** that helps organizations track and remediate security vulnerabilities in their software inventory. It automatically correlates installed software with known vulnerabilities from authoritative sources (CISA KEV, NVD, CVE.org/Vulnrichment, ENISA EUVD, OSV, EPSS) using a **multi-source intelligence architecture** with automatic fallback -- eliminating single-point-of-failure dependency on any one data source.
 
 ## Key Value Proposition
 
 | Problem | SentriKat Solution |
 |---------|-------------------|
 | Organizations don't know what software they have | Push agents auto-discover installed software |
-| CVE databases are hard to search | Automatic CPE matching to 800K+ NVD products |
+| CVE databases are hard to search | Automatic CPE matching via NVD, CVE.org, EUVD (multi-source) |
 | CISA KEV deadlines are missed | Due date tracking with email/Slack alerts |
 | Vulnerability remediation is untracked | Jira/GitHub/GitLab ticket creation |
 | No visibility across enterprise | Multi-tenant dashboard with RBAC |
@@ -191,18 +191,42 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 | ldap3 | LDAP/AD integration |
 | pyotp | TOTP 2FA |
 
-## 3.4 External APIs
+## 3.4 External APIs (Multi-Source Intelligence Architecture)
+
+SentriKat uses a **multi-source fallback chain** for vulnerability intelligence, eliminating single-point-of-failure dependency on any one data source. All sources are free and legally cleared for commercial use.
+
+### CVSS Enrichment (Fallback Chain: NVD → CVE.org → EUVD)
+
+| API | Purpose | License | Rate Limit |
+|-----|---------|---------|------------|
+| NVD API 2.0 | CVSS scores, CPE data (primary) | CVE Terms of Use | 5/30s free, 50/30s with key |
+| CVE.org + Vulnrichment | CVSS from CISA ADP (secondary) | CVE-TOU + CC0 | No formal limit |
+| ENISA EUVD | European CVSS + exploited vulns (tertiary) | ENISA IPR (CC-BY-4.0) | No formal limit |
+
+### Vulnerability Catalog & Threat Intelligence
+
+| API | Purpose | License | Rate Limit |
+|-----|---------|---------|------------|
+| CISA KEV | Exploited vulnerability catalog | CC0 (Public Domain) | None (JSON file) |
+| ENISA EUVD Exploited | EU exploited vulnerabilities | ENISA IPR (CC-BY-4.0) | No formal limit |
+| FIRST EPSS | Exploit probability scoring | Free (attribution) | None |
+
+### Vendor Advisory / Patch Detection
+
+| API | Purpose | License | Rate Limit |
+|-----|---------|---------|------------|
+| OSV.dev | Ubuntu/Debian/Alpine/PyPI/npm/Go/Rust | CC-BY-4.0 / CC0 | None |
+| Red Hat Security Data | RHEL/CentOS/Rocky fix info | Free API | None |
+| Microsoft MSRC CVRF | Windows/Office patch data | Free API | None |
+| Debian Security Tracker | Debian fix tracking | Free | None (bulk JSON) |
+
+### Issue Tracking & Integrations
 
 | API | Purpose | Rate Limit |
 |-----|---------|------------|
-| CISA KEV | Vulnerability catalog | None (JSON file) |
-| NVD API | CVE/CPE database | 5/30s free, 50/30s with key |
-| FIRST EPSS | Exploit scoring | None |
-| OSV.dev | Vendor advisory aggregation | None |
-| Red Hat Security Data | RHEL fix information | None |
-| Microsoft MSRC CVRF | Windows patch data | None |
-| Debian Security Tracker | Debian fix tracking | None (bulk JSON) |
 | Jira REST | Ticket creation | Per Jira limits |
+| GitHub Issues | Issue creation | Per GitHub limits |
+| GitLab Issues | Issue creation | Per GitLab limits |
 
 ## 3.5 Containerization
 
@@ -232,8 +256,10 @@ during Docker build via `scripts/download_vendor_assets.sh`. Templates use local
 | Category | Service | URL | Required |
 |----------|---------|-----|----------|
 | **CRITICAL** | CISA KEV | `https://www.cisa.gov/feeds/...` | YES |
-| **CRITICAL** | NVD CVE API | `https://services.nvd.nist.gov/rest/json/cves/2.0` | YES |
+| **CRITICAL** | NVD CVE API | `https://services.nvd.nist.gov/rest/json/cves/2.0` | YES (primary CVSS source) |
 | **CRITICAL** | NVD CPE API | `https://services.nvd.nist.gov/rest/json/cpes/2.0` | YES |
+| **FALLBACK** | CVE.org API | `https://cveawg.mitre.org/api/cve/` | CVSS fallback when NVD unavailable |
+| **FALLBACK** | ENISA EUVD | `https://euvdservices.enisa.europa.eu/api/` | CVSS fallback + EU exploited vulns |
 | **ESSENTIAL** | OSV API | `https://api.osv.dev/v1` | For false-positive reduction |
 | **ESSENTIAL** | Red Hat API | `https://access.redhat.com/hydra/rest/securitydata` | For RHEL patch detection |
 | **ESSENTIAL** | Debian Tracker | `https://security-tracker.debian.org/tracker/data/json` | For Debian patch detection |

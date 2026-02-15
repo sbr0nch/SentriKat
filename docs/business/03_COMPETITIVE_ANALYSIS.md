@@ -195,6 +195,10 @@
 | Feature | SentriKat | Tenable | Qualys | Rapid7 | OpenVAS |
 |---------|-----------|---------|--------|--------|---------|
 | CISA KEV Sync | Native | Manual | Manual | Manual | No |
+| Multi-Source CVSS | 3 sources (NVD/CVE.org/EUVD) | Single (NVD) | Single | Single | Single |
+| ENISA EUVD Integration | Native | No | No | No | Partial |
+| NVD Outage Resilience | Auto-fallback | Degraded | Degraded | Degraded | Degraded |
+| Data Provenance | Per-CVE source tag | No | No | No | No |
 | Push Agents | Win/Linux | Yes | Yes | Yes | No |
 | Agentless Scan | No | Yes | Yes | Yes | Yes |
 | EPSS Scoring | Yes | Yes | Yes | Yes | No |
@@ -299,6 +303,8 @@ COMPLEX │                │                │ SIMPLE
 | Moat | Strategy |
 |------|----------|
 | CISA KEV Focus | First-mover advantage, native integration |
+| Multi-Source Intelligence | 6+ data sources with auto-fallback, no NVD single-point-of-failure |
+| European Data Sovereignty | ENISA EUVD integration, NIS2-aligned architecture |
 | Simplicity | Opinionated product, easy deployment |
 | Price | 5-10x cheaper than enterprise tools |
 | Self-Hosted | Data sovereignty, compliance |
