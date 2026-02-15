@@ -487,6 +487,7 @@ class Vulnerability(db.Model):
     notes = db.Column(db.Text, nullable=True)
     cvss_score = db.Column(db.Float, nullable=True, index=True)  # CVSS score from NVD
     severity = db.Column(db.String(20), nullable=True, index=True)  # CRITICAL, HIGH, MEDIUM, LOW
+    cvss_source = db.Column(db.String(30), nullable=True)  # Source of CVSS data: nvd, cve_org, euvd
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # CPE data from NVD (cached for better matching)
@@ -613,6 +614,7 @@ class Vulnerability(db.Model):
             'notes': self.notes,
             'cvss_score': self.cvss_score,
             'severity': self.severity,
+            'cvss_source': self.cvss_source,
             'priority': self.calculate_priority(),
             'days_old': (date.today() - self.date_added).days if self.date_added else None,
             'has_cpe_data': self.has_cpe_data(),

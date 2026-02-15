@@ -425,8 +425,11 @@ def fetch_cpe_version_data(limit=30):
 
 def enrich_with_cvss_data(limit=50):
     """
-    Enrich vulnerabilities with CVSS scores from NVD API
-    Only processes vulnerabilities without CVSS data
+    Enrich vulnerabilities with CVSS scores using multi-source fallback chain:
+      1. NVD API 2.0 (NIST)
+      2. CVE.org + CISA Vulnrichment (ADP)
+      3. ENISA EUVD (European Vulnerability Database)
+    Only processes vulnerabilities without CVSS data.
     limit: Maximum number of CVEs to process per run (to avoid rate limits)
     """
     # Get vulnerabilities without CVSS data, prioritize recent ones
@@ -439,22 +442,93 @@ def enrich_with_cvss_data(limit=50):
         return 0
 
     enriched_count = 0
-    logger.info(f"Enriching {len(vulns_to_enrich)} vulnerabilities with CVSS data from NVD")
+    source_stats = {'nvd': 0, 'cve_org': 0, 'euvd': 0}
+    logger.info(f"Enriching {len(vulns_to_enrich)} vulnerabilities with CVSS data (multi-source)")
 
     for vuln in vulns_to_enrich:
-        cvss_score, severity = fetch_cvss_data(vuln.cve_id)
+        cvss_score, severity, source = fetch_cvss_data(vuln.cve_id)
 
         if cvss_score is not None:
             vuln.cvss_score = cvss_score
             vuln.severity = severity
+            vuln.cvss_source = source
             enriched_count += 1
+            if source:
+                source_stats[source] = source_stats.get(source, 0) + 1
         else:
             # Mark as checked even if not found (0.0 = "checked but not found")
             vuln.cvss_score = 0.0
 
     db.session.commit()
-    logger.info(f"Enriched {enriched_count} vulnerabilities with CVSS data")
+    sources_summary = ', '.join(f'{k}={v}' for k, v in source_stats.items() if v > 0)
+    logger.info(f"Enriched {enriched_count} vulnerabilities with CVSS data ({sources_summary})")
     return enriched_count
+
+def enrich_with_euvd_exploited():
+    """
+    Cross-reference CISA KEV data with ENISA EUVD exploited vulnerabilities.
+    The EUVD tracks actively exploited CVEs from a European perspective,
+    complementing the US-centric CISA KEV catalog.
+
+    This adds European threat intelligence without replacing CISA KEV data.
+    License: ENISA IPR Policy (attribution required).
+    """
+    try:
+        kwargs = {}
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        kwargs = {'proxies': proxies, 'verify': verify_ssl}
+
+        response = requests.get(
+            'https://euvdservices.enisa.europa.eu/api/exploitedvulnerabilities',
+            timeout=15,
+            **kwargs
+        )
+
+        if response.status_code != 200:
+            logger.warning(f"EUVD exploited API returned {response.status_code}")
+            return 0
+
+        data = response.json()
+        items = data.get('items', [])
+        if not items:
+            return 0
+
+        enriched = 0
+        for item in items:
+            cve_id = item.get('cveId')
+            if not cve_id:
+                continue
+
+            vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
+            if not vuln:
+                continue
+
+            # If we have EUVD CVSS but no score yet, use it
+            euvd_score = item.get('baseScore') or item.get('cvssScore')
+            if euvd_score and (vuln.cvss_score is None or vuln.cvss_score == 0.0):
+                vuln.cvss_score = float(euvd_score)
+                severity = item.get('baseSeverity')
+                if severity:
+                    vuln.severity = severity.upper()
+                else:
+                    from app.nvd_api import _score_to_severity
+                    vuln.severity = _score_to_severity(vuln.cvss_score)
+                vuln.cvss_source = 'euvd'
+                enriched += 1
+
+        if enriched > 0:
+            db.session.commit()
+            logger.info(f"EUVD: enriched {enriched} vulnerabilities with European exploit intelligence")
+
+        return enriched
+
+    except Exception as e:
+        logger.warning(f"EUVD exploited enrichment failed (non-critical): {e}")
+        return 0
+
 
 def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=100):
     """Main sync function to download and process CISA KEV"""
@@ -488,9 +562,15 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
         if removed_count:
             logger.info(f"Cleaned up {removed_count} stale matches (no longer in affected version range)")
 
-        # Optionally enrich with CVSS data from NVD
+        # Enrich with CVSS data (multi-source: NVD → CVE.org → EUVD)
         if enrich_cvss:
             enrich_with_cvss_data(limit=cvss_limit)
+
+        # Cross-reference with ENISA EUVD exploited vulnerabilities
+        try:
+            enrich_with_euvd_exploited()
+        except Exception as e:
+            logger.warning(f"EUVD enrichment failed (non-critical): {e}")
 
         # Send email alerts for new critical matches
         from app.models import Organization, VulnerabilityMatch

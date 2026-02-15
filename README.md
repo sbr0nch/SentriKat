@@ -34,6 +34,8 @@ SentriKat is a **self-hosted vulnerability management platform** that discovers 
 
 **What makes it different from Tenable/Qualys/Rapid7:**
 - **CISA KEV-native** — built around actively exploited vulnerabilities, not 200,000+ theoretical CVEs
+- **Multi-source intelligence** — aggregates data from 6+ sources (NVD, CVE.org/Vulnrichment, ENISA EUVD, EPSS, OSV, vendor feeds) with automatic fallback — no single point of failure
+- **European data sovereignty** — integrates the ENISA EUVD (NIS2-mandated EU vulnerability database) alongside US sources
 - **Vendor backport detection** — automatically detects when Linux distros have patched a CVE via backport, eliminating false positives that plague other scanners
 - **Self-hosted, air-gap capable** — runs entirely on your infrastructure, no data leaves your network
 - **Lightweight agents** — transparent bash/PowerShell scripts (not opaque binaries), auditable by your security team
@@ -103,7 +105,7 @@ SentriKat/
 │   ├── cpe_mapping.py            # 224 regex CPE patterns + auto-mapping
 │   ├── cpe_dictionary.py         # Local NVD CPE dictionary (50K+ entries)
 │   ├── cpe_mappings.py           # User-defined CPE mappings + NVD fallback
-│   ├── cisa_sync.py              # CISA KEV sync + NVD CVSS enrichment
+│   ├── cisa_sync.py              # CISA KEV sync + multi-source CVSS enrichment
 │   ├── vendor_advisories.py      # OSV.dev, Red Hat, MSRC, Debian feeds
 │   ├── cve_known_products.py     # CVE history lookup for filtering guard
 │   ├── scheduler.py              # 15+ background jobs (APScheduler)
@@ -633,7 +635,9 @@ SentriKat requires outbound HTTPS access to external vulnerability data sources:
 | Domain | Purpose | Schedule |
 |--------|---------|----------|
 | `www.cisa.gov` | CISA KEV vulnerability catalog | Daily (02:00 UTC) |
-| `services.nvd.nist.gov` | NVD CPE/CVSS data enrichment | During product search + weekly sync |
+| `services.nvd.nist.gov` | NVD CPE/CVSS data (primary) | During product search + weekly sync |
+| `cveawg.mitre.org` | CVE.org + Vulnrichment CVSS (fallback) | On NVD miss |
+| `euvdservices.enisa.europa.eu` | ENISA EUVD CVSS + EU exploited vulns (fallback) | On NVD+CVE.org miss + daily sync |
 | `api.osv.dev` | OSV vendor backport detection | Daily (03:00 UTC) |
 | `access.redhat.com` | Red Hat/CentOS/Rocky advisories | Daily (03:00 UTC) |
 | `api.msrc.microsoft.com` | Microsoft Patch Tuesday data | Daily (03:00 UTC) |
@@ -642,7 +646,9 @@ SentriKat requires outbound HTTPS access to external vulnerability data sources:
 | `api.first.org` | EPSS scores (optional) | Daily |
 | `api.github.com` | Update check (optional) | On admin dashboard load |
 
-**Air-gapped deployments:** Only `www.cisa.gov` and `services.nvd.nist.gov` are critical. All other feeds are optional and degrade gracefully.
+**Multi-source resilience:** CVSS enrichment uses a 3-source fallback chain (NVD → CVE.org/Vulnrichment → ENISA EUVD). If NVD is down, the system automatically tries the next source. Every CVSS score carries a provenance tag showing its origin.
+
+**Air-gapped deployments:** Only `www.cisa.gov` is truly critical. All other feeds (including NVD) have fallbacks and degrade gracefully.
 
 **Optional:** Get a free NVD API key from [nvd.nist.gov](https://nvd.nist.gov/developers/request-an-api-key) for 10x faster product search.
 
