@@ -1784,9 +1784,11 @@
             '<span class="badge bg-warning text-dark"><i class="bi bi-circle"></i> Needs Review</span>';
         const priorityBadge = `<span class="badge ${getPriorityBadgeClass(priority)}"><i class="bi ${getPriorityIcon(priority)}"></i> ${priority.toUpperCase()} Severity</span>`;
 
-        // CVSS Severity Badge
+        // CVSS Severity Badge (with data source tooltip)
+        const cvssSourceLabel = {'nvd': 'NVD', 'cve_org': 'CVE.org/Vulnrichment', 'euvd': 'ENISA EUVD'}[vuln.cvss_source] || 'Unknown';
+        const cvssTooltip = vuln.cvss_source ? `Source: ${cvssSourceLabel}` : '';
         const severityBadge = vuln.severity ?
-            `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}"><i class="bi bi-graph-up"></i> CVSS: ${escapeHtml(vuln.severity)} ${vuln.cvss_score ? `(${escapeHtml(String(vuln.cvss_score))})` : ''}</span>` :
+            `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}" title="${cvssTooltip}"><i class="bi bi-graph-up"></i> CVSS: ${escapeHtml(vuln.severity)} ${vuln.cvss_score ? `(${escapeHtml(String(vuln.cvss_score))})` : ''}</span>` :
             '<span class="badge bg-secondary"><i class="bi bi-question-circle"></i> No CVSS Data</span>';
 
         // EPSS (Exploit Prediction Scoring System) Badge
@@ -3028,7 +3030,7 @@
                     <!-- Compact badge row: scores + exposure + platform icons -->
                     <div class="d-flex flex-wrap gap-1 mb-2 align-items-center">
                         ${vuln.cvss_score ? `
-                        <span class="badge rounded-pill" style="background-color: ${cvssColor}; font-size: 0.75rem;">
+                        <span class="badge rounded-pill" style="background-color: ${cvssColor}; font-size: 0.75rem;" title="${vuln.cvss_source ? 'Source: ' + ({'nvd': 'NVD', 'cve_org': 'CVE.org/Vulnrichment', 'euvd': 'ENISA EUVD'}[vuln.cvss_source] || 'Unknown') : ''}">
                             CVSS ${escapeHtml(String(vuln.cvss_score))}
                         </span>` : ''}
                         ${epssScore != null ? `
