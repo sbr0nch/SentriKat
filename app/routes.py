@@ -19,6 +19,53 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+# Cached NVD service status (avoid hitting NVD API on every page load)
+_nvd_status_cache = {'status': None, 'checked_at': None}
+NVD_STATUS_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cached_nvd_status():
+    """Check NVD API reachability with 5-minute cache."""
+    import urllib3
+    from config import Config
+
+    now = datetime.utcnow()
+    if (_nvd_status_cache['status'] is not None and
+            _nvd_status_cache['checked_at'] and
+            (now - _nvd_status_cache['checked_at']).total_seconds() < NVD_STATUS_CACHE_TTL):
+        return _nvd_status_cache['status']
+
+    try:
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        response = http_requests.get(
+            'https://services.nvd.nist.gov/rest/json/cves/2.0',
+            params={'resultsPerPage': 1},
+            timeout=10,
+            proxies=proxies,
+            verify=verify_ssl
+        )
+        if response.status_code == 200:
+            status = 'online'
+        elif response.status_code == 403:
+            status = 'rate_limited'
+        else:
+            status = 'error'
+    except http_requests.exceptions.Timeout:
+        status = 'timeout'
+    except http_requests.exceptions.ConnectionError:
+        status = 'offline'
+    except Exception:
+        status = 'error'
+
+    _nvd_status_cache['status'] = status
+    _nvd_status_cache['checked_at'] = now
+    return status
+
+
 # Application version
 API_VERSION = "v1"  # API version for future versioned endpoints (/api/v1/...)
 APP_NAME = "SentriKat"
@@ -495,6 +542,36 @@ def system_notifications():
                         'icon': 'bi-heart-pulse',
                         'message': f'System health: {summary}',
                         'action': {'label': 'View', 'url': '/admin-panel#settings:health'},
+                        'dismissible': True
+                    })
+            except Exception:
+                pass
+
+        # 8. NVD API connectivity - admin only
+        if is_admin:
+            try:
+                nvd_status = _get_cached_nvd_status()
+                if nvd_status in ('offline', 'timeout', 'error'):
+                    status_messages = {
+                        'offline': 'NVD API is unreachable. Vulnerability data cannot be updated.',
+                        'timeout': 'NVD API is not responding (timeout). Vulnerability data may become stale.',
+                        'error': 'NVD API returned an error. Vulnerability data updates may be affected.',
+                    }
+                    notifications.append({
+                        'id': 'nvd_offline',
+                        'level': 'danger',
+                        'icon': 'bi-cloud-slash-fill',
+                        'message': status_messages[nvd_status],
+                        'action': {'label': 'Health Checks', 'url': '/admin-panel#settings:health'},
+                        'dismissible': True
+                    })
+                elif nvd_status == 'rate_limited':
+                    notifications.append({
+                        'id': 'nvd_rate_limited',
+                        'level': 'warning',
+                        'icon': 'bi-speedometer',
+                        'message': 'NVD API is rate-limiting requests. Consider adding an NVD API key for higher limits.',
+                        'action': {'label': 'Settings', 'url': '/admin-panel#settings:system'},
                         'dismissible': True
                     })
             except Exception:
@@ -5952,63 +6029,22 @@ def export_audit_logs():
 @login_required
 def check_cve_service_status():
     """
-    Check if the CVE/NVD service is accessible
-    Returns status of connection to NIST NVD API
+    Check if the CVE/NVD service is accessible.
+    Returns status of connection to NIST NVD API.
+    Uses cached result (5-min TTL) shared with system notifications.
     """
-    import requests
-    from config import Config
-    import urllib3
-
-    try:
-        proxies = Config.get_proxies()
-        verify_ssl = Config.get_verify_ssl()
-
-        if not verify_ssl:
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-        # Try to reach the NVD API
-        response = requests.get(
-            'https://services.nvd.nist.gov/rest/json/cves/2.0',
-            params={'resultsPerPage': 1},
-            timeout=10,
-            proxies=proxies,
-            verify=verify_ssl
-        )
-
-        if response.status_code == 200:
-            return jsonify({
-                'status': 'online',
-                'message': 'NVD service is accessible',
-                'response_code': response.status_code
-            })
-        elif response.status_code == 403:
-            return jsonify({
-                'status': 'rate_limited',
-                'message': 'NVD API rate limited',
-                'response_code': response.status_code
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'NVD returned status {response.status_code}',
-                'response_code': response.status_code
-            })
-
-    except requests.exceptions.Timeout:
-        return jsonify({
-            'status': 'timeout',
-            'message': 'Connection to NVD timed out'
-        })
-    except requests.exceptions.ConnectionError as e:
-        return jsonify({
-            'status': 'offline',
-            'message': 'Cannot connect to NVD service'
-        })
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        })
+    status = _get_cached_nvd_status()
+    messages = {
+        'online': 'NVD service is accessible',
+        'rate_limited': 'NVD API rate limited',
+        'timeout': 'Connection to NVD timed out',
+        'offline': 'Cannot connect to NVD service',
+        'error': 'NVD service error',
+    }
+    return jsonify({
+        'status': status,
+        'message': messages.get(status, 'Unknown status'),
+    })
 
 # ============================================================================
 # REPORTS API
