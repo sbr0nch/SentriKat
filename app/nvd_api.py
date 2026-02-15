@@ -140,7 +140,7 @@ def _fetch_cvss_from_cve_org(cve_id):
         url = f"https://cveawg.mitre.org/api/cve/{cve_id}"
         kwargs = _get_request_kwargs()
 
-        response = requests.get(url, timeout=10, **kwargs)
+        response = requests.get(url, timeout=5, **kwargs)
 
         if response.status_code != 200:
             return None, None
@@ -195,7 +195,7 @@ def _fetch_cvss_from_euvd(cve_id):
         params = {'cveId': cve_id}
         kwargs = _get_request_kwargs()
 
-        response = requests.get(url, params=params, timeout=10, **kwargs)
+        response = requests.get(url, params=params, timeout=5, **kwargs)
 
         if response.status_code != 200:
             return None, None
