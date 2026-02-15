@@ -553,13 +553,13 @@ def system_notifications():
                 nvd_status = _get_cached_nvd_status()
                 if nvd_status in ('offline', 'timeout', 'error'):
                     status_messages = {
-                        'offline': 'NVD API is unreachable. Vulnerability data cannot be updated.',
-                        'timeout': 'NVD API is not responding (timeout). Vulnerability data may become stale.',
-                        'error': 'NVD API returned an error. Vulnerability data updates may be affected.',
+                        'offline': 'NVD API is unreachable. CVSS enrichment will use fallback sources (CVE.org, ENISA EUVD).',
+                        'timeout': 'NVD API is not responding (timeout). Fallback sources (CVE.org, ENISA EUVD) will be used.',
+                        'error': 'NVD API returned an error. Fallback sources (CVE.org, ENISA EUVD) will be used.',
                     }
                     notifications.append({
                         'id': 'nvd_offline',
-                        'level': 'danger',
+                        'level': 'warning',
                         'icon': 'bi-cloud-slash-fill',
                         'message': status_messages[nvd_status],
                         'action': {'label': 'Health Checks', 'url': '/admin-panel#settings:health'},
@@ -6041,10 +6041,17 @@ def check_cve_service_status():
         'offline': 'Cannot connect to NVD service',
         'error': 'NVD service error',
     }
-    return jsonify({
+    result = {
         'status': status,
         'message': messages.get(status, 'Unknown status'),
-    })
+        'sources': {
+            'nvd': {'status': status, 'url': 'https://services.nvd.nist.gov', 'auth': 'api_key_optional'},
+            'cve_org': {'status': 'available', 'url': 'https://cveawg.mitre.org', 'auth': 'none'},
+            'euvd': {'status': 'available', 'url': 'https://euvdservices.enisa.europa.eu', 'auth': 'none'},
+        },
+        'fallback_active': status != 'online',
+    }
+    return jsonify(result)
 
 # ============================================================================
 # REPORTS API
