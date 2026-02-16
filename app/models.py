@@ -1566,20 +1566,24 @@ class ProductInstallation(db.Model):
         if not platform and self.asset:
             platform = self.normalize_os_name(self.asset.os_name)
 
+        discovered_iso = self.discovered_at.isoformat() if self.discovered_at else None
+
         return {
             'id': self.id,
             'asset_id': self.asset_id,
             'asset_hostname': self.asset.hostname if self.asset else None,
             'product_id': self.product_id,
-            'product_name': f"{self.product.vendor} {self.product.product_name}" if self.product else None,
+            'vendor': self.product.vendor if self.product else None,
+            'product_name': self.product.product_name if self.product else None,
             'version': self.version,
             'install_path': self.install_path,
             'detected_by': self.detected_by,
             'detected_on_os': self.detected_on_os,
+            'detected_at': discovered_iso,
             'platform': platform,  # Normalized platform (linux, windows, macos, etc.)
             'is_vulnerable': self.is_vulnerable,
             'vulnerability_count': self.vulnerability_count,
-            'discovered_at': self.discovered_at.isoformat() if self.discovered_at else None,
+            'discovered_at': discovered_iso,
             'last_seen_at': self.last_seen_at.isoformat() if self.last_seen_at else None,
             'verified_at': self.verified_at.isoformat() if self.verified_at else None
         }

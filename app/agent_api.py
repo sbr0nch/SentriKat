@@ -3607,7 +3607,7 @@ def get_agent_commands():
 
     agent_id = data.get('agent_id')
     hostname = data.get('hostname')
-    agent_version = data.get('version', '1.0.0')
+    agent_version = data.get('version') or None
     platform = data.get('platform', 'linux').lower()
 
     if not agent_id and not hostname:
@@ -3633,7 +3633,7 @@ def get_agent_commands():
         asset.last_checkin = datetime.utcnow()
         asset.status = 'online'
         previous_version = asset.agent_version
-        if agent_version and agent_version != '1.0.0':
+        if agent_version:
             asset.agent_version = agent_version
 
         # Log reconnection event when transitioning from offline/stale to online
@@ -3653,7 +3653,7 @@ def get_agent_commands():
                 pass
 
         # Log agent_updated event when version changes
-        if agent_version and agent_version != '1.0.0' and previous_version and agent_version != previous_version:
+        if agent_version and previous_version and agent_version != previous_version:
             try:
                 AgentEvent.log_event(
                     organization_id=asset.organization_id,

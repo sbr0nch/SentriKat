@@ -139,8 +139,12 @@ get_system_info() {
     hostname=$(hostname -s 2>/dev/null || hostname)
     fqdn=$(hostname -f 2>/dev/null || hostname)
 
-    # Get primary IP address
-    ip_address=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}')
+    # Get primary IP address (the interface used to route to the internet)
+    ip_address=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++) if($i=="src") print $(i+1); exit}')
+    # Fallback: first non-loopback IP from hostname
+    if [[ -z "$ip_address" ]]; then
+        ip_address=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
 
     # Detect OS
     if [[ -f /etc/os-release ]]; then
