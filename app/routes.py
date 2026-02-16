@@ -69,7 +69,6 @@ def _get_cached_nvd_status():
 # Application version
 API_VERSION = "v1"  # API version for future versioned endpoints (/api/v1/...)
 APP_NAME = "SentriKat"
-GITHUB_REPO = "sbr0nch/SentriKat"
 
 bp = Blueprint('main', __name__)
 
@@ -639,63 +638,51 @@ def get_version():
 @login_required
 @admin_required
 def check_for_updates():
-    """Check GitHub for the latest SentriKat release."""
+    """Check the SentriKat portal for the latest release."""
     try:
         from config import Config
-        from app.models import SystemSettings
+        from app.licensing import get_installation_id, LICENSE_SERVER_URL
 
         proxies = Config.get_proxies()
         verify_ssl = Config.get_verify_ssl()
-        headers = {'Accept': 'application/vnd.github.v3+json'}
 
-        # Use GitHub token if configured (required for private repos)
-        gh_token = None
-        try:
-            token_setting = SystemSettings.query.filter_by(key='github_token').first()
-            if token_setting and token_setting.value:
-                gh_token = token_setting.value
-        except Exception:
-            pass
-        if not gh_token:
-            import os
-            gh_token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
-        if gh_token:
-            headers['Authorization'] = f'token {gh_token}'
+        installation_id = get_installation_id()
 
-        kwargs = {'timeout': 8, 'headers': headers,
-                  'proxies': proxies, 'verify': verify_ssl}
-
-        # First try /releases/latest (excludes pre-releases)
         resp = http_requests.get(
-            f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest',
-            **kwargs
+            f'{LICENSE_SERVER_URL}/v1/releases/latest',
+            headers={
+                'X-Installation-ID': installation_id,
+                'X-App-Version': APP_VERSION,
+            },
+            timeout=10,
+            proxies=proxies,
+            verify=verify_ssl,
         )
-        # If no stable release exists, fall back to the most recent release (including pre-releases)
-        if resp.status_code != 200:
-            resp = http_requests.get(
-                f'https://api.github.com/repos/{GITHUB_REPO}/releases',
-                **kwargs
-            )
-            if resp.status_code != 200 or not resp.json():
-                detail = f'GitHub API returned {resp.status_code}'
-                if resp.status_code in (401, 403, 404):
-                    detail += ' — if repo is private, set GITHUB_TOKEN env var or github_token in settings'
-                return jsonify({'error': detail, 'update_available': False}), 200
-            data = resp.json()[0]  # Most recent release
-        else:
-            data = resp.json()
 
-        latest_tag = data.get('tag_name', '').lstrip('v')
+        # 204 = no releases published yet
+        if resp.status_code == 204:
+            return jsonify({
+                'update_available': False,
+                'current_version': APP_VERSION,
+                'latest_version': APP_VERSION,
+            })
+
+        if resp.status_code != 200:
+            return jsonify({
+                'error': f'Portal returned {resp.status_code}',
+                'update_available': False,
+            }), 200
+
+        data = resp.json()
+        latest_tag = data.get('version', '').lstrip('v')
         current = APP_VERSION
 
         # Version comparison that handles pre-release tags (e.g., 1.0.0-beta.1)
         def parse_ver(v):
             try:
-                # Split off pre-release suffix: "1.0.0-beta.4" -> base=(1,0,0) pre=4
                 base = v.split('-', 1)[0]
                 parts = tuple(int(x) for x in base.split('.'))
                 is_prerelease = '-' in v
-                # Extract trailing number from pre-release suffix (beta.4 -> 4)
                 pre_num = 0
                 if is_prerelease:
                     suffix = v.split('-', 1)[1]
@@ -703,7 +690,6 @@ def check_for_updates():
                     m = _re.search(r'(\d+)$', suffix)
                     if m:
                         pre_num = int(m.group(1))
-                # Pre-releases sort lower than stable, but beta.5 > beta.4
                 return (parts, 0 if is_prerelease else 1, pre_num)
             except (ValueError, AttributeError):
                 return ((0, 0, 0), 0, 0)
@@ -717,15 +703,15 @@ def check_for_updates():
         if latest_is_prerelease and current_is_stable:
             update_available = False
         else:
-            update_available = latest_parsed > current_parsed
+            update_available = data.get('update_available', latest_parsed > current_parsed)
 
         return jsonify({
             'update_available': update_available,
             'current_version': current,
             'latest_version': latest_tag,
-            'release_name': data.get('name', ''),
-            'release_url': data.get('html_url', ''),
-            'published_at': data.get('published_at', ''),
+            'release_name': data.get('release_notes', ''),
+            'release_url': data.get('download_url', ''),
+            'published_at': data.get('released_at', ''),
         })
     except http_requests.exceptions.RequestException:
         # Offline or network error - not critical

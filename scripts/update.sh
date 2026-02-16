@@ -15,12 +15,12 @@
 set -e
 
 REPO="sbr0nch/SentriKat"
-GITHUB_API="https://api.github.com/repos/${REPO}"
+PORTAL_API="${SENTRIKAT_LICENSE_SERVER:-https://license.sentrikat.com/api}"
 CURRENT_VERSION_FILE=""
 CURRENT_VERSION=""
 TARGET_VERSION=""
 CHECK_ONLY=false
-GH_AUTH_HEADER=""
+INSTALLATION_ID=""
 
 # Load proxy settings from .env if present (so curl and docker use them)
 load_proxy_from_env() {
@@ -51,38 +51,31 @@ load_proxy_from_env() {
     fi
 }
 
-# Load GitHub token for private repo access
-load_github_token() {
-    local token=""
+# Load installation ID for portal API calls
+load_installation_id() {
+    local install_dir="${INSTALL_DIR:-.}"
 
-    # 1. Already in environment (GITHUB_TOKEN or GH_TOKEN)
-    token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-
-    # 2. Try .env file
-    if [ -z "$token" ]; then
-        for candidate in "./.env" "../.env" "${INSTALL_DIR:-.}/.env"; do
-            if [ -f "$candidate" ]; then
-                local val
-                val=$(grep -E '^GITHUB_TOKEN=' "$candidate" 2>/dev/null | head -1 | cut -d'=' -f2-)
-                [ -n "$val" ] && token="$val" && break
-                val=$(grep -E '^GH_TOKEN=' "$candidate" 2>/dev/null | head -1 | cut -d'=' -f2-)
-                [ -n "$val" ] && token="$val" && break
-            fi
-        done
+    # 1. From data/.installation_id file
+    if [ -f "${install_dir}/data/.installation_id" ]; then
+        INSTALLATION_ID=$(cat "${install_dir}/data/.installation_id" 2>/dev/null | tr -d '[:space:]')
     fi
 
-    if [ -n "$token" ]; then
-        GH_AUTH_HEADER="Authorization: token ${token}"
+    # 2. Fallback to environment variable
+    if [ -z "$INSTALLATION_ID" ]; then
+        INSTALLATION_ID="${SENTRIKAT_INSTALLATION_ID:-}"
+    fi
+
+    if [ -z "$INSTALLATION_ID" ]; then
+        log_warn "No installation ID found. Update check will still work but won't be tracked."
     fi
 }
 
-# Build curl args for GitHub API (includes auth if token is available)
-gh_curl() {
-    if [ -n "$GH_AUTH_HEADER" ]; then
-        curl -sf -H "Accept: application/vnd.github.v3+json" -H "$GH_AUTH_HEADER" "$@"
-    else
-        curl -sf -H "Accept: application/vnd.github.v3+json" "$@"
-    fi
+# Build curl args for portal API
+portal_curl() {
+    local headers=(-H "Content-Type: application/json")
+    [ -n "$INSTALLATION_ID" ] && headers+=(-H "X-Installation-ID: ${INSTALLATION_ID}")
+    [ -n "$CURRENT_VERSION" ] && headers+=(-H "X-App-Version: ${CURRENT_VERSION}")
+    curl -sf "${headers[@]}" "$@"
 }
 
 # Colors
@@ -159,35 +152,36 @@ get_current_version() {
     fi
 }
 
-# Get latest release version from GitHub
+# Get latest release version from the portal
 get_latest_version() {
-    local response
+    local response http_code
 
-    # Try /releases/latest first (excludes pre-releases)
-    response=$(gh_curl "${GITHUB_API}/releases/latest" 2>/dev/null)
-    if [ $? -ne 0 ] || [ -z "$response" ]; then
-        # Fall back to all releases (includes pre-releases)
-        response=$(gh_curl "${GITHUB_API}/releases" 2>/dev/null)
-        if [ $? -ne 0 ] || [ -z "$response" ]; then
-            if [ -z "$GH_AUTH_HEADER" ]; then
-                log_error "Could not reach GitHub API. If the repo is private, set GITHUB_TOKEN in .env or environment."
-            else
-                log_error "Could not reach GitHub API. Check your internet connection and token permissions."
-            fi
-            exit 1
-        fi
-        # Get first (most recent) release from the array
-        response=$(echo "$response" | grep -o '{[^{}]*"tag_name"[^{}]*}' | head -1)
+    # Query the portal for the latest release
+    http_code=$(portal_curl -o /tmp/sentrikat_latest.json -w '%{http_code}' \
+        "${PORTAL_API}/v1/releases/latest" 2>/dev/null) || true
+
+    if [ "$http_code" = "204" ]; then
+        log_error "No releases published on the portal yet."
+        exit 1
     fi
 
-    # Extract tag_name and strip 'v' prefix
-    echo "$response" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"v\?\([^"]*\)"/\1/'
+    if [ "$http_code" != "200" ] || [ ! -s /tmp/sentrikat_latest.json ]; then
+        log_error "Could not reach SentriKat portal (${PORTAL_API}). Check your internet connection."
+        rm -f /tmp/sentrikat_latest.json
+        exit 1
+    fi
+
+    response=$(cat /tmp/sentrikat_latest.json)
+    rm -f /tmp/sentrikat_latest.json
+
+    # Extract version and strip 'v' prefix
+    echo "$response" | grep -o '"version": *"[^"]*"' | head -1 | sed 's/.*"v\?\([^"]*\)"/\1/'
 }
 
-# Get download URL for a specific version
+# Get download URL for a specific version (served by the portal)
 get_download_url() {
     local version="$1"
-    echo "https://github.com/${REPO}/releases/download/v${version}/sentrikat-${version}.tar.gz"
+    echo "${PORTAL_API}/v1/releases/${version}/download"
 }
 
 # Compare versions (returns 0 if $1 > $2)
@@ -214,33 +208,13 @@ update_docker() {
         log_info "Updated image tag to ${version}"
     fi
 
-    # Ensure Docker is logged into GHCR for private repos
-    if [ -n "$GH_AUTH_HEADER" ]; then
-        local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-        if [ -z "$token" ]; then
-            for candidate in "./.env" "../.env" "${install_dir}/.env"; do
-                if [ -f "$candidate" ]; then
-                    token=$(grep -E '^GITHUB_TOKEN=' "$candidate" 2>/dev/null | head -1 | cut -d'=' -f2-)
-                    [ -n "$token" ] && break
-                    token=$(grep -E '^GH_TOKEN=' "$candidate" 2>/dev/null | head -1 | cut -d'=' -f2-)
-                    [ -n "$token" ] && break
-                fi
-            done
-        fi
-        if [ -n "$token" ]; then
-            echo "$token" | docker login ghcr.io -u USERNAME --password-stdin 2>/dev/null && \
-                log_info "Logged into ghcr.io" || \
-                log_warn "Could not log into ghcr.io — pull may fail for private images"
-        fi
-    fi
-
     # Pull new image
     log_info "Pulling new Docker image..."
     cd "${install_dir}"
     if ! (docker compose pull 2>/dev/null || docker-compose pull); then
         log_error "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:${version}"
-        log_error "The image may not exist yet. Check: https://github.com/${REPO}/actions"
-        log_error "If using a tag-triggered CI, ensure you pushed a git tag (v${version})."
+        log_error "The image may not exist yet, or GHCR packages may not be public."
+        log_error "Check: https://github.com/${REPO}/actions"
         # Revert image tag
         sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${CURRENT_VERSION}|g" "${install_dir}/docker-compose.yml"
         log_warn "Reverted docker-compose.yml to v${CURRENT_VERSION}"
@@ -268,14 +242,11 @@ update_files() {
 
     log_info "Downloading SentriKat v${version}..."
 
-    # Download release package (use auth header for private repos)
+    # Download release package from portal
     local curl_args=(-sfL -o "${tmp_dir}/sentrikat-${version}.tar.gz")
-    if [ -n "$GH_AUTH_HEADER" ]; then
-        curl_args+=(-H "$GH_AUTH_HEADER")
-    fi
+    [ -n "$INSTALLATION_ID" ] && curl_args+=(-H "X-Installation-ID: ${INSTALLATION_ID}")
     if ! curl "${curl_args[@]}" "$download_url"; then
         log_error "Failed to download v${version}. URL: ${download_url}"
-        [ -z "$GH_AUTH_HEADER" ] && log_error "If the repo is private, set GITHUB_TOKEN in .env or environment."
         rm -rf "$tmp_dir"
         exit 1
     fi
@@ -377,11 +348,12 @@ if [ -n "${HTTP_PROXY:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
     log_info "Proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}"
 fi
 
-# Load GitHub token for private repo access
-load_github_token
-if [ -n "$GH_AUTH_HEADER" ]; then
-    log_info "GitHub token: configured"
+# Load installation ID for portal API
+load_installation_id
+if [ -n "$INSTALLATION_ID" ]; then
+    log_info "Installation ID: ${INSTALLATION_ID:0:20}..."
 fi
+log_info "Update server: ${PORTAL_API}"
 
 # Get current version
 get_current_version "$INSTALL_DIR"

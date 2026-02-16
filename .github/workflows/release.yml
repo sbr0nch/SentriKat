@@ -322,18 +322,19 @@ jobs:
           draft: false
           prerelease: false
 
-      # ── (Optional) Notify the portal about the new release ──
+      # ── Notify the portal about the new release ──
       - name: Notify Portal
         if: ${{ vars.PORTAL_API_URL != '' }}
         continue-on-error: true # Don't fail release if portal is down
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
-          curl -sf -X POST "${{ vars.PORTAL_API_URL }}/api/releases" \
+          curl -sf -X POST "${{ vars.PORTAL_API_URL }}/api/v1/releases" \
             -H "Authorization: Bearer ${{ secrets.PORTAL_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d "{
               \"version\": \"${VERSION}\",
               \"image\": \"ghcr.io/sbr0nch/sentrikat:${VERSION}\",
-              \"download_url\": \"https://github.com/sbr0nch/SentriKat/releases/download/v${VERSION}/sentrikat-${VERSION}.tar.gz\",
-              \"released_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+              \"download_url\": \"${{ vars.PORTAL_API_URL }}/api/v1/releases/${VERSION}/download\",
+              \"released_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+              \"release_notes\": \"Release ${VERSION}\"
             }" && echo "Portal notified" || echo "Portal notification failed (non-critical)"
