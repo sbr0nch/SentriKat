@@ -250,17 +250,17 @@ def save_proxy_settings():
 
         # Save new proxy settings
         proxy_settings = [
-            SystemSettings(key='proxy_enabled', value='true'),
-            SystemSettings(key='proxy_url', value=proxy_url),
-            SystemSettings(key='proxy_server', value=proxy_server),
-            SystemSettings(key='proxy_port', value=str(proxy_port)),
+            SystemSettings(key='proxy_enabled', value='true', category='proxy'),
+            SystemSettings(key='proxy_url', value=proxy_url, category='proxy'),
+            SystemSettings(key='proxy_server', value=proxy_server, category='proxy'),
+            SystemSettings(key='proxy_port', value=str(proxy_port), category='proxy'),
         ]
 
         if proxy_username:
-            proxy_settings.append(SystemSettings(key='proxy_username', value=proxy_username))
+            proxy_settings.append(SystemSettings(key='proxy_username', value=proxy_username, category='proxy'))
         if proxy_password:
             from app.encryption import encrypt_value
-            proxy_settings.append(SystemSettings(key='proxy_password', value=encrypt_value(proxy_password)))
+            proxy_settings.append(SystemSettings(key='proxy_password', value=encrypt_value(proxy_password), category='proxy'))
 
         for setting in proxy_settings:
             db.session.add(setting)

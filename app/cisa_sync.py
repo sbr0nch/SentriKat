@@ -1191,7 +1191,7 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
 
         # Record sync time
         if not last_nvd_sync:
-            last_nvd_sync = SystemSettings(key='last_nvd_cve_sync', value=pub_end.isoformat())
+            last_nvd_sync = SystemSettings(key='last_nvd_cve_sync', value=pub_end.isoformat(), category='sync')
             db.session.add(last_nvd_sync)
         else:
             last_nvd_sync.value = pub_end.isoformat()
