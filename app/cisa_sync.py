@@ -992,11 +992,9 @@ def reenrich_fallback_cvss(limit=50):
     initial enrichment. On success the vulnerability's cvss_source is
     upgraded to 'nvd'.
 
-    Also handles unscored CVEs imported during Phase 2 of the NVD sync
-    (Received/Awaiting Analysis). Once NVD scores them:
-      - HIGH/CRITICAL → keep and update the score
-      - LOW/MEDIUM    → auto-delete (they were only imported because
-                         they were unscored and might have been dangerous)
+    Also handles CNA-scored CVEs imported during Phase 2 of the NVD sync
+    (Received/Awaiting Analysis with CNA CVSS). Once NVD analyzes them,
+    upgrades from CNA score to the authoritative NVD score.
 
     Args:
         limit: Maximum CVEs to re-enrich per run (respects NVD rate limits)
@@ -1032,60 +1030,82 @@ def reenrich_fallback_cvss(limit=50):
             f"from fallback to NVD"
         )
 
-    # Part 2: Score unscored CVEs (imported from Phase 2 with no CVSS).
-    # Once NVD analyzes them, either keep (HIGH/CRITICAL) or remove (LOW/MEDIUM).
-    from sqlalchemy import or_
-    unscored = Vulnerability.query.filter(
+    # Part 2: Upgrade CNA-scored CVEs (from Phase 2) to NVD Primary scores
+    # once NVD finishes analyzing them.
+    cna_scored = Vulnerability.query.filter(
         Vulnerability.source == 'nvd',
+        Vulnerability.cvss_source == 'cna',
         Vulnerability.nvd_status.in_(['Received', 'Awaiting Analysis', 'Undergoing Analysis']),
-        or_(
-            Vulnerability.cvss_score.is_(None),
-            Vulnerability.cvss_source.is_(None),
-        )
     ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
 
-    scored = 0
-    removed = 0
-    for vuln in unscored:
+    cna_upgraded = 0
+    for vuln in cna_scored:
         try:
             score, severity = _fetch_cvss_from_nvd(vuln.cve_id)
-            if score is None:
-                # Still unscored — NVD hasn't analyzed it yet, keep it
-                continue
-
-            if severity in ('HIGH', 'CRITICAL'):
+            if score is not None:
                 vuln.cvss_score = score
                 vuln.severity = severity
                 vuln.cvss_source = 'nvd'
                 vuln.nvd_status = 'Analyzed'
-                scored += 1
-            else:
-                # LOW or MEDIUM — wouldn't have been imported by Phase 1,
-                # only got in because it was unscored. Remove it.
-                db.session.delete(vuln)
-                removed += 1
-                logger.info(
-                    f"CVSS re-enrichment: removed {vuln.cve_id} "
-                    f"(scored {severity} {score} — below threshold)"
-                )
+                cna_upgraded += 1
         except Exception:
             continue
 
-    if scored or removed:
+    if cna_upgraded:
         db.session.commit()
-        if scored:
-            logger.info(
-                f"CVSS re-enrichment: scored {scored}/{len(unscored)} "
-                f"previously unscored CVEs"
-            )
-        if removed:
-            logger.info(
-                f"CVSS re-enrichment: cleaned up {removed} low-severity "
-                f"CVEs that were imported while unscored"
-            )
+        logger.info(
+            f"CVSS re-enrichment: upgraded {cna_upgraded}/{len(cna_scored)} "
+            f"from CNA to NVD scores"
+        )
 
-    checked = len(vulns) + len(unscored)
-    return upgraded + scored, checked
+    checked = len(vulns) + len(cna_scored)
+    return upgraded + cna_upgraded, checked
+
+
+def _extract_cvss_from_metrics(metrics):
+    """
+    Extract CVSS score and severity from NVD API metrics, preferring
+    NVD-assigned (Primary) scores but falling back to CNA-assigned
+    (Secondary) scores.
+
+    This is critical for CVEs in "Awaiting Analysis" status where NVD
+    hasn't scored yet, but the CNA (e.g., Google, Microsoft) has already
+    provided their own CVSS assessment.
+
+    Returns:
+        (score, severity, source_type) where source_type is 'Primary' or 'Secondary'
+    """
+    for metric_key in ['cvssMetricV31', 'cvssMetricV30']:
+        entries = metrics.get(metric_key, [])
+        if not entries:
+            continue
+
+        # First pass: look for NVD Primary score
+        for entry in entries:
+            if entry.get('type') == 'Primary':
+                cvss_data = entry.get('cvssData', {})
+                score = cvss_data.get('baseScore')
+                severity = cvss_data.get('baseSeverity')
+                if score is not None:
+                    return score, severity, 'Primary'
+
+        # Second pass: fall back to CNA/ADP Secondary score
+        for entry in entries:
+            if entry.get('type') == 'Secondary':
+                cvss_data = entry.get('cvssData', {})
+                score = cvss_data.get('baseScore')
+                severity = cvss_data.get('baseSeverity')
+                if score is not None:
+                    return score, severity, 'Secondary'
+
+        # Last resort: just grab whatever is at index 0
+        cvss_data = entries[0].get('cvssData', {})
+        score = cvss_data.get('baseScore')
+        severity = cvss_data.get('baseSeverity')
+        if score is not None:
+            return score, severity, 'Unknown'
+
+    return None, None, None
 
 
 def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
@@ -1097,12 +1117,13 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
     in the database.
 
     Two-phase approach:
-      Phase 1: Fetch CVEs with known HIGH/CRITICAL CVSS severity.
-      Phase 2: Fetch recently published CVEs that NVD hasn't scored yet
-               (status: Received / Awaiting Analysis / Undergoing Analysis).
-               This catches zero-days and fresh CVEs before NVD assigns a
-               CVSS score — without this, actively exploited vulnerabilities
-               like Chrome 0-days would be invisible until NVD processes them.
+      Phase 1: Fetch CVEs with known HIGH/CRITICAL NVD CVSS severity.
+      Phase 2: Fetch CVEs that NVD hasn't analyzed yet (Received / Awaiting
+               Analysis) and check for CNA-assigned CVSS scores (e.g., Google
+               scores their own Chrome CVEs immediately).  Only imports
+               CNA-scored HIGH/CRITICAL — skips LOW/MEDIUM and truly unscored
+               CVEs to avoid noise.  This catches zero-days like Chrome 0-days
+               that would be invisible until NVD gets around to scoring them.
 
     Args:
         hours_back: How far back to look (default 6 hours, first run uses 7 days)
@@ -1226,16 +1247,9 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                             if vuln_status in ('Rejected', 'Disputed'):
                                 continue
 
-                            # Extract CVSS
-                            cvss_score = None
-                            cvss_severity = None
+                            # Extract CVSS (prefer NVD Primary, fall back to CNA Secondary)
                             metrics = cve_data.get('metrics', {})
-                            for metric_key in ['cvssMetricV31', 'cvssMetricV30']:
-                                if metric_key in metrics and metrics[metric_key]:
-                                    cvss_data = metrics[metric_key][0].get('cvssData', {})
-                                    cvss_score = cvss_data.get('baseScore')
-                                    cvss_severity = cvss_data.get('baseSeverity')
-                                    break
+                            cvss_score, cvss_severity, cvss_type = _extract_cvss_from_metrics(metrics)
 
                             if not cvss_severity:
                                 cvss_severity = _score_to_severity(cvss_score)
@@ -1361,12 +1375,22 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                     errors += 1
                     break
 
-        # Phase 2: Fetch recently published CVEs that NVD hasn't scored yet.
-        # These are zero-days and fresh CVEs in "Received" / "Awaiting Analysis"
-        # status — NVD has no CVSS assigned so the severity filter above misses
-        # them entirely.  We query WITHOUT cvssV3Severity to catch them.
+        # Phase 2: Catch HIGH/CRITICAL CVEs that NVD hasn't analyzed yet.
+        #
+        # Problem: Phase 1 uses cvssV3Severity=HIGH which only returns CVEs
+        # where NVD has assigned a score.  Zero-days and fresh CVEs in
+        # "Received" / "Awaiting Analysis" status have no NVD score yet —
+        # but the CNA (e.g., Google, Microsoft) often provides their own
+        # CVSS assessment as a "Secondary" metric in the API response.
+        #
+        # Solution: query without severity filter, check CNA-assigned
+        # (Secondary) CVSS scores, and only import HIGH/CRITICAL.
+        # This means zero noise — no LOW/MEDIUM junk, just the dangerous
+        # CVEs that NVD is slow to process.
         unscored_start = 0
-        unscored_max = 200  # cap — unscored CVEs are typically a small batch
+        unscored_max = 500
+        unscored_imported = 0
+        unscored_skipped_low = 0
 
         while unscored_start < unscored_max:
             if not limiter.acquire(timeout=60.0, block=True):
@@ -1417,10 +1441,23 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
 
                         vuln_status = cve_data.get('vulnStatus', '')
 
-                        # Only import unscored CVEs — ones that NVD hasn't analyzed.
-                        # Scored CVEs were already handled by Phase 1.
+                        # Only process CVEs that NVD hasn't analyzed yet.
+                        # Analyzed CVEs were already handled by Phase 1.
                         if vuln_status not in ('Received', 'Awaiting Analysis', 'Undergoing Analysis'):
                             skipped += 1
+                            continue
+
+                        # Check for CNA-assigned CVSS score (Secondary metric)
+                        metrics = cve_data.get('metrics', {})
+                        cvss_score, cvss_severity, cvss_type = _extract_cvss_from_metrics(metrics)
+
+                        if not cvss_severity:
+                            cvss_severity = _score_to_severity(cvss_score)
+
+                        # Only import if CNA says HIGH or CRITICAL.
+                        # No CNA score at all = skip (truly unknown, avoid noise).
+                        if cvss_severity not in ('HIGH', 'CRITICAL'):
+                            unscored_skipped_low += 1
                             continue
 
                         # Skip if already in DB (and not stale)
@@ -1442,23 +1479,6 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
 
                         if not description:
                             continue
-
-                        if vuln_status in ('Rejected', 'Disputed'):
-                            continue
-
-                        # Extract CVSS (may be absent for unscored CVEs)
-                        cvss_score = None
-                        cvss_severity = None
-                        metrics = cve_data.get('metrics', {})
-                        for metric_key in ['cvssMetricV31', 'cvssMetricV30']:
-                            if metric_key in metrics and metrics[metric_key]:
-                                cvss_data = metrics[metric_key][0].get('cvssData', {})
-                                cvss_score = cvss_data.get('baseScore')
-                                cvss_severity = cvss_data.get('baseSeverity')
-                                break
-
-                        if not cvss_severity:
-                            cvss_severity = _score_to_severity(cvss_score)
 
                         # Extract vendor/product from CPE
                         vendor = ''
@@ -1518,6 +1538,9 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                                     product = p or m.group(1).title()
                                     break
 
+                        # Determine CVSS source label
+                        cvss_source_label = 'cna' if cvss_type == 'Secondary' else 'nvd'
+
                         if needs_refresh:
                             vuln = existing
                             if vendor:
@@ -1531,13 +1554,15 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                                 vuln.cvss_score = cvss_score
                             if cvss_severity:
                                 vuln.severity = cvss_severity
+                            vuln.cvss_source = cvss_source_label
                             if vuln_status in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
                                 vuln.cpe_fetched_at = None
                                 vuln.cpe_data = None
                             if cpe_entries:
                                 vuln.set_cpe_entries(cpe_entries)
                             new_count += 1
-                            logger.info(f"Refreshed stale unscored {cve_id}: vendor={vendor or 'Unknown'}, product={product or 'Unknown'}, status={vuln_status}")
+                            unscored_imported += 1
+                            logger.info(f"Refreshed unscored {cve_id}: vendor={vendor or 'Unknown'}, product={product or 'Unknown'}, cvss={cvss_score} ({cvss_type}), status={vuln_status}")
                         else:
                             vuln = Vulnerability(
                                 cve_id=cve_id,
@@ -1546,12 +1571,12 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                                 vulnerability_name=description[:500],
                                 date_added=datetime.utcnow().date(),
                                 short_description=description,
-                                required_action='Apply vendor patches. (Source: NVD — awaiting analysis)',
+                                required_action='Apply vendor patches. (Source: NVD — CNA-scored, awaiting NVD analysis)',
                                 known_ransomware=False,
-                                notes=f'Auto-imported from NVD (unscored, NVD status: {vuln_status}).',
+                                notes=f'Auto-imported from NVD (CNA-scored {cvss_severity} {cvss_score}, NVD status: {vuln_status}).',
                                 cvss_score=cvss_score,
                                 severity=cvss_severity,
-                                cvss_source='nvd' if cvss_score else None,
+                                cvss_source=cvss_source_label,
                                 source='nvd',
                                 nvd_status=vuln_status or None,
                             )
@@ -1561,7 +1586,8 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
 
                             db.session.add(vuln)
                             new_count += 1
-                            logger.info(f"Imported unscored {cve_id}: vendor={vendor or 'Unknown'}, product={product or 'Unknown'}, status={vuln_status}")
+                            unscored_imported += 1
+                            logger.info(f"Imported CNA-scored {cve_id}: vendor={vendor or 'Unknown'}, product={product or 'Unknown'}, cvss={cvss_score} ({cvss_type}), status={vuln_status}")
 
                     except Exception as e:
                         logger.debug(f"NVD unscored sync: error processing CVE: {e}")
@@ -1576,6 +1602,12 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                 logger.warning(f"NVD unscored CVE sync request failed: {e}")
                 errors += 1
                 break
+
+        if unscored_imported or unscored_skipped_low:
+            logger.info(
+                f"NVD Phase 2 (unscored): {unscored_imported} CNA-scored HIGH/CRITICAL imported, "
+                f"{unscored_skipped_low} skipped (LOW/MEDIUM/no score)"
+            )
 
         if new_count > 0:
             db.session.commit()
