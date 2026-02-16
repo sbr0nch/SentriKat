@@ -64,18 +64,32 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # Find the SentriKat installation directory
 find_install_dir() {
-    # Check common locations
-    if [ -f "./VERSION" ] && [ -f "./app/licensing.py" ]; then
-        echo "."
-    elif [ -f "../VERSION" ] && [ -f "../app/licensing.py" ]; then
-        echo ".."
-    elif [ -f "/opt/sentrikat/VERSION" ]; then
-        echo "/opt/sentrikat"
-    elif [ -f "/app/VERSION" ]; then
-        echo "/app"
-    else
-        echo ""
+    # 1. Explicit override via environment variable
+    if [ -n "${SENTRIKAT_DIR:-}" ] && [ -f "${SENTRIKAT_DIR}/VERSION" ]; then
+        echo "$SENTRIKAT_DIR"
+        return
     fi
+
+    # 2. Walk up from the current directory (handles running from any subdirectory)
+    local dir
+    dir=$(pwd)
+    while [ "$dir" != "/" ]; do
+        if [ -f "${dir}/VERSION" ] && [ -f "${dir}/app/licensing.py" ]; then
+            echo "$dir"
+            return
+        fi
+        dir=$(dirname "$dir")
+    done
+
+    # 3. Check well-known installation paths
+    for candidate in /opt/sentrikat /app /data/sentrikat; do
+        if [ -f "${candidate}/VERSION" ] && [ -f "${candidate}/app/licensing.py" ]; then
+            echo "$candidate"
+            return
+        fi
+    done
+
+    echo ""
 }
 
 # Get current installed version
@@ -258,7 +272,7 @@ esac
 INSTALL_DIR=$(find_install_dir)
 if [ -z "$INSTALL_DIR" ]; then
     log_error "Could not find SentriKat installation."
-    log_error "Run this script from the SentriKat directory, or install to /opt/sentrikat."
+    log_error "Run this script from the SentriKat directory, or set SENTRIKAT_DIR=/path/to/sentrikat"
     exit 1
 fi
 INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd)
