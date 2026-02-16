@@ -85,6 +85,8 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerabilities', 'cvss_source', 'VARCHAR(30)', 'VARCHAR(30)'),
         # Vulnerability source tracking (cisa_kev or euvd)
         ('vulnerabilities', 'source', "VARCHAR(20) DEFAULT 'cisa_kev'", "VARCHAR(20) DEFAULT 'cisa_kev'"),
+        # NVD analysis status tracking (Awaiting Analysis, Analyzed, etc.)
+        ('vulnerabilities', 'nvd_status', 'VARCHAR(50)', 'VARCHAR(50)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

@@ -389,12 +389,27 @@ def fetch_cpe_version_data(limit=30):
     from app.nvd_cpe_api import match_cve_to_cpe
     import time
 
-    # Get vulnerabilities without CPE data, prioritize:
-    # 1. New CVEs (recently added to CISA KEV)
-    # 2. CVEs with product matches (more urgent to get version data)
+    from sqlalchemy import or_
+
+    # Get vulnerabilities needing CPE data:
+    # 1. Never fetched (cpe_data IS NULL) — highest priority
+    # 2. Previously empty AND older than 24h — re-check in case NVD completed analysis
+    #    (NVD "Awaiting Analysis" can take days to resolve; we must not give up)
+    stale_cutoff = datetime.utcnow() - timedelta(hours=24)
+
     vulns_to_fetch = Vulnerability.query.filter(
-        Vulnerability.cpe_data == None
-    ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
+        or_(
+            Vulnerability.cpe_data == None,
+            db.and_(
+                Vulnerability.cpe_data == '[]',
+                Vulnerability.cpe_fetched_at < stale_cutoff
+            )
+        )
+    ).order_by(
+        # Prioritize: never-fetched first, then oldest stale re-checks
+        (Vulnerability.cpe_data == None).desc(),
+        Vulnerability.date_added.desc()
+    ).limit(limit).all()
 
     if not vulns_to_fetch:
         logger.info("All vulnerabilities already have CPE version data")
@@ -414,10 +429,17 @@ def fetch_cpe_version_data(limit=30):
                 enriched_count += 1
                 logger.debug(f"Fetched {len(cpe_entries)} CPE entries for {vuln.cve_id}")
             else:
-                # Mark as checked even if no CPE data found
-                vuln.cpe_data = '[]'
-                vuln.cpe_fetched_at = datetime.utcnow()
-                logger.debug(f"No CPE data found for {vuln.cve_id}")
+                # Check if NVD simply hasn't analyzed this CVE yet.
+                # "Awaiting Analysis" means NVD received the CVE but hasn't added
+                # CPE configurations. We must NOT stamp cpe_fetched_at, otherwise
+                # the matching logic permanently treats it as "not affected" and
+                # the CVE is never re-checked even after NVD completes analysis.
+                if getattr(vuln, 'nvd_status', None) in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
+                    logger.info(f"Skipping CPE stamp for {vuln.cve_id} — NVD status: {vuln.nvd_status} (will retry)")
+                else:
+                    vuln.cpe_data = '[]'
+                    vuln.cpe_fetched_at = datetime.utcnow()
+                    logger.debug(f"No CPE data found for {vuln.cve_id} (NVD status: {getattr(vuln, 'nvd_status', 'unknown')})")
 
         except Exception as e:
             logger.warning(f"Failed to fetch CPE data for {vuln.cve_id}: {e}")
@@ -1149,6 +1171,28 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                                             'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
                                         })
 
+                            # Fallback: extract vendor/product from description if
+                            # NVD has no configurations (common for "Awaiting Analysis")
+                            if not vendor and not product and description:
+                                import re as _re
+                                KNOWN_PRODUCTS = {
+                                    r'google\s+chrome': ('Google', 'Chrome'),
+                                    r'chromium': ('Chromium', 'Chromium'),
+                                    r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
+                                    r'microsoft\s+edge': ('Microsoft', 'Edge'),
+                                    r'apple\s+safari': ('Apple', 'Safari'),
+                                    r'microsoft\s+windows': ('Microsoft', 'Windows'),
+                                    r'linux\s+kernel': ('Linux', 'Kernel'),
+                                    r'apache\s+(\w+)': ('Apache', None),
+                                }
+                                desc_lower = description.lower()
+                                for pattern, (v, p) in KNOWN_PRODUCTS.items():
+                                    m = _re.search(pattern, desc_lower)
+                                    if m:
+                                        vendor = v
+                                        product = p or m.group(1).title()
+                                        break
+
                             # Create vulnerability record
                             vuln = Vulnerability(
                                 cve_id=cve_id,
@@ -1164,6 +1208,7 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                                 severity=cvss_severity,
                                 cvss_source='nvd',
                                 source='nvd',
+                                nvd_status=vuln_status or None,
                             )
 
                             if cpe_entries:

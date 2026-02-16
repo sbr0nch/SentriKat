@@ -494,6 +494,7 @@ class Vulnerability(db.Model):
     # CPE data from NVD (cached for better matching)
     cpe_data = db.Column(db.Text, nullable=True)  # JSON array of affected CPE entries
     cpe_fetched_at = db.Column(db.DateTime, nullable=True)  # When CPE data was last fetched
+    nvd_status = db.Column(db.String(50), nullable=True)  # NVD vulnStatus: Awaiting Analysis, Analyzed, etc.
 
     # EPSS (Exploit Prediction Scoring System) data from FIRST
     # Score: Probability of exploitation in the next 30 days (0-1)
