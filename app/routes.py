@@ -3899,6 +3899,13 @@ def trigger_sync():
         result['nvd_new'] = nvd_new
         result['nvd_skipped'] = nvd_skipped
         result['nvd_errors'] = nvd_errors
+
+        # If NVD imported new CVEs, rematch — these were imported AFTER the
+        # rematch inside sync_cisa_kev() already ran.
+        if nvd_new > 0:
+            from app.filters import rematch_all_products
+            _, nvd_matches = rematch_all_products()
+            result['nvd_matches'] = nvd_matches
     except Exception as e:
         logger.warning(f"NVD sync during manual trigger failed (non-critical): {e}")
         result['nvd_error'] = str(e)
