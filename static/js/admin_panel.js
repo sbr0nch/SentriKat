@@ -2566,7 +2566,7 @@ async function loadEpssStatus() {
         const epssLastSync = SK.DOM.get('epssLastSync');
 
         if (epssTotal) epssTotal.textContent = status.with_epss_scores || 0;
-        if (epssHighRisk) epssHighRisk.textContent = status.high_risk_count || 0;
+        if (epssHighRisk) epssHighRisk.textContent = ((status.distribution?.very_high || 0) + (status.distribution?.high || 0));
         if (epssCoverage) epssCoverage.textContent = (status.coverage_percent || 0) + '%';
         if (epssLastSync) {
             epssLastSync.textContent = status.last_sync
