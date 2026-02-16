@@ -992,6 +992,12 @@ def reenrich_fallback_cvss(limit=50):
     initial enrichment. On success the vulnerability's cvss_source is
     upgraded to 'nvd'.
 
+    Also handles unscored CVEs imported during Phase 2 of the NVD sync
+    (Received/Awaiting Analysis). Once NVD scores them:
+      - HIGH/CRITICAL → keep and update the score
+      - LOW/MEDIUM    → auto-delete (they were only imported because
+                         they were unscored and might have been dangerous)
+
     Args:
         limit: Maximum CVEs to re-enrich per run (respects NVD rate limits)
 
@@ -1000,14 +1006,12 @@ def reenrich_fallback_cvss(limit=50):
     """
     from app.nvd_api import _fetch_cvss_from_nvd
 
+    # Part 1: Upgrade fallback-sourced CVEs to NVD
     vulns = Vulnerability.query.filter(
         Vulnerability.cvss_source.in_(['cve_org', 'euvd']),
         Vulnerability.cvss_score.isnot(None),
         Vulnerability.cvss_score > 0
     ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
-
-    if not vulns:
-        return 0, 0
 
     upgraded = 0
     for vuln in vulns:
@@ -1028,7 +1032,60 @@ def reenrich_fallback_cvss(limit=50):
             f"from fallback to NVD"
         )
 
-    return upgraded, len(vulns)
+    # Part 2: Score unscored CVEs (imported from Phase 2 with no CVSS).
+    # Once NVD analyzes them, either keep (HIGH/CRITICAL) or remove (LOW/MEDIUM).
+    from sqlalchemy import or_
+    unscored = Vulnerability.query.filter(
+        Vulnerability.source == 'nvd',
+        Vulnerability.nvd_status.in_(['Received', 'Awaiting Analysis', 'Undergoing Analysis']),
+        or_(
+            Vulnerability.cvss_score.is_(None),
+            Vulnerability.cvss_source.is_(None),
+        )
+    ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
+
+    scored = 0
+    removed = 0
+    for vuln in unscored:
+        try:
+            score, severity = _fetch_cvss_from_nvd(vuln.cve_id)
+            if score is None:
+                # Still unscored — NVD hasn't analyzed it yet, keep it
+                continue
+
+            if severity in ('HIGH', 'CRITICAL'):
+                vuln.cvss_score = score
+                vuln.severity = severity
+                vuln.cvss_source = 'nvd'
+                vuln.nvd_status = 'Analyzed'
+                scored += 1
+            else:
+                # LOW or MEDIUM — wouldn't have been imported by Phase 1,
+                # only got in because it was unscored. Remove it.
+                db.session.delete(vuln)
+                removed += 1
+                logger.info(
+                    f"CVSS re-enrichment: removed {vuln.cve_id} "
+                    f"(scored {severity} {score} — below threshold)"
+                )
+        except Exception:
+            continue
+
+    if scored or removed:
+        db.session.commit()
+        if scored:
+            logger.info(
+                f"CVSS re-enrichment: scored {scored}/{len(unscored)} "
+                f"previously unscored CVEs"
+            )
+        if removed:
+            logger.info(
+                f"CVSS re-enrichment: cleaned up {removed} low-severity "
+                f"CVEs that were imported while unscored"
+            )
+
+    checked = len(vulns) + len(unscored)
+    return upgraded + scored, checked
 
 
 def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
