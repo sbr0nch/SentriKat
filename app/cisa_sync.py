@@ -1298,13 +1298,27 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
         if new_count > 0:
             db.session.commit()
 
-        # Record sync time
-        if not last_nvd_sync:
-            last_nvd_sync = SystemSettings(key='last_nvd_cve_sync', value=pub_end.isoformat(), category='sync')
-            db.session.add(last_nvd_sync)
+        # Record sync time — but ONLY advance the window if we actually
+        # got a successful API response.  When the NVD API is unreachable
+        # (network error, 403 rate-limit, etc.) we must NOT move the
+        # timestamp forward, otherwise CVEs published during the outage
+        # window are permanently skipped.  We detect a total failure by
+        # checking: zero new CVEs, zero skipped (nothing fetched at all),
+        # AND at least one error.
+        total_api_failure = (new_count == 0 and skipped == 0 and errors > 0)
+
+        if total_api_failure:
+            logger.warning(
+                "NVD CVE sync: not advancing sync timestamp — "
+                f"API appears unreachable ({errors} errors, 0 results)"
+            )
         else:
-            last_nvd_sync.value = pub_end.isoformat()
-        db.session.commit()
+            if not last_nvd_sync:
+                last_nvd_sync = SystemSettings(key='last_nvd_cve_sync', value=pub_end.isoformat(), category='sync')
+                db.session.add(last_nvd_sync)
+            else:
+                last_nvd_sync.value = pub_end.isoformat()
+            db.session.commit()
 
         logger.info(
             f"NVD CVE sync: {new_count} new, {skipped} existing, "
