@@ -111,13 +111,29 @@ class TestCPEMatch:
         self.vulnerability.get_cpe_entries = MagicMock(return_value=[])
 
     def test_cpe_inference_match(self):
-        """Test CPE matching via inference (no cached CPE data)."""
+        """Test CPE matching via inference for versionless products (no cached CPE data)."""
         from app.filters import check_cpe_match
+
+        # Inference only works for versionless products (versioned products
+        # require NVD CPE data for safe matching — prevents false positives)
+        self.product.version = None
+        self.vulnerability.cpe_fetched_at = None
 
         match_reasons, method, confidence = check_cpe_match(self.vulnerability, self.product)
         assert len(match_reasons) > 0
         assert method == 'cpe'
         assert 'CPE inference' in match_reasons[0]
+
+    def test_cpe_inference_skips_versioned_product(self):
+        """Test that versioned products do NOT match via inference (prevents false positives)."""
+        from app.filters import check_cpe_match
+
+        # Product has version 10.1.18 but vulnerability has no CPE data
+        # from NVD — we can't verify the version is actually affected, so skip.
+        self.vulnerability.cpe_fetched_at = None
+
+        match_reasons, method, confidence = check_cpe_match(self.vulnerability, self.product)
+        assert len(match_reasons) == 0, "Versioned product should not match via inference"
 
     def test_cpe_cached_match(self):
         """Test CPE matching with cached CPE data."""
@@ -204,6 +220,13 @@ class TestCheckMatch:
         """Test auto mode prefers CPE when available."""
         from app.filters import check_match
 
+        # Provide CPE data so the proper CPE path is used
+        self.vulnerability.get_cpe_entries = MagicMock(return_value=[
+            {'vendor': 'apache', 'product': 'tomcat',
+             'version_start': '10.0.0', 'version_end': '11.0.0',
+             'version_start_type': 'including', 'version_end_type': 'excluding'}
+        ])
+
         match_reasons, method, confidence = check_match(self.vulnerability, self.product)
         assert method == 'cpe'
 
@@ -246,6 +269,12 @@ class TestCheckMatch:
         from app.filters import check_match
 
         self.product.match_type = 'both'
+        # Provide CPE data so the proper CPE path is used
+        self.vulnerability.get_cpe_entries = MagicMock(return_value=[
+            {'vendor': 'apache', 'product': 'tomcat',
+             'version_start': '10.0.0', 'version_end': '11.0.0',
+             'version_start_type': 'including', 'version_end_type': 'excluding'}
+        ])
 
         match_reasons, method, _ = check_match(self.vulnerability, self.product)
         # Should prefer CPE
@@ -513,6 +542,11 @@ class TestMatchVulnerabilitiesToProducts:
         # Now change the vulnerability so it no longer matches this product
         sample_vulnerability.vendor_project = 'Microsoft'
         sample_vulnerability.product = 'Windows'
+        sample_vulnerability.set_cpe_entries([{
+            'vendor': 'microsoft', 'product': 'windows',
+            'version_start': '10.0.0', 'version_end': '10.0.99',
+            'version_start_type': 'including', 'version_end_type': 'excluding',
+        }])
         db_session.commit()
 
         removed = cleanup_invalid_matches()
