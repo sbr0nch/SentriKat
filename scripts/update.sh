@@ -20,6 +20,7 @@ CURRENT_VERSION_FILE=""
 CURRENT_VERSION=""
 TARGET_VERSION=""
 CHECK_ONLY=false
+GH_AUTH_HEADER=""
 
 # Load proxy settings from .env if present (so curl and docker use them)
 load_proxy_from_env() {
@@ -50,6 +51,40 @@ load_proxy_from_env() {
     fi
 }
 
+# Load GitHub token for private repo access
+load_github_token() {
+    local token=""
+
+    # 1. Already in environment (GITHUB_TOKEN or GH_TOKEN)
+    token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+
+    # 2. Try .env file
+    if [ -z "$token" ]; then
+        for candidate in "./.env" "../.env" "${INSTALL_DIR:-.}/.env"; do
+            if [ -f "$candidate" ]; then
+                local val
+                val=$(grep -E '^GITHUB_TOKEN=' "$candidate" 2>/dev/null | head -1 | cut -d'=' -f2-)
+                [ -n "$val" ] && token="$val" && break
+                val=$(grep -E '^GH_TOKEN=' "$candidate" 2>/dev/null | head -1 | cut -d'=' -f2-)
+                [ -n "$val" ] && token="$val" && break
+            fi
+        done
+    fi
+
+    if [ -n "$token" ]; then
+        GH_AUTH_HEADER="Authorization: token ${token}"
+    fi
+}
+
+# Build curl args for GitHub API (includes auth if token is available)
+gh_curl() {
+    if [ -n "$GH_AUTH_HEADER" ]; then
+        curl -sf -H "Accept: application/vnd.github.v3+json" -H "$GH_AUTH_HEADER" "$@"
+    else
+        curl -sf -H "Accept: application/vnd.github.v3+json" "$@"
+    fi
+}
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -62,10 +97,25 @@ log_ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Detect if a directory is a SentriKat installation
+is_sentrikat_dir() {
+    local dir="$1"
+    # Full installation (source/tarball): has VERSION + app/licensing.py
+    if [ -f "${dir}/VERSION" ] && [ -f "${dir}/app/licensing.py" ]; then
+        return 0
+    fi
+    # Docker-only deployment: has docker-compose.yml referencing sentrikat image
+    if [ -f "${dir}/docker-compose.yml" ] && \
+       grep -q "ghcr.io/sbr0nch/sentrikat" "${dir}/docker-compose.yml" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
 # Find the SentriKat installation directory
 find_install_dir() {
     # 1. Explicit override via environment variable
-    if [ -n "${SENTRIKAT_DIR:-}" ] && [ -f "${SENTRIKAT_DIR}/VERSION" ]; then
+    if [ -n "${SENTRIKAT_DIR:-}" ] && is_sentrikat_dir "$SENTRIKAT_DIR"; then
         echo "$SENTRIKAT_DIR"
         return
     fi
@@ -74,7 +124,7 @@ find_install_dir() {
     local dir
     dir=$(pwd)
     while [ "$dir" != "/" ]; do
-        if [ -f "${dir}/VERSION" ] && [ -f "${dir}/app/licensing.py" ]; then
+        if is_sentrikat_dir "$dir"; then
             echo "$dir"
             return
         fi
@@ -83,7 +133,7 @@ find_install_dir() {
 
     # 3. Check well-known installation paths
     for candidate in /opt/sentrikat /app /data/sentrikat; do
-        if [ -f "${candidate}/VERSION" ] && [ -f "${candidate}/app/licensing.py" ]; then
+        if is_sentrikat_dir "$candidate"; then
             echo "$candidate"
             return
         fi
@@ -99,6 +149,11 @@ get_current_version() {
     if [ -f "${install_dir}/VERSION" ]; then
         CURRENT_VERSION=$(cat "${install_dir}/VERSION" | tr -d '[:space:]')
         CURRENT_VERSION_FILE="${install_dir}/VERSION"
+    elif [ -f "${install_dir}/docker-compose.yml" ]; then
+        # Docker-only deployment: extract version from image tag
+        CURRENT_VERSION=$(grep -o 'ghcr.io/sbr0nch/sentrikat:[^ "]*' "${install_dir}/docker-compose.yml" 2>/dev/null \
+            | head -1 | cut -d: -f2)
+        [ -z "$CURRENT_VERSION" ] && CURRENT_VERSION="unknown"
     else
         CURRENT_VERSION="unknown"
     fi
@@ -107,10 +162,23 @@ get_current_version() {
 # Get latest release version from GitHub
 get_latest_version() {
     local response
-    response=$(curl -sf "${GITHUB_API}/releases/latest" 2>/dev/null) || {
-        log_error "Could not reach GitHub API. Check your internet connection."
-        exit 1
-    }
+
+    # Try /releases/latest first (excludes pre-releases)
+    response=$(gh_curl "${GITHUB_API}/releases/latest" 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+        # Fall back to all releases (includes pre-releases)
+        response=$(gh_curl "${GITHUB_API}/releases" 2>/dev/null)
+        if [ $? -ne 0 ] || [ -z "$response" ]; then
+            if [ -z "$GH_AUTH_HEADER" ]; then
+                log_error "Could not reach GitHub API. If the repo is private, set GITHUB_TOKEN in .env or environment."
+            else
+                log_error "Could not reach GitHub API. Check your internet connection and token permissions."
+            fi
+            exit 1
+        fi
+        # Get first (most recent) release from the array
+        response=$(echo "$response" | grep -o '{[^{}]*"tag_name"[^{}]*}' | head -1)
+    fi
 
     # Extract tag_name and strip 'v' prefix
     echo "$response" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"v\?\([^"]*\)"/\1/'
@@ -144,6 +212,26 @@ update_docker() {
     if grep -q "ghcr.io/sbr0nch/sentrikat:" "${install_dir}/docker-compose.yml"; then
         sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${version}|g" "${install_dir}/docker-compose.yml"
         log_info "Updated image tag to ${version}"
+    fi
+
+    # Ensure Docker is logged into GHCR for private repos
+    if [ -n "$GH_AUTH_HEADER" ]; then
+        local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+        if [ -z "$token" ]; then
+            for candidate in "./.env" "../.env" "${install_dir}/.env"; do
+                if [ -f "$candidate" ]; then
+                    token=$(grep -E '^GITHUB_TOKEN=' "$candidate" 2>/dev/null | head -1 | cut -d'=' -f2-)
+                    [ -n "$token" ] && break
+                    token=$(grep -E '^GH_TOKEN=' "$candidate" 2>/dev/null | head -1 | cut -d'=' -f2-)
+                    [ -n "$token" ] && break
+                fi
+            done
+        fi
+        if [ -n "$token" ]; then
+            echo "$token" | docker login ghcr.io -u USERNAME --password-stdin 2>/dev/null && \
+                log_info "Logged into ghcr.io" || \
+                log_warn "Could not log into ghcr.io — pull may fail for private images"
+        fi
     fi
 
     # Pull new image
@@ -180,9 +268,14 @@ update_files() {
 
     log_info "Downloading SentriKat v${version}..."
 
-    # Download release package
-    if ! curl -sfL -o "${tmp_dir}/sentrikat-${version}.tar.gz" "$download_url"; then
+    # Download release package (use auth header for private repos)
+    local curl_args=(-sfL -o "${tmp_dir}/sentrikat-${version}.tar.gz")
+    if [ -n "$GH_AUTH_HEADER" ]; then
+        curl_args+=(-H "$GH_AUTH_HEADER")
+    fi
+    if ! curl "${curl_args[@]}" "$download_url"; then
         log_error "Failed to download v${version}. URL: ${download_url}"
+        [ -z "$GH_AUTH_HEADER" ] && log_error "If the repo is private, set GITHUB_TOKEN in .env or environment."
         rm -rf "$tmp_dir"
         exit 1
     fi
@@ -282,6 +375,12 @@ log_info "Installation directory: ${INSTALL_DIR}"
 load_proxy_from_env
 if [ -n "${HTTP_PROXY:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
     log_info "Proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}"
+fi
+
+# Load GitHub token for private repo access
+load_github_token
+if [ -n "$GH_AUTH_HEADER" ]; then
+    log_info "GitHub token: configured"
 fi
 
 # Get current version
