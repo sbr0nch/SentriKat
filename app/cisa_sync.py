@@ -386,7 +386,7 @@ def fetch_cpe_version_data(limit=30):
     Returns:
         int: Number of vulnerabilities enriched with CPE data
     """
-    from app.nvd_cpe_api import match_cve_to_cpe
+    from app.nvd_cpe_api import match_cve_to_cpe_with_status
     import time
 
     from sqlalchemy import or_
@@ -420,8 +420,36 @@ def fetch_cpe_version_data(limit=30):
 
     for vuln in vulns_to_fetch:
         try:
-            # Fetch CPE data with version ranges from NVD
-            cpe_entries = match_cve_to_cpe(vuln.cve_id)
+            # Fetch CPE data with version ranges AND vulnStatus from NVD
+            cpe_entries, nvd_vuln_status = match_cve_to_cpe_with_status(vuln.cve_id)
+
+            # Always update nvd_status from NVD (handles records imported by old code
+            # that never had nvd_status set — critical for recovery)
+            if nvd_vuln_status and hasattr(vuln, 'nvd_status'):
+                vuln.nvd_status = nvd_vuln_status
+
+            # Recovery: if vendor/product are 'Unknown' (imported by old code before
+            # description fallback existed), apply the fallback now
+            if vuln.vendor_project == 'Unknown' and vuln.product == 'Unknown' and vuln.short_description:
+                import re as _re
+                _KNOWN_PRODUCTS = {
+                    r'google\s+chrome': ('Google', 'Chrome'),
+                    r'chromium': ('Chromium', 'Chromium'),
+                    r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
+                    r'microsoft\s+edge': ('Microsoft', 'Edge'),
+                    r'apple\s+safari': ('Apple', 'Safari'),
+                    r'microsoft\s+windows': ('Microsoft', 'Windows'),
+                    r'linux\s+kernel': ('Linux', 'Kernel'),
+                    r'apache\s+(\w+)': ('Apache', None),
+                }
+                desc_lower = vuln.short_description.lower()
+                for pattern, (v, p) in _KNOWN_PRODUCTS.items():
+                    m = _re.search(pattern, desc_lower)
+                    if m:
+                        vuln.vendor_project = v
+                        vuln.product = p or m.group(1).title()
+                        logger.info(f"Recovered vendor/product for {vuln.cve_id}: {v}/{vuln.product}")
+                        break
 
             if cpe_entries:
                 # Store CPE data using the model's method
@@ -434,12 +462,18 @@ def fetch_cpe_version_data(limit=30):
                 # CPE configurations. We must NOT stamp cpe_fetched_at, otherwise
                 # the matching logic permanently treats it as "not affected" and
                 # the CVE is never re-checked even after NVD completes analysis.
-                if getattr(vuln, 'nvd_status', None) in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
-                    logger.info(f"Skipping CPE stamp for {vuln.cve_id} — NVD status: {vuln.nvd_status} (will retry)")
+                effective_status = nvd_vuln_status or getattr(vuln, 'nvd_status', None)
+                if effective_status in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
+                    # Clear stale cpe_fetched_at so the matching logic doesn't
+                    # treat NVD as authoritative when it hasn't analyzed yet
+                    if vuln.cpe_fetched_at:
+                        vuln.cpe_fetched_at = None
+                        vuln.cpe_data = None
+                    logger.info(f"Skipping CPE stamp for {vuln.cve_id} — NVD status: {effective_status} (will retry)")
                 else:
                     vuln.cpe_data = '[]'
                     vuln.cpe_fetched_at = datetime.utcnow()
-                    logger.debug(f"No CPE data found for {vuln.cve_id} (NVD status: {getattr(vuln, 'nvd_status', 'unknown')})")
+                    logger.debug(f"No CPE data found for {vuln.cve_id} (NVD status: {effective_status or 'unknown'})")
 
         except Exception as e:
             logger.warning(f"Failed to fetch CPE data for {vuln.cve_id}: {e}")
@@ -1099,9 +1133,15 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                             if not cve_id or not cve_id.startswith('CVE-'):
                                 continue
 
-                            # Skip if already in DB
+                            # Skip if already in DB — unless record has stale data
+                            # that needs recovery (e.g., imported by old code before
+                            # description fallback existed)
                             existing = Vulnerability.query.filter_by(cve_id=cve_id).first()
-                            if existing:
+                            needs_refresh = (
+                                existing and existing.vendor_project == 'Unknown'
+                                and existing.product == 'Unknown'
+                            )
+                            if existing and not needs_refresh:
                                 skipped += 1
                                 continue
 
@@ -1193,29 +1233,53 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                                         product = p or m.group(1).title()
                                         break
 
-                            # Create vulnerability record
-                            vuln = Vulnerability(
-                                cve_id=cve_id,
-                                vendor_project=vendor or 'Unknown',
-                                product=product or 'Unknown',
-                                vulnerability_name=description[:500],
-                                date_added=datetime.utcnow().date(),
-                                short_description=description,
-                                required_action='Apply vendor patches. (Source: NVD)',
-                                known_ransomware=False,
-                                notes=f'Auto-imported from NVD (severity: {cvss_severity}).',
-                                cvss_score=cvss_score,
-                                severity=cvss_severity,
-                                cvss_source='nvd',
-                                source='nvd',
-                                nvd_status=vuln_status or None,
-                            )
+                            if needs_refresh:
+                                # Update existing stale record (vendor=Unknown recovery)
+                                vuln = existing
+                                if vendor:
+                                    vuln.vendor_project = vendor
+                                if product:
+                                    vuln.product = product
+                                vuln.vulnerability_name = description[:500]
+                                vuln.short_description = description
+                                vuln.nvd_status = vuln_status or None
+                                if cvss_score is not None:
+                                    vuln.cvss_score = cvss_score
+                                if cvss_severity:
+                                    vuln.severity = cvss_severity
+                                # Clear stale CPE stamp for Awaiting Analysis CVEs
+                                # so matching logic doesn't treat NVD as authoritative
+                                if vuln_status in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
+                                    vuln.cpe_fetched_at = None
+                                    vuln.cpe_data = None
+                                if cpe_entries:
+                                    vuln.set_cpe_entries(cpe_entries)
+                                new_count += 1
+                                logger.info(f"Refreshed stale {cve_id}: vendor={vendor or 'Unknown'}, product={product or 'Unknown'}")
+                            else:
+                                # Create new vulnerability record
+                                vuln = Vulnerability(
+                                    cve_id=cve_id,
+                                    vendor_project=vendor or 'Unknown',
+                                    product=product or 'Unknown',
+                                    vulnerability_name=description[:500],
+                                    date_added=datetime.utcnow().date(),
+                                    short_description=description,
+                                    required_action='Apply vendor patches. (Source: NVD)',
+                                    known_ransomware=False,
+                                    notes=f'Auto-imported from NVD (severity: {cvss_severity}).',
+                                    cvss_score=cvss_score,
+                                    severity=cvss_severity,
+                                    cvss_source='nvd',
+                                    source='nvd',
+                                    nvd_status=vuln_status or None,
+                                )
 
-                            if cpe_entries:
-                                vuln.set_cpe_entries(cpe_entries)
+                                if cpe_entries:
+                                    vuln.set_cpe_entries(cpe_entries)
 
-                            db.session.add(vuln)
-                            new_count += 1
+                                db.session.add(vuln)
+                                new_count += 1
 
                         except Exception as e:
                             logger.debug(f"NVD sync: error processing CVE: {e}")

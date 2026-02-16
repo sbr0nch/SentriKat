@@ -118,25 +118,33 @@ def check_cpe_match(vulnerability, product):
                             return [f"CPE match: {cpe_vendor}:{cpe_product} (all versions affected)"], 'cpe', 'high'
     else:
         # No cached CPE data from NVD for this vulnerability.
-        # Two scenarios:
-        # 1. cpe_fetched_at is set → NVD was queried but returned no CPE configs
+        # Three scenarios:
+        # 1. cpe_fetched_at is set + NVD completed analysis → no CPE data exists (authoritative)
         # 2. cpe_fetched_at is None → NVD hasn't been queried yet
+        # 3. NVD status is "Awaiting Analysis" → NVD hasn't analyzed yet (NOT authoritative)
         #
-        # CRITICAL: If the product has a specific version, we MUST NOT create
-        # a match without verifying the version against NVD ranges. Doing so
-        # causes false positives (e.g., Chrome 145.x flagged for CVE affecting
-        # Chrome < 72.x). Wait for CPE data to be fetched instead.
-        if vulnerability.cpe_fetched_at:
-            # NVD was already queried — no CPE data exists for this CVE.
+        # CRITICAL: For scenario 1, NVD is authoritative — don't match.
+        # For scenarios 2 & 3, NVD can't tell us anything yet, so we fall back
+        # to vendor/product text matching to give early visibility.
+
+        # Detect if NVD analysis is still pending (not authoritative)
+        nvd_pending = getattr(vulnerability, 'nvd_status', None) in (
+            'Awaiting Analysis', 'Received', 'Undergoing Analysis'
+        )
+
+        if vulnerability.cpe_fetched_at and not nvd_pending:
+            # NVD was queried AND completed analysis — no CPE data exists.
             # Don't fall back to text matching; NVD is authoritative.
             return [], None, None
 
-        if product.version:
+        if product.version and not nvd_pending:
             # Product has a version but we have no NVD data to verify ranges.
             # Skip — the match will be created once CPE data is fetched.
             return [], None, None
 
-        # Versionless product + no NVD data yet: fall back to text matching.
+        # Fall back to text matching for:
+        # - CVEs where NVD hasn't been queried yet
+        # - CVEs where NVD analysis is pending (Awaiting Analysis)
         # Use STRICT word-boundary matching to prevent false positives.
         vuln_vendor = normalize_string(vulnerability.vendor_project)
         vuln_product = normalize_string(vulnerability.product)
@@ -160,6 +168,8 @@ def check_cpe_match(vulnerability, product):
         product_match = is_word_match(normalized_cpe_product, vuln_product) or is_word_match(vuln_product, normalized_cpe_product)
 
         if vendor_match and product_match:
+            if nvd_pending:
+                return [f"CPE inference: {cpe_vendor}:{cpe_product} (NVD analysis pending — version not yet verified)"], 'cpe', 'medium'
             return [f"CPE inference: {cpe_vendor}:{cpe_product} (NVD version data pending)"], 'cpe', 'medium'
 
     return [], None, None
