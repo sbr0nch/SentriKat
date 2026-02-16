@@ -285,6 +285,64 @@ def get_cpe_for_product(product_name, vendor_name=None):
     return None, None
 
 
+def validate_cpe_assignment(product_vendor, product_name, cpe_vendor, cpe_product):
+    """
+    Sanity-check a CPE assignment to prevent clearly wrong mappings.
+
+    Catches cases like Logitech products getting assigned git-scm:git.
+    The key heuristic: at least one word in the product vendor OR product name
+    must overlap with the CPE vendor OR CPE product. If there's zero overlap,
+    the mapping is almost certainly wrong.
+
+    Args:
+        product_vendor: The product's vendor name (e.g., "Logitech")
+        product_name: The product name (e.g., "Logi Options+")
+        cpe_vendor: The proposed CPE vendor (e.g., "git-scm")
+        cpe_product: The proposed CPE product (e.g., "git")
+
+    Returns:
+        bool: True if the assignment looks reasonable, False if suspicious
+    """
+    if not cpe_vendor or not cpe_product:
+        return False
+
+    # Skip validation for known special markers
+    if cpe_vendor == '_skip':
+        return True
+
+    # Normalize all strings for comparison
+    def to_words(s):
+        if not s:
+            return set()
+        # Split on non-alphanumeric, lowercase, filter short noise words
+        words = set(re.split(r'[^a-z0-9]+', s.lower()))
+        return {w for w in words if len(w) >= 3}
+
+    vendor_words = to_words(product_vendor)
+    product_words = to_words(product_name)
+    all_product_words = vendor_words | product_words
+
+    cpe_vendor_words = to_words(cpe_vendor)
+    cpe_product_words = to_words(cpe_product)
+    all_cpe_words = cpe_vendor_words | cpe_product_words
+
+    # Check for ANY overlap between product info and CPE info
+    overlap = all_product_words & all_cpe_words
+    if overlap:
+        return True
+
+    # Check for substring matches (e.g., "chrome" in "chromium", "fire" in "firefox")
+    for pw in all_product_words:
+        for cw in all_cpe_words:
+            if len(pw) >= 4 and len(cw) >= 4:
+                if pw in cw or cw in pw:
+                    return True
+
+    # No overlap at all — this mapping is almost certainly wrong
+    # e.g., Logitech/Logi Options+ → git-scm/git
+    return False
+
+
 def apply_cpe_to_product(product):
     """
     Apply CPE mapping to a single product if it doesn't have CPE set.
@@ -328,6 +386,15 @@ def apply_cpe_to_product(product):
             pass
 
     if cpe_vendor and cpe_product:
+        # Sanity check: prevent clearly wrong mappings
+        if not validate_cpe_assignment(product.vendor, product.product_name,
+                                       cpe_vendor, cpe_product):
+            import logging
+            logging.getLogger(__name__).warning(
+                f"CPE sanity check BLOCKED: {product.vendor}/{product.product_name} "
+                f"→ {cpe_vendor}:{cpe_product} (no word overlap)"
+            )
+            return False
         product.cpe_vendor = cpe_vendor
         product.cpe_product = cpe_product
         return True
@@ -442,7 +509,16 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
                 )
                 nvd_lookups += 1
 
-                if cpe_vendor and cpe_product and confidence >= 0.5:
+                if cpe_vendor and cpe_product and confidence >= 0.6:
+                    # Sanity check: prevent clearly wrong mappings
+                    if not validate_cpe_assignment(product.vendor, product.product_name,
+                                                   cpe_vendor, cpe_product):
+                        logger.warning(
+                            f"CPE sanity check BLOCKED (NVD): {product.vendor}/{product.product_name} "
+                            f"→ {cpe_vendor}:{cpe_product} (confidence={confidence:.0%}, no word overlap)"
+                        )
+                        continue
+
                     # Apply to this product
                     product.cpe_vendor = cpe_vendor
                     product.cpe_product = cpe_product
