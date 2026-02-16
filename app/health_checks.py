@@ -91,6 +91,18 @@ HEALTH_CHECKS = {
         'description': 'Checks for excessive items in the import queue',
         'default_enabled': True,
     },
+    'api_source_status': {
+        'category': 'sync',
+        'label': 'API Source Status',
+        'description': 'Checks if CVSS enrichment is using the primary source (NVD) or fallback sources',
+        'default_enabled': True,
+    },
+    'sync_retry_status': {
+        'category': 'sync',
+        'label': 'Sync Retry Status',
+        'description': 'Tracks whether the CISA sync is retrying after a failure',
+        'default_enabled': True,
+    },
 }
 
 
@@ -564,6 +576,74 @@ def check_queue_throughput():
                 f'Error checking throughput: {str(e)[:200]}')
 
 
+def check_api_source_status():
+    """
+    Check if CVSS enrichment is using the primary source (NVD) or fallback sources.
+
+    Reads from the api_source_status HealthCheckResult which is recorded
+    by enrich_with_cvss_data() after each sync. Also checks for vulns
+    still on fallback sources that haven't been re-enriched yet.
+    """
+    try:
+        from app.models import Vulnerability
+
+        # Count vulns currently on fallback sources
+        fallback_count = Vulnerability.query.filter(
+            Vulnerability.cvss_source.in_(['cve_org', 'euvd']),
+            Vulnerability.cvss_score.isnot(None),
+            Vulnerability.cvss_score > 0
+        ).count()
+
+        if fallback_count == 0:
+            _record('api_source_status', 'ok',
+                    'All CVSS scores from NVD (primary source)',
+                    value='NVD primary',
+                    details={'fallback_vulns': 0})
+        else:
+            total_with_cvss = Vulnerability.query.filter(
+                Vulnerability.cvss_score.isnot(None),
+                Vulnerability.cvss_score > 0
+            ).count()
+            pct = round(fallback_count / max(1, total_with_cvss) * 100, 1)
+            status = 'warning' if pct > 5 else 'ok'
+            _record('api_source_status', status,
+                    f'{fallback_count} vulnerabilities using fallback CVSS sources '
+                    f'({pct}%). Auto re-enrichment will retry NVD.',
+                    value=f'{fallback_count} fallback',
+                    details={'fallback_vulns': fallback_count, 'total_with_cvss': total_with_cvss,
+                             'fallback_pct': pct})
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        _record('api_source_status', 'error',
+                f'Error checking API source status: {str(e)[:200]}')
+
+
+def check_sync_retry_status():
+    """
+    Check if the CISA sync is in retry state.
+
+    This is a passthrough check - the actual state is recorded by
+    _record_sync_retry_status() in scheduler.py when retries happen.
+    Here we just verify the existing record is still relevant.
+    """
+    try:
+        existing = HealthCheckResult.query.filter_by(check_name='sync_retry_status').first()
+        if not existing:
+            # No record yet - first run, record OK
+            _record('sync_retry_status', 'ok', 'Sync operating normally', value='OK')
+        # Otherwise, keep the existing status (managed by scheduler retry logic)
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        _record('sync_retry_status', 'error',
+                f'Error checking retry status: {str(e)[:200]}')
+
+
 def check_pending_import_queue():
     """Check for excessive items in the import queue."""
     try:
@@ -607,6 +687,8 @@ CHECK_FUNCTIONS = {
     'license_status': check_license_status,
     'smtp_connectivity': check_smtp_connectivity,
     'pending_import_queue': check_pending_import_queue,
+    'api_source_status': check_api_source_status,
+    'sync_retry_status': check_sync_retry_status,
 }
 
 

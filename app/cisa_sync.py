@@ -462,6 +462,45 @@ def enrich_with_cvss_data(limit=50):
     db.session.commit()
     sources_summary = ', '.join(f'{k}={v}' for k, v in source_stats.items() if v > 0)
     logger.info(f"Enriched {enriched_count} vulnerabilities with CVSS data ({sources_summary})")
+
+    # Record source stats for health monitoring / degradation detection
+    try:
+        from app.models import HealthCheckResult
+        fallback_count = source_stats.get('cve_org', 0) + source_stats.get('euvd', 0)
+        nvd_count = source_stats.get('nvd', 0)
+        total_sourced = nvd_count + fallback_count
+
+        if total_sourced > 0 and fallback_count > 0:
+            pct_fallback = round(fallback_count / total_sourced * 100, 1)
+            if nvd_count == 0:
+                status = 'warning'
+                msg = (f'NVD unavailable during last enrichment. '
+                       f'All {fallback_count} scores from fallback sources '
+                       f'({sources_summary}). Will retry NVD automatically.')
+            else:
+                status = 'warning' if pct_fallback > 50 else 'ok'
+                msg = (f'{pct_fallback}% of CVSS scores from fallback sources '
+                       f'({sources_summary}). NVD partially degraded.')
+            HealthCheckResult.record(
+                'api_source_status', 'sync', status, msg,
+                value=f'{pct_fallback}% fallback',
+                details={
+                    'nvd': nvd_count, 'cve_org': source_stats.get('cve_org', 0),
+                    'euvd': source_stats.get('euvd', 0),
+                    'total': total_sourced, 'fallback_pct': pct_fallback
+                }
+            )
+        elif total_sourced > 0:
+            HealthCheckResult.record(
+                'api_source_status', 'sync', 'ok',
+                f'All {nvd_count} CVSS scores from NVD (primary source)',
+                value='NVD primary',
+                details={'nvd': nvd_count, 'cve_org': 0, 'euvd': 0,
+                         'total': total_sourced, 'fallback_pct': 0}
+            )
+    except Exception as rec_err:
+        logger.debug(f"Could not record source stats: {rec_err}")
+
     return enriched_count
 
 def enrich_with_euvd_exploited():
@@ -763,3 +802,51 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
             'error': str(e),
             'duration': duration
         }
+
+
+def reenrich_fallback_cvss(limit=50):
+    """
+    Re-try NVD (primary source) for vulnerabilities whose CVSS scores
+    were obtained from fallback sources (CVE.org, ENISA EUVD).
+
+    This closes the gap when NVD was temporarily unavailable during the
+    initial enrichment. On success the vulnerability's cvss_source is
+    upgraded to 'nvd'.
+
+    Args:
+        limit: Maximum CVEs to re-enrich per run (respects NVD rate limits)
+
+    Returns:
+        (upgraded_count, checked_count)
+    """
+    from app.nvd_api import _fetch_cvss_from_nvd
+
+    vulns = Vulnerability.query.filter(
+        Vulnerability.cvss_source.in_(['cve_org', 'euvd']),
+        Vulnerability.cvss_score.isnot(None),
+        Vulnerability.cvss_score > 0
+    ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
+
+    if not vulns:
+        return 0, 0
+
+    upgraded = 0
+    for vuln in vulns:
+        try:
+            score, severity = _fetch_cvss_from_nvd(vuln.cve_id)
+            if score is not None:
+                vuln.cvss_score = score
+                vuln.severity = severity
+                vuln.cvss_source = 'nvd'
+                upgraded += 1
+        except Exception:
+            continue
+
+    if upgraded:
+        db.session.commit()
+        logger.info(
+            f"CVSS re-enrichment: upgraded {upgraded}/{len(vulns)} "
+            f"from fallback to NVD"
+        )
+
+    return upgraded, len(vulns)

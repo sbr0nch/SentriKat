@@ -577,6 +577,36 @@ def system_notifications():
             except Exception:
                 pass
 
+        # 9. Sync retry / API source degradation - admin only
+        if is_admin:
+            try:
+                from app.models import HealthCheckResult as HCR
+                # Sync retry status
+                retry_hc = HCR.query.filter_by(check_name='sync_retry_status').first()
+                if retry_hc and retry_hc.status in ('warning', 'critical'):
+                    notifications.append({
+                        'id': 'sync_retry',
+                        'level': 'warning' if retry_hc.status == 'warning' else 'danger',
+                        'icon': 'bi-arrow-repeat',
+                        'message': retry_hc.message,
+                        'action': {'label': 'Health Checks', 'url': '/admin-panel#settings:health'},
+                        'dismissible': True
+                    })
+
+                # API source degradation (CVSS from fallback sources)
+                source_hc = HCR.query.filter_by(check_name='api_source_status').first()
+                if source_hc and source_hc.status == 'warning':
+                    notifications.append({
+                        'id': 'api_source_degraded',
+                        'level': 'info',
+                        'icon': 'bi-exclamation-triangle',
+                        'message': source_hc.message,
+                        'action': {'label': 'Health Checks', 'url': '/admin-panel#settings:health'},
+                        'dismissible': True
+                    })
+            except Exception:
+                pass
+
     except Exception as e:
         logger.error(f"Error fetching system notifications: {e}")
 
@@ -3989,6 +4019,31 @@ def system_health():
         'with_cpe_data': with_cpe_data,
         'last_sync': last_sync.isoformat() if last_sync else None,
     }
+
+    # API source freshness / degradation status
+    try:
+        from app.models import HealthCheckResult
+        source_hc = HealthCheckResult.query.filter_by(check_name='api_source_status').first()
+        retry_hc = HealthCheckResult.query.filter_by(check_name='sync_retry_status').first()
+
+        # Count vulns on fallback sources
+        fallback_count = Vulnerability.query.filter(
+            Vulnerability.cvss_source.in_(['cve_org', 'euvd']),
+            Vulnerability.cvss_score > 0
+        ).count()
+
+        result['api_sources'] = {
+            'status': source_hc.status if source_hc else 'unknown',
+            'message': source_hc.message if source_hc else None,
+            'last_checked': source_hc.checked_at.isoformat() if source_hc and source_hc.checked_at else None,
+            'fallback_count': fallback_count,
+            'sync_retry': {
+                'status': retry_hc.status if retry_hc else 'ok',
+                'message': retry_hc.message if retry_hc else None,
+            } if retry_hc else None,
+        }
+    except Exception:
+        result['api_sources'] = {'status': 'unknown'}
 
     return jsonify(result)
 
