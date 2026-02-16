@@ -386,7 +386,7 @@ def fetch_cpe_version_data(limit=30):
     Returns:
         int: Number of vulnerabilities enriched with CPE data
     """
-    from app.nvd_cpe_api import match_cve_to_cpe
+    from app.nvd_cpe_api import match_cve_to_cpe_with_status
     import time
 
     from sqlalchemy import or_
@@ -420,8 +420,13 @@ def fetch_cpe_version_data(limit=30):
 
     for vuln in vulns_to_fetch:
         try:
-            # Fetch CPE data with version ranges from NVD
-            cpe_entries = match_cve_to_cpe(vuln.cve_id)
+            # Fetch CPE data with version ranges AND vulnStatus from NVD
+            cpe_entries, nvd_vuln_status = match_cve_to_cpe_with_status(vuln.cve_id)
+
+            # Always update nvd_status from NVD (handles records imported by old code
+            # that never had nvd_status set — critical for recovery)
+            if nvd_vuln_status and hasattr(vuln, 'nvd_status'):
+                vuln.nvd_status = nvd_vuln_status
 
             if cpe_entries:
                 # Store CPE data using the model's method
@@ -434,12 +439,13 @@ def fetch_cpe_version_data(limit=30):
                 # CPE configurations. We must NOT stamp cpe_fetched_at, otherwise
                 # the matching logic permanently treats it as "not affected" and
                 # the CVE is never re-checked even after NVD completes analysis.
-                if getattr(vuln, 'nvd_status', None) in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
-                    logger.info(f"Skipping CPE stamp for {vuln.cve_id} — NVD status: {vuln.nvd_status} (will retry)")
+                effective_status = nvd_vuln_status or getattr(vuln, 'nvd_status', None)
+                if effective_status in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
+                    logger.info(f"Skipping CPE stamp for {vuln.cve_id} — NVD status: {effective_status} (will retry)")
                 else:
                     vuln.cpe_data = '[]'
                     vuln.cpe_fetched_at = datetime.utcnow()
-                    logger.debug(f"No CPE data found for {vuln.cve_id} (NVD status: {getattr(vuln, 'nvd_status', 'unknown')})")
+                    logger.debug(f"No CPE data found for {vuln.cve_id} (NVD status: {effective_status or 'unknown'})")
 
         except Exception as e:
             logger.warning(f"Failed to fetch CPE data for {vuln.cve_id}: {e}")

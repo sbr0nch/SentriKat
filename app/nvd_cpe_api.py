@@ -689,6 +689,86 @@ def match_cve_to_cpe(cve_id: str) -> List[Dict]:
         return []
 
 
+def match_cve_to_cpe_with_status(cve_id: str) -> Tuple[List[Dict], Optional[str]]:
+    """
+    Get CPE entries affected by a specific CVE, plus the NVD vulnStatus.
+
+    Same as match_cve_to_cpe but also returns NVD analysis status so callers
+    can distinguish "NVD hasn't analyzed this yet" from "no CPE data exists."
+
+    Returns:
+        Tuple of (affected_cpes, vuln_status)
+        vuln_status is e.g. 'Awaiting Analysis', 'Analyzed', 'Received', or None
+    """
+    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    params = {'cveId': cve_id}
+
+    api_key = _get_api_key()
+    headers = {}
+    if api_key:
+        headers['apiKey'] = api_key
+
+    _rate_limit()
+
+    try:
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        response = requests.get(
+            url,
+            params=params,
+            headers=headers,
+            timeout=15,
+            proxies=proxies,
+            verify=verify_ssl
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            vulnerabilities = data.get('vulnerabilities', [])
+
+            if not vulnerabilities:
+                return [], None
+
+            cve_data = vulnerabilities[0].get('cve', {})
+            vuln_status = cve_data.get('vulnStatus')
+            configurations = cve_data.get('configurations', [])
+
+            affected_cpes = []
+            for config in configurations:
+                nodes = config.get('nodes', [])
+                for node in nodes:
+                    cpe_matches = node.get('cpeMatch', [])
+                    for match in cpe_matches:
+                        if match.get('vulnerable', False):
+                            cpe_uri = match.get('criteria', '')
+                            parsed = parse_cpe_uri(cpe_uri)
+                            cpe_version = parsed.get('version', '*')
+                            has_range = (match.get('versionStartIncluding') or match.get('versionStartExcluding')
+                                        or match.get('versionEndIncluding') or match.get('versionEndExcluding'))
+                            affected_cpes.append({
+                                'cpe_uri': cpe_uri,
+                                'vendor': parsed['vendor'],
+                                'product': parsed['product'],
+                                'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),
+                                'version_end': match.get('versionEndIncluding') or match.get('versionEndExcluding'),
+                                'version_start_type': 'including' if match.get('versionStartIncluding') else 'excluding' if match.get('versionStartExcluding') else None,
+                                'version_end_type': 'including' if match.get('versionEndIncluding') else 'excluding' if match.get('versionEndExcluding') else None,
+                                'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
+                            })
+
+            return affected_cpes, vuln_status
+
+        return [], None
+
+    except Exception as e:
+        logger.error(f"Error fetching CVE CPE data with status: {str(e)}")
+        return [], None
+
+
 def check_product_affected(
     cpe_vendor: str,
     cpe_product: str,

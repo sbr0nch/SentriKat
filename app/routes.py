@@ -3923,15 +3923,26 @@ def lookup_single_cve(cve_id):
 
     # Check if already in DB
     existing = Vulnerability.query.filter_by(cve_id=cve_id).first()
-    if existing:
-        return jsonify({
-            'status': 'already_exists',
-            'cve_id': cve_id,
-            'vendor': existing.vendor_project,
-            'product': existing.product,
-            'cpe_data': existing.cpe_data,
-            'message': f'{cve_id} already in database'
-        })
+    force_refresh = request.args.get('force', '').lower() in ('1', 'true', 'yes')
+
+    # If exists and not forcing refresh, allow refresh if data looks stale
+    # (vendor=Unknown or no CPE data despite being old enough for NVD to have analyzed)
+    if existing and not force_refresh:
+        needs_refresh = (
+            existing.vendor_project == 'Unknown' or
+            (existing.cpe_data in (None, '[]') and existing.vendor_project == 'Unknown')
+        )
+        if not needs_refresh:
+            return jsonify({
+                'status': 'already_exists',
+                'cve_id': cve_id,
+                'vendor': existing.vendor_project,
+                'product': existing.product,
+                'cpe_data': existing.cpe_data,
+                'message': f'{cve_id} already in database'
+            })
+        # Fall through to refresh stale data
+        force_refresh = True
 
     # Query NVD
     try:
@@ -4041,35 +4052,57 @@ def lookup_single_cve(cve_id):
                     product_name = p
                     break
 
-        vuln = Vulnerability(
-            cve_id=cve_id,
-            vendor_project=vendor or 'Unknown',
-            product=product_name or 'Unknown',
-            vulnerability_name=description[:500],
-            date_added=datetime.utcnow().date(),
-            short_description=description,
-            required_action='Apply vendor patches. (Source: NVD — manual lookup)',
-            known_ransomware=False,
-            notes=f'Manually imported from NVD (severity: {cvss_severity}, status: {vuln_status}).',
-            cvss_score=cvss_score,
-            severity=cvss_severity,
-            cvss_source='nvd',
-            source='nvd',
-            nvd_status=vuln_status or None,
-        )
+        if existing and force_refresh:
+            # Update existing record with fresh NVD data
+            vuln = existing
+            if vendor or vuln.vendor_project == 'Unknown':
+                vuln.vendor_project = vendor or vuln.vendor_project
+            if product_name or vuln.product == 'Unknown':
+                vuln.product = product_name or vuln.product
+            vuln.vulnerability_name = description[:500]
+            vuln.short_description = description
+            if cvss_score is not None:
+                vuln.cvss_score = cvss_score
+            if cvss_severity:
+                vuln.severity = cvss_severity
+            vuln.nvd_status = vuln_status or None
+            vuln.notes = f'Refreshed from NVD (severity: {cvss_severity}, status: {vuln_status}).'
+            status_label = 'refreshed'
+        else:
+            vuln = Vulnerability(
+                cve_id=cve_id,
+                vendor_project=vendor or 'Unknown',
+                product=product_name or 'Unknown',
+                vulnerability_name=description[:500],
+                date_added=datetime.utcnow().date(),
+                short_description=description,
+                required_action='Apply vendor patches. (Source: NVD — manual lookup)',
+                known_ransomware=False,
+                notes=f'Manually imported from NVD (severity: {cvss_severity}, status: {vuln_status}).',
+                cvss_score=cvss_score,
+                severity=cvss_severity,
+                cvss_source='nvd',
+                source='nvd',
+                nvd_status=vuln_status or None,
+            )
+            db.session.add(vuln)
+            status_label = 'imported'
 
         if cpe_entries:
             vuln.set_cpe_entries(cpe_entries)
+        elif force_refresh and vuln.nvd_status in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
+            # Clear stale CPE stamp so the CVE stays in the retry queue
+            vuln.cpe_data = None
+            vuln.cpe_fetched_at = None
 
-        db.session.add(vuln)
         db.session.commit()
 
-        # Trigger rematch for this new CVE
+        # Trigger rematch for this CVE
         from app.filters import rematch_all_products
         removed, matched = rematch_all_products()
 
         return jsonify({
-            'status': 'imported',
+            'status': status_label,
             'cve_id': cve_id,
             'vendor': vuln.vendor_project,
             'product': vuln.product,
@@ -4078,7 +4111,7 @@ def lookup_single_cve(cve_id):
             'nvd_status': vuln_status,
             'has_cpe_data': bool(cpe_entries),
             'matches_created': matched,
-            'message': f'{cve_id} imported successfully'
+            'message': f'{cve_id} {status_label} successfully'
         })
 
     except Exception as e:
