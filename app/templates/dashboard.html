@@ -1836,6 +1836,7 @@
                                         ${epssBadge}
                                         ${ransomwareBadge}
                                         ${ackBadge}
+                                        ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV + EUVD</span>' : '<span class="badge" style="background-color: #2e7d32;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
                                         <span class="badge bg-secondary">
                                             <i class="bi bi-calendar3"></i> Added: ${formatDate(vuln.date_added)} (${vuln.days_old} days ago)
                                         </span>
@@ -3023,6 +3024,7 @@
                                 <span class="badge bg-dark fs-6 me-1">${escapeHtml(vuln.cve_id)}</span>
                             </a>
                             <span class="badge bg-secondary" style="font-size: 0.7rem;"><i class="bi bi-calendar3"></i> ${formatDate(vuln.date_added)}</span>
+                            ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1; font-size: 0.7rem;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0; font-size: 0.7rem;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV+EUVD</span>' : '<span class="badge" style="background-color: #2e7d32; font-size: 0.7rem;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
                         </div>
                     </div>
                     <h6 class="mb-2 fw-semibold" style="line-height: 1.3;">${escapeHtml(vuln.vulnerability_name)}</h6>

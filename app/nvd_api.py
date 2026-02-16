@@ -257,6 +257,114 @@ def fetch_cvss_data(cve_id):
     return None, None, None
 
 
+def fetch_cve_details(cve_id):
+    """
+    Fetch full CVE details from NVD API 2.0 for creating new vulnerability entries.
+
+    Used when EUVD reports a CVE that isn't in CISA KEV yet — we need
+    description, vendor/product, CVSS, and CPE data to create a usable record.
+
+    Returns:
+        dict with keys: description, vendor, product, cvss_score, severity,
+                        vulnerability_name, cpe_entries
+        or None if not found.
+    """
+    try:
+        limiter = get_rate_limiter()
+        if not limiter.acquire(timeout=30.0, block=True):
+            logger.warning(f"NVD rate limit timeout for {cve_id}")
+            return None
+
+        url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+        params = {'cveId': cve_id}
+        kwargs = _get_request_kwargs()
+
+        headers = {}
+        api_key = _get_api_key()
+        if api_key:
+            headers['apiKey'] = api_key
+
+        response = requests.get(url, params=params, headers=headers,
+                                timeout=15, **kwargs)
+
+        if response.status_code != 200:
+            logger.warning(f"NVD API error for {cve_id}: {response.status_code}")
+            return None
+
+        data = response.json()
+        vulnerabilities = data.get('vulnerabilities', [])
+        if not vulnerabilities:
+            return None
+
+        cve_data = vulnerabilities[0].get('cve', {})
+        result = {
+            'description': '',
+            'vendor': '',
+            'product': '',
+            'vulnerability_name': '',
+            'cvss_score': None,
+            'severity': None,
+            'cpe_entries': [],
+        }
+
+        # Extract English description
+        descriptions = cve_data.get('descriptions', [])
+        for desc in descriptions:
+            if desc.get('lang') == 'en':
+                result['description'] = desc.get('value', '')
+                result['vulnerability_name'] = desc.get('value', '')[:500]
+                break
+
+        # Extract CVSS score
+        metrics = cve_data.get('metrics', {})
+        if 'cvssMetricV31' in metrics and metrics['cvssMetricV31']:
+            cvss_data = metrics['cvssMetricV31'][0]['cvssData']
+            result['cvss_score'] = cvss_data.get('baseScore')
+            result['severity'] = cvss_data.get('baseSeverity')
+        elif 'cvssMetricV30' in metrics and metrics['cvssMetricV30']:
+            cvss_data = metrics['cvssMetricV30'][0]['cvssData']
+            result['cvss_score'] = cvss_data.get('baseScore')
+            result['severity'] = cvss_data.get('baseSeverity')
+
+        # Extract CPE entries with version ranges + vendor/product
+        from app.nvd_cpe_api import parse_cpe_uri
+        configurations = cve_data.get('configurations', [])
+        for config in configurations:
+            for node in config.get('nodes', []):
+                for match in node.get('cpeMatch', []):
+                    if not match.get('vulnerable', False):
+                        continue
+                    cpe_uri = match.get('criteria', '')
+                    parsed = parse_cpe_uri(cpe_uri)
+
+                    # Use first vendor/product as the CVE's vendor/product
+                    if not result['vendor'] and parsed.get('vendor'):
+                        result['vendor'] = parsed['vendor'].replace('_', ' ').title()
+                    if not result['product'] and parsed.get('product'):
+                        result['product'] = parsed['product'].replace('_', ' ').title()
+
+                    cpe_version = parsed.get('version', '*')
+                    has_range = (match.get('versionStartIncluding') or match.get('versionStartExcluding')
+                                or match.get('versionEndIncluding') or match.get('versionEndExcluding'))
+
+                    result['cpe_entries'].append({
+                        'cpe_uri': cpe_uri,
+                        'vendor': parsed.get('vendor', ''),
+                        'product': parsed.get('product', ''),
+                        'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),
+                        'version_end': match.get('versionEndIncluding') or match.get('versionEndExcluding'),
+                        'version_start_type': 'including' if match.get('versionStartIncluding') else 'excluding' if match.get('versionStartExcluding') else None,
+                        'version_end_type': 'including' if match.get('versionEndIncluding') else 'excluding' if match.get('versionEndExcluding') else None,
+                        'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
+                    })
+
+        return result
+
+    except Exception as e:
+        logger.warning(f"NVD CVE detail fetch failed for {cve_id}: {e}")
+        return None
+
+
 def fetch_cvss_batch(cve_ids, max_retries=3):
     """
     Fetch CVSS data for multiple CVEs using the multi-source fallback chain.

@@ -337,7 +337,7 @@ def parse_and_store_vulnerabilities(kev_data):
         vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
 
         if vuln:
-            # Update existing vulnerability
+            # Update existing vulnerability (may have been created by EUVD first)
             vuln.vendor_project = vuln_data.get('vendorProject', '')
             vuln.product = vuln_data.get('product', '')
             vuln.vulnerability_name = vuln_data.get('vulnerabilityName', '')
@@ -346,9 +346,13 @@ def parse_and_store_vulnerabilities(kev_data):
             vuln.due_date = due_date
             vuln.known_ransomware = vuln_data.get('knownRansomwareCampaignUse', 'Unknown').lower() == 'known'
             vuln.notes = vuln_data.get('notes', '')
+            # Reconcile source: if EUVD created it, now CISA confirms it
+            if vuln.source == 'euvd':
+                vuln.source = 'cisa_kev+euvd'
+                vuln.date_added = date_added or vuln.date_added
             updated_count += 1
         else:
-            # Create new vulnerability
+            # Create new vulnerability from CISA KEV
             vuln = Vulnerability(
                 cve_id=cve_id,
                 vendor_project=vuln_data.get('vendorProject', ''),
@@ -359,7 +363,8 @@ def parse_and_store_vulnerabilities(kev_data):
                 required_action=vuln_data.get('requiredAction', ''),
                 due_date=due_date,
                 known_ransomware=vuln_data.get('knownRansomwareCampaignUse', 'Unknown').lower() == 'known',
-                notes=vuln_data.get('notes', '')
+                notes=vuln_data.get('notes', ''),
+                source='cisa_kev',
             )
             db.session.add(vuln)
             stored_count += 1
@@ -509,8 +514,15 @@ def enrich_with_euvd_exploited():
     The EUVD tracks actively exploited CVEs from a European perspective,
     complementing the US-centric CISA KEV catalog.
 
-    This adds European threat intelligence without replacing CISA KEV data.
+    Two roles:
+    1. ENRICH existing CISA KEV entries with EUVD CVSS data
+    2. CREATE new entries for actively exploited CVEs not yet in CISA KEV
+       (zero-day gap coverage — fetches full details from NVD)
+
     License: ENISA IPR Policy (attribution required).
+
+    Returns:
+        tuple: (enriched_count, new_count)
     """
     try:
         kwargs = {}
@@ -528,45 +540,114 @@ def enrich_with_euvd_exploited():
 
         if response.status_code != 200:
             logger.warning(f"EUVD exploited API returned {response.status_code}")
-            return 0
+            return 0, 0
 
         data = response.json()
         items = data.get('items', [])
         if not items:
-            return 0
+            return 0, 0
 
         enriched = 0
+        new_count = 0
+        new_cve_ids = []
+
         for item in items:
             cve_id = item.get('cveId')
             if not cve_id:
                 continue
 
             vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
-            if not vuln:
-                continue
 
-            # If we have EUVD CVSS but no score yet, use it
-            euvd_score = item.get('baseScore') or item.get('cvssScore')
-            if euvd_score and (vuln.cvss_score is None or vuln.cvss_score == 0.0):
-                vuln.cvss_score = float(euvd_score)
-                severity = item.get('baseSeverity')
-                if severity:
-                    vuln.severity = severity.upper()
-                else:
-                    from app.nvd_api import _score_to_severity
-                    vuln.severity = _score_to_severity(vuln.cvss_score)
-                vuln.cvss_source = 'euvd'
-                enriched += 1
+            if vuln:
+                # Existing CVE — enrich with EUVD CVSS if missing
+                euvd_score = item.get('baseScore') or item.get('cvssScore')
+                if euvd_score and (vuln.cvss_score is None or vuln.cvss_score == 0.0):
+                    vuln.cvss_score = float(euvd_score)
+                    severity = item.get('baseSeverity')
+                    if severity:
+                        vuln.severity = severity.upper()
+                    else:
+                        from app.nvd_api import _score_to_severity
+                        vuln.severity = _score_to_severity(vuln.cvss_score)
+                    vuln.cvss_source = 'euvd'
+                    enriched += 1
+            else:
+                # NEW CVE not in CISA KEV — create entry from EUVD + NVD
+                new_cve_ids.append((cve_id, item))
 
-        if enriched > 0:
+        # Batch-create new EUVD entries (fetch details from NVD)
+        if new_cve_ids:
+            from app.nvd_api import fetch_cve_details, _score_to_severity
+            logger.info(f"EUVD: {len(new_cve_ids)} exploited CVEs not in CISA KEV — fetching from NVD")
+
+            for cve_id, euvd_item in new_cve_ids:
+                try:
+                    # Fetch full CVE details from NVD
+                    details = fetch_cve_details(cve_id)
+
+                    # Use EUVD CVSS as fallback if NVD didn't provide one
+                    euvd_score = euvd_item.get('baseScore') or euvd_item.get('cvssScore')
+                    euvd_severity = euvd_item.get('baseSeverity')
+
+                    if details:
+                        cvss_score = details['cvss_score'] or (float(euvd_score) if euvd_score else None)
+                        severity = details['severity'] or (euvd_severity.upper() if euvd_severity else _score_to_severity(cvss_score))
+                        cvss_source = 'nvd' if details['cvss_score'] else ('euvd' if euvd_score else None)
+                        vendor = details['vendor'] or 'Unknown'
+                        product = details['product'] or 'Unknown'
+                        description = details['description'] or f'Actively exploited vulnerability {cve_id} (details pending)'
+                        vuln_name = details['vulnerability_name'] or cve_id
+                    else:
+                        # NVD unavailable — use what EUVD provides
+                        cvss_score = float(euvd_score) if euvd_score else None
+                        severity = euvd_severity.upper() if euvd_severity else _score_to_severity(cvss_score)
+                        cvss_source = 'euvd' if euvd_score else None
+                        vendor = euvd_item.get('vendorProject', '') or 'Unknown'
+                        product = euvd_item.get('product', '') or 'Unknown'
+                        description = euvd_item.get('description', '') or f'Actively exploited vulnerability {cve_id} (details pending from NVD)'
+                        vuln_name = description[:500]
+
+                    vuln = Vulnerability(
+                        cve_id=cve_id,
+                        vendor_project=vendor,
+                        product=product,
+                        vulnerability_name=vuln_name[:500],
+                        date_added=datetime.utcnow().date(),
+                        short_description=description,
+                        required_action='Apply vendor patches immediately. (Detected via ENISA EUVD — not yet in CISA KEV)',
+                        due_date=None,
+                        known_ransomware=False,
+                        notes='Auto-created from ENISA EUVD exploited vulnerabilities feed.',
+                        cvss_score=cvss_score,
+                        severity=severity,
+                        cvss_source=cvss_source,
+                        source='euvd',
+                    )
+
+                    # Store CPE data if available from NVD
+                    if details and details.get('cpe_entries'):
+                        vuln.set_cpe_entries(details['cpe_entries'])
+
+                    db.session.add(vuln)
+                    new_count += 1
+                    logger.info(f"EUVD: created entry for {cve_id} ({vendor} {product})")
+
+                except Exception as e:
+                    logger.warning(f"EUVD: failed to create entry for {cve_id}: {e}")
+                    continue
+
+        if enriched > 0 or new_count > 0:
             db.session.commit()
-            logger.info(f"EUVD: enriched {enriched} vulnerabilities with European exploit intelligence")
+            if enriched:
+                logger.info(f"EUVD: enriched {enriched} existing vulnerabilities")
+            if new_count:
+                logger.info(f"EUVD: created {new_count} new vulnerability entries (zero-day gap coverage)")
 
-        return enriched
+        return enriched, new_count
 
     except Exception as e:
         logger.warning(f"EUVD exploited enrichment failed (non-critical): {e}")
-        return 0
+        return 0, 0
 
 
 def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=100):
@@ -606,10 +687,20 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
             enrich_with_cvss_data(limit=cvss_limit)
 
         # Cross-reference with ENISA EUVD exploited vulnerabilities
+        # Also creates NEW entries for actively exploited CVEs not yet in CISA KEV
+        euvd_new_count = 0
         try:
-            enrich_with_euvd_exploited()
+            euvd_enriched, euvd_new_count = enrich_with_euvd_exploited()
         except Exception as e:
             logger.warning(f"EUVD enrichment failed (non-critical): {e}")
+
+        # If EUVD added new vulnerabilities, match them against products
+        if euvd_new_count > 0:
+            try:
+                _, euvd_matches = rematch_all_products()
+                logger.info(f"EUVD: matched {euvd_matches} products against {euvd_new_count} new EUVD entries")
+            except Exception as e:
+                logger.warning(f"EUVD product matching failed (non-critical): {e}")
 
         # Send email alerts for new critical matches
         from app.models import Organization, VulnerabilityMatch
