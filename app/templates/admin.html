@@ -4202,25 +4202,29 @@
     }
 
     // Push update to all outdated agents
-    async function pushUpdateAllAgents() {
-        if (!confirm('Push agent update to all outdated endpoints? Agents will download and install the update on their next poll (within 5 minutes).')) return;
-        try {
-            const response = await fetch('/api/admin/assets/trigger-update-all', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
-            if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.error || `HTTP ${response.status}`);
+    function pushUpdateAllAgents() {
+        showConfirmation(
+            'Push agent update to all outdated endpoints? Agents will download and install the update on their next poll (within 5 minutes).',
+            async () => {
+                try {
+                    const response = await fetch('/api/admin/assets/trigger-update-all', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
+                    });
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.error || `HTTP ${response.status}`);
+                    }
+                    const data = await response.json();
+                    showToast(data.message || `Update pushed to ${data.agents_triggered} agents`, 'success');
+                    loadEndpoints(endpointsPage);
+                    loadAgentVersionSummary();
+                } catch (error) {
+                    showToast(`Failed to push updates: ${error.message}`, 'danger');
+                }
             }
-            const data = await response.json();
-            showToast(data.message || `Update pushed to ${data.agents_triggered} agents`, 'success');
-            loadEndpoints(endpointsPage);
-            loadAgentVersionSummary();
-        } catch (error) {
-            showToast(`Failed to push updates: ${error.message}`, 'danger');
-        }
+        );
     }
 
     // Load endpoints when tab is shown (lazy load)

@@ -235,6 +235,19 @@ def start_scheduler(app):
     )
     logger.info("Background health checks scheduled every 30 minutes")
 
+    # Schedule independent EUVD sync (every 6 hours)
+    # Catches actively exploited zero-days faster than CISA KEV alone.
+    # CISA KEV is US-centric and can lag days behind; ENISA EUVD provides
+    # European/global coverage for exploited CVEs like CVE-2026-2441.
+    scheduler.add_job(
+        func=lambda: _run_with_lock('euvd_sync', euvd_sync_job, app),
+        trigger=IntervalTrigger(hours=6),
+        id='euvd_exploited_sync',
+        name='ENISA EUVD Exploited CVE Sync',
+        replace_existing=True
+    )
+    logger.info("ENISA EUVD exploited CVE sync scheduled every 6 hours")
+
     # Schedule CVSS re-enrichment (every 4 hours)
     # Retries NVD for vulnerabilities that used fallback CVSS sources
     # (CVE.org, ENISA EUVD) due to temporary NVD unavailability
@@ -424,6 +437,36 @@ def _record_sync_retry_status(state, attempt=0, delay=0):
             )
     except Exception as e:
         logger.debug(f"Could not record sync retry status: {e}")
+
+
+def euvd_sync_job(app):
+    """
+    Independent ENISA EUVD sync for faster zero-day coverage.
+
+    Runs every 6 hours to catch actively exploited CVEs that aren't yet
+    in CISA KEV. Creates new vulnerability entries from EUVD and matches
+    them against products.
+    """
+    with app.app_context():
+        try:
+            from app.cisa_sync import enrich_with_euvd_exploited
+            from app.filters import rematch_all_products
+
+            euvd_enriched, euvd_new_count = enrich_with_euvd_exploited()
+
+            if euvd_new_count > 0:
+                _, matches = rematch_all_products()
+                logger.info(
+                    f"EUVD independent sync: {euvd_new_count} new CVEs, "
+                    f"{matches} product matches"
+                )
+            elif euvd_enriched > 0:
+                logger.info(f"EUVD independent sync: enriched {euvd_enriched} existing CVEs")
+            else:
+                logger.debug("EUVD independent sync: no new exploited CVEs")
+
+        except Exception as e:
+            logger.warning(f"EUVD independent sync failed: {e}")
 
 
 def cvss_reenrich_job(app):

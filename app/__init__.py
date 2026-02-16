@@ -177,6 +177,23 @@ def create_app(config_class=Config):
             }
         )
 
+        if force_https:
+            # Exempt internal health check paths from HTTPS redirect.
+            # Docker/nginx health checks use HTTP internally (curl http://localhost:5000/...)
+            # and get stuck in redirect loops when FORCE_HTTPS is enabled.
+            _health_paths = frozenset(['/api/health', '/api/sync/status'])
+
+            @app.before_request
+            def _skip_https_for_internal_health():
+                from flask import request
+                remote = request.remote_addr or ''
+                is_internal = (remote.startswith('127.') or remote == '::1' or
+                               remote.startswith('172.') or remote.startswith('10.') or
+                               remote.startswith('192.168.'))
+                if request.path in _health_paths and is_internal:
+                    # Tell Talisman this request is already secure
+                    request.environ['wsgi.url_scheme'] = 'https'
+
     # Setup comprehensive logging with rotation
     from app.logging_config import setup_logging
     setup_logging(app)

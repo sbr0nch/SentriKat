@@ -641,18 +641,21 @@ def get_version():
 def check_for_updates():
     """Check GitHub for the latest SentriKat release."""
     try:
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+        kwargs = {'timeout': 8, 'headers': {'Accept': 'application/vnd.github.v3+json'},
+                  'proxies': proxies, 'verify': verify_ssl}
+
         # First try /releases/latest (excludes pre-releases)
         resp = http_requests.get(
             f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest',
-            timeout=5,
-            headers={'Accept': 'application/vnd.github.v3+json'}
+            **kwargs
         )
         # If no stable release exists, fall back to the most recent release (including pre-releases)
         if resp.status_code != 200:
             resp = http_requests.get(
                 f'https://api.github.com/repos/{GITHUB_REPO}/releases',
-                timeout=5,
-                headers={'Accept': 'application/vnd.github.v3+json'}
+                **kwargs
             )
             if resp.status_code != 200 or not resp.json():
                 return jsonify({'error': 'Could not reach update server', 'update_available': False}), 200
