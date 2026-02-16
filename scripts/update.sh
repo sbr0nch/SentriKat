@@ -15,11 +15,12 @@
 set -e
 
 REPO="sbr0nch/SentriKat"
-GITHUB_API="https://api.github.com/repos/${REPO}"
+PORTAL_API="${SENTRIKAT_LICENSE_SERVER:-https://license.sentrikat.com/api}"
 CURRENT_VERSION_FILE=""
 CURRENT_VERSION=""
 TARGET_VERSION=""
 CHECK_ONLY=false
+INSTALLATION_ID=""
 
 # Load proxy settings from .env if present (so curl and docker use them)
 load_proxy_from_env() {
@@ -50,6 +51,33 @@ load_proxy_from_env() {
     fi
 }
 
+# Load installation ID for portal API calls
+load_installation_id() {
+    local install_dir="${INSTALL_DIR:-.}"
+
+    # 1. From data/.installation_id file
+    if [ -f "${install_dir}/data/.installation_id" ]; then
+        INSTALLATION_ID=$(cat "${install_dir}/data/.installation_id" 2>/dev/null | tr -d '[:space:]')
+    fi
+
+    # 2. Fallback to environment variable
+    if [ -z "$INSTALLATION_ID" ]; then
+        INSTALLATION_ID="${SENTRIKAT_INSTALLATION_ID:-}"
+    fi
+
+    if [ -z "$INSTALLATION_ID" ]; then
+        log_warn "No installation ID found. Update check will still work but won't be tracked."
+    fi
+}
+
+# Build curl args for portal API
+portal_curl() {
+    local headers=(-H "Content-Type: application/json")
+    [ -n "$INSTALLATION_ID" ] && headers+=(-H "X-Installation-ID: ${INSTALLATION_ID}")
+    [ -n "$CURRENT_VERSION" ] && headers+=(-H "X-App-Version: ${CURRENT_VERSION}")
+    curl -sf "${headers[@]}" "$@"
+}
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -62,10 +90,25 @@ log_ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Detect if a directory is a SentriKat installation
+is_sentrikat_dir() {
+    local dir="$1"
+    # Full installation (source/tarball): has VERSION + app/licensing.py
+    if [ -f "${dir}/VERSION" ] && [ -f "${dir}/app/licensing.py" ]; then
+        return 0
+    fi
+    # Docker-only deployment: has docker-compose.yml referencing sentrikat image
+    if [ -f "${dir}/docker-compose.yml" ] && \
+       grep -q "ghcr.io/sbr0nch/sentrikat" "${dir}/docker-compose.yml" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
 # Find the SentriKat installation directory
 find_install_dir() {
     # 1. Explicit override via environment variable
-    if [ -n "${SENTRIKAT_DIR:-}" ] && [ -f "${SENTRIKAT_DIR}/VERSION" ]; then
+    if [ -n "${SENTRIKAT_DIR:-}" ] && is_sentrikat_dir "$SENTRIKAT_DIR"; then
         echo "$SENTRIKAT_DIR"
         return
     fi
@@ -74,7 +117,7 @@ find_install_dir() {
     local dir
     dir=$(pwd)
     while [ "$dir" != "/" ]; do
-        if [ -f "${dir}/VERSION" ] && [ -f "${dir}/app/licensing.py" ]; then
+        if is_sentrikat_dir "$dir"; then
             echo "$dir"
             return
         fi
@@ -83,7 +126,7 @@ find_install_dir() {
 
     # 3. Check well-known installation paths
     for candidate in /opt/sentrikat /app /data/sentrikat; do
-        if [ -f "${candidate}/VERSION" ] && [ -f "${candidate}/app/licensing.py" ]; then
+        if is_sentrikat_dir "$candidate"; then
             echo "$candidate"
             return
         fi
@@ -99,27 +142,46 @@ get_current_version() {
     if [ -f "${install_dir}/VERSION" ]; then
         CURRENT_VERSION=$(cat "${install_dir}/VERSION" | tr -d '[:space:]')
         CURRENT_VERSION_FILE="${install_dir}/VERSION"
+    elif [ -f "${install_dir}/docker-compose.yml" ]; then
+        # Docker-only deployment: extract version from image tag
+        CURRENT_VERSION=$(grep -o 'ghcr.io/sbr0nch/sentrikat:[^ "]*' "${install_dir}/docker-compose.yml" 2>/dev/null \
+            | head -1 | cut -d: -f2)
+        [ -z "$CURRENT_VERSION" ] && CURRENT_VERSION="unknown"
     else
         CURRENT_VERSION="unknown"
     fi
 }
 
-# Get latest release version from GitHub
+# Get latest release version from the portal
 get_latest_version() {
-    local response
-    response=$(curl -sf "${GITHUB_API}/releases/latest" 2>/dev/null) || {
-        log_error "Could not reach GitHub API. Check your internet connection."
-        exit 1
-    }
+    local response http_code
 
-    # Extract tag_name and strip 'v' prefix
-    echo "$response" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"v\?\([^"]*\)"/\1/'
+    # Query the portal for the latest release
+    http_code=$(portal_curl -o /tmp/sentrikat_latest.json -w '%{http_code}' \
+        "${PORTAL_API}/v1/releases/latest" 2>/dev/null) || true
+
+    if [ "$http_code" = "204" ]; then
+        log_error "No releases published on the portal yet."
+        exit 1
+    fi
+
+    if [ "$http_code" != "200" ] || [ ! -s /tmp/sentrikat_latest.json ]; then
+        log_error "Could not reach SentriKat portal (${PORTAL_API}). Check your internet connection."
+        rm -f /tmp/sentrikat_latest.json
+        exit 1
+    fi
+
+    response=$(cat /tmp/sentrikat_latest.json)
+    rm -f /tmp/sentrikat_latest.json
+
+    # Extract version and strip 'v' prefix
+    echo "$response" | grep -o '"version": *"[^"]*"' | head -1 | sed 's/.*"v\?\([^"]*\)"/\1/'
 }
 
-# Get download URL for a specific version
+# Get download URL for a specific version (served by the portal)
 get_download_url() {
     local version="$1"
-    echo "https://github.com/${REPO}/releases/download/v${version}/sentrikat-${version}.tar.gz"
+    echo "${PORTAL_API}/v1/releases/${version}/download"
 }
 
 # Compare versions (returns 0 if $1 > $2)
@@ -151,8 +213,8 @@ update_docker() {
     cd "${install_dir}"
     if ! (docker compose pull 2>/dev/null || docker-compose pull); then
         log_error "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:${version}"
-        log_error "The image may not exist yet. Check: https://github.com/${REPO}/actions"
-        log_error "If using a tag-triggered CI, ensure you pushed a git tag (v${version})."
+        log_error "The image may not exist yet, or GHCR packages may not be public."
+        log_error "Check: https://github.com/${REPO}/actions"
         # Revert image tag
         sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${CURRENT_VERSION}|g" "${install_dir}/docker-compose.yml"
         log_warn "Reverted docker-compose.yml to v${CURRENT_VERSION}"
@@ -180,8 +242,10 @@ update_files() {
 
     log_info "Downloading SentriKat v${version}..."
 
-    # Download release package
-    if ! curl -sfL -o "${tmp_dir}/sentrikat-${version}.tar.gz" "$download_url"; then
+    # Download release package from portal
+    local curl_args=(-sfL -o "${tmp_dir}/sentrikat-${version}.tar.gz")
+    [ -n "$INSTALLATION_ID" ] && curl_args+=(-H "X-Installation-ID: ${INSTALLATION_ID}")
+    if ! curl "${curl_args[@]}" "$download_url"; then
         log_error "Failed to download v${version}. URL: ${download_url}"
         rm -rf "$tmp_dir"
         exit 1
@@ -283,6 +347,13 @@ load_proxy_from_env
 if [ -n "${HTTP_PROXY:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
     log_info "Proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}"
 fi
+
+# Load installation ID for portal API
+load_installation_id
+if [ -n "$INSTALLATION_ID" ]; then
+    log_info "Installation ID: ${INSTALLATION_ID:0:20}..."
+fi
+log_info "Update server: ${PORTAL_API}"
 
 # Get current version
 get_current_version "$INSTALL_DIR"
