@@ -89,6 +89,43 @@ class TestKeywordMatch:
         keyword_matches = [r for r in match_reasons if 'Keyword' in r]
         assert len(keyword_matches) == 0
 
+    def test_vendor_product_no_false_positive_long_name(self):
+        """Test that generic product names don't false-match longer product names.
+
+        'Microsoft Windows Desktop Targeting Pack' is NOT 'Microsoft Windows'.
+        The word 'Windows' in a much longer product name should not match the
+        vulnerability product 'Windows'.
+        """
+        from app.filters import check_keyword_match
+
+        self.product.vendor = 'Microsoft'
+        self.product.product_name = 'Microsoft Windows Desktop Targeting Pack - 9.0.13 (x64)'
+        self.product.keywords = ''
+        self.vulnerability.vendor_project = 'Microsoft'
+        self.vulnerability.product = 'Windows'
+
+        match_reasons, _, _ = check_keyword_match(self.vulnerability, self.product)
+        assert len(match_reasons) == 0, (
+            "Windows Desktop Targeting Pack should NOT match Windows OS CVEs"
+        )
+
+    def test_vendor_product_matches_with_vendor_prefix(self):
+        """Test that vendor prefix in product name doesn't prevent matching.
+
+        'Mozilla Firefox' should still match vulnerability product 'Firefox'.
+        """
+        from app.filters import check_keyword_match
+
+        self.product.vendor = 'Mozilla'
+        self.product.product_name = 'Mozilla Firefox'
+        self.product.keywords = ''
+        self.vulnerability.vendor_project = 'Mozilla'
+        self.vulnerability.product = 'Firefox'
+
+        match_reasons, method, _ = check_keyword_match(self.vulnerability, self.product)
+        assert len(match_reasons) > 0, "Mozilla Firefox should match Firefox CVEs"
+        assert method == 'vendor_product'
+
 
 class TestCPEMatch:
     """Tests for CPE-based matching."""
