@@ -641,6 +641,7 @@ def get_version():
 def check_for_updates():
     """Check GitHub for the latest SentriKat release."""
     try:
+        from config import Config
         proxies = Config.get_proxies()
         verify_ssl = Config.get_verify_ssl()
         kwargs = {'timeout': 8, 'headers': {'Accept': 'application/vnd.github.v3+json'},

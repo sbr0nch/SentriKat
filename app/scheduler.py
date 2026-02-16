@@ -345,6 +345,15 @@ def cisa_sync_job(app):
             except Exception as remap_err:
                 logger.warning(f"Auto-remap after KEV sync failed: {remap_err}")
 
+            # Clean up any bad auto-learned CPE mappings
+            try:
+                from app.cpe_mapping import cleanup_bad_auto_mappings
+                removed = cleanup_bad_auto_mappings()
+                if removed > 0:
+                    logger.info(f"Cleaned {removed} bad auto_nvd CPE mappings")
+            except Exception as cleanup_err:
+                logger.warning(f"CPE mapping cleanup failed (non-critical): {cleanup_err}")
+
             # Sync succeeded - clear retry state and cancel pending retries
             with _sync_retry_lock:
                 if _sync_retry_count > 0:

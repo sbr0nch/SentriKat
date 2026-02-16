@@ -625,3 +625,46 @@ def suggest_cpe_for_products(limit=50):
                 break
 
     return suggestions
+
+
+def cleanup_bad_auto_mappings():
+    """
+    Remove auto-learned user_cpe_mappings that fail the validation check.
+
+    Scans all mappings with source='auto_nvd' and removes those where the
+    CPE vendor/product has no word overlap with the vendor/product pattern.
+    This catches historically bad mappings like Logitech → git-scm:git.
+
+    Returns:
+        int: Number of mappings removed
+    """
+    from app.models import UserCpeMapping
+
+    bad_mappings = []
+    auto_mappings = UserCpeMapping.query.filter(
+        UserCpeMapping.source == 'auto_nvd'
+    ).all()
+
+    for mapping in auto_mappings:
+        if not validate_cpe_assignment(
+            mapping.vendor_pattern,
+            mapping.product_pattern,
+            mapping.cpe_vendor,
+            mapping.cpe_product
+        ):
+            bad_mappings.append(mapping)
+            logger.info(
+                f"Removing bad auto_nvd mapping: "
+                f"{mapping.vendor_pattern}/{mapping.product_pattern} → "
+                f"{mapping.cpe_vendor}:{mapping.cpe_product}"
+            )
+
+    removed = len(bad_mappings)
+    for mapping in bad_mappings:
+        db.session.delete(mapping)
+
+    if removed > 0:
+        db.session.commit()
+        logger.info(f"Cleaned up {removed} bad auto_nvd CPE mappings")
+
+    return removed
