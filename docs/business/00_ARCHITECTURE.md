@@ -96,7 +96,9 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 
 ### Vulnerability Management
 - **CISA KEV Sync**: Daily automatic sync with CISA Known Exploited Vulnerabilities catalog
+- **NVD Recent CVEs**: Automatic import of HIGH/CRITICAL CVEs every 2 hours (zero-day coverage)
 - **NVD Integration**: Search 800,000+ products in National Vulnerability Database
+- **On-Demand CVE Lookup**: Admin can import any CVE by ID for immediate 0-day response
 - **CVE Matching**: Automatic correlation between installed software and CVEs
 - **EPSS Scoring**: Exploit Prediction Scoring System integration from FIRST.org
 - **Due Date Tracking**: CISA BOD 22-01 compliance with deadline alerts
@@ -345,7 +347,8 @@ SentriKat/
 
 | Job | Schedule | Purpose |
 |-----|----------|---------|
-| CISA KEV Sync | Daily 02:00 UTC | Fetch latest vulnerabilities |
+| CISA KEV Sync | Daily 02:00 UTC | Fetch latest exploited vulnerabilities from CISA |
+| NVD Recent CVEs Sync | Every 2 hours | Import new HIGH/CRITICAL CVEs from NVD (zero-day coverage) |
 | Critical CVE Email | Daily 09:00 UTC | Send alert digests |
 | Data Retention Cleanup | Daily 03:00 UTC | Delete old logs |
 | Vulnerability Snapshot | Daily 02:00 UTC | Historical tracking |
@@ -396,7 +399,7 @@ SentriKat/
                                                          ▼
                                                  ┌─────────────────┐
                                                  │  Vulnerability  │
-                                                 │   (CISA KEV)    │
+                                                 │ (CISA KEV + NVD)│
                                                  └─────────────────┘
 ```
 
@@ -461,7 +464,7 @@ CREATE TABLE product (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- CISA KEV vulnerabilities
+-- Vulnerability data (CISA KEV + NVD)
 CREATE TABLE vulnerability (
     id SERIAL PRIMARY KEY,
     cve_id VARCHAR(20) UNIQUE NOT NULL,
@@ -476,7 +479,10 @@ CREATE TABLE vulnerability (
     cvss_score DECIMAL(3,1),
     severity VARCHAR(20),
     epss_score DECIMAL(5,4),
-    cpe_data JSONB,  -- Cached CPE entries
+    cpe_data JSONB,           -- Cached CPE entries from NVD
+    cpe_fetched_at TIMESTAMP, -- When CPE data was last fetched
+    nvd_status VARCHAR(50),   -- NVD analysis status (Awaiting Analysis, Analyzed, etc.)
+    source VARCHAR(20),       -- Origin: cisa_kev, nvd, euvd
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -593,6 +599,8 @@ POST   /api/products/rematch         # Re-run CVE matching
 GET    /api/vulnerabilities          # List CVEs
 GET    /api/vulnerabilities/stats    # Counts by severity
 GET    /api/vulnerabilities/trends   # Historical data
+POST   /api/sync                     # Manual full sync (CISA KEV + NVD recent CVEs)
+POST   /api/sync/cve/<cve_id>       # On-demand import of a single CVE by ID
 POST   /api/matches/<id>/acknowledge # Mark as handled (sets resolution_reason='manual')
 POST   /api/matches/<id>/unacknowledge  # Reopen for alerts
 POST   /api/matches/<id>/snooze      # Defer alerts
@@ -691,6 +699,76 @@ rather than silently removing the CVE from their dashboard.
 | RPM | rpmvercmp (digit-beats-alpha, segment tokenization) | RHEL, CentOS, Rocky, Alma, Fedora, SUSE |
 | APK | Semver-like with -rN revision suffix | Alpine Linux |
 | generic | Numeric segment comparison | PyPI, npm, other ecosystems |
+
+### 6.3.4 Zero-Day CVE Pipeline
+
+SentriKat is designed to surface zero-day vulnerabilities as quickly as possible, even when
+upstream data sources (NVD, CISA KEV) have incomplete data. This is critical because:
+
+- CISA KEV only lists *known exploited* vulnerabilities — many 0-days aren't added for days/weeks
+- NVD often marks new CVEs as "Awaiting Analysis" for days before adding CPE configuration data
+- Without CPE data, traditional matching cannot link a CVE to affected products
+
+**Multi-Source Ingestion (No Single Point of Failure):**
+
+| Source | Schedule | What It Catches |
+|--------|----------|-----------------|
+| CISA KEV Sync | Daily 02:00 UTC + manual | Known exploited vulnerabilities with due dates |
+| NVD Recent CVEs | Every 2 hours + manual | All HIGH/CRITICAL CVEs published in the last 6 hours |
+| Manual CVE Lookup | On-demand (`POST /api/sync/cve/<id>`) | Any specific CVE by ID (admin 0-day response tool) |
+
+**Handling "Awaiting Analysis" CVEs:**
+
+When NVD publishes a CVE but hasn't completed analysis (no CPE configurations yet):
+
+1. **`nvd_status` tracking** — Each vulnerability stores NVD's analysis state (`Awaiting Analysis`,
+   `Analyzed`, `Received`, `Undergoing Analysis`). This prevents the system from treating
+   "NVD hasn't analyzed it yet" the same as "NVD confirmed it affects nothing."
+
+2. **Description-based vendor/product extraction** — When NVD has no CPE data, the system parses
+   the CVE description to identify the affected product (e.g., "Use after free in CSS in
+   **Google Chrome** prior to 145.0.7632.75" → vendor=Google, product=Chrome). This ensures
+   the CVE appears on the correct dashboard even before NVD adds CPE configurations.
+
+3. **Deferred CPE stamping** — CVEs with `nvd_status` of `Awaiting Analysis`, `Received`, or
+   `Undergoing Analysis` are NOT marked as "checked with no CPE data." They remain in the
+   retry queue and are re-fetched on every sync cycle until NVD completes analysis.
+
+4. **Stale CPE re-check** — Even CVEs that were previously stamped with empty CPE data are
+   automatically re-checked after 24 hours. This recovers CVEs that were imported before the
+   `nvd_status` tracking was in place, and handles edge cases where NVD analysis takes longer
+   than expected.
+
+**Complete Zero-Day Lifecycle:**
+
+```
+0-day dropped (e.g., Chrome CVE published)
+    │
+    ├─→ NVD has it within hours (vulnStatus: "Awaiting Analysis")
+    │       │
+    │       ├─→ Scheduled NVD sync (every 2h) picks it up
+    │       │   OR admin clicks Sync button (now includes NVD)
+    │       │   OR admin uses POST /api/sync/cve/<id> for immediate import
+    │       │
+    │       ├─→ No CPE configs yet → description parsed → vendor=Google, product=Chrome
+    │       ├─→ nvd_status="Awaiting Analysis" → CPE NOT stamped → stays in retry queue
+    │       ├─→ rematch runs → keyword match against Chrome products → appears on dashboard
+    │       │
+    │       └─→ Days later: NVD completes analysis → CPE data fetched → precise version matching
+    │
+    └─→ CISA KEV adds it (if exploited) → due date tracking + alerts
+```
+
+**Admin On-Demand CVE Lookup (`POST /api/sync/cve/<cve_id>`):**
+
+For immediate 0-day response, admins can import any CVE by ID without waiting for scheduled syncs:
+
+```bash
+curl -X POST https://sentrikat.example.com/api/sync/cve/CVE-2026-2441 \
+  -H "Cookie: session=<admin-session>"
+```
+
+Returns: CVE details, whether CPE data was available, and how many product matches were created.
 
 ## 6.4 Agent API
 

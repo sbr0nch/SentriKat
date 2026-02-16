@@ -6516,9 +6516,9 @@ async function checkForUpdates() {
             `;
         } else if (data.error) {
             container.innerHTML = `
-                <small class="text-warning">
-                    <i class="bi bi-exclamation-circle me-1"></i>
-                    ${escapeHtml(data.error)}
+                <small class="text-danger">
+                    <i class="bi bi-wifi-off me-1"></i>
+                    Could not connect to update server. Check your network or try again later.
                 </small>
             `;
         } else {

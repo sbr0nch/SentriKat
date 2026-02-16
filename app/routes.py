@@ -668,10 +668,13 @@ def check_for_updates():
             })
 
         if resp.status_code != 200:
+            # Don't expose raw HTTP status codes to end users.
+            # Non-200 typically means the portal releases endpoint isn't ready yet.
             return jsonify({
-                'error': f'Portal returned {resp.status_code}',
                 'update_available': False,
-            }), 200
+                'current_version': APP_VERSION,
+                'latest_version': APP_VERSION,
+            })
 
         data = resp.json()
         latest_tag = data.get('version', '').lstrip('v')
