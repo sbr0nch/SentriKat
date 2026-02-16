@@ -18,9 +18,10 @@ import logging
 import os
 import uuid
 import socket
+import threading
 from datetime import datetime, date
 from functools import wraps
-from flask import jsonify
+from flask import jsonify, has_request_context
 from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
@@ -492,29 +493,57 @@ class LicenseInfo:
 
 _current_license = None
 _license_load_time = None
-LICENSE_CACHE_SECONDS = 5
+_license_lock = threading.Lock()
+LICENSE_CACHE_SECONDS = 60
 
 
 def get_license():
-    """Get current license info with short caching."""
+    """Get current license info with thread-safe caching (60s TTL)."""
     global _current_license, _license_load_time
 
-    now = datetime.utcnow()
-    if (_current_license is None or
-        _license_load_time is None or
-        (now - _license_load_time).total_seconds() > LICENSE_CACHE_SECONDS):
-        _current_license = load_license()
-        _license_load_time = now
+    # Request-level dedup: avoid re-validating within the same HTTP request
+    if has_request_context():
+        from flask import g
+        cached = getattr(g, '_license_info', None)
+        if cached is not None:
+            return cached
 
-    return _current_license
+    now = datetime.utcnow()
+    # Fast path: check cache without lock
+    if (_current_license is not None and
+        _license_load_time is not None and
+        (now - _license_load_time).total_seconds() <= LICENSE_CACHE_SECONDS):
+        if has_request_context():
+            from flask import g
+            g._license_info = _current_license
+        return _current_license
+
+    # Slow path: acquire lock and reload
+    with _license_lock:
+        # Double-check after acquiring lock (another thread may have refreshed)
+        now = datetime.utcnow()
+        if (_current_license is not None and
+            _license_load_time is not None and
+            (now - _license_load_time).total_seconds() <= LICENSE_CACHE_SECONDS):
+            result = _current_license
+        else:
+            _current_license = load_license()
+            _license_load_time = datetime.utcnow()
+            result = _current_license
+
+    if has_request_context():
+        from flask import g
+        g._license_info = result
+    return result
 
 
 def reload_license():
-    """Force reload license from database"""
+    """Force reload license from database (bypasses cache)."""
     global _current_license, _license_load_time
-    _current_license = load_license()
-    _license_load_time = datetime.utcnow()
-    return _current_license
+    with _license_lock:
+        _current_license = load_license()
+        _license_load_time = datetime.utcnow()
+        return _current_license
 
 
 def load_license():

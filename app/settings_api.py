@@ -199,6 +199,10 @@ ALLOWED_SETTING_KEYS = {
     'gitlab_url', 'gitlab_token', 'gitlab_project_id',
     # Generic Webhook settings
     'webhook_url', 'webhook_method', 'webhook_auth_type', 'webhook_auth_value',
+    # SAML SSO settings
+    'saml_enabled', 'saml_idp_metadata', 'saml_sp_entity_id', 'saml_sp_acs_url',
+    'saml_sp_sls_url', 'saml_default_org_id', 'saml_user_mapping',
+    'saml_auto_provision', 'saml_update_user_info',
 }
 
 
