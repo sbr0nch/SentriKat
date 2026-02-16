@@ -199,6 +199,19 @@ def sample_vulnerability(db_session):
         severity='HIGH'
     )
     db_session.add(vuln)
+    db_session.flush()
+
+    # Add CPE data with version range covering 10.1.18 (the sample_product version).
+    # Real vulnerabilities get this from NVD after the first sync.
+    vuln.set_cpe_entries([{
+        'vendor': 'apache',
+        'product': 'tomcat',
+        'version_start': '10.0.0',
+        'version_end': '10.1.25',
+        'version_start_type': 'including',
+        'version_end_type': 'excluding',
+    }])
+
     db_session.commit()
     return vuln
 
