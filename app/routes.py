@@ -691,14 +691,22 @@ def check_for_updates():
         # Version comparison that handles pre-release tags (e.g., 1.0.0-beta.1)
         def parse_ver(v):
             try:
-                # Split off pre-release suffix: "1.0.0-beta.1" -> ("1.0.0", "beta.1")
+                # Split off pre-release suffix: "1.0.0-beta.4" -> base=(1,0,0) pre=4
                 base = v.split('-', 1)[0]
                 parts = tuple(int(x) for x in base.split('.'))
-                # Pre-release versions sort lower than the same version without suffix
                 is_prerelease = '-' in v
-                return (parts, 0 if is_prerelease else 1)
+                # Extract trailing number from pre-release suffix (beta.4 -> 4)
+                pre_num = 0
+                if is_prerelease:
+                    suffix = v.split('-', 1)[1]
+                    import re as _re
+                    m = _re.search(r'(\d+)$', suffix)
+                    if m:
+                        pre_num = int(m.group(1))
+                # Pre-releases sort lower than stable, but beta.5 > beta.4
+                return (parts, 0 if is_prerelease else 1, pre_num)
             except (ValueError, AttributeError):
-                return ((0, 0, 0), 0)
+                return ((0, 0, 0), 0, 0)
 
         latest_parsed = parse_ver(latest_tag)
         current_parsed = parse_ver(current)

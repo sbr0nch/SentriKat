@@ -638,6 +638,8 @@ def cleanup_bad_auto_mappings():
     Returns:
         int: Number of mappings removed
     """
+    import logging
+    logger = logging.getLogger(__name__)
     from app.models import UserCpeMapping
 
     bad_mappings = []
