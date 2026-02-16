@@ -543,7 +543,7 @@ def enrich_with_euvd_exploited():
             return 0, 0
 
         data = response.json()
-        # EUVD API returns a list directly, not {'items': [...]}
+        # EUVD API returns a bare list of vulnerability dicts
         if isinstance(data, list):
             items = data
         else:
@@ -556,7 +556,20 @@ def enrich_with_euvd_exploited():
         new_cve_ids = []
 
         for item in items:
+            # Skip non-dict items (API sometimes returns mixed structures)
+            if not isinstance(item, dict):
+                continue
+
+            # EUVD uses 'aliases' field (newline-separated) for CVE IDs, not 'cveId'
             cve_id = item.get('cveId')
+            if not cve_id:
+                aliases = item.get('aliases', '')
+                if aliases:
+                    for alias in aliases.split('\n'):
+                        alias = alias.strip()
+                        if alias.startswith('CVE-'):
+                            cve_id = alias
+                            break
             if not cve_id:
                 continue
 
@@ -606,8 +619,23 @@ def enrich_with_euvd_exploited():
                         cvss_score = float(euvd_score) if euvd_score else None
                         severity = euvd_severity.upper() if euvd_severity else _score_to_severity(cvss_score)
                         cvss_source = 'euvd' if euvd_score else None
-                        vendor = euvd_item.get('vendorProject', '') or 'Unknown'
-                        product = euvd_item.get('product', '') or 'Unknown'
+                        # EUVD stores vendor/product in nested arrays
+                        vendor_list = euvd_item.get('enisaIdVendor') or []
+                        product_list = euvd_item.get('enisaIdProduct') or []
+                        vendor = 'Unknown'
+                        product = 'Unknown'
+                        if vendor_list and isinstance(vendor_list[0], dict):
+                            v = vendor_list[0].get('vendor')
+                            if isinstance(v, dict):
+                                vendor = v.get('name', 'Unknown')
+                            elif isinstance(v, str):
+                                vendor = v
+                        if product_list and isinstance(product_list[0], dict):
+                            p = product_list[0].get('product')
+                            if isinstance(p, dict):
+                                product = p.get('name', 'Unknown')
+                            elif isinstance(p, str):
+                                product = p
                         description = euvd_item.get('description', '') or f'Actively exploited vulnerability {cve_id} (details pending from NVD)'
                         vuln_name = description[:500]
 
