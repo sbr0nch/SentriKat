@@ -1121,7 +1121,7 @@ def license_heartbeat():
                 from app import db
                 revoked = SystemSettings.query.filter_by(key='license_revoked').first()
                 if not revoked:
-                    revoked = SystemSettings(key='license_revoked', value='true')
+                    revoked = SystemSettings(key='license_revoked', value='true', category='license')
                     db.session.add(revoked)
                 else:
                     revoked.value = 'true'
