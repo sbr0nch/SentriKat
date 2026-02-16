@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 _job_locks = {}
 _job_locks_lock = threading.Lock()
 
+# Sync retry state (exponential backoff: 15min, 30min, 1h, 2h)
+_sync_retry_lock = threading.Lock()
+_sync_retry_count = 0
+_MAX_SYNC_RETRIES = 4
+_SYNC_RETRY_DELAYS = [900, 1800, 3600, 7200]  # seconds
+
 
 def _run_with_lock(job_name, func, *args, **kwargs):
     """Run a job function with a lock to prevent overlap."""
@@ -229,6 +235,18 @@ def start_scheduler(app):
     )
     logger.info("Background health checks scheduled every 30 minutes")
 
+    # Schedule CVSS re-enrichment (every 4 hours)
+    # Retries NVD for vulnerabilities that used fallback CVSS sources
+    # (CVE.org, ENISA EUVD) due to temporary NVD unavailability
+    scheduler.add_job(
+        func=lambda: _run_with_lock('cvss_reenrich', cvss_reenrich_job, app),
+        trigger=IntervalTrigger(hours=4),
+        id='cvss_reenrich',
+        name='CVSS Re-enrichment (upgrade fallback sources to NVD)',
+        replace_existing=True
+    )
+    logger.info("CVSS re-enrichment scheduled every 4 hours")
+
     # Warm up the CVE known products cache on startup
     try:
         from app.cve_known_products import refresh_known_cve_products
@@ -269,7 +287,13 @@ def reschedule_critical_email():
         logger.info("Critical CVE reminder disabled")
 
 def cisa_sync_job(app):
-    """Job wrapper to run CISA KEV sync with app context, then update EPSS scores"""
+    """Job wrapper to run CISA KEV sync with app context, then update EPSS scores.
+
+    On failure, schedules automatic retries with exponential backoff
+    (15min → 30min → 1h → 2h, max 4 retries). On success, clears
+    retry state and cancels any pending retry jobs.
+    """
+    global _sync_retry_count
     with app.app_context():
         try:
             logger.info("Starting scheduled CISA KEV sync...")
@@ -308,8 +332,125 @@ def cisa_sync_job(app):
             except Exception as remap_err:
                 logger.warning(f"Auto-remap after KEV sync failed: {remap_err}")
 
+            # Sync succeeded - clear retry state and cancel pending retries
+            with _sync_retry_lock:
+                if _sync_retry_count > 0:
+                    logger.info(f"Sync succeeded after {_sync_retry_count} retry attempt(s), resetting retry state")
+                _sync_retry_count = 0
+            _cancel_pending_sync_retries()
+            _record_sync_retry_status('idle')
+
         except Exception as e:
             logger.error(f"CISA KEV sync job failed: {str(e)}")
+            _schedule_sync_retry(app)
+
+def _schedule_sync_retry(app):
+    """Schedule a CISA sync retry with exponential backoff.
+
+    Backoff schedule: 15min, 30min, 1h, 2h (max 4 retries).
+    Uses _run_with_lock to prevent overlap with regular sync.
+    Records state in HealthCheckResult for dashboard visibility.
+    """
+    global _sync_retry_count
+    with _sync_retry_lock:
+        if _sync_retry_count >= _MAX_SYNC_RETRIES:
+            logger.error(
+                f"CISA sync failed after {_MAX_SYNC_RETRIES} retries. "
+                f"Will retry at next scheduled sync."
+            )
+            _record_sync_retry_status('exhausted')
+            _sync_retry_count = 0
+            return
+
+        delay = _SYNC_RETRY_DELAYS[_sync_retry_count]
+        _sync_retry_count += 1
+        attempt = _sync_retry_count
+
+    delay_min = delay // 60
+    logger.warning(f"Scheduling CISA sync retry #{attempt}/{_MAX_SYNC_RETRIES} in {delay_min} minutes")
+    _record_sync_retry_status('retry_scheduled', attempt, delay)
+
+    if _scheduler:
+        run_time = datetime.utcnow() + timedelta(seconds=delay)
+        _scheduler.add_job(
+            func=lambda: _run_with_lock('cisa_sync', cisa_sync_job, app),
+            trigger='date',
+            run_date=run_time,
+            id=f'cisa_sync_retry_{attempt}',
+            name=f'CISA Sync Retry #{attempt} (backoff {delay_min}min)',
+            replace_existing=True
+        )
+
+
+def _cancel_pending_sync_retries():
+    """Cancel any pending sync retry jobs after a successful sync."""
+    if not _scheduler:
+        return
+    for i in range(1, _MAX_SYNC_RETRIES + 1):
+        try:
+            _scheduler.remove_job(f'cisa_sync_retry_{i}')
+        except Exception:
+            pass  # Job doesn't exist, that's fine
+
+
+def _record_sync_retry_status(state, attempt=0, delay=0):
+    """Record sync retry state in HealthCheckResult for dashboard visibility."""
+    try:
+        from app.models import HealthCheckResult
+
+        if state == 'idle':
+            HealthCheckResult.record(
+                'sync_retry_status', 'sync', 'ok',
+                'Sync operating normally',
+                value='OK'
+            )
+        elif state == 'retry_scheduled':
+            delay_min = delay // 60
+            HealthCheckResult.record(
+                'sync_retry_status', 'sync', 'warning',
+                f'Sync failed, retry #{attempt}/{_MAX_SYNC_RETRIES} '
+                f'scheduled in {delay_min} minutes',
+                value=f'retry #{attempt}',
+                details={'attempt': attempt, 'max_retries': _MAX_SYNC_RETRIES,
+                         'delay_seconds': delay, 'state': 'retry_scheduled'}
+            )
+        elif state == 'exhausted':
+            HealthCheckResult.record(
+                'sync_retry_status', 'sync', 'critical',
+                f'Sync failed after {_MAX_SYNC_RETRIES} retries. '
+                f'Will retry at next scheduled sync.',
+                value='retries exhausted',
+                details={'attempt': _MAX_SYNC_RETRIES, 'state': 'exhausted'}
+            )
+    except Exception as e:
+        logger.debug(f"Could not record sync retry status: {e}")
+
+
+def cvss_reenrich_job(app):
+    """
+    Re-try NVD for vulnerabilities whose CVSS came from fallback sources.
+
+    When NVD is temporarily unavailable, CVSS scores are obtained from
+    CVE.org or ENISA EUVD. This job periodically retries NVD to upgrade
+    those scores, ensuring we use the most authoritative source.
+
+    Runs every 4 hours. Skips if no fallback-sourced vulns exist.
+    """
+    with app.app_context():
+        try:
+            from app.cisa_sync import reenrich_fallback_cvss
+
+            upgraded, checked = reenrich_fallback_cvss(limit=50)
+            if checked > 0:
+                logger.info(
+                    f"CVSS re-enrichment: {upgraded}/{checked} upgraded "
+                    f"from fallback to NVD"
+                )
+            else:
+                logger.debug("CVSS re-enrichment: no fallback-sourced vulns to retry")
+        except Exception as e:
+            logger.warning(f"CVSS re-enrichment job failed (non-critical): {e}")
+
 
 def ldap_sync_job(app):
     """Job wrapper to run LDAP sync with app context"""
