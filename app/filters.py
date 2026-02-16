@@ -221,18 +221,46 @@ def check_keyword_match(vulnerability, product):
         # Check both directions but require word boundaries
         return is_word_in_text(v1_normalized, v2_normalized) or is_word_in_text(v2_normalized, v1_normalized)
 
-    # Product matching: check multiple variations
+    # Product matching: use word-boundary matching with length checks
+    # to prevent false positives from generic words in longer product names
+    # (e.g., "windows" should NOT match "windows desktop targeting pack")
     def products_match(prod, vuln):
         if not prod or not vuln:
             return False
-        # Direct containment (either direction)
-        if prod in vuln or vuln in prod:
+        if prod == vuln:
             return True
-        # Word-level matching: check if vuln product appears as a word in product name
-        # e.g., "firefox" should match "mozilla firefox"
-        pattern = r'\b' + re.escape(vuln) + r'\b'
-        if re.search(pattern, prod):
+
+        # Strip vendor prefix from product name for tighter comparison
+        # "microsoft windows desktop targeting pack" → "windows desktop targeting pack"
+        prod_no_vendor = prod
+        for vendor in [vuln_vendor, prod_vendor]:
+            if vendor and prod.startswith(vendor + ' '):
+                prod_no_vendor = prod[len(vendor) + 1:]
+                break
+
+        # Exact match after vendor removal
+        if prod_no_vendor == vuln:
             return True
+
+        # Word-boundary matching with word-count guard:
+        # The vuln product must appear as a whole word AND the product name
+        # (after removing vendor) must not have too many extra words.
+        # This prevents "windows" matching "windows desktop targeting pack"
+        # but allows "sql server" matching "sql server 2012" (+1 extra word).
+        vuln_words = [w for w in vuln.split() if len(w) >= 2]
+        prod_core_words = [w for w in prod_no_vendor.split() if len(w) >= 2]
+
+        vuln_pattern = r'\b' + re.escape(vuln) + r'\b'
+        if re.search(vuln_pattern, prod_no_vendor):
+            if len(prod_core_words) <= len(vuln_words) + 2:
+                return True
+
+        # Reverse: product name (without vendor) found as whole word in vuln product
+        if len(prod_no_vendor) >= 3:
+            prod_pattern = r'\b' + re.escape(prod_no_vendor) + r'\b'
+            if re.search(prod_pattern, vuln):
+                return True
+
         return False
 
     # Strict matching: if both vendor AND product are specified, BOTH must match
