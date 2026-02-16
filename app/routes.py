@@ -642,9 +642,27 @@ def check_for_updates():
     """Check GitHub for the latest SentriKat release."""
     try:
         from config import Config
+        from app.models import SystemSettings
+
         proxies = Config.get_proxies()
         verify_ssl = Config.get_verify_ssl()
-        kwargs = {'timeout': 8, 'headers': {'Accept': 'application/vnd.github.v3+json'},
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+
+        # Use GitHub token if configured (required for private repos)
+        gh_token = None
+        try:
+            token_setting = SystemSettings.query.filter_by(key='github_token').first()
+            if token_setting and token_setting.value:
+                gh_token = token_setting.value
+        except Exception:
+            pass
+        if not gh_token:
+            import os
+            gh_token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
+        if gh_token:
+            headers['Authorization'] = f'token {gh_token}'
+
+        kwargs = {'timeout': 8, 'headers': headers,
                   'proxies': proxies, 'verify': verify_ssl}
 
         # First try /releases/latest (excludes pre-releases)
@@ -659,7 +677,10 @@ def check_for_updates():
                 **kwargs
             )
             if resp.status_code != 200 or not resp.json():
-                return jsonify({'error': 'Could not reach update server', 'update_available': False}), 200
+                detail = f'GitHub API returned {resp.status_code}'
+                if resp.status_code in (401, 403, 404):
+                    detail += ' — if repo is private, set GITHUB_TOKEN env var or github_token in settings'
+                return jsonify({'error': detail, 'update_available': False}), 200
             data = resp.json()[0]  # Most recent release
         else:
             data = resp.json()

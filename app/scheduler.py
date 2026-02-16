@@ -260,6 +260,17 @@ def start_scheduler(app):
     )
     logger.info("CVSS re-enrichment scheduled every 4 hours")
 
+    # Schedule NVD CVE sync (every 2 hours)
+    # Imports recent HIGH/CRITICAL CVEs directly from NVD for fast zero-day coverage
+    scheduler.add_job(
+        func=lambda: _run_with_lock('nvd_cve_sync', nvd_cve_sync_job, app),
+        trigger=IntervalTrigger(hours=2),
+        id='nvd_cve_sync',
+        name='NVD Recent CVE Sync (HIGH/CRITICAL)',
+        replace_existing=True
+    )
+    logger.info("NVD CVE sync scheduled every 2 hours")
+
     # Warm up the CVE known products cache on startup
     try:
         from app.cve_known_products import refresh_known_cve_products
@@ -476,6 +487,34 @@ def euvd_sync_job(app):
 
         except Exception as e:
             logger.warning(f"EUVD independent sync failed: {e}")
+
+
+def nvd_cve_sync_job(app):
+    """
+    Import recent HIGH/CRITICAL CVEs from NVD for fast zero-day coverage.
+
+    Runs every 2 hours. Catches CVEs that CISA KEV and EUVD haven't added yet
+    (e.g. CVE-2026-2441 was in NVD the same day Google patched it, but took
+    days to appear in CISA KEV).
+    """
+    with app.app_context():
+        try:
+            from app.cisa_sync import sync_nvd_recent_cves
+            from app.filters import rematch_all_products
+
+            new_count, skipped, errors = sync_nvd_recent_cves()
+
+            if new_count > 0:
+                _, matches = rematch_all_products()
+                logger.info(
+                    f"NVD CVE sync: {new_count} new CVEs imported, "
+                    f"{matches} product matches"
+                )
+            else:
+                logger.debug(f"NVD CVE sync: no new CVEs (skipped {skipped} existing)")
+
+        except Exception as e:
+            logger.warning(f"NVD CVE sync job failed: {e}")
 
 
 def cvss_reenrich_job(app):
