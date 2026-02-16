@@ -3880,13 +3880,208 @@ def check_vendor_advisories(cve_id):
 @limiter.limit("5/minute")
 def trigger_sync():
     """
-    Manually trigger CISA KEV sync
+    Manually trigger full vulnerability sync (CISA KEV + NVD recent CVEs).
 
     Permissions:
-    - Super Admin only: Can trigger manual sync of CISA KEV data
+    - Super Admin only: Can trigger manual sync
     """
     result = sync_cisa_kev()
+
+    # Also run NVD recent CVEs sync for zero-day coverage.
+    # Without this, "Awaiting Analysis" CVEs in NVD are only picked up
+    # by the 2-hour scheduled job — not by the manual sync button.
+    try:
+        from app.cisa_sync import sync_nvd_recent_cves
+        nvd_new, nvd_skipped, nvd_errors = sync_nvd_recent_cves()
+        result['nvd_new'] = nvd_new
+        result['nvd_skipped'] = nvd_skipped
+        result['nvd_errors'] = nvd_errors
+    except Exception as e:
+        logger.warning(f"NVD sync during manual trigger failed (non-critical): {e}")
+        result['nvd_error'] = str(e)
+
     return jsonify(result)
+
+@bp.route('/api/sync/cve/<cve_id>', methods=['POST'])
+@admin_required
+@limiter.limit("10/minute")
+def lookup_single_cve(cve_id):
+    """
+    Manually import a single CVE by ID from NVD.
+
+    Use case: 0-day dropped, not yet in CISA KEV or scheduled NVD sync window.
+    Admin enters CVE ID -> SentriKat queries NVD on-demand -> imports immediately.
+
+    Permissions:
+    - Super Admin only: Can trigger manual CVE lookup
+    """
+    if not re.match(r'^CVE-\d{4}-\d{4,}$', cve_id):
+        return jsonify({'error': 'Invalid CVE ID format'}), 400
+
+    # Check if already in DB
+    existing = Vulnerability.query.filter_by(cve_id=cve_id).first()
+    if existing:
+        return jsonify({
+            'status': 'already_exists',
+            'cve_id': cve_id,
+            'vendor': existing.vendor_project,
+            'product': existing.product,
+            'cpe_data': existing.cpe_data,
+            'message': f'{cve_id} already in database'
+        })
+
+    # Query NVD
+    try:
+        from config import Config
+        kwargs = {}
+        proxies = Config.get_proxies()
+        if proxies:
+            kwargs['proxies'] = proxies
+        if hasattr(Config, 'VERIFY_SSL'):
+            kwargs['verify'] = Config.VERIFY_SSL
+
+        headers = {}
+        api_key = getattr(Config, 'NVD_API_KEY', None)
+        if api_key:
+            headers['apiKey'] = api_key
+
+        resp = http_requests.get(
+            f'https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}',
+            headers=headers,
+            timeout=15,
+            **kwargs
+        )
+
+        if resp.status_code != 200:
+            return jsonify({'error': f'NVD returned {resp.status_code}'}), 502
+
+        data = resp.json()
+        vulns = data.get('vulnerabilities', [])
+        if not vulns:
+            return jsonify({'error': f'{cve_id} not found in NVD'}), 404
+
+        cve_data = vulns[0].get('cve', {})
+
+        # Extract description
+        description = ''
+        for desc in cve_data.get('descriptions', []):
+            if desc.get('lang') == 'en':
+                description = desc.get('value', '')
+                break
+
+        if not description:
+            return jsonify({'error': f'{cve_id} has no English description in NVD'}), 404
+
+        vuln_status = cve_data.get('vulnStatus', '')
+
+        # Extract CVSS
+        cvss_score = None
+        cvss_severity = None
+        metrics = cve_data.get('metrics', {})
+        for metric_key in ['cvssMetricV31', 'cvssMetricV30']:
+            if metric_key in metrics and metrics[metric_key]:
+                cvss_data_item = metrics[metric_key][0].get('cvssData', {})
+                cvss_score = cvss_data_item.get('baseScore')
+                cvss_severity = cvss_data_item.get('baseSeverity')
+                break
+
+        # Extract vendor/product from CPE configurations
+        vendor = ''
+        product_name = ''
+        cpe_entries = []
+        from app.nvd_cpe_api import parse_cpe_uri
+
+        for config in cve_data.get('configurations', []):
+            for node in config.get('nodes', []):
+                for match in node.get('cpeMatch', []):
+                    if not match.get('vulnerable', False):
+                        continue
+                    cpe_uri = match.get('criteria', '')
+                    parsed = parse_cpe_uri(cpe_uri)
+                    if not vendor and parsed.get('vendor'):
+                        vendor = parsed['vendor'].replace('_', ' ').title()
+                    if not product_name and parsed.get('product'):
+                        product_name = parsed['product'].replace('_', ' ').title()
+                    cpe_version = parsed.get('version', '*')
+                    has_range = (
+                        match.get('versionStartIncluding') or
+                        match.get('versionStartExcluding') or
+                        match.get('versionEndIncluding') or
+                        match.get('versionEndExcluding')
+                    )
+                    cpe_entries.append({
+                        'cpe_uri': cpe_uri,
+                        'vendor': parsed.get('vendor', ''),
+                        'product': parsed.get('product', ''),
+                        'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),
+                        'version_end': match.get('versionEndIncluding') or match.get('versionEndExcluding'),
+                        'version_start_type': 'including' if match.get('versionStartIncluding') else 'excluding' if match.get('versionStartExcluding') else None,
+                        'version_end_type': 'including' if match.get('versionEndIncluding') else 'excluding' if match.get('versionEndExcluding') else None,
+                        'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
+                    })
+
+        # Description fallback for vendor/product
+        if not vendor and not product_name and description:
+            desc_lower = description.lower()
+            for pattern, (v, p) in {
+                r'google\s+chrome': ('Google', 'Chrome'),
+                r'chromium': ('Chromium', 'Chromium'),
+                r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
+                r'microsoft\s+edge': ('Microsoft', 'Edge'),
+                r'apple\s+safari': ('Apple', 'Safari'),
+                r'microsoft\s+windows': ('Microsoft', 'Windows'),
+                r'linux\s+kernel': ('Linux', 'Kernel'),
+            }.items():
+                m = re.search(pattern, desc_lower)
+                if m:
+                    vendor = v
+                    product_name = p
+                    break
+
+        vuln = Vulnerability(
+            cve_id=cve_id,
+            vendor_project=vendor or 'Unknown',
+            product=product_name or 'Unknown',
+            vulnerability_name=description[:500],
+            date_added=datetime.utcnow().date(),
+            short_description=description,
+            required_action='Apply vendor patches. (Source: NVD — manual lookup)',
+            known_ransomware=False,
+            notes=f'Manually imported from NVD (severity: {cvss_severity}, status: {vuln_status}).',
+            cvss_score=cvss_score,
+            severity=cvss_severity,
+            cvss_source='nvd',
+            source='nvd',
+            nvd_status=vuln_status or None,
+        )
+
+        if cpe_entries:
+            vuln.set_cpe_entries(cpe_entries)
+
+        db.session.add(vuln)
+        db.session.commit()
+
+        # Trigger rematch for this new CVE
+        from app.filters import rematch_all_products
+        removed, matched = rematch_all_products()
+
+        return jsonify({
+            'status': 'imported',
+            'cve_id': cve_id,
+            'vendor': vuln.vendor_project,
+            'product': vuln.product,
+            'cvss_score': cvss_score,
+            'severity': cvss_severity,
+            'nvd_status': vuln_status,
+            'has_cpe_data': bool(cpe_entries),
+            'matches_created': matched,
+            'message': f'{cve_id} imported successfully'
+        })
+
+    except Exception as e:
+        logger.exception(f"Manual CVE lookup failed for {cve_id}")
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/sync/status', methods=['GET'])
 @login_required
