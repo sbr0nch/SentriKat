@@ -266,7 +266,7 @@ def start_scheduler(app):
         func=lambda: _run_with_lock('nvd_cve_sync', nvd_cve_sync_job, app),
         trigger=IntervalTrigger(hours=2),
         id='nvd_cve_sync',
-        name='NVD Recent CVE Sync (HIGH/CRITICAL)',
+        name='NVD Recent CVE Sync (HIGH/CRITICAL + unscored)',
         replace_existing=True
     )
     logger.info("NVD CVE sync scheduled every 2 hours")

@@ -1033,11 +1033,19 @@ def reenrich_fallback_cvss(limit=50):
 
 def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
     """
-    Sync recent HIGH/CRITICAL CVEs from NVD API 2.0.
+    Sync recent CVEs from NVD API 2.0.
 
     Fills the gap between CISA KEV (curated, slow) and real-time CVE publication.
     Imports CVEs published in the last `hours_back` hours that aren't already
     in the database.
+
+    Two-phase approach:
+      Phase 1: Fetch CVEs with known HIGH/CRITICAL CVSS severity.
+      Phase 2: Fetch recently published CVEs that NVD hasn't scored yet
+               (status: Received / Awaiting Analysis / Undergoing Analysis).
+               This catches zero-days and fresh CVEs before NVD assigns a
+               CVSS score — without this, actively exploited vulnerabilities
+               like Chrome 0-days would be invisible until NVD processes them.
 
     Args:
         hours_back: How far back to look (default 6 hours, first run uses 7 days)
@@ -1083,6 +1091,7 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
         skipped = 0
         errors = 0
 
+        # Phase 1: Fetch CVEs with known HIGH/CRITICAL severity
         for severity in severity_filter:
             start_index = 0
 
@@ -1294,6 +1303,222 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                     logger.warning(f"NVD CVE sync request failed: {e}")
                     errors += 1
                     break
+
+        # Phase 2: Fetch recently published CVEs that NVD hasn't scored yet.
+        # These are zero-days and fresh CVEs in "Received" / "Awaiting Analysis"
+        # status — NVD has no CVSS assigned so the severity filter above misses
+        # them entirely.  We query WITHOUT cvssV3Severity to catch them.
+        unscored_start = 0
+        unscored_max = 200  # cap — unscored CVEs are typically a small batch
+
+        while unscored_start < unscored_max:
+            if not limiter.acquire(timeout=60.0, block=True):
+                logger.warning("NVD rate limit timeout during unscored CVE sync")
+                break
+
+            params = {
+                'pubStartDate': pub_start.strftime(date_fmt),
+                'pubEndDate': pub_end.strftime(date_fmt),
+                'noRejected': '',
+                'resultsPerPage': min(200, unscored_max - unscored_start),
+                'startIndex': unscored_start,
+            }
+
+            try:
+                response = requests.get(
+                    'https://services.nvd.nist.gov/rest/json/cves/2.0',
+                    params=params,
+                    headers=headers,
+                    timeout=20,
+                    **kwargs
+                )
+
+                if response.status_code == 403:
+                    logger.warning("NVD API rate limited (403) during unscored sync, backing off")
+                    import time
+                    time.sleep(30)
+                    continue
+
+                if response.status_code != 200:
+                    logger.warning(f"NVD unscored CVE sync: API returned {response.status_code}")
+                    break
+
+                data = response.json()
+                results = data.get('vulnerabilities', [])
+                total_results = data.get('totalResults', 0)
+
+                if not results:
+                    break
+
+                for item in results:
+                    try:
+                        cve_data = item.get('cve', {})
+                        cve_id = cve_data.get('id', '')
+
+                        if not cve_id or not cve_id.startswith('CVE-'):
+                            continue
+
+                        vuln_status = cve_data.get('vulnStatus', '')
+
+                        # Only import unscored CVEs — ones that NVD hasn't analyzed.
+                        # Scored CVEs were already handled by Phase 1.
+                        if vuln_status not in ('Received', 'Awaiting Analysis', 'Undergoing Analysis'):
+                            skipped += 1
+                            continue
+
+                        # Skip if already in DB (and not stale)
+                        existing = Vulnerability.query.filter_by(cve_id=cve_id).first()
+                        needs_refresh = (
+                            existing and existing.vendor_project == 'Unknown'
+                            and existing.product == 'Unknown'
+                        )
+                        if existing and not needs_refresh:
+                            skipped += 1
+                            continue
+
+                        # Extract description
+                        description = ''
+                        for desc in cve_data.get('descriptions', []):
+                            if desc.get('lang') == 'en':
+                                description = desc.get('value', '')
+                                break
+
+                        if not description:
+                            continue
+
+                        if vuln_status in ('Rejected', 'Disputed'):
+                            continue
+
+                        # Extract CVSS (may be absent for unscored CVEs)
+                        cvss_score = None
+                        cvss_severity = None
+                        metrics = cve_data.get('metrics', {})
+                        for metric_key in ['cvssMetricV31', 'cvssMetricV30']:
+                            if metric_key in metrics and metrics[metric_key]:
+                                cvss_data = metrics[metric_key][0].get('cvssData', {})
+                                cvss_score = cvss_data.get('baseScore')
+                                cvss_severity = cvss_data.get('baseSeverity')
+                                break
+
+                        if not cvss_severity:
+                            cvss_severity = _score_to_severity(cvss_score)
+
+                        # Extract vendor/product from CPE
+                        vendor = ''
+                        product = ''
+                        cpe_entries = []
+                        from app.nvd_cpe_api import parse_cpe_uri
+
+                        for config in cve_data.get('configurations', []):
+                            for node in config.get('nodes', []):
+                                for match in node.get('cpeMatch', []):
+                                    if not match.get('vulnerable', False):
+                                        continue
+                                    cpe_uri = match.get('criteria', '')
+                                    parsed = parse_cpe_uri(cpe_uri)
+
+                                    if not vendor and parsed.get('vendor'):
+                                        vendor = parsed['vendor'].replace('_', ' ').title()
+                                    if not product and parsed.get('product'):
+                                        product = parsed['product'].replace('_', ' ').title()
+
+                                    cpe_version = parsed.get('version', '*')
+                                    has_range = (
+                                        match.get('versionStartIncluding') or
+                                        match.get('versionStartExcluding') or
+                                        match.get('versionEndIncluding') or
+                                        match.get('versionEndExcluding')
+                                    )
+                                    cpe_entries.append({
+                                        'cpe_uri': cpe_uri,
+                                        'vendor': parsed.get('vendor', ''),
+                                        'product': parsed.get('product', ''),
+                                        'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),
+                                        'version_end': match.get('versionEndIncluding') or match.get('versionEndExcluding'),
+                                        'version_start_type': 'including' if match.get('versionStartIncluding') else 'excluding' if match.get('versionStartExcluding') else None,
+                                        'version_end_type': 'including' if match.get('versionEndIncluding') else 'excluding' if match.get('versionEndExcluding') else None,
+                                        'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
+                                    })
+
+                        # Description fallback for vendor/product
+                        if not vendor and not product and description:
+                            import re as _re
+                            KNOWN_PRODUCTS = {
+                                r'google\s+chrome': ('Google', 'Chrome'),
+                                r'chromium': ('Chromium', 'Chromium'),
+                                r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
+                                r'microsoft\s+edge': ('Microsoft', 'Edge'),
+                                r'apple\s+safari': ('Apple', 'Safari'),
+                                r'microsoft\s+windows': ('Microsoft', 'Windows'),
+                                r'linux\s+kernel': ('Linux', 'Kernel'),
+                                r'apache\s+(\w+)': ('Apache', None),
+                            }
+                            desc_lower = description.lower()
+                            for pattern, (v, p) in KNOWN_PRODUCTS.items():
+                                m = _re.search(pattern, desc_lower)
+                                if m:
+                                    vendor = v
+                                    product = p or m.group(1).title()
+                                    break
+
+                        if needs_refresh:
+                            vuln = existing
+                            if vendor:
+                                vuln.vendor_project = vendor
+                            if product:
+                                vuln.product = product
+                            vuln.vulnerability_name = description[:500]
+                            vuln.short_description = description
+                            vuln.nvd_status = vuln_status or None
+                            if cvss_score is not None:
+                                vuln.cvss_score = cvss_score
+                            if cvss_severity:
+                                vuln.severity = cvss_severity
+                            if vuln_status in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
+                                vuln.cpe_fetched_at = None
+                                vuln.cpe_data = None
+                            if cpe_entries:
+                                vuln.set_cpe_entries(cpe_entries)
+                            new_count += 1
+                            logger.info(f"Refreshed stale unscored {cve_id}: vendor={vendor or 'Unknown'}, product={product or 'Unknown'}, status={vuln_status}")
+                        else:
+                            vuln = Vulnerability(
+                                cve_id=cve_id,
+                                vendor_project=vendor or 'Unknown',
+                                product=product or 'Unknown',
+                                vulnerability_name=description[:500],
+                                date_added=datetime.utcnow().date(),
+                                short_description=description,
+                                required_action='Apply vendor patches. (Source: NVD — awaiting analysis)',
+                                known_ransomware=False,
+                                notes=f'Auto-imported from NVD (unscored, NVD status: {vuln_status}).',
+                                cvss_score=cvss_score,
+                                severity=cvss_severity,
+                                cvss_source='nvd' if cvss_score else None,
+                                source='nvd',
+                                nvd_status=vuln_status or None,
+                            )
+
+                            if cpe_entries:
+                                vuln.set_cpe_entries(cpe_entries)
+
+                            db.session.add(vuln)
+                            new_count += 1
+                            logger.info(f"Imported unscored {cve_id}: vendor={vendor or 'Unknown'}, product={product or 'Unknown'}, status={vuln_status}")
+
+                    except Exception as e:
+                        logger.debug(f"NVD unscored sync: error processing CVE: {e}")
+                        errors += 1
+                        continue
+
+                unscored_start += len(results)
+                if unscored_start >= total_results:
+                    break
+
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"NVD unscored CVE sync request failed: {e}")
+                errors += 1
+                break
 
         if new_count > 0:
             db.session.commit()
