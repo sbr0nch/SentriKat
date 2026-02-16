@@ -83,6 +83,8 @@ def _apply_schema_migrations(logger, db_uri):
         ('inventory_jobs', 'retry_count', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
         # Multi-source CVSS provenance tracking
         ('vulnerabilities', 'cvss_source', 'VARCHAR(30)', 'VARCHAR(30)'),
+        # Vulnerability source tracking (cisa_kev or euvd)
+        ('vulnerabilities', 'source', "VARCHAR(20) DEFAULT 'cisa_kev'", "VARCHAR(20) DEFAULT 'cisa_kev'"),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
