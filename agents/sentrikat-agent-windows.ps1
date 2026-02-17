@@ -53,7 +53,7 @@ param(
     [int]$IntervalMinutes = 240,  # 4 hours default
 
     [Parameter(Mandatory=$false)]
-    [switch]$Verbose
+    [switch]$VerboseOutput
 )
 
 # Use Stop so unexpected errors are visible; individual cmdlets use -ErrorAction SilentlyContinue where intended
@@ -85,7 +85,7 @@ function Write-Log {
 
     Add-Content -Path $LogFile -Value $logEntry
 
-    if ($Verbose) {
+    if ($VerboseOutput) {
         switch ($Level) {
             "ERROR" { Write-Host $logEntry -ForegroundColor Red }
             "WARN"  { Write-Host $logEntry -ForegroundColor Yellow }
