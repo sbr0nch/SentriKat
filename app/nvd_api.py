@@ -101,13 +101,24 @@ def _fetch_cvss_from_nvd(cve_id):
             metrics = vulnerabilities[0].get('cve', {}).get('metrics', {})
 
             # Try CVSS v3.1 first, then v3.0, then v2.0
-            if 'cvssMetricV31' in metrics and metrics['cvssMetricV31']:
-                cvss_data = metrics['cvssMetricV31'][0]['cvssData']
-                return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
-            elif 'cvssMetricV30' in metrics and metrics['cvssMetricV30']:
-                cvss_data = metrics['cvssMetricV30'][0]['cvssData']
-                return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
-            elif 'cvssMetricV2' in metrics and metrics['cvssMetricV2']:
+            # Prefer NVD Primary scores over CNA Secondary scores
+            for metric_key in ('cvssMetricV31', 'cvssMetricV30'):
+                entries = metrics.get(metric_key, [])
+                # First pass: look for NVD Primary score
+                for entry in entries:
+                    if entry.get('type') == 'Primary':
+                        cvss_data = entry.get('cvssData', {})
+                        return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+                # Second pass: accept Secondary (CNA) as fallback
+                for entry in entries:
+                    if entry.get('type') == 'Secondary':
+                        cvss_data = entry.get('cvssData', {})
+                        return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+                # Last resort: any entry
+                if entries:
+                    cvss_data = entries[0].get('cvssData', {})
+                    return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+            if 'cvssMetricV2' in metrics and metrics['cvssMetricV2']:
                 cvss_data = metrics['cvssMetricV2'][0]['cvssData']
                 score = cvss_data.get('baseScore')
                 return score, _score_to_severity(score)

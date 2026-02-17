@@ -762,10 +762,15 @@ def match_cve_to_cpe_with_status(cve_id: str) -> Tuple[List[Dict], Optional[str]
 
             return affected_cpes, vuln_status
 
-        return [], None
+        # Non-200: raise so callers don't mistake API failure for "no data"
+        logger.warning(f"NVD API returned {response.status_code} for {cve_id}")
+        raise RuntimeError(f"NVD API returned HTTP {response.status_code}")
 
-    except Exception as e:
+    except (requests.exceptions.RequestException, RuntimeError) as e:
         logger.error(f"Error fetching CVE CPE data with status: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error fetching CVE CPE data: {str(e)}")
         return [], None
 
 
