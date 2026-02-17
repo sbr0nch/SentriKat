@@ -13,99 +13,124 @@ logger = logging.getLogger(__name__)
 # Vendor/product patterns for description-based extraction when NVD
 # hasn't populated CPE data yet.  Used in fetch_cpe_version_data(),
 # sync_nvd_recent_cves Phase 1 and Phase 2.
+#
+# DYNAMIC APPROACH: patterns are built at runtime from 3 sources:
+#   1. Customer's Products table (vendor + product_name + CPE identifiers)
+#   2. Small seed set for tricky vendor aliases (e.g., "fortigate" → Fortinet)
+#   3. cve_known_products.py static set (~500 products for package filtering)
+# This means ANY product a customer adds to SentriKat is automatically
+# recognized in CVE descriptions without code changes.
 import re as _re
-_KNOWN_PRODUCTS = {
-    # Browsers
-    r'google\s+chrome': ('Google', 'Chrome'),
-    r'chromium': ('Chromium', 'Chromium'),
-    r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
-    r'microsoft\s+edge': ('Microsoft', 'Edge'),
-    r'apple\s+safari': ('Apple', 'Safari'),
-    # OS
-    r'microsoft\s+windows': ('Microsoft', 'Windows'),
-    r'linux\s+kernel': ('Linux', 'Kernel'),
-    r'apple\s+(?:macos|mac\s+os|ios|ipados|watchos|tvos|visionos)': ('Apple', None),
-    r'android': ('Google', 'Android'),
-    # Adobe — frequent 0-day target
-    r'adobe\s+acrobat': ('Adobe', 'Acrobat'),
-    r'adobe\s+reader': ('Adobe', 'Reader'),
-    r'adobe\s+flash': ('Adobe', 'Flash Player'),
-    r'adobe\s+coldfusion': ('Adobe', 'ColdFusion'),
-    r'adobe\s+commerce': ('Adobe', 'Commerce'),
-    r'adobe\s+(\w+)': ('Adobe', None),
-    # Oracle / Java
-    r'oracle\s+java': ('Oracle', 'Java'),
-    r'oracle\s+weblogic': ('Oracle', 'WebLogic Server'),
-    r'oracle\s+(\w+)': ('Oracle', None),
-    # Network appliances — top 0-day targets
-    r'fortinet\s+fortios': ('Fortinet', 'FortiOS'),
+import time as _time
+
+# Minimal seed set for non-obvious aliases that can't be auto-derived
+# from the Products table (brand names, abbreviations, etc.).
+# Generic patterns use capture groups (None product → captured from text).
+_SEED_PRODUCT_PATTERNS = {
     r'fortigate': ('Fortinet', 'FortiGate'),
-    r'fortinet\s+(\w+)': ('Fortinet', None),
     r'palo\s+alto\s+(?:networks?\s+)?pan-?os': ('Palo Alto Networks', 'PAN-OS'),
     r'palo\s+alto': ('Palo Alto Networks', 'PAN-OS'),
-    r'cisco\s+ios\s+xe': ('Cisco', 'IOS XE'),
-    r'cisco\s+ios': ('Cisco', 'IOS'),
-    r'cisco\s+asa': ('Cisco', 'ASA'),
-    r'cisco\s+webex': ('Cisco', 'Webex'),
-    r'cisco\s+(\w+)': ('Cisco', None),
-    r'sonicwall\s+sma': ('SonicWall', 'SMA'),
-    r'sonicwall\s+(\w+)': ('SonicWall', None),
-    r'ivanti\s+connect\s+secure': ('Ivanti', 'Connect Secure'),
-    r'ivanti\s+policy\s+secure': ('Ivanti', 'Policy Secure'),
-    r'ivanti\s+epmm': ('Ivanti', 'EPMM'),
-    r'ivanti\s+(\w+)': ('Ivanti', None),
-    r'citrix\s+netscaler': ('Citrix', 'NetScaler'),
-    r'citrix\s+adc': ('Citrix', 'ADC'),
-    r'citrix\s+(\w+)': ('Citrix', None),
-    r'zyxel': ('Zyxel', 'Firewall'),
-    r'barracuda': ('Barracuda', 'ESG'),
-    # Virtualization — high-value targets
-    r'vmware\s+vcenter': ('VMware', 'vCenter Server'),
-    r'vmware\s+esxi': ('VMware', 'ESXi'),
-    r'vmware\s+(\w+)': ('VMware', None),
-    # Atlassian
-    r'atlassian\s+confluence': ('Atlassian', 'Confluence'),
-    r'atlassian\s+jira': ('Atlassian', 'Jira'),
-    r'atlassian\s+(\w+)': ('Atlassian', None),
-    # Collaboration / VPN
-    r'zoom': ('Zoom', 'Zoom'),
-    r'microsoft\s+exchange': ('Microsoft', 'Exchange Server'),
-    r'microsoft\s+office': ('Microsoft', 'Office'),
-    r'microsoft\s+outlook': ('Microsoft', 'Outlook'),
-    r'microsoft\s+sharepoint': ('Microsoft', 'SharePoint'),
-    r'microsoft\s+teams': ('Microsoft', 'Teams'),
-    # File transfer — frequent ransomware entry
     r'moveit\s+transfer': ('Progress', 'MOVEit Transfer'),
     r'progress\s+moveit': ('Progress', 'MOVEit Transfer'),
     r'goanywhere': ('Fortra', 'GoAnywhere MFT'),
-    # Server software
-    r'apache\s+(\w+)': ('Apache', None),
-    r'nginx': ('Nginx', 'Nginx'),
-    r'openssl': ('OpenSSL', 'OpenSSL'),
-    # Enterprise / ERP
-    r'sap\s+netweaver': ('SAP', 'NetWeaver'),
-    r'sap\s+(\w+)': ('SAP', None),
-    # Other frequent 0-day targets
-    r'wordpress': ('WordPress', 'WordPress'),
-    r'drupal': ('Drupal', 'Drupal'),
-    r'gitlab': ('GitLab', 'GitLab'),
-    r'jenkins': ('Jenkins', 'Jenkins'),
-    r'veeam': ('Veeam', 'Backup & Replication'),
-    r'qnap': ('QNAP', 'QTS'),
-    r'synology': ('Synology', 'DSM'),
+    r'apple\s+(?:macos|mac\s+os|ios|ipados|watchos|tvos|visionos)': ('Apple', None),
+    r'linux\s+kernel': ('Linux', 'Kernel'),
 }
+
+# Cache for the dynamically built patterns (rebuilt every 10 minutes)
+_dynamic_patterns_cache = {'patterns': None, 'ts': 0}
+
+
+def _build_dynamic_product_patterns():
+    """Build vendor/product regex patterns dynamically from the Products table.
+
+    Merges:
+      1. Customer's Products (vendor/product_name + CPE vendor/product)
+      2. _SEED_PRODUCT_PATTERNS (non-obvious aliases)
+
+    Returns dict of {regex_pattern: (Vendor, Product_or_None)}.
+    Cached for 10 minutes to avoid hammering the DB on every CVE.
+    """
+    global _dynamic_patterns_cache
+
+    now = _time.time()
+    if _dynamic_patterns_cache['patterns'] is not None and (now - _dynamic_patterns_cache['ts']) < 600:
+        return _dynamic_patterns_cache['patterns']
+
+    patterns = dict(_SEED_PRODUCT_PATTERNS)
+    seen_keys = set()
+
+    try:
+        products = Product.query.filter_by(active=True).all()
+
+        for product in products:
+            vendor = (product.vendor or '').strip()
+            name = (product.product_name or '').strip()
+
+            if not vendor or not name:
+                continue
+
+            key = (vendor.lower(), name.lower())
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            # Build "vendor product" pattern
+            vendor_esc = _re.escape(vendor.lower())
+            name_esc = _re.escape(name.lower())
+            patterns[vendor_esc + r'\s+' + name_esc] = (vendor, name)
+
+            # Also add product-only pattern if name is specific enough (>= 5 chars)
+            if len(name) >= 5:
+                patterns[name_esc] = (vendor, name)
+
+            # Add CPE-based patterns (handles underscores → spaces)
+            try:
+                cpe_vendor, cpe_product, _ = product.get_effective_cpe()
+                if cpe_vendor and cpe_product:
+                    cv = cpe_vendor.replace('_', ' ')
+                    cp = cpe_product.replace('_', ' ')
+                    cpe_key = (cv.lower(), cp.lower())
+                    if cpe_key not in seen_keys:
+                        seen_keys.add(cpe_key)
+                        patterns[_re.escape(cv.lower()) + r'\s+' + _re.escape(cp.lower())] = (
+                            cv.title(), cp.title()
+                        )
+            except Exception:
+                pass
+
+    except Exception as e:
+        # During app startup or outside request context, Products table
+        # may not be available — fall back to seed patterns only.
+        logger.debug(f"Could not build dynamic patterns from DB: {e}")
+
+    _dynamic_patterns_cache = {'patterns': patterns, 'ts': now}
+    return patterns
 
 
 def _extract_vendor_product_from_description(description):
-    """Extract vendor/product from CVE description using known patterns.
-    Returns (vendor, product) or (None, None)."""
+    """Extract vendor/product from CVE description using dynamic patterns.
+
+    Patterns are built from:
+      1. Customer's Products table (vendor/product_name + CPE data)
+      2. _SEED_PRODUCT_PATTERNS (non-obvious vendor aliases)
+
+    Returns (vendor, product) or (None, None).
+    """
     if not description:
         return None, None
     desc_lower = description.lower()
-    for pattern, (vendor, product) in _KNOWN_PRODUCTS.items():
+    patterns = _build_dynamic_product_patterns()
+    for pattern, (vendor, product) in patterns.items():
         m = _re.search(pattern, desc_lower)
         if m:
-            return vendor, product or m.group(1).title()
+            # If product is None, try to capture from regex group
+            if product is None:
+                try:
+                    product = m.group(1).title()
+                except (IndexError, AttributeError):
+                    product = None
+            return vendor, product
     return None, None
 
 

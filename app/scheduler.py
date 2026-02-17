@@ -476,7 +476,14 @@ def euvd_sync_job(app):
             euvd_enriched, euvd_new_count = enrich_with_euvd_exploited()
 
             if euvd_new_count > 0:
-                _, matches = rematch_all_products()
+                # Only match newly imported vulnerabilities (not the entire DB)
+                from app.models import Vulnerability
+                recent_vulns = Vulnerability.query.filter(
+                    Vulnerability.created_at >= sync_start
+                ).all()
+                _, matches = rematch_all_products(
+                    target_vulnerabilities=recent_vulns if recent_vulns else None
+                )
                 logger.info(
                     f"EUVD independent sync: {euvd_new_count} new CVEs, "
                     f"{matches} product matches"
@@ -512,7 +519,14 @@ def nvd_cve_sync_job(app):
             new_count, skipped, errors = sync_nvd_recent_cves()
 
             if new_count > 0:
-                _, matches = rematch_all_products()
+                # Only match newly imported vulnerabilities (not the entire DB)
+                from app.models import Vulnerability
+                recent_vulns = Vulnerability.query.filter(
+                    Vulnerability.created_at >= sync_start
+                ).all()
+                _, matches = rematch_all_products(
+                    target_vulnerabilities=recent_vulns if recent_vulns else None
+                )
                 logger.info(
                     f"NVD CVE sync: {new_count} new CVEs imported, "
                     f"{matches} product matches"

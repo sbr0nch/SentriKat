@@ -663,17 +663,22 @@ def check_for_updates():
         if resp.status_code == 204:
             return jsonify({
                 'update_available': False,
+                'check_status': 'ok',
                 'current_version': APP_VERSION,
                 'latest_version': APP_VERSION,
             })
 
         if resp.status_code != 200:
-            # Don't expose raw HTTP status codes to end users.
             # Non-200 typically means the portal releases endpoint isn't ready yet.
+            logger.warning(
+                f'Update check: license server returned HTTP {resp.status_code}'
+            )
             return jsonify({
                 'update_available': False,
+                'check_status': 'server_error',
+                'error': f'License server returned HTTP {resp.status_code}. '
+                         'The releases endpoint may not be configured yet.',
                 'current_version': APP_VERSION,
-                'latest_version': APP_VERSION,
             })
 
         data = resp.json()
@@ -710,18 +715,32 @@ def check_for_updates():
 
         return jsonify({
             'update_available': update_available,
+            'check_status': 'ok',
             'current_version': current,
             'latest_version': latest_tag,
             'release_name': data.get('release_notes', ''),
             'release_url': data.get('download_url', ''),
             'published_at': data.get('released_at', ''),
         })
-    except http_requests.exceptions.RequestException:
-        # Offline or network error - not critical
-        return jsonify({'error': 'Could not reach update server', 'update_available': False}), 200
+    except http_requests.exceptions.RequestException as e:
+        # Offline or network error — tell the UI so it can show
+        # "Unable to check" instead of a misleading green "Up to date".
+        logger.warning(f'Update check: could not reach update server: {e}')
+        return jsonify({
+            'update_available': False,
+            'check_status': 'unreachable',
+            'error': f'Could not reach update server ({type(e).__name__}). '
+                     'Check firewall rules for outbound HTTPS to license.sentrikat.com.',
+            'current_version': APP_VERSION,
+        }), 200
     except Exception as e:
         logger.warning(f'Update check failed: {e}')
-        return jsonify({'error': 'Update check failed', 'update_available': False}), 200
+        return jsonify({
+            'update_available': False,
+            'check_status': 'error',
+            'error': f'Update check failed: {e}',
+            'current_version': APP_VERSION,
+        }), 200
 
 
 @bp.route('/api/status', methods=['GET'])

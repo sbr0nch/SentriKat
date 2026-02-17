@@ -2353,13 +2353,14 @@ def list_assets():
             try:
                 asset_dict = asset.to_dict()
                 # Add latest agent version for update status display
+                _agent_versions = _get_latest_agent_versions()
                 asset_platform = (asset.os_name or '').lower()
                 if 'windows' in asset_platform:
-                    asset_dict['latest_agent_version'] = LATEST_AGENT_VERSIONS.get('windows', '1.0.0')
+                    asset_dict['latest_agent_version'] = _agent_versions.get('windows', '1.0.0')
                 elif 'macos' in asset_platform or 'mac os' in asset_platform or 'darwin' in asset_platform:
-                    asset_dict['latest_agent_version'] = LATEST_AGENT_VERSIONS.get('macos', '1.0.0')
+                    asset_dict['latest_agent_version'] = _agent_versions.get('macos', '1.0.0')
                 else:
-                    asset_dict['latest_agent_version'] = LATEST_AGENT_VERSIONS.get('linux', '1.0.0')
+                    asset_dict['latest_agent_version'] = _agent_versions.get('linux', '1.0.0')
                 # Add latest job info so UI can show "N products pending review"
                 job_info = latest_jobs.get(asset.id)
                 if job_info:
@@ -3583,12 +3584,38 @@ def get_license_tiers():
 # Agent Command & Control Endpoints
 # ============================================================================
 
-# Current latest agent versions (update when releasing new versions)
-LATEST_AGENT_VERSIONS = {
+# Default agent versions — used as fallback if DB settings aren't configured.
+# Admins can override via SystemSettings key 'latest_agent_version_{platform}'.
+_DEFAULT_AGENT_VERSIONS = {
     'linux': '1.4.0',
     'windows': '1.4.0',
     'macos': '1.4.0'
 }
+
+
+def _get_latest_agent_versions():
+    """Get latest agent versions from DB settings, falling back to defaults.
+
+    Admins can set 'latest_agent_version_linux', 'latest_agent_version_windows',
+    'latest_agent_version_macos' in SystemSettings to push updates without
+    redeploying SentriKat.
+    """
+    versions = dict(_DEFAULT_AGENT_VERSIONS)
+    try:
+        from app.models import SystemSettings
+        for platform in ('linux', 'windows', 'macos'):
+            setting = SystemSettings.query.filter_by(
+                key=f'latest_agent_version_{platform}'
+            ).first()
+            if setting and setting.value:
+                versions[platform] = setting.value
+    except Exception:
+        pass
+    return versions
+
+
+# Keep the name for backward compatibility (read-only reference for imports)
+LATEST_AGENT_VERSIONS = _DEFAULT_AGENT_VERSIONS
 
 
 @agent_bp.route('/api/agent/commands', methods=['GET'])
@@ -3692,7 +3719,7 @@ def get_agent_commands():
 
         # Check for admin-triggered update push
         if asset.pending_update:
-            latest_version = LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
+            latest_version = _get_latest_agent_versions().get(platform, '1.0.0')
             commands.append({
                 'command': 'update_available',
                 'current_version': agent_version,
@@ -3709,7 +3736,7 @@ def get_agent_commands():
         db.session.commit()
 
     # Check for agent update (automatic version comparison)
-    latest_version = LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
+    latest_version = _get_latest_agent_versions().get(platform, '1.0.0')
     if _version_compare(agent_version, latest_version) < 0:
         # Only send if we didn't already send a forced update above
         if not any(c.get('command') == 'update_available' for c in commands):
@@ -3779,7 +3806,7 @@ def get_agent_version():
     Public endpoint - no authentication required.
     """
     return jsonify({
-        'versions': LATEST_AGENT_VERSIONS,
+        'versions': _get_latest_agent_versions(),
         'release_notes_url': '/docs/agent-changelog',
         'server_time': datetime.utcnow().isoformat()
     })
@@ -3829,7 +3856,7 @@ def download_agent_script(platform):
         mimetype=content_type,
         headers={
             'Content-Disposition': f'attachment; filename={filename}',
-            'X-Agent-Version': LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
+            'X-Agent-Version': _get_latest_agent_versions().get(platform, '1.0.0')
         }
     )
 
@@ -4157,7 +4184,8 @@ def agent_version_summary():
         else:
             platform = 'linux'
 
-        latest = LATEST_AGENT_VERSIONS.get(platform, '1.0.0')
+        _agent_versions = _get_latest_agent_versions()
+        latest = _agent_versions.get(platform, '1.0.0')
         if _version_compare(asset.agent_version, latest) >= 0:
             up_to_date += 1
         else:
@@ -4177,7 +4205,7 @@ def agent_version_summary():
         'up_to_date': up_to_date,
         'outdated': outdated,
         'pending_updates': pending_updates,
-        'latest_versions': LATEST_AGENT_VERSIONS,
+        'latest_versions': _get_latest_agent_versions(),
         'version_breakdown': version_breakdown
     })
 

@@ -6514,11 +6514,27 @@ async function checkForUpdates() {
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
             `;
+        } else if (data.check_status === 'unreachable') {
+            container.innerHTML = `
+                <small class="text-warning">
+                    <i class="bi bi-wifi-off me-1"></i>
+                    Unable to reach update server. Check firewall rules for outbound HTTPS to license.sentrikat.com.
+                    <br><span class="text-muted">Running v${escapeHtml(data.current_version || '')}</span>
+                </small>
+            `;
+        } else if (data.check_status === 'server_error') {
+            container.innerHTML = `
+                <small class="text-warning">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    Update server returned an error. The releases endpoint may not be configured yet.
+                    <br><span class="text-muted">Running v${escapeHtml(data.current_version || '')}</span>
+                </small>
+            `;
         } else if (data.error) {
             container.innerHTML = `
-                <small class="text-danger">
+                <small class="text-warning">
                     <i class="bi bi-wifi-off me-1"></i>
-                    Could not connect to update server. Check your network or try again later.
+                    ${escapeHtml(data.error)}
                 </small>
             `;
         } else {

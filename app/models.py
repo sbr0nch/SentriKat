@@ -535,9 +535,17 @@ class Vulnerability(db.Model):
 
         current_level = priority_order.get(base_priority, 2)
 
-        # Actively exploited or ransomware = Always Critical (OVERRIDE)
-        if self.is_actively_exploited or self.known_ransomware:
+        # Known ransomware campaign = Always Critical (small set, always urgent)
+        if self.known_ransomware:
             return 'critical'
+
+        # Actively exploited (CISA KEV, EUVD exploited) = ELEVATE by one level.
+        # Previously this forced everything to 'critical', which inflated the
+        # critical count because most monitored CVEs come from CISA KEV.
+        # Now: CRITICAL stays CRITICAL, HIGH→CRITICAL, MEDIUM→HIGH, LOW→MEDIUM.
+        # The 'ACTIVELY EXPLOITED' badge still provides visual urgency.
+        if self.is_actively_exploited:
+            current_level = min(current_level + 1, priority_order['critical'])
 
         # Check due date urgency (can ELEVATE priority)
         if self.due_date:
