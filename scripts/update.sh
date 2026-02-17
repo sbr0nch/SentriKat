@@ -126,30 +126,61 @@ is_sentrikat_dir() {
     return 1
 }
 
+# Resolve a path to absolute, following symlinks when possible
+resolve_path() {
+    local p="$1"
+    # Try readlink -f (Linux), then realpath, then manual resolution
+    readlink -f "$p" 2>/dev/null && return
+    realpath "$p" 2>/dev/null && return
+    # Manual: cd into it (works for directories and relative paths)
+    if [ -d "$p" ]; then
+        (cd "$p" 2>/dev/null && pwd) && return
+    elif [ -f "$p" ]; then
+        local dir base
+        dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd)" || return 1
+        base="$(basename "$p")"
+        echo "${dir}/${base}" && return
+    fi
+    # Last resort: return as-is
+    echo "$p"
+}
+
 # Find the SentriKat installation directory
 find_install_dir() {
-    # 1. Explicit override
+    # Helper: check a directory and its app/ subdirectory
+    _check_dir_and_app() {
+        local d="$1"
+        [ -d "$d" ] || return 1
+        if is_sentrikat_dir "$d"; then
+            echo "$d"
+            return 0
+        fi
+        if [ -d "${d}/app" ] && is_sentrikat_dir "${d}/app"; then
+            echo "${d}/app"
+            return 0
+        fi
+        return 1
+    }
+
+    local result
+
+    # 1. Explicit override via SENTRIKAT_DIR
     if [ -n "${SENTRIKAT_DIR:-}" ]; then
-        if is_sentrikat_dir "$SENTRIKAT_DIR"; then
-            echo "$SENTRIKAT_DIR"
-            return
-        fi
-        # Check app/ subdirectory (common deployment layout: SENTRIKAT_DIR/app/ holds source)
-        if is_sentrikat_dir "${SENTRIKAT_DIR}/app"; then
-            echo "${SENTRIKAT_DIR}/app"
-            return
-        fi
+        local resolved
+        resolved="$(resolve_path "$SENTRIKAT_DIR" 2>/dev/null)" || resolved="$SENTRIKAT_DIR"
+        result=$(_check_dir_and_app "$resolved") && { echo "$result"; return; }
     fi
 
     # 2. Derive from script's own location (scripts/update.sh → parent is install root)
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || true
-    if [ -n "$script_dir" ]; then
-        local script_parent
-        script_parent="$(dirname "$script_dir")"
-        if is_sentrikat_dir "$script_parent"; then
-            echo "$script_parent"
-            return
+    #    Handles symlinks and indirect invocations (e.g. bash /other/path/update.sh)
+    local script_path="${BASH_SOURCE[0]:-$0}"
+    if [ -n "$script_path" ] && [ "$script_path" != "bash" ] && [ "$script_path" != "-bash" ]; then
+        local real_path
+        real_path="$(resolve_path "$script_path" 2>/dev/null)" || real_path=""
+        if [ -n "$real_path" ]; then
+            local script_parent
+            script_parent="$(dirname "$(dirname "$real_path")")"
+            result=$(_check_dir_and_app "$script_parent") && { echo "$result"; return; }
         fi
     fi
 
@@ -157,24 +188,13 @@ find_install_dir() {
     local dir
     dir=$(pwd)
     while [ "$dir" != "/" ]; do
-        if is_sentrikat_dir "$dir"; then
-            echo "$dir"
-            return
-        fi
-        # Also check app/ subdirectory at each level
-        if is_sentrikat_dir "${dir}/app"; then
-            echo "${dir}/app"
-            return
-        fi
+        result=$(_check_dir_and_app "$dir") && { echo "$result"; return; }
         dir=$(dirname "$dir")
     done
 
     # 4. Well-known installation paths
-    for candidate in /opt/sentrikat /app /data/sentrikat /data/sentrikat/app; do
-        if is_sentrikat_dir "$candidate"; then
-            echo "$candidate"
-            return
-        fi
+    for candidate in /opt/sentrikat /app /data/sentrikat; do
+        result=$(_check_dir_and_app "$candidate") && { echo "$result"; return; }
     done
 
     echo ""
@@ -513,7 +533,14 @@ esac
 INSTALL_DIR=$(find_install_dir)
 if [ -z "$INSTALL_DIR" ]; then
     log_error "Could not find SentriKat installation."
-    log_error "Run this script from the SentriKat directory, or set SENTRIKAT_DIR=/path/to/sentrikat"
+    log_error "Looked for SentriKat files (VERSION, app/licensing.py, docker-compose.yml, run.py)"
+    log_error "in these locations (and their app/ subdirectories):"
+    [ -n "${SENTRIKAT_DIR:-}" ] && log_error "  SENTRIKAT_DIR: ${SENTRIKAT_DIR}"
+    log_error "  Script location: $(dirname "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "unknown")"
+    log_error "  Working directory: $(pwd) (walked up to /)"
+    log_error "  Well-known paths: /opt/sentrikat, /app, /data/sentrikat"
+    log_error ""
+    log_error "Set SENTRIKAT_DIR=/path/to/sentrikat to override."
     exit 1
 fi
 INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd)
