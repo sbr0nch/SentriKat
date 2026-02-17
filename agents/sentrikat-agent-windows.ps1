@@ -944,6 +944,27 @@ function Main {
 
     if ($Install) {
         Install-ScheduledTask $config
+
+        # Run first inventory immediately so the asset appears in the dashboard
+        Write-Host "Running initial inventory scan..."
+        Write-Log "Running initial inventory scan after install..."
+        try {
+            $systemInfo = Get-SystemInfo
+            $products = Get-InstalledSoftware
+            if ($products.Count -gt 0) {
+                $success = Send-Inventory $config $systemInfo $products
+                if ($success) {
+                    Write-Host "Initial scan complete - agent is now visible in SentriKat dashboard"
+                    Write-Log "Initial inventory sent successfully"
+                } else {
+                    Write-Host "Initial scan failed - agent will retry on next scheduled scan"
+                    Write-Log "Initial inventory failed, will retry on next scheduled run" -Level "WARN"
+                }
+            }
+        } catch {
+            Write-Log "Initial inventory scan failed: $_" -Level "WARN"
+            Write-Host "Initial scan failed - agent will retry on next scheduled scan"
+        }
         return
     }
 
@@ -956,6 +977,11 @@ function Main {
     if ($Heartbeat) {
         Write-Log "Running heartbeat check..."
         $systemInfo = Get-SystemInfo
+
+        # Send heartbeat to keep agent online in dashboard
+        Send-Heartbeat $config $systemInfo
+
+        # Check for pending commands (scan_now, update, etc.)
         $scanRequested = Check-Commands $config $systemInfo
 
         if ($scanRequested) {

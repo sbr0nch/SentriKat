@@ -820,6 +820,16 @@ EOF
     echo "  - Full scan: every ${INTERVAL_HOURS} hours"
     echo "  - Heartbeat: every ${HEARTBEAT_MINUTES} minutes (checks for commands)"
     echo "Run 'sudo launchctl list | grep sentrikat' to check status"
+
+    # Run first inventory immediately so the asset appears in the dashboard
+    echo "Running initial inventory scan..."
+    log_info "Running initial inventory scan after install..."
+    if main 2>/dev/null; then
+        echo "Initial scan complete - agent is now visible in SentriKat dashboard"
+    else
+        echo "Initial scan failed - agent will retry on next scheduled scan"
+        log_warn "Initial inventory failed, will retry on next scheduled run"
+    fi
 }
 
 uninstall_agent() {
@@ -850,6 +860,10 @@ heartbeat_mode() {
         exit 1
     fi
 
+    # Send heartbeat to keep agent online in dashboard
+    send_heartbeat
+
+    # Check for commands from server (scan_now, update, etc.)
     if check_commands; then
         log_info "Executing requested scan..."
         main
