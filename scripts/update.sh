@@ -129,12 +129,31 @@ is_sentrikat_dir() {
 # Find the SentriKat installation directory
 find_install_dir() {
     # 1. Explicit override
-    if [ -n "${SENTRIKAT_DIR:-}" ] && is_sentrikat_dir "$SENTRIKAT_DIR"; then
-        echo "$SENTRIKAT_DIR"
-        return
+    if [ -n "${SENTRIKAT_DIR:-}" ]; then
+        if is_sentrikat_dir "$SENTRIKAT_DIR"; then
+            echo "$SENTRIKAT_DIR"
+            return
+        fi
+        # Check app/ subdirectory (common deployment layout: SENTRIKAT_DIR/app/ holds source)
+        if is_sentrikat_dir "${SENTRIKAT_DIR}/app"; then
+            echo "${SENTRIKAT_DIR}/app"
+            return
+        fi
     fi
 
-    # 2. Walk up from current directory
+    # 2. Derive from script's own location (scripts/update.sh → parent is install root)
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || true
+    if [ -n "$script_dir" ]; then
+        local script_parent
+        script_parent="$(dirname "$script_dir")"
+        if is_sentrikat_dir "$script_parent"; then
+            echo "$script_parent"
+            return
+        fi
+    fi
+
+    # 3. Walk up from current directory
     local dir
     dir=$(pwd)
     while [ "$dir" != "/" ]; do
@@ -142,10 +161,15 @@ find_install_dir() {
             echo "$dir"
             return
         fi
+        # Also check app/ subdirectory at each level
+        if is_sentrikat_dir "${dir}/app"; then
+            echo "${dir}/app"
+            return
+        fi
         dir=$(dirname "$dir")
     done
 
-    # 3. Well-known installation paths
+    # 4. Well-known installation paths
     for candidate in /opt/sentrikat /app /data/sentrikat /data/sentrikat/app; do
         if is_sentrikat_dir "$candidate"; then
             echo "$candidate"
