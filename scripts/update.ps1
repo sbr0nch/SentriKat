@@ -4,9 +4,14 @@
 # Updates a SentriKat installation to the latest (or specified) version.
 #
 # Usage:
-#   .\scripts\update.ps1              # Update to latest version
-#   .\scripts\update.ps1 -Version 1.0.3  # Update to specific version
-#   .\scripts\update.ps1 -CheckOnly      # Check for updates only
+#   .\scripts\update.ps1                    # Update to latest version
+#   .\scripts\update.ps1 -Version 1.0.3     # Update to specific version
+#   .\scripts\update.ps1 -CheckOnly         # Check for updates only
+#
+# Supports three deployment types (auto-detected):
+#   1. Docker image (customer package with ghcr.io pre-built image)
+#   2. Docker build (developer/self-hosted, builds from source)
+#   3. Standalone (no Docker, source-based)
 # ============================================================
 
 param(
@@ -18,6 +23,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Repo = "sbr0nch/SentriKat"
 $GithubApi = "https://api.github.com/repos/$Repo"
+$PortalApi = if ($env:SENTRIKAT_LICENSE_SERVER) { $env:SENTRIKAT_LICENSE_SERVER } else { "https://license.sentrikat.com/api" }
 
 function Write-Info  { param($Msg) Write-Host "[INFO] $Msg" -ForegroundColor Cyan }
 function Write-OK    { param($Msg) Write-Host "[OK] $Msg" -ForegroundColor Green }
@@ -30,9 +36,14 @@ if ($Help) {
     Write-Host "================================"
     Write-Host ""
     Write-Host "Usage:"
-    Write-Host "  .\update.ps1                    Update to latest version"
-    Write-Host "  .\update.ps1 -Version 1.0.3     Update to specific version"
-    Write-Host "  .\update.ps1 -CheckOnly         Check for updates only"
+    Write-Host "  .\update.ps1                         Update to latest stable version"
+    Write-Host "  .\update.ps1 -Version 1.0.3          Update to specific version"
+    Write-Host "  .\update.ps1 -Version 1.0.0-beta.1   Update to pre-release"
+    Write-Host "  .\update.ps1 -CheckOnly              Check for updates only"
+    Write-Host ""
+    Write-Host "Environment:"
+    Write-Host "  GITHUB_TOKEN          Auth token for private repos"
+    Write-Host "  SENTRIKAT_DIR         Override install directory detection"
     Write-Host ""
     exit 0
 }
@@ -43,27 +54,100 @@ Write-Host "  SentriKat Update Tool (Windows)"
 Write-Host "=========================================="
 Write-Host ""
 
-# Find installation directory
-$InstallDir = $null
-$SearchPaths = @(".", "..", $PSScriptRoot, (Split-Path $PSScriptRoot))
+# Strip leading 'v' from version if present
+if ($Version -and $Version.StartsWith("v")) {
+    $Version = $Version.Substring(1)
+}
 
-foreach ($path in $SearchPaths) {
-    $resolved = Resolve-Path $path -ErrorAction SilentlyContinue
-    if ($resolved -and (Test-Path "$resolved\app\licensing.py")) {
-        $InstallDir = $resolved.Path
-        break
+# ============================================================
+# Installation Detection
+# ============================================================
+
+function Test-SentriKatDir {
+    param([string]$Dir)
+
+    # 1. Full source install: VERSION + app/licensing.py
+    if ((Test-Path "$Dir\VERSION") -and (Test-Path "$Dir\app\licensing.py")) {
+        return $true
+    }
+
+    # 2. Customer Docker: docker-compose.yml with GHCR image
+    if ((Test-Path "$Dir\docker-compose.yml") -and
+        (Select-String -Path "$Dir\docker-compose.yml" -Pattern "ghcr.io/sbr0nch/sentrikat" -Quiet)) {
+        return $true
+    }
+
+    # 3. Developer Docker: Dockerfile + docker-compose.yml + app/
+    if ((Test-Path "$Dir\docker-compose.yml") -and (Test-Path "$Dir\Dockerfile") -and
+        (Test-Path "$Dir\app\licensing.py")) {
+        return $true
+    }
+
+    # 4. Source checkout without VERSION: run.py + app/licensing.py
+    if ((Test-Path "$Dir\run.py") -and (Test-Path "$Dir\app\licensing.py")) {
+        return $true
+    }
+
+    return $false
+}
+
+$InstallDir = $null
+
+# 1. Explicit override
+if ($env:SENTRIKAT_DIR -and (Test-SentriKatDir $env:SENTRIKAT_DIR)) {
+    $InstallDir = $env:SENTRIKAT_DIR
+}
+
+# 2. Walk up from current/script directory
+if (-not $InstallDir) {
+    $SearchPaths = @((Get-Location).Path, $PSScriptRoot)
+    foreach ($startPath in $SearchPaths) {
+        $dir = $startPath
+        while ($dir -and $dir.Length -gt 3) {
+            if (Test-SentriKatDir $dir) {
+                $InstallDir = $dir
+                break
+            }
+            $dir = Split-Path $dir -Parent
+        }
+        if ($InstallDir) { break }
+    }
+}
+
+# 3. Well-known paths
+if (-not $InstallDir) {
+    foreach ($candidate in @("C:\SentriKat", "C:\Program Files\SentriKat", "$env:ProgramData\SentriKat")) {
+        if ($candidate -and (Test-Path $candidate) -and (Test-SentriKatDir $candidate)) {
+            $InstallDir = $candidate
+            break
+        }
     }
 }
 
 if (-not $InstallDir) {
     Write-Err "Could not find SentriKat installation."
-    Write-Err "Run this script from the SentriKat directory."
+    Write-Err "Run this script from the SentriKat directory, or set SENTRIKAT_DIR=C:\path\to\sentrikat"
     exit 1
 }
 
+$InstallDir = (Resolve-Path $InstallDir).Path
 Write-Info "Installation directory: $InstallDir"
 
-# Load proxy settings from .env if present
+# Detect deployment type
+$DeployType = "standalone"
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    $DockerCompose = Join-Path $InstallDir "docker-compose.yml"
+    if (Test-Path $DockerCompose) {
+        if (Select-String -Path $DockerCompose -Pattern "ghcr.io/sbr0nch/sentrikat" -Quiet) {
+            $DeployType = "docker_image"
+        } elseif (Select-String -Path $DockerCompose -Pattern '^\s+build:' -Quiet) {
+            $DeployType = "docker_build"
+        }
+    }
+}
+Write-Info "Deployment type: $DeployType"
+
+# Load proxy settings from .env
 $EnvFile = Join-Path $InstallDir ".env"
 if (Test-Path $EnvFile) {
     $envContent = Get-Content $EnvFile
@@ -81,7 +165,6 @@ $proxy = [Environment]::GetEnvironmentVariable("HTTPS_PROXY")
 if (-not $proxy) { $proxy = [Environment]::GetEnvironmentVariable("HTTP_PROXY") }
 if ($proxy) {
     Write-Info "Proxy: $proxy"
-    # Configure PowerShell to use the proxy
     [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy($proxy)
     [System.Net.WebRequest]::DefaultWebProxy.BypassProxyOnLocal = $true
 }
@@ -91,21 +174,41 @@ $CurrentVersion = "unknown"
 $VersionFile = Join-Path $InstallDir "VERSION"
 if (Test-Path $VersionFile) {
     $CurrentVersion = (Get-Content $VersionFile -Raw).Trim()
+} elseif ($DeployType -eq "docker_image") {
+    $tag = Select-String -Path (Join-Path $InstallDir "docker-compose.yml") -Pattern 'ghcr\.io/sbr0nch/sentrikat:([^\s"]+)' |
+        ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
+    if ($tag) { $CurrentVersion = $tag }
 }
 Write-Info "Current version: $CurrentVersion"
 
-# Get latest version from GitHub
-Write-Info "Checking for latest release..."
-try {
-    $release = Invoke-RestMethod -Uri "$GithubApi/releases/latest" -UseBasicParsing
-    $LatestVersion = $release.tag_name -replace '^v', ''
-} catch {
-    Write-Err "Could not reach GitHub API. Check your internet connection."
-    exit 1
-}
+# Get latest version (portal then GitHub)
+$TargetVersion = $Version
+if (-not $TargetVersion) {
+    Write-Info "Checking for latest release..."
 
-# Determine target version
-$TargetVersion = if ($Version) { $Version } else { $LatestVersion }
+    # Try portal first
+    try {
+        $portalResponse = Invoke-RestMethod -Uri "$PortalApi/v1/releases/latest" -UseBasicParsing -ErrorAction Stop
+        if ($portalResponse.version) {
+            $TargetVersion = $portalResponse.version -replace '^v', ''
+        }
+    } catch {
+        # Portal unavailable, try GitHub
+    }
+
+    if (-not $TargetVersion) {
+        Write-Info "Portal unavailable, checking GitHub..."
+        try {
+            $headers = @{}
+            if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "token $($env:GITHUB_TOKEN)" }
+            $release = Invoke-RestMethod -Uri "$GithubApi/releases/latest" -Headers $headers -UseBasicParsing
+            $TargetVersion = $release.tag_name -replace '^v', ''
+        } catch {
+            Write-Err "Could not determine latest version from portal or GitHub."
+            exit 1
+        }
+    }
+}
 Write-Info "Target version:  $TargetVersion"
 
 # Compare
@@ -118,7 +221,7 @@ if ($CheckOnly) {
     Write-Host ""
     Write-OK "Update available: v$CurrentVersion -> v$TargetVersion"
     Write-Host ""
-    Write-Host "  Run '.\update.ps1' to update."
+    Write-Host "  Run '.\update.ps1' to update, or '.\update.ps1 -Version $TargetVersion' for this version."
     Write-Host ""
     exit 0
 }
@@ -127,33 +230,134 @@ Write-Host ""
 Write-Info "Updating: v$CurrentVersion -> v$TargetVersion"
 Write-Host ""
 
-# Check if Docker installation
-$DockerCompose = Join-Path $InstallDir "docker-compose.yml"
-$IsDocker = (Test-Path $DockerCompose) -and (Get-Command docker -ErrorAction SilentlyContinue)
+# ============================================================
+# Download Helper
+# ============================================================
 
-if ($IsDocker -and (Select-String -Path $DockerCompose -Pattern "ghcr.io/sbr0nch/sentrikat" -Quiet)) {
-    # Docker update - only update image tag, never replace docker-compose.yml
-    Write-Info "Updating Docker installation..."
+function Download-Release {
+    param([string]$Ver, [string]$Output)
 
-    # Update image tag in docker-compose.yml
+    $headers = @{}
+    if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "token $($env:GITHUB_TOKEN)" }
+
+    # 1. GitHub source archive
+    Write-Info "Downloading from GitHub..."
+    try {
+        Invoke-WebRequest -Uri "https://github.com/$Repo/archive/refs/tags/v$Ver.tar.gz" `
+            -OutFile $Output -UseBasicParsing -Headers $headers -ErrorAction Stop
+        Write-OK "Downloaded source archive from GitHub"
+        return $true
+    } catch {}
+
+    # 2. GitHub release asset
+    try {
+        Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/v$Ver/sentrikat-$Ver.tar.gz" `
+            -OutFile $Output -UseBasicParsing -Headers $headers -ErrorAction Stop
+        Write-OK "Downloaded release package from GitHub"
+        return $true
+    } catch {}
+
+    # 3. Portal
+    Write-Info "Trying portal download..."
+    try {
+        Invoke-WebRequest -Uri "$PortalApi/v1/releases/$Ver/download" `
+            -OutFile $Output -UseBasicParsing -ErrorAction Stop
+        Write-OK "Downloaded from portal"
+        return $true
+    } catch {}
+
+    Write-Err "Failed to download v$Ver from any source."
+    if (-not $env:GITHUB_TOKEN) { Write-Warn "If the repo is private, set GITHUB_TOKEN=<your-token>" }
+    return $false
+}
+
+# ============================================================
+# Update Functions
+# ============================================================
+
+function Update-SourceFiles {
+    param([string]$InstDir, [string]$Ver)
+
+    $TempDir = Join-Path $env:TEMP "sentrikat-update-$(Get-Date -Format 'yyyyMMddHHmmss')"
+    New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+    $archivePath = Join-Path $TempDir "sentrikat-$Ver.tar.gz"
+
+    try {
+        Write-Info "Downloading SentriKat v$Ver..."
+        if (-not (Download-Release -Ver $Ver -Output $archivePath)) {
+            exit 1
+        }
+
+        # Extract
+        Write-Info "Extracting..."
+        tar xzf $archivePath -C $TempDir
+
+        # Find extracted directory
+        $ExtractDir = Get-ChildItem $TempDir -Directory | Select-Object -First 1
+        if (-not $ExtractDir) {
+            Write-Err "Could not find extracted directory"
+            exit 1
+        }
+        Write-Info "Extracted: $($ExtractDir.Name)"
+
+        # Backup
+        $BackupDir = Join-Path $InstDir "backups\pre-update-$(Get-Date -Format 'yyyyMMddHHmmss')"
+        New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
+        Write-Info "Creating backup in $BackupDir..."
+
+        foreach ($item in @("app", "static", "templates", "VERSION", ".env", "docker-compose.yml", "Dockerfile")) {
+            $source = Join-Path $InstDir $item
+            if (Test-Path $source) {
+                Copy-Item $source (Join-Path $BackupDir $item) -Recurse -Force
+            }
+        }
+        Write-OK "Backup created"
+
+        # Replace source files (NEVER touch .env, docker-compose.yml, or data/)
+        Write-Info "Updating application files..."
+        $updateItems = @("app", "static", "templates", "scripts", "tools", "agents", "docs", "nginx",
+                         "Dockerfile", "docker-entrypoint.sh", "gunicorn.conf.py",
+                         "requirements.txt", "VERSION", "README.md", "run.py")
+
+        foreach ($item in $updateItems) {
+            $source = Join-Path $ExtractDir.FullName $item
+            $dest = Join-Path $InstDir $item
+            if (Test-Path $source) {
+                if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+                Copy-Item $source $dest -Recurse -Force
+            }
+        }
+
+        Set-Content -Path (Join-Path $InstDir "VERSION") -Value $Ver -NoNewline
+        Write-OK "Application files updated"
+
+    } finally {
+        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# --- Docker image update ---
+if ($DeployType -eq "docker_image") {
+    $DockerCompose = Join-Path $InstallDir "docker-compose.yml"
+
+    Write-Info "Updating Docker image to v$TargetVersion..."
+
     (Get-Content $DockerCompose) -replace 'ghcr.io/sbr0nch/sentrikat:[^\s"]+', "ghcr.io/sbr0nch/sentrikat:$TargetVersion" |
         Set-Content $DockerCompose
     Write-Info "Updated image tag to $TargetVersion"
 
-    # Pull and restart
     Push-Location $InstallDir
     try {
         Write-Info "Pulling new Docker image..."
-        $pullResult = docker compose pull 2>&1
-        $pullExitCode = $LASTEXITCODE
-        if ($pullExitCode -ne 0) {
+        docker compose pull 2>&1
+        if ($LASTEXITCODE -ne 0) {
             Write-Err "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:$TargetVersion"
-            Write-Err "The image may not exist yet. Check: https://github.com/$Repo/actions"
-            Write-Err "If using a tag-triggered CI, ensure you pushed a git tag (v$TargetVersion)."
-            # Revert image tag
-            (Get-Content $DockerCompose) -replace 'ghcr.io/sbr0nch/sentrikat:[^\s"]+', "ghcr.io/sbr0nch/sentrikat:$CurrentVersion" |
-                Set-Content $DockerCompose
-            Write-Warn "Reverted docker-compose.yml to v$CurrentVersion"
+            Write-Err "Check: https://github.com/$Repo/pkgs/container/sentrikat"
+            if ($CurrentVersion -ne "unknown") {
+                (Get-Content $DockerCompose) -replace 'ghcr.io/sbr0nch/sentrikat:[^\s"]+', "ghcr.io/sbr0nch/sentrikat:$CurrentVersion" |
+                    Set-Content $DockerCompose
+                Write-Warn "Reverted docker-compose.yml to v$CurrentVersion"
+            }
             exit 1
         }
         Write-OK "Docker image pulled"
@@ -169,74 +373,43 @@ if ($IsDocker -and (Select-String -Path $DockerCompose -Pattern "ghcr.io/sbr0nch
         Pop-Location
     }
 
-    # Update VERSION file
-    Set-Content -Path $VersionFile -Value $TargetVersion
-    Write-OK "Docker update complete"
+    Set-Content -Path $VersionFile -Value $TargetVersion -NoNewline
 
-} else {
-    # File-based update
-    $DownloadUrl = "https://github.com/$Repo/releases/download/v$TargetVersion/sentrikat-$TargetVersion.tar.gz"
-    $TempDir = Join-Path $env:TEMP "sentrikat-update-$(Get-Date -Format 'yyyyMMddHHmmss')"
-    New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+# --- Docker build update ---
+} elseif ($DeployType -eq "docker_build") {
+    Write-Info "Updating Docker (build from source) to v$TargetVersion..."
 
+    Update-SourceFiles -InstDir $InstallDir -Ver $TargetVersion
+
+    Push-Location $InstallDir
     try {
-        # Download
-        Write-Info "Downloading SentriKat v$TargetVersion..."
-        $archivePath = Join-Path $TempDir "sentrikat-$TargetVersion.tar.gz"
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $archivePath -UseBasicParsing
-        Write-OK "Downloaded release package"
-
-        # Extract (requires tar, available on Windows 10+)
-        Write-Info "Extracting..."
-        tar xzf $archivePath -C $TempDir
-
-        # Find extracted directory
-        $ExtractDir = Get-ChildItem $TempDir -Directory -Filter "sentrikat-*" | Select-Object -First 1
-        if (-not $ExtractDir) {
-            Write-Err "Could not find extracted directory"
+        Write-Info "Rebuilding Docker image (this may take a few minutes)..."
+        docker compose build 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Docker build failed. Check the output above."
+            Write-Warn "Source files were updated. Retry: docker compose build && docker compose up -d"
             exit 1
         }
+        Write-OK "Docker image rebuilt"
 
-        # Backup
-        $BackupDir = Join-Path $InstallDir "backups\pre-update-$(Get-Date -Format 'yyyyMMddHHmmss')"
-        New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
-        Write-Info "Creating backup in $BackupDir..."
-
-        foreach ($item in @("app", "static", "templates", "VERSION", ".env", "docker-compose.yml")) {
-            $source = Join-Path $InstallDir $item
-            if (Test-Path $source) {
-                Copy-Item $source (Join-Path $BackupDir $item) -Recurse -Force
-            }
+        Write-Info "Restarting SentriKat..."
+        docker compose up -d
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Failed to restart containers."
+            exit 1
         }
-        Write-OK "Backup created"
-
-        # Update files (preserve .env, docker-compose.yml, and data)
-        Write-Info "Updating application files..."
-        $updateItems = @("app", "static", "templates", "scripts", "tools", "agents", "docs",
-                         "Dockerfile", "docker-entrypoint.sh",
-                         "requirements.txt", "VERSION", "README.md")
-
-        foreach ($item in $updateItems) {
-            $source = Join-Path $ExtractDir.FullName $item
-            $dest = Join-Path $InstallDir $item
-            if (Test-Path $source) {
-                if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-                Copy-Item $source $dest -Recurse -Force
-            }
-        }
-
-        # Ensure VERSION is updated
-        Set-Content -Path $VersionFile -Value $TargetVersion
-        Write-OK "Application files updated"
-
+        Write-OK "SentriKat restarted"
     } finally {
-        # Clean up temp
-        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+        Pop-Location
     }
+
+# --- Standalone update ---
+} else {
+    Update-SourceFiles -InstDir $InstallDir -Ver $TargetVersion
 
     Write-Warn "Restart SentriKat for changes to take effect."
     Write-Warn "  Docker: docker compose up -d"
-    Write-Warn "  Manual: Restart your Python/Flask process"
+    Write-Warn "  Service: Restart-Service SentriKat"
 }
 
 Write-Host ""

@@ -320,7 +320,7 @@ jobs:
           files: |
             sentrikat-${{ steps.version.outputs.VERSION }}.tar.gz
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       # ── Notify the portal about the new release ──
       - name: Notify Portal

@@ -9,18 +9,28 @@
 #   ./scripts/update.sh 1.0.3        # Update to specific version
 #   ./scripts/update.sh --check      # Check for updates only
 #
-# Works for both Docker and manual installations.
+# Supports three deployment types (auto-detected):
+#   1. Docker image (customer package with ghcr.io pre-built image)
+#   2. Docker build (developer/self-hosted, builds from source)
+#   3. Standalone (no Docker, source-based)
+#
+# Environment variables:
+#   SENTRIKAT_DIR        Override installation directory detection
+#   GITHUB_TOKEN         Auth token for private repos
+#   SENTRIKAT_LICENSE_SERVER  Portal API URL override
 # ============================================================
 
 set -e
 
 REPO="sbr0nch/SentriKat"
+GITHUB_API="https://api.github.com/repos/${REPO}"
 PORTAL_API="${SENTRIKAT_LICENSE_SERVER:-https://license.sentrikat.com/api}"
 CURRENT_VERSION_FILE=""
 CURRENT_VERSION=""
 TARGET_VERSION=""
 CHECK_ONLY=false
 INSTALLATION_ID=""
+DEPLOY_TYPE="" # docker_image, docker_build, standalone
 
 # Load proxy settings from .env if present (so curl and docker use them)
 load_proxy_from_env() {
@@ -33,7 +43,6 @@ load_proxy_from_env() {
     done
     [ -z "$env_file" ] && return
 
-    # Only set if not already in environment
     if [ -z "${HTTP_PROXY:-}" ]; then
         local val
         val=$(grep -E '^HTTP_PROXY=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2-)
@@ -55,18 +64,12 @@ load_proxy_from_env() {
 load_installation_id() {
     local install_dir="${INSTALL_DIR:-.}"
 
-    # 1. From data/.installation_id file
     if [ -f "${install_dir}/data/.installation_id" ]; then
         INSTALLATION_ID=$(cat "${install_dir}/data/.installation_id" 2>/dev/null | tr -d '[:space:]')
     fi
 
-    # 2. Fallback to environment variable
     if [ -z "$INSTALLATION_ID" ]; then
         INSTALLATION_ID="${SENTRIKAT_INSTALLATION_ID:-}"
-    fi
-
-    if [ -z "$INSTALLATION_ID" ]; then
-        log_warn "No installation ID found. Update check will still work but won't be tracked."
     fi
 }
 
@@ -83,37 +86,55 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 log_info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# ============================================================
+# Installation Detection
+# ============================================================
+
 # Detect if a directory is a SentriKat installation
 is_sentrikat_dir() {
     local dir="$1"
-    # Full installation (source/tarball): has VERSION + app/licensing.py
+
+    # 1. Full source install: VERSION + app/licensing.py
     if [ -f "${dir}/VERSION" ] && [ -f "${dir}/app/licensing.py" ]; then
         return 0
     fi
-    # Docker-only deployment: has docker-compose.yml referencing sentrikat image
+
+    # 2. Customer Docker deploy: docker-compose.yml with pre-built GHCR image
     if [ -f "${dir}/docker-compose.yml" ] && \
        grep -q "ghcr.io/sbr0nch/sentrikat" "${dir}/docker-compose.yml" 2>/dev/null; then
         return 0
     fi
+
+    # 3. Developer Docker (build from source): Dockerfile + docker-compose.yml + app/
+    if [ -f "${dir}/docker-compose.yml" ] && [ -f "${dir}/Dockerfile" ] && \
+       [ -f "${dir}/app/licensing.py" ]; then
+        return 0
+    fi
+
+    # 4. Source checkout without VERSION file: run.py + app/licensing.py
+    if [ -f "${dir}/run.py" ] && [ -f "${dir}/app/licensing.py" ]; then
+        return 0
+    fi
+
     return 1
 }
 
 # Find the SentriKat installation directory
 find_install_dir() {
-    # 1. Explicit override via environment variable
+    # 1. Explicit override
     if [ -n "${SENTRIKAT_DIR:-}" ] && is_sentrikat_dir "$SENTRIKAT_DIR"; then
         echo "$SENTRIKAT_DIR"
         return
     fi
 
-    # 2. Walk up from the current directory (handles running from any subdirectory)
+    # 2. Walk up from current directory
     local dir
     dir=$(pwd)
     while [ "$dir" != "/" ]; do
@@ -124,8 +145,8 @@ find_install_dir() {
         dir=$(dirname "$dir")
     done
 
-    # 3. Check well-known installation paths
-    for candidate in /opt/sentrikat /app /data/sentrikat; do
+    # 3. Well-known installation paths
+    for candidate in /opt/sentrikat /app /data/sentrikat /data/sentrikat/app; do
         if is_sentrikat_dir "$candidate"; then
             echo "$candidate"
             return
@@ -135,53 +156,111 @@ find_install_dir() {
     echo ""
 }
 
-# Get current installed version
+# Detect deployment type
+detect_deploy_type() {
+    local dir="$1"
+
+    if ! command -v docker &> /dev/null; then
+        DEPLOY_TYPE="standalone"
+        return
+    fi
+
+    if [ ! -f "${dir}/docker-compose.yml" ]; then
+        DEPLOY_TYPE="standalone"
+        return
+    fi
+
+    # Pre-built image from GHCR
+    if grep -q "ghcr.io/sbr0nch/sentrikat" "${dir}/docker-compose.yml" 2>/dev/null; then
+        DEPLOY_TYPE="docker_image"
+        return
+    fi
+
+    # Build from source (has build: directive)
+    if grep -qE '^\s+build:' "${dir}/docker-compose.yml" 2>/dev/null; then
+        DEPLOY_TYPE="docker_build"
+        return
+    fi
+
+    DEPLOY_TYPE="standalone"
+}
+
+# ============================================================
+# Version Detection
+# ============================================================
+
 get_current_version() {
     local install_dir="$1"
 
+    # 1. VERSION file
     if [ -f "${install_dir}/VERSION" ]; then
         CURRENT_VERSION=$(cat "${install_dir}/VERSION" | tr -d '[:space:]')
         CURRENT_VERSION_FILE="${install_dir}/VERSION"
-    elif [ -f "${install_dir}/docker-compose.yml" ]; then
-        # Docker-only deployment: extract version from image tag
-        CURRENT_VERSION=$(grep -o 'ghcr.io/sbr0nch/sentrikat:[^ "]*' "${install_dir}/docker-compose.yml" 2>/dev/null \
-            | head -1 | cut -d: -f2)
-        [ -z "$CURRENT_VERSION" ] && CURRENT_VERSION="unknown"
-    else
-        CURRENT_VERSION="unknown"
+        return
     fi
+
+    # 2. Docker image tag in docker-compose.yml
+    if [ -f "${install_dir}/docker-compose.yml" ]; then
+        local ver
+        ver=$(grep -o 'ghcr.io/sbr0nch/sentrikat:[^ "]*' "${install_dir}/docker-compose.yml" 2>/dev/null \
+            | head -1 | cut -d: -f2)
+        if [ -n "$ver" ]; then
+            CURRENT_VERSION="$ver"
+            return
+        fi
+    fi
+
+    # 3. Running Docker container label
+    if command -v docker &> /dev/null; then
+        local ver
+        ver=$(docker inspect sentrikat --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' 2>/dev/null) || true
+        if [ -n "$ver" ] && [ "$ver" != "<no value>" ]; then
+            CURRENT_VERSION="$ver"
+            return
+        fi
+    fi
+
+    CURRENT_VERSION="unknown"
 }
 
-# Get latest release version from the portal
+# Get latest release version (tries portal, falls back to GitHub)
 get_latest_version() {
-    local response http_code
+    local version=""
 
-    # Query the portal for the latest release
+    # 1. Try portal
+    local http_code
     http_code=$(portal_curl -o /tmp/sentrikat_latest.json -w '%{http_code}' \
         "${PORTAL_API}/v1/releases/latest" 2>/dev/null) || true
 
-    if [ "$http_code" = "204" ]; then
-        log_error "No releases published on the portal yet."
-        exit 1
+    if [ "$http_code" = "200" ] && [ -s /tmp/sentrikat_latest.json ]; then
+        version=$(cat /tmp/sentrikat_latest.json | grep -o '"version": *"[^"]*"' | head -1 | sed 's/.*"v\?\([^"]*\)"/\1/')
     fi
-
-    if [ "$http_code" != "200" ] || [ ! -s /tmp/sentrikat_latest.json ]; then
-        log_error "Could not reach SentriKat portal (${PORTAL_API}). Check your internet connection."
-        rm -f /tmp/sentrikat_latest.json
-        exit 1
-    fi
-
-    response=$(cat /tmp/sentrikat_latest.json)
     rm -f /tmp/sentrikat_latest.json
 
-    # Extract version and strip 'v' prefix
-    echo "$response" | grep -o '"version": *"[^"]*"' | head -1 | sed 's/.*"v\?\([^"]*\)"/\1/'
-}
+    if [ -n "$version" ]; then
+        echo "$version"
+        return
+    fi
 
-# Get download URL for a specific version (served by the portal)
-get_download_url() {
-    local version="$1"
-    echo "${PORTAL_API}/v1/releases/${version}/download"
+    # 2. Fallback to GitHub Releases API
+    log_info "Portal unavailable, checking GitHub..."
+    local gh_args=(-sf)
+    [ -n "${GITHUB_TOKEN:-}" ] && gh_args+=(-H "Authorization: token ${GITHUB_TOKEN}")
+
+    local response
+    response=$(curl "${gh_args[@]}" "${GITHUB_API}/releases/latest" 2>/dev/null) || true
+
+    if [ -n "$response" ]; then
+        version=$(echo "$response" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"v\?\([^"]*\)"/\1/')
+    fi
+
+    if [ -n "$version" ]; then
+        echo "$version"
+        return
+    fi
+
+    log_error "Could not determine latest version from portal or GitHub."
+    exit 1
 }
 
 # Compare versions (returns 0 if $1 > $2)
@@ -189,24 +268,122 @@ version_gt() {
     [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -1)" != "$2" ]
 }
 
-# Docker-based update - only updates the image tag, never replaces docker-compose.yml
-update_docker() {
+# ============================================================
+# Download
+# ============================================================
+
+# Download release source (tries GitHub archive, then release asset, then portal)
+download_release() {
+    local version="$1"
+    local output="$2"
+
+    local gh_args=(-fL --progress-bar -o "$output")
+    [ -n "${GITHUB_TOKEN:-}" ] && gh_args+=(-H "Authorization: token ${GITHUB_TOKEN}")
+
+    # 1. GitHub source archive (best for build-from-source deployments)
+    log_info "Downloading from GitHub..."
+    if curl "${gh_args[@]}" "https://github.com/${REPO}/archive/refs/tags/v${version}.tar.gz" 2>/dev/null; then
+        log_ok "Downloaded source archive from GitHub"
+        return 0
+    fi
+
+    # 2. GitHub release asset (deployment package)
+    if curl "${gh_args[@]}" "https://github.com/${REPO}/releases/download/v${version}/sentrikat-${version}.tar.gz" 2>/dev/null; then
+        log_ok "Downloaded release package from GitHub"
+        return 0
+    fi
+
+    # 3. Portal
+    log_info "Trying portal download..."
+    local portal_args=(-fL --progress-bar -o "$output")
+    [ -n "$INSTALLATION_ID" ] && portal_args+=(-H "X-Installation-ID: ${INSTALLATION_ID}")
+    if curl "${portal_args[@]}" "${PORTAL_API}/v1/releases/${version}/download" 2>/dev/null; then
+        log_ok "Downloaded from portal"
+        return 0
+    fi
+
+    log_error "Failed to download v${version} from any source."
+    log_error "Tried: GitHub source archive, GitHub release, portal"
+    [ -z "${GITHUB_TOKEN:-}" ] && log_warn "If the repo is private, set GITHUB_TOKEN=<your-token>"
+    return 1
+}
+
+# ============================================================
+# Update Functions
+# ============================================================
+
+# Update source files on disk (shared by docker_build and standalone)
+update_source_files() {
     local install_dir="$1"
     local version="$2"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    local archive="${tmp_dir}/sentrikat-${version}.tar.gz"
 
-    log_info "Updating Docker installation to v${version}..."
-
-    # Check if docker-compose.yml exists
-    if [ ! -f "${install_dir}/docker-compose.yml" ]; then
-        log_error "docker-compose.yml not found in ${install_dir}"
+    log_info "Downloading SentriKat v${version}..."
+    if ! download_release "$version" "$archive"; then
+        rm -rf "$tmp_dir"
         exit 1
     fi
 
-    # Update image tag in docker-compose.yml (only the tag, not the whole file)
-    if grep -q "ghcr.io/sbr0nch/sentrikat:" "${install_dir}/docker-compose.yml"; then
-        sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${version}|g" "${install_dir}/docker-compose.yml"
-        log_info "Updated image tag to ${version}"
+    # Extract
+    log_info "Extracting..."
+    tar xzf "$archive" -C "$tmp_dir"
+
+    # Find extracted directory (handles GitHub SentriKat-x.y.z or release sentrikat-x.y.z)
+    local extract_dir
+    extract_dir=$(find "$tmp_dir" -maxdepth 1 -type d ! -path "$tmp_dir" | head -1)
+
+    if [ -z "$extract_dir" ]; then
+        log_error "Could not find extracted directory in archive"
+        rm -rf "$tmp_dir"
+        exit 1
     fi
+    log_info "Extracted: $(basename "$extract_dir")"
+
+    # Backup critical files
+    local backup_dir="${install_dir}/backups/pre-update-$(date +%Y%m%d%H%M%S)"
+    mkdir -p "$backup_dir"
+    log_info "Creating backup in ${backup_dir}..."
+
+    for item in app static templates VERSION .env docker-compose.yml Dockerfile; do
+        if [ -e "${install_dir}/${item}" ]; then
+            cp -r "${install_dir}/${item}" "${backup_dir}/"
+        fi
+    done
+    log_ok "Backup created"
+
+    # Replace source files (NEVER touch .env, docker-compose.yml, or data/)
+    log_info "Updating application files..."
+    for item in app static templates scripts tools agents docs nginx \
+                Dockerfile docker-entrypoint.sh gunicorn.conf.py \
+                requirements.txt VERSION README.md run.py; do
+        if [ -e "${extract_dir}/${item}" ]; then
+            rm -rf "${install_dir}/${item}"
+            cp -r "${extract_dir}/${item}" "${install_dir}/${item}"
+        fi
+    done
+
+    # Ensure VERSION is written
+    echo "${version}" > "${install_dir}/VERSION"
+    log_ok "Application files updated"
+
+    # Make scripts executable
+    chmod +x "${install_dir}/scripts/"*.sh 2>/dev/null || true
+
+    rm -rf "$tmp_dir"
+}
+
+# --- Docker image update (customer deployment with pre-built GHCR image) ---
+update_docker_image() {
+    local install_dir="$1"
+    local version="$2"
+
+    log_info "Updating Docker image to v${version}..."
+
+    # Update image tag in docker-compose.yml
+    sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${version}|g" "${install_dir}/docker-compose.yml"
+    log_info "Updated image tag to ${version}"
 
     # Pull new image
     log_info "Pulling new Docker image..."
@@ -214,95 +391,67 @@ update_docker() {
     if ! (docker compose pull 2>/dev/null || docker-compose pull); then
         log_error "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:${version}"
         log_error "The image may not exist yet, or GHCR packages may not be public."
-        log_error "Check: https://github.com/${REPO}/actions"
-        # Revert image tag
-        sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${CURRENT_VERSION}|g" "${install_dir}/docker-compose.yml"
-        log_warn "Reverted docker-compose.yml to v${CURRENT_VERSION}"
+        log_error "Check: https://github.com/${REPO}/pkgs/container/sentrikat"
+        # Revert
+        if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "unknown" ]; then
+            sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${CURRENT_VERSION}|g" "${install_dir}/docker-compose.yml"
+            log_warn "Reverted docker-compose.yml to v${CURRENT_VERSION}"
+        fi
         exit 1
     fi
     log_ok "Docker image pulled"
 
-    # Restart services
+    # Restart
     log_info "Restarting SentriKat..."
     docker compose up -d 2>/dev/null || docker-compose up -d
     log_ok "SentriKat restarted"
 
-    # Update VERSION file
     echo "${version}" > "${install_dir}/VERSION"
 }
 
-# File-based update (non-Docker)
-update_files() {
+# --- Docker build update (developer/self-hosted, builds from source) ---
+update_docker_build() {
     local install_dir="$1"
     local version="$2"
-    local download_url
-    download_url=$(get_download_url "$version")
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
 
-    log_info "Downloading SentriKat v${version}..."
+    log_info "Updating Docker (build from source) to v${version}..."
 
-    # Download release package from portal
-    local curl_args=(-sfL -o "${tmp_dir}/sentrikat-${version}.tar.gz")
-    [ -n "$INSTALLATION_ID" ] && curl_args+=(-H "X-Installation-ID: ${INSTALLATION_ID}")
-    if ! curl "${curl_args[@]}" "$download_url"; then
-        log_error "Failed to download v${version}. URL: ${download_url}"
-        rm -rf "$tmp_dir"
+    # Update source files first
+    update_source_files "$install_dir" "$version"
+
+    # Rebuild Docker image from updated source
+    log_info "Rebuilding Docker image (this may take a few minutes)..."
+    cd "${install_dir}"
+    if ! (docker compose build 2>&1 || docker-compose build 2>&1); then
+        log_error "Docker build failed. Check the output above for errors."
+        log_warn "Source files were updated. Retry manually:"
+        log_warn "  cd ${install_dir} && docker compose build && docker compose up -d"
         exit 1
     fi
-    log_ok "Downloaded release package"
+    log_ok "Docker image rebuilt"
 
-    # Extract
-    log_info "Extracting..."
-    cd "$tmp_dir"
-    tar xzf "sentrikat-${version}.tar.gz"
-
-    # Find extracted directory
-    local extract_dir
-    extract_dir=$(find "$tmp_dir" -maxdepth 1 -type d -name "sentrikat-*" | head -1)
-    if [ -z "$extract_dir" ]; then
-        log_error "Could not find extracted directory"
-        rm -rf "$tmp_dir"
-        exit 1
-    fi
-
-    # Backup critical files
-    local backup_dir="${install_dir}/backups/pre-update-$(date +%Y%m%d%H%M%S)"
-    mkdir -p "$backup_dir"
-    log_info "Creating backup in ${backup_dir}..."
-
-    # Backup app directory, configs
-    for item in app static templates VERSION .env docker-compose.yml; do
-        if [ -e "${install_dir}/${item}" ]; then
-            cp -r "${install_dir}/${item}" "${backup_dir}/"
-        fi
-    done
-    log_ok "Backup created"
-
-    # Update app files (preserve .env, docker-compose.yml, and data)
-    log_info "Updating application files..."
-    for item in app static templates scripts tools agents docs nginx \
-                Dockerfile docker-entrypoint.sh \
-                requirements.txt VERSION README.md; do
-        if [ -e "${extract_dir}/${item}" ]; then
-            # Remove old and copy new
-            rm -rf "${install_dir}/${item}"
-            cp -r "${extract_dir}/${item}" "${install_dir}/${item}"
-        fi
-    done
-
-    # Ensure VERSION is updated
-    echo "${version}" > "${install_dir}/VERSION"
-    log_ok "Application files updated"
-
-    # Clean up
-    rm -rf "$tmp_dir"
-
-    log_warn "If running with Docker, restart with: docker compose up -d"
-    log_warn "If running with systemd, restart with: sudo systemctl restart sentrikat"
+    # Restart
+    log_info "Restarting SentriKat..."
+    docker compose up -d 2>/dev/null || docker-compose up -d
+    log_ok "SentriKat restarted"
 }
 
-# ── Main ──────────────────────────────────────────────────────
+# --- Standalone update (no Docker) ---
+update_standalone() {
+    local install_dir="$1"
+    local version="$2"
+
+    update_source_files "$install_dir" "$version"
+
+    echo ""
+    log_warn "Restart SentriKat for changes to take effect:"
+    log_warn "  systemd:  sudo systemctl restart sentrikat"
+    log_warn "  manual:   Restart your Python/Gunicorn process"
+}
+
+# ============================================================
+# Main
+# ============================================================
 
 echo ""
 echo "=========================================="
@@ -318,17 +467,21 @@ case "${1:-}" in
     --help|-h)
         echo "Usage: $0 [VERSION|--check|--help]"
         echo ""
-        echo "  (no args)     Update to the latest version"
-        echo "  VERSION        Update to a specific version (e.g., 1.0.3)"
+        echo "  (no args)      Update to the latest stable version"
+        echo "  VERSION         Update to a specific version (e.g., 1.0.3 or 1.0.0-beta.1)"
         echo "  --check, -c    Check for updates without installing"
         echo "  --help, -h     Show this help message"
+        echo ""
+        echo "Environment:"
+        echo "  SENTRIKAT_DIR   Override install directory detection"
+        echo "  GITHUB_TOKEN    Auth token for private GitHub repos"
         echo ""
         exit 0
         ;;
     "")
         ;;
     *)
-        TARGET_VERSION="$1"
+        TARGET_VERSION="${1#v}" # Strip leading 'v' if present
         ;;
 esac
 
@@ -342,18 +495,21 @@ fi
 INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd)
 log_info "Installation directory: ${INSTALL_DIR}"
 
-# Load proxy settings from .env (for curl and docker commands)
+# Detect deployment type
+detect_deploy_type "$INSTALL_DIR"
+log_info "Deployment type: ${DEPLOY_TYPE}"
+
+# Load proxy settings
 load_proxy_from_env
 if [ -n "${HTTP_PROXY:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
     log_info "Proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}"
 fi
 
-# Load installation ID for portal API
+# Load installation ID
 load_installation_id
 if [ -n "$INSTALLATION_ID" ]; then
     log_info "Installation ID: ${INSTALLATION_ID:0:20}..."
 fi
-log_info "Update server: ${PORTAL_API}"
 
 # Get current version
 get_current_version "$INSTALL_DIR"
@@ -402,13 +558,18 @@ echo ""
 log_info "Updating: v${CURRENT_VERSION} -> v${TARGET_VERSION}"
 echo ""
 
-# Detect installation type and update
-if command -v docker &> /dev/null && [ -f "${INSTALL_DIR}/docker-compose.yml" ] && \
-   grep -q "ghcr.io/sbr0nch/sentrikat" "${INSTALL_DIR}/docker-compose.yml" 2>/dev/null; then
-    update_docker "$INSTALL_DIR" "$TARGET_VERSION"
-else
-    update_files "$INSTALL_DIR" "$TARGET_VERSION"
-fi
+# Execute update based on deployment type
+case "$DEPLOY_TYPE" in
+    docker_image)
+        update_docker_image "$INSTALL_DIR" "$TARGET_VERSION"
+        ;;
+    docker_build)
+        update_docker_build "$INSTALL_DIR" "$TARGET_VERSION"
+        ;;
+    standalone)
+        update_standalone "$INSTALL_DIR" "$TARGET_VERSION"
+        ;;
+esac
 
 echo ""
 echo "=========================================="
