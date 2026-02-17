@@ -15,14 +15,84 @@ logger = logging.getLogger(__name__)
 # sync_nvd_recent_cves Phase 1 and Phase 2.
 import re as _re
 _KNOWN_PRODUCTS = {
+    # Browsers
     r'google\s+chrome': ('Google', 'Chrome'),
     r'chromium': ('Chromium', 'Chromium'),
     r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
     r'microsoft\s+edge': ('Microsoft', 'Edge'),
     r'apple\s+safari': ('Apple', 'Safari'),
+    # OS
     r'microsoft\s+windows': ('Microsoft', 'Windows'),
     r'linux\s+kernel': ('Linux', 'Kernel'),
+    r'apple\s+(?:macos|mac\s+os|ios|ipados|watchos|tvos|visionos)': ('Apple', None),
+    r'android': ('Google', 'Android'),
+    # Adobe — frequent 0-day target
+    r'adobe\s+acrobat': ('Adobe', 'Acrobat'),
+    r'adobe\s+reader': ('Adobe', 'Reader'),
+    r'adobe\s+flash': ('Adobe', 'Flash Player'),
+    r'adobe\s+coldfusion': ('Adobe', 'ColdFusion'),
+    r'adobe\s+commerce': ('Adobe', 'Commerce'),
+    r'adobe\s+(\w+)': ('Adobe', None),
+    # Oracle / Java
+    r'oracle\s+java': ('Oracle', 'Java'),
+    r'oracle\s+weblogic': ('Oracle', 'WebLogic Server'),
+    r'oracle\s+(\w+)': ('Oracle', None),
+    # Network appliances — top 0-day targets
+    r'fortinet\s+fortios': ('Fortinet', 'FortiOS'),
+    r'fortigate': ('Fortinet', 'FortiGate'),
+    r'fortinet\s+(\w+)': ('Fortinet', None),
+    r'palo\s+alto\s+(?:networks?\s+)?pan-?os': ('Palo Alto Networks', 'PAN-OS'),
+    r'palo\s+alto': ('Palo Alto Networks', 'PAN-OS'),
+    r'cisco\s+ios\s+xe': ('Cisco', 'IOS XE'),
+    r'cisco\s+ios': ('Cisco', 'IOS'),
+    r'cisco\s+asa': ('Cisco', 'ASA'),
+    r'cisco\s+webex': ('Cisco', 'Webex'),
+    r'cisco\s+(\w+)': ('Cisco', None),
+    r'sonicwall\s+sma': ('SonicWall', 'SMA'),
+    r'sonicwall\s+(\w+)': ('SonicWall', None),
+    r'ivanti\s+connect\s+secure': ('Ivanti', 'Connect Secure'),
+    r'ivanti\s+policy\s+secure': ('Ivanti', 'Policy Secure'),
+    r'ivanti\s+epmm': ('Ivanti', 'EPMM'),
+    r'ivanti\s+(\w+)': ('Ivanti', None),
+    r'citrix\s+netscaler': ('Citrix', 'NetScaler'),
+    r'citrix\s+adc': ('Citrix', 'ADC'),
+    r'citrix\s+(\w+)': ('Citrix', None),
+    r'zyxel': ('Zyxel', 'Firewall'),
+    r'barracuda': ('Barracuda', 'ESG'),
+    # Virtualization — high-value targets
+    r'vmware\s+vcenter': ('VMware', 'vCenter Server'),
+    r'vmware\s+esxi': ('VMware', 'ESXi'),
+    r'vmware\s+(\w+)': ('VMware', None),
+    # Atlassian
+    r'atlassian\s+confluence': ('Atlassian', 'Confluence'),
+    r'atlassian\s+jira': ('Atlassian', 'Jira'),
+    r'atlassian\s+(\w+)': ('Atlassian', None),
+    # Collaboration / VPN
+    r'zoom': ('Zoom', 'Zoom'),
+    r'microsoft\s+exchange': ('Microsoft', 'Exchange Server'),
+    r'microsoft\s+office': ('Microsoft', 'Office'),
+    r'microsoft\s+outlook': ('Microsoft', 'Outlook'),
+    r'microsoft\s+sharepoint': ('Microsoft', 'SharePoint'),
+    r'microsoft\s+teams': ('Microsoft', 'Teams'),
+    # File transfer — frequent ransomware entry
+    r'moveit\s+transfer': ('Progress', 'MOVEit Transfer'),
+    r'progress\s+moveit': ('Progress', 'MOVEit Transfer'),
+    r'goanywhere': ('Fortra', 'GoAnywhere MFT'),
+    # Server software
     r'apache\s+(\w+)': ('Apache', None),
+    r'nginx': ('Nginx', 'Nginx'),
+    r'openssl': ('OpenSSL', 'OpenSSL'),
+    # Enterprise / ERP
+    r'sap\s+netweaver': ('SAP', 'NetWeaver'),
+    r'sap\s+(\w+)': ('SAP', None),
+    # Other frequent 0-day targets
+    r'wordpress': ('WordPress', 'WordPress'),
+    r'drupal': ('Drupal', 'Drupal'),
+    r'gitlab': ('GitLab', 'GitLab'),
+    r'jenkins': ('Jenkins', 'Jenkins'),
+    r'veeam': ('Veeam', 'Backup & Replication'),
+    r'qnap': ('QNAP', 'QTS'),
+    r'synology': ('Synology', 'DSM'),
 }
 
 
@@ -104,10 +174,18 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
             verify_count = sum(1 for m in new_matches if getattr(m, 'vendor_fix_confidence', None) == 'medium')
             verify_note = f"\n🟡 {verify_count} likely resolved (verify fix)" if verify_count > 0 else ""
 
+            # Count actively exploited CVEs (0-days, CISA KEV, EUVD)
+            exploited_count = sum(
+                1 for m in new_matches
+                if m.vulnerability and m.vulnerability.is_actively_exploited
+            )
+
             # Build payload based on format - BATCHED message
             if webhook_format in ('slack', 'rocketchat'):
                 text = f"🔒 *SentriKat Alert for {org.display_name}*\n"
                 text += f"*{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:* {cve_list_str}"
+                if exploited_count > 0:
+                    text += f"\n🚨 *{exploited_count} ACTIVELY EXPLOITED*"
                 if critical_count > 0:
                     text += f"\n⚠️ *{critical_count} critical*"
                 if verify_count > 0:
@@ -116,6 +194,8 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
             elif webhook_format == 'discord':
                 content = f"🔒 **SentriKat Alert for {org.display_name}**\n"
                 content += f"**{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:** {cve_list_str}"
+                if exploited_count > 0:
+                    content += f"\n🚨 **{exploited_count} ACTIVELY EXPLOITED**"
                 if critical_count > 0:
                     content += f"\n⚠️ **{critical_count} critical**"
                 if verify_count > 0:
@@ -125,13 +205,15 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                 facts = [
                     {"name": "New CVEs", "value": str(new_cve_count)},
                     {"name": "CVE IDs", "value": cve_list_str},
-                    {"name": "Critical", "value": str(critical_count)}
                 ]
+                if exploited_count > 0:
+                    facts.append({"name": "Actively Exploited", "value": str(exploited_count)})
+                facts.append({"name": "Critical", "value": str(critical_count)})
                 if verify_count > 0:
                     facts.append({"name": "Likely Resolved (Verify)", "value": str(verify_count)})
                 payload = {
                     "@type": "MessageCard",
-                    "themeColor": "dc2626" if critical_count > 0 else "1e40af",
+                    "themeColor": "dc2626" if critical_count > 0 or exploited_count > 0 else "1e40af",
                     "summary": f"SentriKat: {new_cve_count} new CVEs for {org.display_name}",
                     "sections": [{
                         "activityTitle": f"🔒 SentriKat Alert for {org.display_name}",
@@ -145,6 +227,7 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                     "new_cve_count": new_cve_count,
                     "cve_ids": new_cve_ids,
                     "critical_count": critical_count,
+                    "exploited_count": exploited_count,
                     "verify_count": verify_count
                 }
 
@@ -286,6 +369,178 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
         logger.error(f"Webhook notification failed: {e}")
         return []
 
+def send_alerts_for_new_matches(since_time, source_label='sync'):
+    """
+    Send email and webhook alerts for new vulnerability matches created since `since_time`.
+
+    This is the SHARED alerting function used by ALL sync paths (CISA KEV, NVD, EUVD).
+    Previously only the CISA KEV sync triggered alerts — NVD and EUVD syncs would
+    create matches silently, meaning 0-days caught by NVD/EUVD were invisible to
+    the customer until the daily reminder ran (up to 24h delay).
+
+    Args:
+        since_time: datetime — only matches created after this time trigger alerts
+        source_label: str — label for logging (e.g., 'nvd_sync', 'euvd_sync')
+
+    Returns:
+        dict with alert_results and webhook_results
+    """
+    from app.models import Organization, VulnerabilityMatch, product_organizations
+    from app.email_alerts import EmailAlertManager
+    from datetime import date as _date
+
+    alert_results = []
+    webhook_results = []
+    orgs_with_own_webhook = set()
+    organizations = Organization.query.filter_by(active=True).all()
+
+    for org in organizations:
+        try:
+            alert_config = org.get_effective_alert_mode()
+            alert_mode = alert_config['mode']
+            escalation_days = alert_config['escalation_days']
+
+            # Get product IDs for this organization
+            legacy_ids = [p.id for p in Product.query.filter_by(organization_id=org.id).all()]
+            multi_org_ids = [row.product_id for row in db.session.query(
+                product_organizations.c.product_id
+            ).filter(product_organizations.c.organization_id == org.id).all()]
+            org_product_ids = list(set(legacy_ids + multi_org_ids))
+
+            if not org_product_ids:
+                continue
+
+            if alert_mode == 'new_only':
+                matches_to_alert = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.acknowledged == False,
+                    VulnerabilityMatch.created_at >= since_time
+                ).all()
+            elif alert_mode in ('daily_reminder', 'escalation'):
+                # BUG FIX: Previously filtered ONLY on due_date, which silently
+                # dropped all NVD/EUVD CVEs (they have NULL due_date).
+                # Now: include CVEs with due_date in window OR newly created
+                # OR actively exploited (regardless of due_date).
+                days_window = 7 if alert_mode == 'daily_reminder' else escalation_days
+                cutoff_date = _date.today() + timedelta(days=days_window)
+
+                from sqlalchemy import or_
+                vuln_ids_qualifying = [v.id for v in Vulnerability.query.filter(
+                    or_(
+                        # Original: CVEs with due_date in window
+                        db.and_(
+                            Vulnerability.due_date <= cutoff_date,
+                            Vulnerability.due_date >= _date.today()
+                        ),
+                        # FIX: actively exploited CVEs (0-days) always qualify
+                        Vulnerability.is_actively_exploited == True,
+                        # FIX: CVEs with NULL due_date that are HIGH/CRITICAL
+                        db.and_(
+                            Vulnerability.due_date == None,
+                            Vulnerability.severity.in_(['CRITICAL', 'HIGH'])
+                        )
+                    )
+                ).all()]
+
+                if vuln_ids_qualifying:
+                    matches_to_alert = VulnerabilityMatch.query.filter(
+                        VulnerabilityMatch.product_id.in_(org_product_ids),
+                        VulnerabilityMatch.acknowledged == False,
+                        VulnerabilityMatch.vulnerability_id.in_(vuln_ids_qualifying)
+                    ).all()
+                else:
+                    matches_to_alert = []
+            else:
+                matches_to_alert = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(org_product_ids),
+                    VulnerabilityMatch.acknowledged == False,
+                    VulnerabilityMatch.created_at >= since_time
+                ).all()
+
+            if matches_to_alert:
+                result = EmailAlertManager.send_critical_cve_alert(org, matches_to_alert)
+                alert_results.append({
+                    'organization': org.name,
+                    'alert_mode': alert_mode,
+                    'source': source_label,
+                    'result': result
+                })
+
+                org_critical = sum(
+                    1 for m in matches_to_alert
+                    if m.vulnerability and (
+                        m.vulnerability.is_actively_exploited
+                        or m.vulnerability.known_ransomware
+                        or (m.vulnerability.cvss_score and m.vulnerability.cvss_score >= 9.0)
+                    )
+                )
+
+                org_webhook_result = send_org_webhook(
+                    org, 0, org_critical, len(matches_to_alert),
+                    matches=matches_to_alert
+                )
+                if org_webhook_result:
+                    webhook_results.append(org_webhook_result)
+                    orgs_with_own_webhook.add(org.id)
+
+        except Exception as e:
+            logger.error(f"Alert processing failed for {org.name} ({source_label}): {e}")
+
+    # Send global webhook for orgs without their own
+    new_match_count = VulnerabilityMatch.query.filter(
+        VulnerabilityMatch.created_at >= since_time
+    ).count()
+
+    if new_match_count > 0:
+        critical_vuln_ids = [v.id for v in Vulnerability.query.filter(
+            db.or_(
+                Vulnerability.known_ransomware == True,
+                Vulnerability.cvss_score >= 9.0,
+                Vulnerability.is_actively_exploited == True
+            )
+        ).all()]
+
+        if orgs_with_own_webhook:
+            legacy_excluded = [p.id for p in Product.query.filter(
+                Product.organization_id.in_(orgs_with_own_webhook)
+            ).all()]
+            multi_org_excluded = [row.product_id for row in db.session.query(
+                product_organizations.c.product_id
+            ).filter(product_organizations.c.organization_id.in_(orgs_with_own_webhook)).all()]
+            excluded_product_ids = list(set(legacy_excluded + multi_org_excluded))
+            if critical_vuln_ids and excluded_product_ids:
+                total_critical = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.created_at >= since_time,
+                    ~VulnerabilityMatch.product_id.in_(excluded_product_ids),
+                    VulnerabilityMatch.vulnerability_id.in_(critical_vuln_ids)
+                ).count()
+            elif critical_vuln_ids:
+                total_critical = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.created_at >= since_time,
+                    VulnerabilityMatch.vulnerability_id.in_(critical_vuln_ids)
+                ).count()
+            else:
+                total_critical = 0
+        else:
+            if critical_vuln_ids:
+                total_critical = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.created_at >= since_time,
+                    VulnerabilityMatch.vulnerability_id.in_(critical_vuln_ids)
+                ).count()
+            else:
+                total_critical = 0
+
+        global_webhook_results = send_webhook_notification(
+            new_match_count, total_critical, new_match_count
+        )
+        webhook_results.extend(global_webhook_results)
+
+    if webhook_results:
+        logger.info(f"[{source_label}] Webhook notifications: {webhook_results}")
+
+    return {'alert_results': alert_results, 'webhook_results': webhook_results}
+
+
 def download_cisa_kev(max_retries=3, retry_delay=5):
     """Download CISA KEV JSON feed with retry logic"""
     import time
@@ -374,6 +629,8 @@ def parse_and_store_vulnerabilities(kev_data):
             vuln.due_date = due_date
             vuln.known_ransomware = vuln_data.get('knownRansomwareCampaignUse', 'Unknown').lower() == 'known'
             vuln.notes = vuln_data.get('notes', '')
+            # CISA KEV = confirmed actively exploited
+            vuln.is_actively_exploited = True
             # Reconcile source: if EUVD created it, now CISA confirms it
             if vuln.source == 'euvd':
                 vuln.source = 'cisa_kev+euvd'
@@ -393,6 +650,7 @@ def parse_and_store_vulnerabilities(kev_data):
                 known_ransomware=vuln_data.get('knownRansomwareCampaignUse', 'Unknown').lower() == 'known',
                 notes=vuln_data.get('notes', ''),
                 source='cisa_kev',
+                is_actively_exploited=True,  # CISA KEV = confirmed actively exploited
             )
             db.session.add(vuln)
             stored_count += 1
@@ -531,8 +789,11 @@ def enrich_with_cvss_data(limit=50):
             if source:
                 source_stats[source] = source_stats.get(source, 0) + 1
         else:
-            # Mark as checked even if not found (0.0 = "checked but not found")
+            # Mark as checked but use a sentinel source so re-enrichment can
+            # retry later.  Previously this set cvss_source=None and 0.0 was
+            # never retried (reenrich_fallback_cvss only retried cve_org/euvd).
             vuln.cvss_score = 0.0
+            vuln.cvss_source = 'pending'
 
     db.session.commit()
     sources_summary = ', '.join(f'{k}={v}' for k, v in source_stats.items() if v > 0)
@@ -658,6 +919,8 @@ def enrich_with_euvd_exploited():
                         vuln.severity = _score_to_severity(vuln.cvss_score)
                     vuln.cvss_source = 'euvd'
                     enriched += 1
+                # EUVD exploited feed = confirmed actively exploited
+                vuln.is_actively_exploited = True
             else:
                 # NEW CVE not in CISA KEV — create entry from EUVD + NVD
                 new_cve_ids.append((cve_id, item))
@@ -724,6 +987,7 @@ def enrich_with_euvd_exploited():
                         severity=severity,
                         cvss_source=cvss_source,
                         source='euvd',
+                        is_actively_exploited=True,  # EUVD exploited = confirmed actively exploited
                     )
 
                     # Store CPE data if available from NVD
@@ -804,145 +1068,9 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
             except Exception as e:
                 logger.warning(f"EUVD product matching failed (non-critical): {e}")
 
-        # Send email alerts for new critical matches
-        from app.models import Organization, VulnerabilityMatch
-        from app.email_alerts import EmailAlertManager
-
-        alert_results = []
-        webhook_results = []
-        orgs_with_own_webhook = set()
-        organizations = Organization.query.filter_by(active=True).all()
-
-        for org in organizations:
-            # Get the organization's effective alert mode
-            alert_config = org.get_effective_alert_mode()
-            alert_mode = alert_config['mode']
-            escalation_days = alert_config['escalation_days']
-
-            # Get product IDs for this organization - include both legacy and multi-org table
-            from app.models import product_organizations
-            legacy_ids = [p.id for p in Product.query.filter_by(organization_id=org.id).all()]
-            multi_org_ids = [row.product_id for row in db.session.query(
-                product_organizations.c.product_id
-            ).filter(product_organizations.c.organization_id == org.id).all()]
-            org_product_ids = list(set(legacy_ids + multi_org_ids))
-
-            if not org_product_ids:
-                continue  # No products for this org
-
-            if alert_mode == 'new_only':
-                # Only alert on NEW matches from this sync
-                matches_to_alert = VulnerabilityMatch.query.filter(
-                    VulnerabilityMatch.product_id.in_(org_product_ids),
-                    VulnerabilityMatch.acknowledged == False,
-                    VulnerabilityMatch.created_at >= start_time
-                ).all()
-            elif alert_mode == 'daily_reminder':
-                # Alert on ALL unacknowledged critical CVEs due within 7 days
-                from datetime import date, timedelta
-                cutoff_date = date.today() + timedelta(days=7)
-                # Get vulnerability IDs within due date range - fetch IDs first
-                vuln_ids_due = [v.id for v in Vulnerability.query.filter(
-                    Vulnerability.due_date <= cutoff_date,
-                    Vulnerability.due_date >= date.today()
-                ).all()]
-                if vuln_ids_due:
-                    matches_to_alert = VulnerabilityMatch.query.filter(
-                        VulnerabilityMatch.product_id.in_(org_product_ids),
-                        VulnerabilityMatch.acknowledged == False,
-                        VulnerabilityMatch.vulnerability_id.in_(vuln_ids_due)
-                    ).all()
-                else:
-                    matches_to_alert = []
-            elif alert_mode == 'escalation':
-                # Alert on CVEs approaching due date (within escalation_days)
-                from datetime import date, timedelta
-                cutoff_date = date.today() + timedelta(days=escalation_days)
-                # Get vulnerability IDs within due date range - fetch IDs first
-                vuln_ids_due = [v.id for v in Vulnerability.query.filter(
-                    Vulnerability.due_date <= cutoff_date,
-                    Vulnerability.due_date >= date.today()
-                ).all()]
-                if vuln_ids_due:
-                    matches_to_alert = VulnerabilityMatch.query.filter(
-                        VulnerabilityMatch.product_id.in_(org_product_ids),
-                        VulnerabilityMatch.acknowledged == False,
-                        VulnerabilityMatch.vulnerability_id.in_(vuln_ids_due)
-                    ).all()
-                else:
-                    matches_to_alert = []
-            else:
-                # Fallback to new_only behavior
-                matches_to_alert = VulnerabilityMatch.query.filter(
-                    VulnerabilityMatch.product_id.in_(org_product_ids),
-                    VulnerabilityMatch.acknowledged == False,
-                    VulnerabilityMatch.created_at >= start_time
-                ).all()
-
-            if matches_to_alert:
-                # Send email alert
-                result = EmailAlertManager.send_critical_cve_alert(org, matches_to_alert)
-                alert_results.append({
-                    'organization': org.name,
-                    'alert_mode': alert_mode,
-                    'result': result
-                })
-
-                # Count critical for this org
-                org_critical = sum(1 for m in matches_to_alert if m.vulnerability.known_ransomware or (m.vulnerability.cvss_score and m.vulnerability.cvss_score >= 9.0))
-
-                # Send org-specific webhook if configured (takes priority)
-                org_webhook_result = send_org_webhook(org, stored, org_critical, len(matches_to_alert), matches=matches_to_alert)
-                if org_webhook_result:
-                    webhook_results.append(org_webhook_result)
-                    orgs_with_own_webhook.add(org.id)
-
-        # Send global webhook notifications for orgs without their own webhook
-        if stored > 0 or matches_count > 0:
-            # Count total critical matches (for orgs without their own webhook)
-            # Fetch IDs first to avoid subquery issues
-            critical_vuln_ids = [v.id for v in Vulnerability.query.filter(
-                db.or_(Vulnerability.known_ransomware == True, Vulnerability.cvss_score >= 9.0)
-            ).all()]
-
-            if orgs_with_own_webhook:
-                # Include both legacy organization_id and multi-org table products
-                from app.models import product_organizations
-                legacy_excluded = [p.id for p in Product.query.filter(
-                    Product.organization_id.in_(orgs_with_own_webhook)
-                ).all()]
-                multi_org_excluded = [row.product_id for row in db.session.query(
-                    product_organizations.c.product_id
-                ).filter(product_organizations.c.organization_id.in_(orgs_with_own_webhook)).all()]
-                excluded_product_ids = list(set(legacy_excluded + multi_org_excluded))
-                if critical_vuln_ids and excluded_product_ids:
-                    total_critical = VulnerabilityMatch.query.filter(
-                        VulnerabilityMatch.created_at >= start_time,
-                        ~VulnerabilityMatch.product_id.in_(excluded_product_ids),
-                        VulnerabilityMatch.vulnerability_id.in_(critical_vuln_ids)
-                    ).count()
-                elif critical_vuln_ids:
-                    total_critical = VulnerabilityMatch.query.filter(
-                        VulnerabilityMatch.created_at >= start_time,
-                        VulnerabilityMatch.vulnerability_id.in_(critical_vuln_ids)
-                    ).count()
-                else:
-                    total_critical = 0
-            else:
-                if critical_vuln_ids:
-                    total_critical = VulnerabilityMatch.query.filter(
-                        VulnerabilityMatch.created_at >= start_time,
-                        VulnerabilityMatch.vulnerability_id.in_(critical_vuln_ids)
-                    ).count()
-                else:
-                    total_critical = 0
-
-            # Only send global webhook if there are orgs without their own webhook
-            global_webhook_results = send_webhook_notification(stored, total_critical, matches_count)
-            webhook_results.extend(global_webhook_results)
-
-        if webhook_results:
-            logger.info(f"Webhook notifications sent: {webhook_results}")
+        # Send email and webhook alerts for all new matches from this sync
+        alerts = send_alerts_for_new_matches(start_time, source_label='cisa_kev')
+        alert_results = alerts.get('alert_results', [])
 
         # Log success
         duration = (datetime.utcnow() - start_time).total_seconds()
@@ -1019,10 +1147,9 @@ def reenrich_fallback_cvss(limit=50):
     from app.nvd_api import _fetch_cvss_from_nvd
 
     # Part 1: Upgrade fallback-sourced CVEs to NVD
+    # Also retry 'pending' (= all 3 sources returned nothing on first attempt)
     vulns = Vulnerability.query.filter(
-        Vulnerability.cvss_source.in_(['cve_org', 'euvd']),
-        Vulnerability.cvss_score.isnot(None),
-        Vulnerability.cvss_score > 0
+        Vulnerability.cvss_source.in_(['cve_org', 'euvd', 'pending']),
     ).order_by(Vulnerability.date_added.desc()).limit(limit).all()
 
     upgraded = 0
@@ -1616,6 +1743,151 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                 f"NVD Phase 2 (unscored): {unscored_imported} CNA-scored HIGH/CRITICAL imported, "
                 f"{unscored_skipped_low} skipped (LOW/MEDIUM/no score)"
             )
+
+        # Phase 3: Catch-up for late-analyzed CVEs using lastModStartDate.
+        #
+        # Phases 1 & 2 use pubStartDate which means a CVE published on Monday
+        # that NVD doesn't analyze until Friday will be missed — by Friday the
+        # publication window has moved past Monday.  Phase 3 queries by
+        # lastModStartDate to catch CVEs that were MODIFIED (e.g., NVD added
+        # CVSS score) since the last sync, regardless of when they were
+        # originally published.  We only create new entries for CVEs not
+        # already in our DB (avoid duplicating Phase 1/2 work).
+        phase3_imported = 0
+        try:
+            mod_start = pub_start  # Same window as Phases 1/2
+            mod_params = {
+                'lastModStartDate': mod_start.strftime(date_fmt),
+                'lastModEndDate': pub_end.strftime(date_fmt),
+                'cvssV3Severity': 'CRITICAL',
+                'resultsPerPage': 200,
+                'startIndex': 0,
+            }
+
+            for p3_severity in ['CRITICAL', 'HIGH']:
+                mod_params['cvssV3Severity'] = p3_severity
+                mod_params['startIndex'] = 0
+
+                if not limiter.acquire(timeout=60.0, block=True):
+                    break
+
+                try:
+                    response = requests.get(
+                        'https://services.nvd.nist.gov/rest/json/cves/2.0',
+                        params=mod_params,
+                        headers=headers,
+                        timeout=20,
+                        **kwargs
+                    )
+
+                    if response.status_code != 200:
+                        continue
+
+                    data = response.json()
+                    results = data.get('vulnerabilities', [])
+
+                    for item in results:
+                        try:
+                            cve_data = item.get('cve', {})
+                            cve_id = cve_data.get('id', '')
+                            if not cve_id or not cve_id.startswith('CVE-'):
+                                continue
+
+                            # Only import if NOT already in DB
+                            existing = Vulnerability.query.filter_by(cve_id=cve_id).first()
+                            if existing:
+                                # Update NVD status if it changed (e.g., Awaiting → Analyzed)
+                                live_status = cve_data.get('vulnStatus', '')
+                                if live_status and existing.nvd_status != live_status:
+                                    existing.nvd_status = live_status
+                                continue
+
+                            vuln_status = cve_data.get('vulnStatus', '')
+                            if vuln_status in ('Rejected', 'Disputed'):
+                                continue
+
+                            description = ''
+                            for desc in cve_data.get('descriptions', []):
+                                if desc.get('lang') == 'en':
+                                    description = desc.get('value', '')
+                                    break
+                            if not description:
+                                continue
+
+                            metrics = cve_data.get('metrics', {})
+                            cvss_score_p3, cvss_severity_p3, cvss_type_p3 = _extract_cvss_from_metrics(metrics)
+                            if not cvss_severity_p3:
+                                cvss_severity_p3 = _score_to_severity(cvss_score_p3)
+
+                            vendor = ''
+                            product = ''
+                            cpe_entries = []
+                            from app.nvd_cpe_api import parse_cpe_uri
+                            for config in cve_data.get('configurations', []):
+                                for node in config.get('nodes', []):
+                                    for match in node.get('cpeMatch', []):
+                                        if not match.get('vulnerable', False):
+                                            continue
+                                        cpe_uri = match.get('criteria', '')
+                                        parsed = parse_cpe_uri(cpe_uri)
+                                        if not vendor and parsed.get('vendor'):
+                                            vendor = parsed['vendor'].replace('_', ' ').title()
+                                        if not product and parsed.get('product'):
+                                            product = parsed['product'].replace('_', ' ').title()
+                                        cpe_version = parsed.get('version', '*')
+                                        has_range = (
+                                            match.get('versionStartIncluding') or match.get('versionStartExcluding') or
+                                            match.get('versionEndIncluding') or match.get('versionEndExcluding')
+                                        )
+                                        cpe_entries.append({
+                                            'cpe_uri': cpe_uri,
+                                            'vendor': parsed.get('vendor', ''),
+                                            'product': parsed.get('product', ''),
+                                            'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),
+                                            'version_end': match.get('versionEndIncluding') or match.get('versionEndExcluding'),
+                                            'version_start_type': 'including' if match.get('versionStartIncluding') else 'excluding' if match.get('versionStartExcluding') else None,
+                                            'version_end_type': 'including' if match.get('versionEndIncluding') else 'excluding' if match.get('versionEndExcluding') else None,
+                                            'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
+                                        })
+
+                            if not vendor and not product and description:
+                                vendor, product = _extract_vendor_product_from_description(description)
+
+                            vuln = Vulnerability(
+                                cve_id=cve_id,
+                                vendor_project=vendor or 'Unknown',
+                                product=product or 'Unknown',
+                                vulnerability_name=description[:500],
+                                date_added=datetime.utcnow().date(),
+                                short_description=description,
+                                required_action='Apply vendor patches. (Source: NVD — late-analyzed catch-up)',
+                                known_ransomware=False,
+                                notes=f'Auto-imported from NVD Phase 3 catch-up (severity: {cvss_severity_p3}).',
+                                cvss_score=cvss_score_p3,
+                                severity=cvss_severity_p3,
+                                cvss_source='nvd',
+                                source='nvd',
+                                nvd_status=vuln_status or None,
+                            )
+                            if cpe_entries:
+                                vuln.set_cpe_entries(cpe_entries)
+                            db.session.add(vuln)
+                            new_count += 1
+                            phase3_imported += 1
+
+                        except Exception as e:
+                            logger.debug(f"NVD Phase 3: error processing CVE: {e}")
+                            continue
+
+                except requests.exceptions.RequestException as e:
+                    logger.debug(f"NVD Phase 3 request failed for {p3_severity}: {e}")
+                    continue
+
+        except Exception as e:
+            logger.debug(f"NVD Phase 3 catch-up failed (non-critical): {e}")
+
+        if phase3_imported:
+            logger.info(f"NVD Phase 3 (lastMod catch-up): {phase3_imported} late-analyzed CVEs imported")
 
         if new_count > 0:
             db.session.commit()

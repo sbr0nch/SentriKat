@@ -87,6 +87,8 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerabilities', 'source', "VARCHAR(20) DEFAULT 'cisa_kev'", "VARCHAR(20) DEFAULT 'cisa_kev'"),
         # NVD analysis status tracking (Awaiting Analysis, Analyzed, etc.)
         ('vulnerabilities', 'nvd_status', 'VARCHAR(50)', 'VARCHAR(50)'),
+        # Actively exploited flag (CISA KEV, EUVD exploited, or manual)
+        ('vulnerabilities', 'is_actively_exploited', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

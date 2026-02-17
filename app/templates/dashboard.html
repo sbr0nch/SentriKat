@@ -8,6 +8,12 @@
 
 {% block content %}
 <style>
+    /* Actively exploited pulsing badge */
+    @keyframes pulse-badge {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+
     /* Priority Alert Cards - Compact */
     .alert-card {
         border-radius: 8px;
@@ -1779,6 +1785,8 @@
 
         const ransomwareBadge = vuln.known_ransomware ?
             '<span class="badge badge-critical"><i class="bi bi-shield-exclamation"></i> Ransomware</span>' : '';
+        const exploitedBadge = vuln.is_actively_exploited ?
+            '<span class="badge" style="background-color: #b91c1c; color: white; animation: pulse-badge 2s infinite;"><i class="bi bi-exclamation-triangle-fill"></i> ACTIVELY EXPLOITED</span>' : '';
         const ackBadge = match.acknowledged ?
             '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Acknowledged</span>' :
             '<span class="badge bg-warning text-dark"><i class="bi bi-circle"></i> Needs Review</span>';
@@ -1834,6 +1842,7 @@
                                         ${priorityBadge}
                                         ${severityBadge}
                                         ${epssBadge}
+                                        ${exploitedBadge}
                                         ${ransomwareBadge}
                                         ${ackBadge}
                                         ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV + EUVD</span>' : '<span class="badge" style="background-color: #2e7d32;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
