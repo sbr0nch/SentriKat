@@ -100,9 +100,9 @@ def _fetch_cvss_from_nvd(cve_id):
 
             metrics = vulnerabilities[0].get('cve', {}).get('metrics', {})
 
-            # Try CVSS v3.1 first, then v3.0, then v2.0
+            # Try CVSS v4.0 first, then v3.1, v3.0, then v2.0
             # Prefer NVD Primary scores over CNA Secondary scores
-            for metric_key in ('cvssMetricV31', 'cvssMetricV30'):
+            for metric_key in ('cvssMetricV40', 'cvssMetricV31', 'cvssMetricV30'):
                 entries = metrics.get(metric_key, [])
                 # First pass: look for NVD Primary score
                 for entry in entries:

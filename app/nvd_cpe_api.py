@@ -700,6 +700,12 @@ def match_cve_to_cpe_with_status(cve_id: str) -> Tuple[List[Dict], Optional[str]
         Tuple of (affected_cpes, vuln_status)
         vuln_status is e.g. 'Awaiting Analysis', 'Analyzed', 'Received', or None
     """
+    cache_key = f"cve_cpe_status:{cve_id}"
+    cached = _get_cached_result(cache_key)
+    if cached is not None:
+        # cached is a dict with 'cpes' and 'status' keys
+        return cached.get('cpes', []), cached.get('status')
+
     url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     params = {'cveId': cve_id}
 
@@ -760,6 +766,7 @@ def match_cve_to_cpe_with_status(cve_id: str) -> Tuple[List[Dict], Optional[str]
                                 'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
                             })
 
+            _set_cached_result(cache_key, {'cpes': affected_cpes, 'status': vuln_status})
             return affected_cpes, vuln_status
 
         # Non-200: raise so callers don't mistake API failure for "no data"

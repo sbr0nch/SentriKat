@@ -1100,7 +1100,7 @@ def _extract_cvss_from_metrics(metrics):
     Returns:
         (score, severity, source_type) where source_type is 'Primary' or 'Secondary'
     """
-    for metric_key in ['cvssMetricV31', 'cvssMetricV30']:
+    for metric_key in ['cvssMetricV40', 'cvssMetricV31', 'cvssMetricV30']:
         entries = metrics.get(metric_key, [])
         if not entries:
             continue
@@ -1129,6 +1129,23 @@ def _extract_cvss_from_metrics(metrics):
         severity = cvss_data.get('baseSeverity')
         if score is not None:
             return score, severity, 'Unknown'
+
+    # CVSS v2.0 fallback (no Primary/Secondary distinction in v2)
+    v2_entries = metrics.get('cvssMetricV2', [])
+    if v2_entries:
+        cvss_data = v2_entries[0].get('cvssData', {})
+        score = cvss_data.get('baseScore')
+        if score is not None:
+            # V2 doesn't have baseSeverity, derive from score
+            if score >= 9.0:
+                severity = 'CRITICAL'
+            elif score >= 7.0:
+                severity = 'HIGH'
+            elif score >= 4.0:
+                severity = 'MEDIUM'
+            else:
+                severity = 'LOW'
+            return score, severity, 'Primary'
 
     return None, None, None
 
