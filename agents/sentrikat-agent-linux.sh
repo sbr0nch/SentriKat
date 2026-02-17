@@ -905,6 +905,16 @@ EOF
     echo "  - Heartbeat: every ${HEARTBEAT_MINUTES} minutes (checks for commands)"
     echo "Run 'systemctl status sentrikat-agent.timer' to check scan status"
     echo "Run 'systemctl status sentrikat-heartbeat.timer' to check heartbeat status"
+
+    # Run first inventory immediately so the asset appears in the dashboard
+    echo "Running initial inventory scan..."
+    log_info "Running initial inventory scan after install..."
+    if main 2>/dev/null; then
+        echo "Initial scan complete - agent is now visible in SentriKat dashboard"
+    else
+        echo "Initial scan failed - agent will retry on next scheduled scan"
+        log_warn "Initial inventory failed, will retry on next scheduled run"
+    fi
 }
 
 uninstall_agent() {
@@ -939,7 +949,7 @@ uninstall_agent() {
 }
 
 heartbeat_mode() {
-    # Heartbeat mode: check for commands and trigger scan if requested
+    # Heartbeat mode: send heartbeat + check for commands
     log_info "Running heartbeat check..."
 
     load_config
@@ -949,7 +959,10 @@ heartbeat_mode() {
         exit 1
     fi
 
-    # Check for commands from server
+    # Send heartbeat to keep agent online in dashboard
+    send_heartbeat
+
+    # Check for commands from server (scan_now, update, etc.)
     if check_commands; then
         # scan_now command received - run full inventory
         log_info "Executing requested scan..."
