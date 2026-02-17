@@ -142,11 +142,14 @@ function Save-AgentConfig {
     $Config | ConvertTo-Json | Set-Content $ConfigFile -Force
 
     # Restrict file ACL to SYSTEM and Administrators only (config contains API key)
+    # Use well-known SIDs instead of localized names for non-English Windows
     try {
         $acl = Get-Acl $ConfigFile
         $acl.SetAccessRuleProtection($true, $false)
-        $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","FullControl","Allow")
-        $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM","FullControl","Allow")
+        $adminSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")  # BUILTIN\Administrators
+        $systemSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")     # NT AUTHORITY\SYSTEM
+        $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule($adminSid,"FullControl","Allow")
+        $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid,"FullControl","Allow")
         $acl.AddAccessRule($adminRule)
         $acl.AddAccessRule($systemRule)
         Set-Acl $ConfigFile $acl
@@ -343,7 +346,6 @@ function Send-Inventory {
 
     $headers = @{
         "X-Agent-Key" = $Config.ApiKey
-        "Content-Type" = "application/json"
         "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
     }
 
@@ -364,8 +366,11 @@ function Send-Inventory {
             # Use TLS 1.2
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-            $bodyParam = if ($useFile) { Get-Content $tmpFile -Raw } else { $jsonPayload }
-            $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyParam -TimeoutSec 120
+            $bodyContent = if ($useFile) { Get-Content $tmpFile -Raw } else { $jsonPayload }
+            # Encode body as UTF-8 bytes explicitly to avoid system default encoding
+            # (e.g. Windows-1252 on German Windows) corrupting non-ASCII characters
+            $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyContent)
+            $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 120
 
             Write-Log "Inventory sent successfully: $($response.status)"
 
@@ -382,10 +387,15 @@ function Send-Inventory {
             $errorMsg = $_.Exception.Message
             if ($_.Exception.Response) {
                 try {
-                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                    $stream = $_.Exception.Response.GetResponseStream()
+                    $stream.Position = 0
+                    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
                     $errorBody = $reader.ReadToEnd()
-                    $errorMsg = "$errorMsg - $errorBody"
-                } catch {}
+                    $reader.Close()
+                    if ($errorBody) { $errorMsg = "$errorMsg - $errorBody" }
+                } catch {
+                    # Stream may already be disposed on some PS versions
+                }
             }
 
             Write-Log "Attempt $i failed: $errorMsg" -Level "WARN"
@@ -416,17 +426,29 @@ function Send-Heartbeat {
 
     $headers = @{
         "X-Agent-Key" = $Config.ApiKey
-        "Content-Type" = "application/json"
         "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
     }
 
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body ($payload | ConvertTo-Json) -TimeoutSec 30
+        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json))
+        $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30
         return $true
     }
     catch {
-        Write-Log "Heartbeat failed: $_" -Level "WARN"
+        # Extract error body from response for better diagnostics
+        $errorDetail = $_.Exception.Message
+        if ($_.Exception.Response) {
+            try {
+                $stream = $_.Exception.Response.GetResponseStream()
+                $stream.Position = 0
+                $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+                $errorBody = $reader.ReadToEnd()
+                $reader.Close()
+                if ($errorBody) { $errorDetail = "$errorDetail - $errorBody" }
+            } catch {}
+        }
+        Write-Log "Heartbeat failed: $errorDetail" -Level "WARN"
         return $false
     }
 }
@@ -492,7 +514,6 @@ function Check-Commands {
 
     $headers = @{
         "X-Agent-Key" = $Config.ApiKey
-        "Content-Type" = "application/json"
         "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
     }
 
@@ -733,13 +754,13 @@ function Invoke-ContainerScan {
 
     $headers = @{
         "X-Agent-Key" = $Config.ApiKey
-        "Content-Type" = "application/json"
         "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
     }
 
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $jsonPayload -TimeoutSec 120
+        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($jsonPayload)
+        $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 120
         Write-Log "Container scan results sent successfully"
     }
     catch {
