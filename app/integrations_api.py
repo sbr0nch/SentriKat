@@ -1562,255 +1562,56 @@ def delete_agent(agent_id):
 
 
 # ============================================================================
-# Agent Script Downloads (Server-Generated)
+# Agent Script Downloads (Serves Real Agents from agents/ Directory)
 # ============================================================================
+
+def _get_base_url():
+    """Get the SentriKat server URL for embedding in agent scripts."""
+    base_url = Config.SENTRIKAT_URL
+    if not base_url:
+        proto = request.headers.get('X-Forwarded-Proto', request.scheme)
+        base_url = f"{proto}://{request.host}"
+    return base_url.rstrip('/')
+
+
+def _read_agent_script(filename):
+    """Read the real agent script from the agents/ directory."""
+    import os
+    agents_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'agents')
+    script_path = os.path.join(agents_dir, filename)
+    if not os.path.exists(script_path):
+        return None
+    with open(script_path, 'r') as f:
+        return f.read()
+
 
 @bp.route('/api/agents/script/windows', methods=['GET'])
 @login_required
 @requires_professional('Integrations')
 def download_windows_agent():
-    """Download Windows PowerShell agent script with embedded API key."""
+    """Download Windows PowerShell agent script with embedded server URL and API key."""
     api_key = request.args.get('api_key', '')
+    base_url = _get_base_url()
 
-    # Use SENTRIKAT_URL config (which respects env var), fall back to X-Forwarded-Proto detection
-    base_url = Config.SENTRIKAT_URL
-    if not base_url:
-        proto = request.headers.get('X-Forwarded-Proto', request.scheme)
-        base_url = f"{proto}://{request.host}"
-    base_url = base_url.rstrip('/')
+    script = _read_agent_script('sentrikat-agent-windows.ps1')
+    if not script:
+        return jsonify({'error': 'Windows agent script not found on server'}), 404
 
-    # Build validation section based on whether key is embedded
+    # Inject default ServerUrl into the param block
+    script = script.replace(
+        '[string]$ServerUrl,',
+        f'[string]$ServerUrl = "{base_url}",',
+        1
+    )
+
+    # Inject default ApiKey if we have one
     if api_key and api_key != 'YOUR_API_KEY_HERE':
         safe_key = api_key.replace('`', '``').replace('$', '`$').replace('"', '`"')
-        key_section = f'''[string]$ApiKey = "{safe_key}",'''
-        validation = ''
-    else:
-        key_section = '''[Parameter(Mandatory=$true)]
-    [string]$ApiKey,'''
-        validation = '''
-# Validate API key
-if ([string]::IsNullOrEmpty($ApiKey)) {
-    Write-Error "Please provide a valid API key. Get one from Admin Panel > Integrations > Agent Keys"
-    Write-Host ""
-    Write-Host "Press any key to exit..." -ForegroundColor Cyan
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 1
-}
-'''
-
-    script = f'''# SentriKat Discovery Agent for Windows
-# ================================================
-# Deploy via GPO, SCCM, Intune, or run manually with Task Scheduler
-#
-# INSTALLATION (for scheduled inventory):
-#   1. Save this script to: C:\\SentriKat\\sentrikat-agent.ps1
-#   2. Create scheduled task:
-#      schtasks /create /tn "SentriKat Agent" /tr "powershell -ExecutionPolicy Bypass -File C:\\SentriKat\\sentrikat-agent.ps1" /sc hourly /ru SYSTEM
-#
-# UNINSTALL:
-#   1. Remove the scheduled task:
-#      schtasks /delete /tn "SentriKat Agent" /f
-#   2. Delete the script:
-#      Remove-Item -Path "C:\\SentriKat" -Recurse -Force
-#   3. (Optional) Remove endpoint from SentriKat Admin Panel > Endpoints
-#
-# Requirements: PowerShell 5.1+, Windows 7/Server 2008 R2 or later
-# ================================================
-
-param(
-    {key_section}
-    [string]$SentriKatUrl = "{base_url}"
-)
-{validation}
-$ErrorActionPreference = "Stop"
-
-# Allow self-signed/internal SSL certificates
-try {{
-    if ($PSVersionTable.PSVersion.Major -ge 6) {{
-        # PowerShell Core 6+: -SkipCertificateCheck is handled per-request below
-        $script:SkipCert = $true
-    }} else {{
-        # PowerShell 5.x: override certificate validation globally
-        Add-Type @"
-using System.Net;
-using System.Security.Cryptography.X509Certificates;
-public class TrustAll : ICertificatePolicy {{
-    public bool CheckValidationResult(ServicePoint sp, X509Certificate cert, WebRequest req, int problem) {{ return true; }}
-}}
-"@
-        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAll
-    }}
-}} catch {{
-    # Ignore - will fail on strict cert only
-}}
-
-# Get system information
-$Hostname = $env:COMPUTERNAME
-$OSInfo = Get-CimInstance Win32_OperatingSystem
-$OSVersion = $OSInfo.Caption
-$OSArch = if ([Environment]::Is64BitOperatingSystem) {{ "x64" }} else {{ "x86" }}
-$AgentId = (Get-CimInstance Win32_ComputerSystemProduct).UUID
-$IPAddress = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {{ $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' }} | Select-Object -First 1).IPAddress
-
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  SentriKat Windows Discovery Agent" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Hostname:   $Hostname"
-Write-Host "IP Address: $IPAddress"
-Write-Host "OS:         $OSVersion ($OSArch)"
-Write-Host "Agent ID:   $AgentId"
-Write-Host ""
-
-# Collect installed software
-Write-Host "Scanning installed software..." -ForegroundColor Yellow
-$Products = @()
-$Seen = @{{}}
-
-# Helper function to sanitize strings for JSON
-function Sanitize-String {{
-    param([string]$Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) {{ return "" }}
-    # Remove control characters and normalize
-    $Value = $Value -replace '[\\x00-\\x1F\\x7F]', ''
-    $Value = $Value.Trim()
-    return $Value
-}}
-
-function Add-Software {{
-    param($Publisher, $Name, $Version, $Path)
-
-    if ([string]::IsNullOrWhiteSpace($Name)) {{ return }}
-
-    # Sanitize all inputs
-    $Name = Sanitize-String $Name
-    $Publisher = Sanitize-String $Publisher
-    $Version = Sanitize-String $Version
-    $Path = Sanitize-String $Path
-
-    if ([string]::IsNullOrWhiteSpace($Name)) {{ return }}
-
-    $Key = "$($Name.ToLower())"
-    if ($Seen.ContainsKey($Key)) {{ return }}
-    $Seen[$Key] = $true
-
-    $script:Products += @{{
-        vendor = if ($Publisher) {{ $Publisher }} else {{ "Unknown" }}
-        product = $Name
-        version = if ($Version) {{ $Version }} else {{ "" }}
-        path = if ($Path) {{ $Path }} else {{ "" }}
-    }}
-}}
-
-# From registry (64-bit)
-Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
-    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion -Path $_.InstallLocation
-}}
-
-# From registry (32-bit on 64-bit OS)
-Get-ItemProperty "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
-    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion -Path $_.InstallLocation
-}}
-
-# Current user software
-Get-ItemProperty "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | ForEach-Object {{
-    Add-Software -Publisher $_.Publisher -Name $_.DisplayName -Version $_.DisplayVersion -Path $_.InstallLocation
-}}
-
-Write-Host "Found $($Products.Count) unique software items" -ForegroundColor Green
-Write-Host ""
-
-# Build payload
-$Payload = @{{
-    hostname = $Hostname
-    ip_address = $IPAddress
-    os = @{{
-        name = "Windows"
-        version = $OSVersion
-    }}
-    agent = @{{
-        id = $AgentId
-        version = "1.0.0"
-    }}
-    products = $Products
-}}
-
-# Convert to JSON with proper depth and encoding
-try {{
-    $Body = $Payload | ConvertTo-Json -Depth 10 -Compress -ErrorAction Stop
-    # Convert to UTF-8 bytes for proper encoding
-    $BodyBytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
-}} catch {{
-    Write-Host ""
-    Write-Host "ERROR: Failed to serialize JSON!" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Press any key to exit..." -ForegroundColor Cyan
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 1
-}}
-
-# Report to SentriKat
-Write-Host "Sending inventory to SentriKat..." -ForegroundColor Yellow
-Write-Host "Payload size: $($BodyBytes.Length) bytes" -ForegroundColor Gray
-
-try {{
-    $params = @{{
-        Uri         = "$SentriKatUrl/api/agent/inventory"
-        Method      = "POST"
-        Body        = $BodyBytes
-        ContentType = "application/json; charset=utf-8"
-        Headers     = @{{"X-Agent-Key" = $ApiKey}}
-        ErrorAction = "Stop"
-    }}
-    if ($script:SkipCert) {{ $params["SkipCertificateCheck"] = $true }}
-    $Response = Invoke-RestMethod @params
-
-    Write-Host ""
-    Write-Host "SUCCESS!" -ForegroundColor Green
-    Write-Host "----------------------------------------"
-    if ($Response.status -eq "queued") {{
-        # Async processing for large batches
-        Write-Host "Status:               Queued for processing" -ForegroundColor Yellow
-        Write-Host "Job ID:               $($Response.job_id)"
-        Write-Host "Asset ID:             $($Response.asset_id)"
-        Write-Host "Total Products:       $($Response.message)"
-        Write-Host ""
-        Write-Host "Large inventory queued for background processing."
-        Write-Host "Check job status at: $SentriKatUrl$($Response.check_status_url)"
-    }} else {{
-        # Sync processing result
-        Write-Host "Asset ID:             $($Response.asset_id)"
-        if ($Response.summary) {{
-            Write-Host "Products Created:     $($Response.summary.products_created)"
-            Write-Host "Products Updated:     $($Response.summary.products_updated)"
-            Write-Host "Installations Created: $($Response.summary.installations_created)"
-            Write-Host "Installations Updated: $($Response.summary.installations_updated)"
-        }}
-    }}
-    Write-Host "----------------------------------------"
-}} catch {{
-    Write-Host ""
-    Write-Host "ERROR!" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    if ($_.Exception.Response) {{
-        try {{
-            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-            Write-Host "Server Response: $($reader.ReadToEnd())" -ForegroundColor Red
-        }} catch {{}}
-    }}
-    Write-Host ""
-    Write-Host "Press any key to exit..." -ForegroundColor Cyan
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 1
-}}
-
-Write-Host ""
-Write-Host "Agent completed successfully!" -ForegroundColor Green
-Write-Host ""
-Write-Host "Press any key to exit..." -ForegroundColor Cyan
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-'''
+        script = script.replace(
+            '[string]$ApiKey,',
+            f'[string]$ApiKey = "{safe_key}",',
+            1
+        )
 
     return Response(
         script,
@@ -1823,267 +1624,21 @@ $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 @login_required
 @requires_professional('Integrations')
 def download_linux_agent():
-    """Download Linux Bash agent script with embedded API key."""
+    """Download Linux Bash agent script with embedded server URL and API key."""
     api_key = request.args.get('api_key', '')
+    base_url = _get_base_url()
 
-    # Use SENTRIKAT_URL config (which respects env var), fall back to X-Forwarded-Proto detection
-    base_url = Config.SENTRIKAT_URL
-    if not base_url:
-        proto = request.headers.get('X-Forwarded-Proto', request.scheme)
-        base_url = f"{proto}://{request.host}"
-    base_url = base_url.rstrip('/')
+    script = _read_agent_script('sentrikat-agent-linux.sh')
+    if not script:
+        return jsonify({'error': 'Linux agent script not found on server'}), 404
 
-    # Build key section based on whether embedded
+    # Inject default SERVER_URL
+    script = script.replace('SERVER_URL=""', f'SERVER_URL="{base_url}"', 1)
+
+    # Inject default API_KEY if we have one
     if api_key and api_key != 'YOUR_API_KEY_HERE':
         safe_key = api_key.replace('\\', '\\\\').replace('$', '\\$').replace('`', '\\`').replace('"', '\\"')
-        key_section = f'''API_KEY="{safe_key}"
-API_URL="${{1:-{base_url}}}"'''
-        validation = ''
-    else:
-        key_section = f'''API_KEY="${{1:?Usage: $0 <api-key>}}"
-API_URL="${{2:-{base_url}}}"'''
-        validation = '''
-# Validate API key
-if [ -z "$API_KEY" ]; then
-    echo "ERROR: Please provide a valid API key"
-    echo "Get one from Admin Panel > Integrations > Agent Keys"
-    exit 1
-fi
-'''
-
-    script = f'''#!/bin/bash
-# ================================================
-# SentriKat Discovery Agent for Linux
-# ================================================
-# Deploy via Ansible, Puppet, Chef, or add to cron for persistent monitoring.
-#
-# INSTALLATION:
-#   sudo mkdir -p /opt/sentrikat
-#   sudo mv sentrikat-agent.sh /opt/sentrikat/
-#   sudo chmod +x /opt/sentrikat/sentrikat-agent.sh
-#   # Add to cron (runs every 4 hours):
-#   (crontab -l 2>/dev/null; echo "0 */4 * * * /opt/sentrikat/sentrikat-agent.sh >> /var/log/sentrikat-agent.log 2>&1") | crontab -
-#
-# UNINSTALL:
-#   # Remove cron entry:
-#   crontab -l | grep -v sentrikat-agent | crontab -
-#   # Delete the agent:
-#   sudo rm -rf /opt/sentrikat /var/log/sentrikat-agent.log
-#   # (Optional) Remove endpoint from SentriKat Admin Panel > Endpoints
-#
-# Requirements: bash, curl
-# ================================================
-
-set -e
-
-{key_section}
-{validation}
-# Get system information
-HOSTNAME=$(hostname)
-IP_ADDRESS=$(hostname -I 2>/dev/null | awk '{{print $1}}' || echo "")
-OS_NAME="Linux"
-OS_VERSION=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2 || uname -sr)
-KERNEL=$(uname -r)
-AGENT_ID=$(cat /etc/machine-id 2>/dev/null || hostname)
-
-echo ""
-echo "========================================"
-echo "  SentriKat Linux Discovery Agent"
-echo "========================================"
-echo "Hostname:   $HOSTNAME"
-echo "IP Address: $IP_ADDRESS"
-echo "OS:         $OS_VERSION"
-echo "Kernel:     $KERNEL"
-echo "Agent ID:   $AGENT_ID"
-echo ""
-
-# Helper: escape a string for safe embedding in JSON.
-# Escapes \\ and " (critical for valid JSON), strips control chars as safety net.
-json_escape() {{
-    printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g' | tr -d '\\001-\\011\\013\\014\\016-\\037'
-}}
-
-# Collect installed software
-echo "Scanning installed software..."
-PRODUCTS_FILE=$(mktemp)
-PAYLOAD_FILE=$(mktemp)
-trap "rm -f $PRODUCTS_FILE $PAYLOAD_FILE" EXIT
-
-# dpkg (Debian/Ubuntu)
-if command -v dpkg-query &> /dev/null; then
-    dpkg-query -W -f='${{Package}}\\t${{Version}}\\n' 2>/dev/null | while IFS=$'\\t' read -r pkg ver; do
-        [ -n "$pkg" ] && printf '{{"vendor":"dpkg","product":"%s","version":"%s"}},\\n' "$(json_escape "$pkg")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE" || true
-fi
-
-# rpm (RHEL/CentOS/Fedora)
-if command -v rpm &> /dev/null && ! command -v dpkg &> /dev/null; then
-    rpm -qa --queryformat '%{{NAME}}\\t%{{VERSION}}-%{{RELEASE}}\\t%{{VENDOR}}\\n' 2>/dev/null | while IFS=$'\\t' read -r pkg ver vendor; do
-        [ -n "$pkg" ] && printf '{{"vendor":"%s","product":"%s","version":"%s"}},\\n' "$(json_escape "${{vendor:-rpm}}")" "$(json_escape "$pkg")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE" || true
-fi
-
-# snap
-if command -v snap &> /dev/null; then
-    snap list 2>/dev/null | tail -n +2 | while read -r name ver rest; do
-        [ -n "$name" ] && printf '{{"vendor":"snap","product":"%s","version":"%s"}},\\n' "$(json_escape "$name")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE" || true
-fi
-
-# flatpak
-if command -v flatpak &> /dev/null; then
-    flatpak list --columns=name,version 2>/dev/null | while read -r name ver; do
-        [ -n "$name" ] && printf '{{"vendor":"flatpak","product":"%s","version":"%s"}},\\n' "$(json_escape "$name")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE" || true
-fi
-
-COUNT=0
-if [ -s "$PRODUCTS_FILE" ]; then
-    COUNT=$(wc -l < "$PRODUCTS_FILE")
-fi
-
-echo "Found $COUNT installed packages"
-echo ""
-
-# Chunked sending: split large inventories into batches to avoid
-# overwhelming the server and to handle timeouts gracefully.
-# Dynamic chunk size: small enough for reliable delivery, large enough to minimize round-trips.
-if [ "$COUNT" -le 500 ]; then
-    CHUNK_SIZE=$COUNT  # No splitting needed
-elif [ "$COUNT" -le 2000 ]; then
-    CHUNK_SIZE=500     # 500 per chunk (typical workstations: ~1800 packages = 4 chunks)
-elif [ "$COUNT" -le 5000 ]; then
-    CHUNK_SIZE=750     # Larger chunks for servers with many packages
-else
-    CHUNK_SIZE=1000    # Maximum chunk for very large inventories
-fi
-H_ESC=$(json_escape "$HOSTNAME")
-IP_ESC=$(json_escape "$IP_ADDRESS")
-OSV_ESC=$(json_escape "$OS_VERSION")
-K_ESC=$(json_escape "$KERNEL")
-AID_ESC=$(json_escape "$AGENT_ID")
-
-# Disable exit-on-error for the send phase (we handle errors ourselves)
-set +e
-
-send_chunk() {{
-    local CHUNK_FILE="$1"
-    local CHUNK_NUM="$2"
-    local TOTAL_CHUNKS="$3"
-
-    {{
-        printf '{{"hostname":"%s","ip_address":"%s","os":{{"name":"%s","version":"%s","kernel":"%s"}},"agent":{{"id":"%s","version":"1.0.0"}},"chunk_index":%d,"total_chunks":%d,"products":[' \\
-            "$H_ESC" "$IP_ESC" "$OS_NAME" "$OSV_ESC" "$K_ESC" "$AID_ESC" "$CHUNK_NUM" "$TOTAL_CHUNKS"
-        if [ -s "$CHUNK_FILE" ]; then
-            sed '$s/,$//' "$CHUNK_FILE" | tr -d '\\n'
-        fi
-        printf ']}}'
-    }} > "$PAYLOAD_FILE"
-
-    local PAYLOAD_SIZE
-    PAYLOAD_SIZE=$(wc -c < "$PAYLOAD_FILE")
-
-    if [ "$TOTAL_CHUNKS" -gt 1 ]; then
-        echo "  Sending chunk $CHUNK_NUM/$TOTAL_CHUNKS ($PAYLOAD_SIZE bytes)..."
-    else
-        echo "  Sending inventory ($PAYLOAD_SIZE bytes)..."
-    fi
-
-    RESPONSE=$(curl -sk -w "\\n%{{http_code}}" --connect-timeout 30 --max-time 120 \\
-        -X POST "$API_URL/api/agent/inventory" \\
-        -H "X-Agent-Key: $API_KEY" \\
-        -H "Content-Type: application/json" \\
-        -d @"$PAYLOAD_FILE" 2>&1)
-
-    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-    BODY=$(echo "$RESPONSE" | sed '$d')
-
-    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-        echo "  Chunk $CHUNK_NUM OK"
-        return 0
-    else
-        echo "  ERROR on chunk $CHUNK_NUM (HTTP $HTTP_CODE): $BODY"
-        return 1
-    fi
-}}
-
-echo "Sending inventory to SentriKat..."
-ERRORS=0
-SENT=0
-
-if [ "$COUNT" -le "$CHUNK_SIZE" ] || [ "$COUNT" -eq 0 ]; then
-    # Small enough to send in one request
-    if send_chunk "$PRODUCTS_FILE" 1 1; then
-        SENT=1
-    else
-        ERRORS=1
-    fi
-else
-    # Split into chunks for reliable delivery
-    TOTAL_CHUNKS=$(( (COUNT + CHUNK_SIZE - 1) / CHUNK_SIZE ))
-    echo "Splitting $COUNT products into $TOTAL_CHUNKS chunks of $CHUNK_SIZE..."
-    echo ""
-    CHUNK_DIR=$(mktemp -d)
-    trap "rm -rf $CHUNK_DIR $PRODUCTS_FILE $PAYLOAD_FILE" EXIT
-    split -l $CHUNK_SIZE -d --additional-suffix=.chunk "$PRODUCTS_FILE" "$CHUNK_DIR/chunk_"
-
-    CHUNK_NUM=1
-    for CHUNK_FILE in "$CHUNK_DIR"/chunk_*.chunk; do
-        if send_chunk "$CHUNK_FILE" "$CHUNK_NUM" "$TOTAL_CHUNKS"; then
-            SENT=$((SENT + 1))
-        else
-            ERRORS=$((ERRORS + 1))
-        fi
-        CHUNK_NUM=$((CHUNK_NUM + 1))
-        # Small delay between chunks to avoid overwhelming the server
-        if [ "$CHUNK_NUM" -le "$TOTAL_CHUNKS" ]; then
-            sleep 2
-        fi
-    done
-fi
-
-echo ""
-echo "========================================"
-if [ "$ERRORS" -eq 0 ]; then
-    echo "  SUCCESS! Sent $SENT chunk(s), $COUNT packages"
-    echo "========================================"
-    echo ""
-    echo "Last server response:"
-    echo "$BODY" | python3 -c "
-import sys,json
-try:
-    d=json.load(sys.stdin)
-    if d.get('status') == 'queued':
-        print(f\\"  Status:       Queued for background processing\\")
-        print(f\\"  Job ID:       {{d.get('job_id')}}\\")
-        print(f\\"  Asset ID:     {{d.get('asset_id')}}\\")
-        print(f\\"  Note:         Large batch queued. Check Endpoints in SentriKat UI.\\")
-    else:
-        print(f\\"  Asset ID:     {{d.get('asset_id')}}\\")
-        s=d.get('summary',d)
-        print(f\\"  Products Created:      {{s.get('products_created', 0)}}\\")
-        print(f\\"  Products Updated:      {{s.get('products_updated', 0)}}\\")
-        print(f\\"  Installations Created: {{s.get('installations_created', 0)}}\\")
-        print(f\\"  Installations Updated: {{s.get('installations_updated', 0)}}\\")
-        q=s.get('products_queued', 0)
-        if q > 0:
-            print(f\\"  Queued for Review:     {{q}} (check Import Queue in UI)\\")
-except:
-    print(sys.stdin.read())
-" 2>/dev/null || echo "$BODY"
-else
-    echo "  COMPLETED: $SENT OK, $ERRORS FAILED"
-    echo "========================================"
-    echo ""
-    echo "Some chunks failed to send. Successfully sent chunks are still processed."
-    echo "Check SentriKat server logs for details."
-    echo "Last server response: $BODY"
-    exit 1
-fi
-
-echo ""
-echo "Agent completed successfully!"
-'''
+        script = script.replace('API_KEY=""', f'API_KEY="{safe_key}"', 1)
 
     return Response(
         script,
@@ -2096,297 +1651,21 @@ echo "Agent completed successfully!"
 @login_required
 @requires_professional('Integrations')
 def download_macos_agent():
-    """Download macOS Bash agent script with embedded API key."""
+    """Download macOS Bash agent script with embedded server URL and API key."""
     api_key = request.args.get('api_key', '')
+    base_url = _get_base_url()
 
-    # Use SENTRIKAT_URL config (which respects env var), fall back to X-Forwarded-Proto detection
-    base_url = Config.SENTRIKAT_URL
-    if not base_url:
-        proto = request.headers.get('X-Forwarded-Proto', request.scheme)
-        base_url = f"{proto}://{request.host}"
-    base_url = base_url.rstrip('/')
+    script = _read_agent_script('sentrikat-agent-macos.sh')
+    if not script:
+        return jsonify({'error': 'macOS agent script not found on server'}), 404
 
-    # Build key section based on whether embedded
+    # Inject default SERVER_URL
+    script = script.replace('SERVER_URL=""', f'SERVER_URL="{base_url}"', 1)
+
+    # Inject default API_KEY if we have one
     if api_key and api_key != 'YOUR_API_KEY_HERE':
         safe_key = api_key.replace('\\', '\\\\').replace('$', '\\$').replace('`', '\\`').replace('"', '\\"')
-        key_section = f'''API_KEY="{safe_key}"
-API_URL="${{1:-{base_url}}}"'''
-        validation = ''
-    else:
-        key_section = f'''API_KEY="${{1:?Usage: $0 <api-key>}}"
-API_URL="${{2:-{base_url}}}"'''
-        validation = '''
-# Validate API key
-if [ -z "$API_KEY" ]; then
-    echo "ERROR: Please provide a valid API key"
-    echo "Get one from Admin Panel > Integrations > Agent Keys"
-    exit 1
-fi
-'''
-
-    script = f'''#!/bin/bash
-# ================================================
-# SentriKat Discovery Agent for macOS
-# ================================================
-# Deploy via MDM (Jamf, Mosyle, Kandji) or run manually.
-#
-# INSTALLATION:
-#   sudo mkdir -p /opt/sentrikat
-#   sudo mv sentrikat-agent-macos.sh /opt/sentrikat/
-#   sudo chmod +x /opt/sentrikat/sentrikat-agent-macos.sh
-#   # Add to launchd (runs every 4 hours):
-#   sudo tee /Library/LaunchDaemons/com.sentrikat.agent.plist << PLIST
-#   <?xml version="1.0" encoding="UTF-8"?>
-#   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-#   <plist version="1.0"><dict>
-#     <key>Label</key><string>com.sentrikat.agent</string>
-#     <key>ProgramArguments</key><array>
-#       <string>/opt/sentrikat/sentrikat-agent-macos.sh</string>
-#     </array>
-#     <key>RunAtLoad</key><true/>
-#     <key>StartInterval</key><integer>14400</integer>
-#   </dict></plist>
-#   PLIST
-#   sudo launchctl load /Library/LaunchDaemons/com.sentrikat.agent.plist
-#
-# UNINSTALL:
-#   sudo launchctl unload /Library/LaunchDaemons/com.sentrikat.agent.plist
-#   sudo rm /Library/LaunchDaemons/com.sentrikat.agent.plist
-#   sudo rm -rf /opt/sentrikat
-#
-# Requirements: bash, curl, system_profiler
-# ================================================
-
-set -e
-
-{key_section}
-{validation}
-# Get system information
-HOSTNAME=$(hostname -s)
-IP_ADDRESS=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "")
-OS_NAME="macOS"
-OS_VERSION=$(sw_vers -productName 2>/dev/null && sw_vers -productVersion 2>/dev/null | tr '\\n' ' ' || echo "macOS")
-OS_VERSION=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
-OS_FULL="macOS $OS_VERSION"
-KERNEL=$(uname -r)
-AGENT_ID=$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | awk -F'"' '/IOPlatformUUID/{{print $4}}' || hostname)
-
-echo ""
-echo "========================================"
-echo "  SentriKat macOS Discovery Agent"
-echo "========================================"
-echo "Hostname:   $HOSTNAME"
-echo "IP Address: $IP_ADDRESS"
-echo "OS:         $OS_FULL"
-echo "Kernel:     $KERNEL"
-echo "Agent ID:   $AGENT_ID"
-echo ""
-
-# Helper: escape a string for safe embedding in JSON.
-json_escape() {{
-    printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g' | tr -d '\\001-\\011\\013\\014\\016-\\037'
-}}
-
-# Collect installed software
-echo "Scanning installed software..."
-PRODUCTS_FILE=$(mktemp)
-PAYLOAD_FILE=$(mktemp)
-trap "rm -f $PRODUCTS_FILE $PAYLOAD_FILE" EXIT
-
-# system_profiler (GUI Applications)
-echo "  Scanning GUI applications via system_profiler..."
-system_profiler SPApplicationsDataType -xml 2>/dev/null | \\
-    /usr/bin/python3 -c "
-import plistlib, sys
-try:
-    data = plistlib.loads(sys.stdin.buffer.read())
-    for item in data:
-        for app in item.get('_items', []):
-            name = app.get('_name', '')
-            ver = app.get('version', '')
-            vendor = app.get('obtained_from', 'system_profiler')
-            if name:
-                name = name.replace('\"', '').replace('\\\\\\\\', '')
-                ver = ver.replace('\"', '') if ver else ''
-                vendor = vendor.replace('\"', '') if vendor else 'system_profiler'
-                print(f'{{{{\"vendor\":\"{{vendor}}\",\"product\":\"{{name}}\",\"version\":\"{{ver}}\"}}}},')
-
-except Exception:
-    pass
-" >> "$PRODUCTS_FILE" 2>/dev/null || true
-
-# pkgutil (System packages, excluding Apple base packages)
-echo "  Scanning system packages via pkgutil..."
-pkgutil --pkgs 2>/dev/null | grep -v "^com\\.apple\\." | while read -r pkg; do
-    ver=$(pkgutil --pkg-info "$pkg" 2>/dev/null | awk '/version:/ {{print $2}}')
-    [ -n "$pkg" ] && printf '{{"vendor":"pkgutil","product":"%s","version":"%s"}},\\n' "$(json_escape "$pkg")" "$(json_escape "$ver")"
-done >> "$PRODUCTS_FILE" 2>/dev/null || true
-
-# Homebrew
-if command -v brew &> /dev/null; then
-    echo "  Scanning Homebrew packages..."
-    brew list --versions 2>/dev/null | while read -r pkg ver; do
-        [ -n "$pkg" ] && printf '{{"vendor":"homebrew","product":"%s","version":"%s"}},\\n' "$(json_escape "$pkg")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE" 2>/dev/null || true
-
-    # Homebrew Casks
-    brew list --cask --versions 2>/dev/null | while read -r pkg ver; do
-        [ -n "$pkg" ] && printf '{{"vendor":"homebrew-cask","product":"%s","version":"%s"}},\\n' "$(json_escape "$pkg")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE" 2>/dev/null || true
-fi
-
-# MacPorts
-if command -v port &> /dev/null; then
-    echo "  Scanning MacPorts packages..."
-    port installed 2>/dev/null | grep "(active)" | while read -r line; do
-        pkg=$(echo "$line" | awk '{{print $1}}')
-        ver=$(echo "$line" | awk '{{print $2}}' | sed 's/@//')
-        [ -n "$pkg" ] && printf '{{"vendor":"macports","product":"%s","version":"%s"}},\\n' "$(json_escape "$pkg")" "$(json_escape "$ver")"
-    done >> "$PRODUCTS_FILE" 2>/dev/null || true
-fi
-
-COUNT=0
-if [ -s "$PRODUCTS_FILE" ]; then
-    COUNT=$(wc -l < "$PRODUCTS_FILE" | tr -d ' ')
-fi
-
-echo "Found $COUNT installed packages"
-echo ""
-
-# Chunked sending
-if [ "$COUNT" -le 500 ]; then
-    CHUNK_SIZE=$COUNT
-elif [ "$COUNT" -le 2000 ]; then
-    CHUNK_SIZE=500
-elif [ "$COUNT" -le 5000 ]; then
-    CHUNK_SIZE=750
-else
-    CHUNK_SIZE=1000
-fi
-H_ESC=$(json_escape "$HOSTNAME")
-IP_ESC=$(json_escape "$IP_ADDRESS")
-OSV_ESC=$(json_escape "$OS_FULL")
-K_ESC=$(json_escape "$KERNEL")
-AID_ESC=$(json_escape "$AGENT_ID")
-
-set +e
-
-send_chunk() {{
-    local CHUNK_FILE="$1"
-    local CHUNK_NUM="$2"
-    local TOTAL_CHUNKS="$3"
-
-    {{
-        printf '{{"hostname":"%s","ip_address":"%s","os":{{"name":"%s","version":"%s","kernel":"%s"}},"agent":{{"id":"%s","version":"1.0.0"}},"chunk_index":%d,"total_chunks":%d,"products":[' \\
-            "$H_ESC" "$IP_ESC" "$OS_NAME" "$OSV_ESC" "$K_ESC" "$AID_ESC" "$CHUNK_NUM" "$TOTAL_CHUNKS"
-        if [ -s "$CHUNK_FILE" ]; then
-            sed '$s/,$//' "$CHUNK_FILE" | tr -d '\\n'
-        fi
-        printf ']}}'
-    }} > "$PAYLOAD_FILE"
-
-    local PAYLOAD_SIZE
-    PAYLOAD_SIZE=$(wc -c < "$PAYLOAD_FILE" | tr -d ' ')
-
-    if [ "$TOTAL_CHUNKS" -gt 1 ]; then
-        echo "  Sending chunk $CHUNK_NUM/$TOTAL_CHUNKS ($PAYLOAD_SIZE bytes)..."
-    else
-        echo "  Sending inventory ($PAYLOAD_SIZE bytes)..."
-    fi
-
-    RESPONSE=$(curl -sk -w "\\n%{{http_code}}" --connect-timeout 30 --max-time 120 \\
-        -X POST "$API_URL/api/agent/inventory" \\
-        -H "X-Agent-Key: $API_KEY" \\
-        -H "Content-Type: application/json" \\
-        -d @"$PAYLOAD_FILE" 2>&1)
-
-    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-    BODY=$(echo "$RESPONSE" | sed '$d')
-
-    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-        echo "  Chunk $CHUNK_NUM OK"
-        return 0
-    else
-        echo "  ERROR on chunk $CHUNK_NUM (HTTP $HTTP_CODE): $BODY"
-        return 1
-    fi
-}}
-
-echo "Sending inventory to SentriKat..."
-ERRORS=0
-SENT=0
-
-if [ "$COUNT" -le "$CHUNK_SIZE" ] || [ "$COUNT" -eq 0 ]; then
-    if send_chunk "$PRODUCTS_FILE" 1 1; then
-        SENT=1
-    else
-        ERRORS=1
-    fi
-else
-    TOTAL_CHUNKS=$(( (COUNT + CHUNK_SIZE - 1) / CHUNK_SIZE ))
-    echo "Splitting $COUNT products into $TOTAL_CHUNKS chunks of $CHUNK_SIZE..."
-    echo ""
-    CHUNK_DIR=$(mktemp -d)
-    trap "rm -rf $CHUNK_DIR $PRODUCTS_FILE $PAYLOAD_FILE" EXIT
-    # macOS split uses -l for lines, no --additional-suffix
-    split -l $CHUNK_SIZE "$PRODUCTS_FILE" "$CHUNK_DIR/chunk_"
-
-    CHUNK_NUM=1
-    for CHUNK_FILE in "$CHUNK_DIR"/chunk_*; do
-        if send_chunk "$CHUNK_FILE" "$CHUNK_NUM" "$TOTAL_CHUNKS"; then
-            SENT=$((SENT + 1))
-        else
-            ERRORS=$((ERRORS + 1))
-        fi
-        CHUNK_NUM=$((CHUNK_NUM + 1))
-        if [ "$CHUNK_NUM" -le "$TOTAL_CHUNKS" ]; then
-            sleep 2
-        fi
-    done
-fi
-
-echo ""
-echo "========================================"
-if [ "$ERRORS" -eq 0 ]; then
-    echo "  SUCCESS! Sent $SENT chunk(s), $COUNT packages"
-    echo "========================================"
-    echo ""
-    echo "Last server response:"
-    echo "$BODY" | /usr/bin/python3 -c "
-import sys,json
-try:
-    d=json.load(sys.stdin)
-    if d.get('status') == 'queued':
-        print(f\\"  Status:       Queued for background processing\\")
-        print(f\\"  Job ID:       {{d.get('job_id')}}\\")
-        print(f\\"  Asset ID:     {{d.get('asset_id')}}\\")
-        print(f\\"  Note:         Large batch queued. Check Endpoints in SentriKat UI.\\")
-    else:
-        print(f\\"  Asset ID:     {{d.get('asset_id')}}\\")
-        s=d.get('summary',d)
-        print(f\\"  Products Created:      {{s.get('products_created', 0)}}\\")
-        print(f\\"  Products Updated:      {{s.get('products_updated', 0)}}\\")
-        print(f\\"  Installations Created: {{s.get('installations_created', 0)}}\\")
-        print(f\\"  Installations Updated: {{s.get('installations_updated', 0)}}\\")
-        q=s.get('products_queued', 0)
-        if q > 0:
-            print(f\\"  Queued for Review:     {{q}} (check Import Queue in UI)\\")
-except:
-    print(sys.stdin.read())
-" 2>/dev/null || echo "$BODY"
-else
-    echo "  COMPLETED: $SENT OK, $ERRORS FAILED"
-    echo "========================================"
-    echo ""
-    echo "Some chunks failed to send. Successfully sent chunks are still processed."
-    echo "Check SentriKat server logs for details."
-    echo "Last server response: $BODY"
-    exit 1
-fi
-
-echo ""
-echo "Agent completed successfully!"
-'''
+        script = script.replace('API_KEY=""', f'API_KEY="{safe_key}"', 1)
 
     return Response(
         script,
