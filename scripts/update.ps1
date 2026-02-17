@@ -91,21 +91,33 @@ function Test-SentriKatDir {
     return $false
 }
 
+# Check a directory and its app/ subdirectory for a SentriKat installation
+function Find-SentriKatIn {
+    param([string]$Dir)
+    if (-not $Dir -or -not (Test-Path $Dir -PathType Container)) { return $null }
+    if (Test-SentriKatDir $Dir) { return $Dir }
+    $appSub = Join-Path $Dir "app"
+    if ((Test-Path $appSub -PathType Container) -and (Test-SentriKatDir $appSub)) { return $appSub }
+    return $null
+}
+
 $InstallDir = $null
 
 # 1. Explicit override
-if ($env:SENTRIKAT_DIR -and (Test-SentriKatDir $env:SENTRIKAT_DIR)) {
-    $InstallDir = $env:SENTRIKAT_DIR
+if ($env:SENTRIKAT_DIR) {
+    $resolved = try { (Resolve-Path $env:SENTRIKAT_DIR -ErrorAction Stop).Path } catch { $env:SENTRIKAT_DIR }
+    $InstallDir = Find-SentriKatIn $resolved
 }
 
-# 2. Walk up from current/script directory
+# 2. Walk up from current directory and script directory
 if (-not $InstallDir) {
     $SearchPaths = @((Get-Location).Path, $PSScriptRoot)
     foreach ($startPath in $SearchPaths) {
         $dir = $startPath
         while ($dir -and $dir.Length -gt 3) {
-            if (Test-SentriKatDir $dir) {
-                $InstallDir = $dir
+            $found = Find-SentriKatIn $dir
+            if ($found) {
+                $InstallDir = $found
                 break
             }
             $dir = Split-Path $dir -Parent
@@ -117,16 +129,26 @@ if (-not $InstallDir) {
 # 3. Well-known paths
 if (-not $InstallDir) {
     foreach ($candidate in @("C:\SentriKat", "C:\Program Files\SentriKat", "$env:ProgramData\SentriKat")) {
-        if ($candidate -and (Test-Path $candidate) -and (Test-SentriKatDir $candidate)) {
-            $InstallDir = $candidate
-            break
+        if ($candidate) {
+            $found = Find-SentriKatIn $candidate
+            if ($found) {
+                $InstallDir = $found
+                break
+            }
         }
     }
 }
 
 if (-not $InstallDir) {
     Write-Err "Could not find SentriKat installation."
-    Write-Err "Run this script from the SentriKat directory, or set SENTRIKAT_DIR=C:\path\to\sentrikat"
+    Write-Err "Looked for SentriKat files (VERSION, app\licensing.py, docker-compose.yml, run.py)"
+    Write-Err "in these locations (and their app\ subdirectories):"
+    if ($env:SENTRIKAT_DIR) { Write-Err "  SENTRIKAT_DIR: $($env:SENTRIKAT_DIR)" }
+    Write-Err "  Script location: $PSScriptRoot"
+    Write-Err "  Working directory: $((Get-Location).Path) (walked up to root)"
+    Write-Err "  Well-known paths: C:\SentriKat, C:\Program Files\SentriKat"
+    Write-Err ""
+    Write-Err "Set SENTRIKAT_DIR=C:\path\to\sentrikat to override."
     exit 1
 }
 
