@@ -130,9 +130,14 @@ class EmailAlertManager:
 
             should_alert = False
 
+            # ALWAYS alert for actively exploited CVEs (0-days, CISA KEV,
+            # EUVD exploited) — these bypass normal alert preferences because
+            # the customer MUST know about active exploitation immediately.
+            if vuln.is_actively_exploited:
+                should_alert = True
             # Alert based on CVE severity and user's alert preferences
             # alert_on_critical: Alert for all critical severity CVEs
-            if organization.alert_on_critical and severity == 'critical':
+            elif organization.alert_on_critical and severity == 'critical':
                 should_alert = True
             # alert_on_high: Alert for all high severity CVEs
             elif organization.alert_on_high and severity == 'high':
@@ -498,6 +503,7 @@ class EmailAlertManager:
                                             <tr>
                                                 <td>
                                                     <a href="https://nvd.nist.gov/vuln/detail/{vuln.cve_id}" style="font-size: 15px; font-weight: 700; color: #1e40af; text-decoration: none;">{vuln.cve_id}</a>
+                                                    {f'<span style="background: #b91c1c; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">ACTIVELY EXPLOITED</span>' if vuln.is_actively_exploited else ''}
                                                     {f'<span style="background: #7c2d12; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">RANSOMWARE</span>' if vuln.known_ransomware else ''}
                                                 </td>
                                                 <td align="right">

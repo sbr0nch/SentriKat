@@ -496,6 +496,12 @@ class Vulnerability(db.Model):
     cpe_fetched_at = db.Column(db.DateTime, nullable=True)  # When CPE data was last fetched
     nvd_status = db.Column(db.String(50), nullable=True)  # NVD vulnStatus: Awaiting Analysis, Analyzed, etc.
 
+    # Actively exploited flag — set when CVE originates from CISA KEV,
+    # ENISA EUVD exploited feed, or has EPSS >= 0.95.  Drives priority
+    # routing: actively-exploited CVEs trigger immediate alerts regardless
+    # of the organization's normal alert cadence.
+    is_actively_exploited = db.Column(db.Boolean, default=False, index=True)
+
     # EPSS (Exploit Prediction Scoring System) data from FIRST
     # Score: Probability of exploitation in the next 30 days (0-1)
     # Percentile: How this CVE ranks compared to all other CVEs (0-1)
@@ -529,9 +535,17 @@ class Vulnerability(db.Model):
 
         current_level = priority_order.get(base_priority, 2)
 
-        # Ransomware = Always Critical (OVERRIDE)
+        # Known ransomware campaign = Always Critical (small set, always urgent)
         if self.known_ransomware:
             return 'critical'
+
+        # Actively exploited (CISA KEV, EUVD exploited) = ELEVATE by one level.
+        # Previously this forced everything to 'critical', which inflated the
+        # critical count because most monitored CVEs come from CISA KEV.
+        # Now: CRITICAL stays CRITICAL, HIGH→CRITICAL, MEDIUM→HIGH, LOW→MEDIUM.
+        # The 'ACTIVELY EXPLOITED' badge still provides visual urgency.
+        if self.is_actively_exploited:
+            current_level = min(current_level + 1, priority_order['critical'])
 
         # Check due date urgency (can ELEVATE priority)
         if self.due_date:
@@ -618,6 +632,7 @@ class Vulnerability(db.Model):
             'severity': self.severity,
             'cvss_source': self.cvss_source,
             'source': self.source or 'cisa_kev',
+            'is_actively_exploited': bool(self.is_actively_exploited),
             'priority': self.calculate_priority(),
             'days_old': (date.today() - self.date_added).days if self.date_added else None,
             'has_cpe_data': self.has_cpe_data(),

@@ -465,21 +465,34 @@ def euvd_sync_job(app):
 
     Runs every 6 hours to catch actively exploited CVEs that aren't yet
     in CISA KEV. Creates new vulnerability entries from EUVD and matches
-    them against products.
+    them against products. NOW SENDS ALERTS for new matches.
     """
     with app.app_context():
         try:
-            from app.cisa_sync import enrich_with_euvd_exploited
+            from app.cisa_sync import enrich_with_euvd_exploited, send_alerts_for_new_matches
             from app.filters import rematch_all_products
 
+            sync_start = datetime.utcnow()
             euvd_enriched, euvd_new_count = enrich_with_euvd_exploited()
 
             if euvd_new_count > 0:
-                _, matches = rematch_all_products()
+                # Only match newly imported vulnerabilities (not the entire DB)
+                from app.models import Vulnerability
+                recent_vulns = Vulnerability.query.filter(
+                    Vulnerability.created_at >= sync_start
+                ).all()
+                _, matches = rematch_all_products(
+                    target_vulnerabilities=recent_vulns if recent_vulns else None
+                )
                 logger.info(
                     f"EUVD independent sync: {euvd_new_count} new CVEs, "
                     f"{matches} product matches"
                 )
+                # Send alerts for new matches from this EUVD sync
+                try:
+                    send_alerts_for_new_matches(sync_start, source_label='euvd_sync')
+                except Exception as alert_err:
+                    logger.warning(f"EUVD alert dispatch failed: {alert_err}")
             elif euvd_enriched > 0:
                 logger.info(f"EUVD independent sync: enriched {euvd_enriched} existing CVEs")
             else:
@@ -495,21 +508,34 @@ def nvd_cve_sync_job(app):
 
     Runs every 2 hours. Catches CVEs that CISA KEV and EUVD haven't added yet
     (e.g. CVE-2026-2441 was in NVD the same day Google patched it, but took
-    days to appear in CISA KEV).
+    days to appear in CISA KEV). NOW SENDS ALERTS for new matches.
     """
     with app.app_context():
         try:
-            from app.cisa_sync import sync_nvd_recent_cves
+            from app.cisa_sync import sync_nvd_recent_cves, send_alerts_for_new_matches
             from app.filters import rematch_all_products
 
+            sync_start = datetime.utcnow()
             new_count, skipped, errors = sync_nvd_recent_cves()
 
             if new_count > 0:
-                _, matches = rematch_all_products()
+                # Only match newly imported vulnerabilities (not the entire DB)
+                from app.models import Vulnerability
+                recent_vulns = Vulnerability.query.filter(
+                    Vulnerability.created_at >= sync_start
+                ).all()
+                _, matches = rematch_all_products(
+                    target_vulnerabilities=recent_vulns if recent_vulns else None
+                )
                 logger.info(
                     f"NVD CVE sync: {new_count} new CVEs imported, "
                     f"{matches} product matches"
                 )
+                # Send alerts for new matches from this NVD sync
+                try:
+                    send_alerts_for_new_matches(sync_start, source_label='nvd_sync')
+                except Exception as alert_err:
+                    logger.warning(f"NVD sync alert dispatch failed: {alert_err}")
             else:
                 logger.debug(f"NVD CVE sync: no new CVEs (skipped {skipped} existing)")
 

@@ -439,12 +439,16 @@ def check_match(vulnerability, product):
 
     return result_reasons, result_method, result_confidence
 
-def match_vulnerabilities_to_products(target_products=None):
-    """Match all active vulnerabilities against active products.
+def match_vulnerabilities_to_products(target_products=None, target_vulnerabilities=None):
+    """Match vulnerabilities against products.
 
     Args:
         target_products: Optional list of Product objects to match against.
                          If None, matches all active products.
+        target_vulnerabilities: Optional list of Vulnerability objects to check.
+                                If None, matches all vulnerabilities.
+                                Pass newly-imported vulnerabilities from sync
+                                jobs to avoid rechecking the entire DB.
     """
     # Get products to match
     if target_products:
@@ -452,8 +456,11 @@ def match_vulnerabilities_to_products(target_products=None):
     else:
         products = Product.query.filter_by(active=True).all()
 
-    # Get all vulnerabilities
-    vulnerabilities = Vulnerability.query.all()
+    # Get vulnerabilities to match
+    if target_vulnerabilities:
+        vulnerabilities = target_vulnerabilities
+    else:
+        vulnerabilities = Vulnerability.query.all()
 
     matches_count = 0
 
@@ -541,13 +548,20 @@ def cleanup_invalid_matches():
     return removed_count
 
 
-def rematch_all_products():
+def rematch_all_products(target_vulnerabilities=None):
     """
     Full rematch: cleanup invalid matches then add new valid ones.
+
+    Args:
+        target_vulnerabilities: Optional list of Vulnerability objects.
+                                If provided, only these vulnerabilities are
+                                matched (faster for incremental sync jobs).
+                                Cleanup still runs against ALL matches.
+
     Returns tuple of (removed_count, added_count).
     """
     removed = cleanup_invalid_matches()
-    added = match_vulnerabilities_to_products()
+    added = match_vulnerabilities_to_products(target_vulnerabilities=target_vulnerabilities)
     return removed, added
 
 def get_filtered_vulnerabilities(filters=None):
