@@ -10,6 +10,34 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Vendor/product patterns for description-based extraction when NVD
+# hasn't populated CPE data yet.  Used in fetch_cpe_version_data(),
+# sync_nvd_recent_cves Phase 1 and Phase 2.
+import re as _re
+_KNOWN_PRODUCTS = {
+    r'google\s+chrome': ('Google', 'Chrome'),
+    r'chromium': ('Chromium', 'Chromium'),
+    r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
+    r'microsoft\s+edge': ('Microsoft', 'Edge'),
+    r'apple\s+safari': ('Apple', 'Safari'),
+    r'microsoft\s+windows': ('Microsoft', 'Windows'),
+    r'linux\s+kernel': ('Linux', 'Kernel'),
+    r'apache\s+(\w+)': ('Apache', None),
+}
+
+
+def _extract_vendor_product_from_description(description):
+    """Extract vendor/product from CVE description using known patterns.
+    Returns (vendor, product) or (None, None)."""
+    if not description:
+        return None, None
+    desc_lower = description.lower()
+    for pattern, (vendor, product) in _KNOWN_PRODUCTS.items():
+        m = _re.search(pattern, desc_lower)
+        if m:
+            return vendor, product or m.group(1).title()
+    return None, None
+
 
 def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches=None, force=False):
     """Send webhook notification for a specific organization using org settings or global fallback
@@ -431,25 +459,11 @@ def fetch_cpe_version_data(limit=30):
             # Recovery: if vendor/product are 'Unknown' (imported by old code before
             # description fallback existed), apply the fallback now
             if vuln.vendor_project == 'Unknown' and vuln.product == 'Unknown' and vuln.short_description:
-                import re as _re
-                _KNOWN_PRODUCTS = {
-                    r'google\s+chrome': ('Google', 'Chrome'),
-                    r'chromium': ('Chromium', 'Chromium'),
-                    r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
-                    r'microsoft\s+edge': ('Microsoft', 'Edge'),
-                    r'apple\s+safari': ('Apple', 'Safari'),
-                    r'microsoft\s+windows': ('Microsoft', 'Windows'),
-                    r'linux\s+kernel': ('Linux', 'Kernel'),
-                    r'apache\s+(\w+)': ('Apache', None),
-                }
-                desc_lower = vuln.short_description.lower()
-                for pattern, (v, p) in _KNOWN_PRODUCTS.items():
-                    m = _re.search(pattern, desc_lower)
-                    if m:
-                        vuln.vendor_project = v
-                        vuln.product = p or m.group(1).title()
-                        logger.info(f"Recovered vendor/product for {vuln.cve_id}: {v}/{vuln.product}")
-                        break
+                v, p = _extract_vendor_product_from_description(vuln.short_description)
+                if v:
+                    vuln.vendor_project = v
+                    vuln.product = p
+                    logger.info(f"Recovered vendor/product for {vuln.cve_id}: {v}/{p}")
 
             if cpe_entries:
                 # Store CPE data using the model's method
@@ -1041,13 +1055,24 @@ def reenrich_fallback_cvss(limit=50):
     cna_upgraded = 0
     for vuln in cna_scored:
         try:
-            score, severity = _fetch_cvss_from_nvd(vuln.cve_id)
-            if score is not None:
-                vuln.cvss_score = score
-                vuln.severity = severity
-                vuln.cvss_source = 'nvd'
-                vuln.nvd_status = 'Analyzed'
-                cna_upgraded += 1
+            # Check actual NVD status before upgrading -- don't blindly
+            # assume "Analyzed" just because a score was returned (it
+            # could still be the same CNA/Secondary score).
+            from app.nvd_cpe_api import match_cve_to_cpe_with_status
+            _, live_status = match_cve_to_cpe_with_status(vuln.cve_id)
+
+            if live_status and live_status not in ('Received', 'Awaiting Analysis', 'Undergoing Analysis'):
+                # NVD has actually analyzed it -- safe to upgrade
+                score, severity = _fetch_cvss_from_nvd(vuln.cve_id)
+                if score is not None:
+                    vuln.cvss_score = score
+                    vuln.severity = severity
+                    vuln.cvss_source = 'nvd'
+                    vuln.nvd_status = live_status
+                    cna_upgraded += 1
+            elif live_status:
+                # Still pending -- just update the status field
+                vuln.nvd_status = live_status
         except Exception:
             continue
 
@@ -1075,7 +1100,7 @@ def _extract_cvss_from_metrics(metrics):
     Returns:
         (score, severity, source_type) where source_type is 'Primary' or 'Secondary'
     """
-    for metric_key in ['cvssMetricV31', 'cvssMetricV30']:
+    for metric_key in ['cvssMetricV40', 'cvssMetricV31', 'cvssMetricV30']:
         entries = metrics.get(metric_key, [])
         if not entries:
             continue
@@ -1104,6 +1129,23 @@ def _extract_cvss_from_metrics(metrics):
         severity = cvss_data.get('baseSeverity')
         if score is not None:
             return score, severity, 'Unknown'
+
+    # CVSS v2.0 fallback (no Primary/Secondary distinction in v2)
+    v2_entries = metrics.get('cvssMetricV2', [])
+    if v2_entries:
+        cvss_data = v2_entries[0].get('cvssData', {})
+        score = cvss_data.get('baseScore')
+        if score is not None:
+            # V2 doesn't have baseSeverity, derive from score
+            if score >= 9.0:
+                severity = 'CRITICAL'
+            elif score >= 7.0:
+                severity = 'HIGH'
+            elif score >= 4.0:
+                severity = 'MEDIUM'
+            else:
+                severity = 'LOW'
+            return score, severity, 'Primary'
 
     return None, None, None
 
@@ -1294,24 +1336,7 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
                             # Fallback: extract vendor/product from description if
                             # NVD has no configurations (common for "Awaiting Analysis")
                             if not vendor and not product and description:
-                                import re as _re
-                                KNOWN_PRODUCTS = {
-                                    r'google\s+chrome': ('Google', 'Chrome'),
-                                    r'chromium': ('Chromium', 'Chromium'),
-                                    r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
-                                    r'microsoft\s+edge': ('Microsoft', 'Edge'),
-                                    r'apple\s+safari': ('Apple', 'Safari'),
-                                    r'microsoft\s+windows': ('Microsoft', 'Windows'),
-                                    r'linux\s+kernel': ('Linux', 'Kernel'),
-                                    r'apache\s+(\w+)': ('Apache', None),
-                                }
-                                desc_lower = description.lower()
-                                for pattern, (v, p) in KNOWN_PRODUCTS.items():
-                                    m = _re.search(pattern, desc_lower)
-                                    if m:
-                                        vendor = v
-                                        product = p or m.group(1).title()
-                                        break
+                                vendor, product = _extract_vendor_product_from_description(description)
 
                             if needs_refresh:
                                 # Update existing stale record (vendor=Unknown recovery)
@@ -1519,24 +1544,7 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
 
                         # Description fallback for vendor/product
                         if not vendor and not product and description:
-                            import re as _re
-                            KNOWN_PRODUCTS = {
-                                r'google\s+chrome': ('Google', 'Chrome'),
-                                r'chromium': ('Chromium', 'Chromium'),
-                                r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
-                                r'microsoft\s+edge': ('Microsoft', 'Edge'),
-                                r'apple\s+safari': ('Apple', 'Safari'),
-                                r'microsoft\s+windows': ('Microsoft', 'Windows'),
-                                r'linux\s+kernel': ('Linux', 'Kernel'),
-                                r'apache\s+(\w+)': ('Apache', None),
-                            }
-                            desc_lower = description.lower()
-                            for pattern, (v, p) in KNOWN_PRODUCTS.items():
-                                m = _re.search(pattern, desc_lower)
-                                if m:
-                                    vendor = v
-                                    product = p or m.group(1).title()
-                                    break
+                            vendor, product = _extract_vendor_product_from_description(description)
 
                         # Determine CVSS source label
                         cvss_source_label = 'cna' if cvss_type == 'Secondary' else 'nvd'

@@ -3937,7 +3937,7 @@ def lookup_single_cve(cve_id):
     if existing and not force_refresh:
         needs_refresh = (
             existing.vendor_project == 'Unknown' or
-            (existing.cpe_data in (None, '[]') and existing.vendor_project == 'Unknown')
+            existing.cpe_data in (None, '[]')
         )
         if not needs_refresh:
             return jsonify({
@@ -3962,7 +3962,8 @@ def lookup_single_cve(cve_id):
             kwargs['verify'] = Config.VERIFY_SSL
 
         headers = {}
-        api_key = getattr(Config, 'NVD_API_KEY', None)
+        from app.nvd_cpe_api import _get_api_key
+        api_key = _get_api_key()
         if api_key:
             headers['apiKey'] = api_key
 
@@ -3995,16 +3996,10 @@ def lookup_single_cve(cve_id):
 
         vuln_status = cve_data.get('vulnStatus', '')
 
-        # Extract CVSS
-        cvss_score = None
-        cvss_severity = None
+        # Extract CVSS (reuse the shared extractor with v4/v3/v2 + Primary preference)
+        from app.cisa_sync import _extract_cvss_from_metrics
         metrics = cve_data.get('metrics', {})
-        for metric_key in ['cvssMetricV31', 'cvssMetricV30']:
-            if metric_key in metrics and metrics[metric_key]:
-                cvss_data_item = metrics[metric_key][0].get('cvssData', {})
-                cvss_score = cvss_data_item.get('baseScore')
-                cvss_severity = cvss_data_item.get('baseSeverity')
-                break
+        cvss_score, cvss_severity, _ = _extract_cvss_from_metrics(metrics)
 
         # Extract vendor/product from CPE configurations
         vendor = ''
@@ -4043,21 +4038,8 @@ def lookup_single_cve(cve_id):
 
         # Description fallback for vendor/product
         if not vendor and not product_name and description:
-            desc_lower = description.lower()
-            for pattern, (v, p) in {
-                r'google\s+chrome': ('Google', 'Chrome'),
-                r'chromium': ('Chromium', 'Chromium'),
-                r'mozilla\s+firefox': ('Mozilla', 'Firefox'),
-                r'microsoft\s+edge': ('Microsoft', 'Edge'),
-                r'apple\s+safari': ('Apple', 'Safari'),
-                r'microsoft\s+windows': ('Microsoft', 'Windows'),
-                r'linux\s+kernel': ('Linux', 'Kernel'),
-            }.items():
-                m = re.search(pattern, desc_lower)
-                if m:
-                    vendor = v
-                    product_name = p
-                    break
+            from app.cisa_sync import _extract_vendor_product_from_description
+            vendor, product_name = _extract_vendor_product_from_description(description)
 
         if existing and force_refresh:
             # Update existing record with fresh NVD data
@@ -4104,9 +4086,33 @@ def lookup_single_cve(cve_id):
 
         db.session.commit()
 
-        # Trigger rematch for this CVE
-        from app.filters import rematch_all_products
-        removed, matched = rematch_all_products()
+        # Targeted rematch: only match active products against this one CVE
+        from app.filters import check_match
+        products = Product.query.filter_by(active=True).all()
+        matched = 0
+        for product in products:
+            match_reasons, match_method, match_confidence = check_match(vuln, product)
+            if match_reasons:
+                existing_match = VulnerabilityMatch.query.filter_by(
+                    product_id=product.id,
+                    vulnerability_id=vuln.id
+                ).first()
+                if not existing_match:
+                    new_match = VulnerabilityMatch(
+                        product_id=product.id,
+                        vulnerability_id=vuln.id,
+                        match_reason='; '.join(match_reasons),
+                        match_method=match_method or 'keyword',
+                        match_confidence=match_confidence or 'medium'
+                    )
+                    db.session.add(new_match)
+                    matched += 1
+                elif existing_match.match_method != match_method or existing_match.match_confidence != match_confidence:
+                    existing_match.match_reason = '; '.join(match_reasons)
+                    existing_match.match_method = match_method or 'keyword'
+                    existing_match.match_confidence = match_confidence or 'medium'
+        if matched:
+            db.session.commit()
 
         return jsonify({
             'status': status_label,
