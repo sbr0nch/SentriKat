@@ -1052,11 +1052,17 @@ def get_notification_settings():
         # escalation: Re-alert when CVE is within X days of due date
         'default_alert_mode': get_setting('default_alert_mode', 'daily_reminder'),
         'default_escalation_days': int(get_setting('default_escalation_days', '3') or '3'),
-        # Alert rules (what to notify on)
+        # Alert rules (what to notify on) - global defaults, propagated to orgs on save
         'notify_on_critical': get_setting('notify_on_critical', 'true') == 'true',
         'notify_on_high': get_setting('notify_on_high', 'false') == 'true',
         'notify_on_new_cve': get_setting('notify_on_new_cve', 'true') == 'true',
         'notify_on_ransomware': get_setting('notify_on_ransomware', 'true') == 'true',
+        'notify_on_low_confidence': get_setting('notify_on_low_confidence', 'false') == 'true',
+        # Per-channel webhook settings (separate from email)
+        'notify_on_critical_webhook': get_setting('notify_on_critical_webhook', 'true') == 'true',
+        'notify_on_high_webhook': get_setting('notify_on_high_webhook', 'false') == 'true',
+        'notify_on_new_cve_webhook': get_setting('notify_on_new_cve_webhook', 'true') == 'true',
+        'notify_on_ransomware_webhook': get_setting('notify_on_ransomware_webhook', 'true') == 'true',
     }
     return jsonify(settings)
 
@@ -1112,15 +1118,35 @@ def save_notification_settings():
             days = int(data.get('default_escalation_days', 3))
             set_setting('default_escalation_days', str(days), 'notifications', 'Default escalation days before due date')
 
-        # Alert rules (what to notify on)
-        if 'notify_on_critical' in data:
-            set_setting('notify_on_critical', 'true' if data.get('notify_on_critical') else 'false', 'notifications', 'Alert on critical severity CVEs')
-        if 'notify_on_high' in data:
-            set_setting('notify_on_high', 'true' if data.get('notify_on_high') else 'false', 'notifications', 'Alert on high severity CVEs')
-        if 'notify_on_new_cve' in data:
-            set_setting('notify_on_new_cve', 'true' if data.get('notify_on_new_cve') else 'false', 'notifications', 'Alert on newly discovered CVEs')
-        if 'notify_on_ransomware' in data:
-            set_setting('notify_on_ransomware', 'true' if data.get('notify_on_ransomware') else 'false', 'notifications', 'Alert on ransomware-linked CVEs')
+        # Alert rules (what to notify on) - save global defaults
+        alert_fields = {
+            'notify_on_critical': ('alert_on_critical', 'Alert on critical severity CVEs'),
+            'notify_on_high': ('alert_on_high', 'Alert on high severity CVEs'),
+            'notify_on_new_cve': ('alert_on_new_cve', 'Alert on newly discovered CVEs'),
+            'notify_on_ransomware': ('alert_on_ransomware', 'Alert on ransomware-linked CVEs'),
+            'notify_on_low_confidence': ('alert_on_low_confidence', 'Include low-confidence matches in alerts'),
+        }
+        org_updates = {}
+        for setting_key, (org_field, desc) in alert_fields.items():
+            if setting_key in data:
+                val = bool(data.get(setting_key))
+                set_setting(setting_key, 'true' if val else 'false', 'notifications', desc)
+                org_updates[org_field] = val
+
+        # Webhook-specific per-rule settings
+        for wh_key in ('notify_on_critical_webhook', 'notify_on_high_webhook',
+                        'notify_on_new_cve_webhook', 'notify_on_ransomware_webhook'):
+            if wh_key in data:
+                set_setting(wh_key, 'true' if data.get(wh_key) else 'false', 'notifications', wh_key.replace('_', ' ').title())
+
+        # Propagate alert rules to all organizations (global defaults apply to all orgs)
+        if org_updates:
+            from app.models import Organization
+            orgs = Organization.query.all()
+            for org in orgs:
+                for field, value in org_updates.items():
+                    setattr(org, field, value)
+            db.session.commit()
 
         return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
     except Exception as e:

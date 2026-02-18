@@ -71,51 +71,75 @@ def check_cpe_match(vulnerability, product):
     cpe_entries = vulnerability.get_cpe_entries()
 
     if cpe_entries:
-        # Check against cached CPE data
+        # Separate matching entries into ranged, exact-version, and wildcard buckets.
+        # Ranged/exact entries are MORE SPECIFIC than wildcards; if any exist for this
+        # vendor:product, wildcard entries must be ignored — otherwise a wildcard
+        # entry would match products whose version is OUTSIDE the affected range
+        # (e.g., Chrome 145 being flagged for a CVE fixed in Chrome 72).
+        version = (product.version or '').strip() or None
+        ranged_entries = []
+        exact_entries = []
+        wildcard_entries = []
+
         for entry in cpe_entries:
             entry_vendor = entry.get('vendor', '').lower()
             entry_product = entry.get('product', '').lower()
 
-            if entry_vendor == cpe_vendor.lower() and entry_product == cpe_product.lower():
-                # Check version range if available
-                version = product.version
-                has_version_range = entry.get('version_start') or entry.get('version_end')
+            if entry_vendor != cpe_vendor.lower() or entry_product != cpe_product.lower():
+                continue
 
-                if has_version_range:
-                    # CPE data has version constraints - verify product version
-                    if version:
-                        if _version_in_range(version,
-                                             entry.get('version_start'),
-                                             entry.get('version_end'),
-                                             entry.get('version_start_type'),
-                                             entry.get('version_end_type')):
-                            # Version confirmed in vulnerable range - HIGH confidence
-                            range_str = f"{entry.get('version_start', '*')} - {entry.get('version_end', '*')}"
-                            return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (version {version} in range {range_str})"], 'cpe', 'high'
-                        # Version NOT in vulnerable range - skip this entry
-                        continue
-                    else:
-                        # Product has no version but CVE has version range
-                        # MEDIUM confidence - can't verify if actually affected
+            has_version_range = entry.get('version_start') or entry.get('version_end')
+            exact_ver = entry.get('exact_version')
+
+            if has_version_range:
+                ranged_entries.append(entry)
+            elif exact_ver:
+                exact_entries.append(entry)
+            else:
+                wildcard_entries.append(entry)
+
+        # Priority 1: Check version-ranged entries (most authoritative)
+        if ranged_entries:
+            for entry in ranged_entries:
+                if version:
+                    if _version_in_range(version,
+                                         entry.get('version_start'),
+                                         entry.get('version_end'),
+                                         entry.get('version_start_type'),
+                                         entry.get('version_end_type')):
                         range_str = f"{entry.get('version_start', '*')} - {entry.get('version_end', '*')}"
-                        return [f"CPE match: {cpe_vendor}:{cpe_product} (version range {range_str}, product version unknown)"], 'cpe', 'medium'
+                        return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (version {version} in range {range_str})"], 'cpe', 'high'
+                    # Version NOT in this range - continue checking other ranges
                 else:
-                    # No version range fields -- check for exact-version CPE entry
-                    exact_ver = entry.get('exact_version')
-                    if exact_ver:
-                        # CPE specifies a single affected version (e.g., cpe:2.3:a:vendor:product:1.2.3)
-                        if version and version.strip() == exact_ver.strip():
-                            return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (exact version match)"], 'cpe', 'high'
-                        elif not version:
-                            return [f"CPE match: {cpe_vendor}:{cpe_product} (exact version {exact_ver}, product version unknown)"], 'cpe', 'medium'
-                        # Version doesn't match this exact entry - skip to next
-                        continue
-                    else:
-                        # No version constraint and no exact version - all versions affected
-                        if version:
-                            return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (all versions affected)"], 'cpe', 'high'
-                        else:
-                            return [f"CPE match: {cpe_vendor}:{cpe_product} (all versions affected)"], 'cpe', 'high'
+                    # Product has no version but CVE has version range
+                    range_str = f"{entry.get('version_start', '*')} - {entry.get('version_end', '*')}"
+                    return [f"CPE match: {cpe_vendor}:{cpe_product} (version range {range_str}, product version unknown)"], 'cpe', 'medium'
+            # If we get here with version-ranged entries, the installed version is
+            # NOT in ANY affected range — this product is NOT vulnerable.
+            # Do NOT fall through to wildcard entries.
+            if version:
+                return [], None, None
+
+        # Priority 2: Check exact-version entries
+        if exact_entries:
+            for entry in exact_entries:
+                exact_ver = entry.get('exact_version')
+                if version and version.strip() == exact_ver.strip():
+                    return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (exact version match)"], 'cpe', 'high'
+                elif not version:
+                    return [f"CPE match: {cpe_vendor}:{cpe_product} (exact version {exact_ver}, product version unknown)"], 'cpe', 'medium'
+            # Installed version doesn't match any exact affected version.
+            # If ranged entries also existed (handled above), we already returned.
+            # If only exact entries exist, not matching any means not vulnerable.
+            if version:
+                return [], None, None
+
+        # Priority 3: Wildcard entries — ONLY used if no ranged/exact entries exist
+        if wildcard_entries:
+            if version:
+                return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (all versions affected)"], 'cpe', 'high'
+            else:
+                return [f"CPE match: {cpe_vendor}:{cpe_product} (all versions affected)"], 'cpe', 'high'
     else:
         # No cached CPE data from NVD for this vulnerability.
         # Three scenarios:
@@ -577,6 +601,15 @@ def get_filtered_vulnerabilities(filters=None):
         selectinload(VulnerabilityMatch.vulnerability)
     )
 
+    # Exclude matches for inactive products (disabled by admin or auto-disabled)
+    active_product_ids = db.session.execute(
+        select(Product.id).where(Product.active == True)
+    ).scalars().all()
+    if active_product_ids:
+        query = query.filter(VulnerabilityMatch.product_id.in_(active_product_ids))
+    else:
+        return []
+
     if filters:
         # Filter by organization - combine many-to-many AND legacy FK
         if filters.get('organization_id'):
@@ -652,14 +685,37 @@ def get_filtered_vulnerabilities(filters=None):
         # Filter by source key type (server/client) - only show matches for products
         # reported by the specified key type
         if filters.get('source_key_type') in ('server', 'client'):
-            from sqlalchemy import select as sa_select
             key_type_product_ids = db.session.execute(
-                sa_select(Product.id).where(
+                select(Product.id).where(
                     Product.source_key_type == filters['source_key_type']
                 )
             ).scalars().all()
             if key_type_product_ids:
                 query = query.filter(VulnerabilityMatch.product_id.in_(key_type_product_ids))
+            else:
+                return []
+
+        # Filter by source type (os_package, extension, code_library)
+        if filters.get('source_type'):
+            st_product_ids = db.session.execute(
+                select(Product.id).where(
+                    Product.source_type == filters['source_type']
+                )
+            ).scalars().all()
+            if st_product_ids:
+                query = query.filter(VulnerabilityMatch.product_id.in_(st_product_ids))
+            else:
+                return []
+
+        # Filter by multiple source types (e.g., code_library + extension)
+        if filters.get('source_types'):
+            st_product_ids = db.session.execute(
+                select(Product.id).where(
+                    Product.source_type.in_(filters['source_types'])
+                )
+            ).scalars().all()
+            if st_product_ids:
+                query = query.filter(VulnerabilityMatch.product_id.in_(st_product_ids))
             else:
                 return []
 

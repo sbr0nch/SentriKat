@@ -1296,6 +1296,7 @@ def process_inventory_job(job):
         installations_removed = 0
         items_failed = 0
         items_processed = 0
+        version_changed_product_ids = set()  # Products whose version changed — need re-matching
 
         # Resolve the agent_key for license gating (reuse from above if loaded)
         agent_key_for_gating = None
@@ -1396,6 +1397,16 @@ def process_inventory_job(job):
                     # Update last_agent_report timestamp
                     product.last_agent_report = datetime.utcnow()
 
+                    # Update product version to latest agent-reported version.
+                    # This is critical: check_match() uses product.version for CPE range
+                    # checking. Without this, stale versions cause false positive CVEs
+                    # (e.g., Chrome updated from v145→v150 but product.version stays v145).
+                    if version and version != product.version:
+                        old_ver = product.version
+                        product.version = version
+                        version_changed_product_ids.add(product.id)
+                        logger.info(f"Product version updated: {vendor} {product_name} {old_ver} -> {version}")
+
                     # Update source_type/ecosystem if not already set (backfill from agent data)
                     if p_source_type and not product.source_type:
                         product.source_type = p_source_type
@@ -1465,6 +1476,8 @@ def process_inventory_job(job):
                 # Rollback the failed item but continue processing
                 try:
                     db.session.rollback()
+                    # Version changes from rolled-back batch are invalid
+                    version_changed_product_ids.clear()
                     # Re-fetch objects after rollback
                     job = InventoryJob.query.get(job_id)
                     asset = Asset.query.get(asset_id)
@@ -1500,6 +1513,35 @@ def process_inventory_job(job):
             asset.last_inventory_at = datetime.utcnow()
             asset.last_checkin = datetime.utcnow()
             asset.status = 'online'
+
+        # Commit pending changes (version updates, installation removals, asset timestamps)
+        # before re-matching so check_match() sees persisted data.
+        db.session.commit()
+
+        # Re-match products whose versions changed during this job.
+        # Ensures stale vulnerability matches are removed immediately.
+        rematched_removed = 0
+        if version_changed_product_ids:
+            try:
+                from app.filters import check_match
+                changed_matches = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(list(version_changed_product_ids))
+                ).all()
+                for match in changed_matches:
+                    if match.product and match.vulnerability:
+                        reasons, _, _ = check_match(match.vulnerability, match.product)
+                        if not reasons:
+                            db.session.delete(match)
+                            rematched_removed += 1
+                if rematched_removed:
+                    db.session.commit()
+                    logger.info(
+                        f"Job {job_id}: Removed {rematched_removed} stale vulnerability "
+                        f"matches for {len(version_changed_product_ids)} version-changed products"
+                    )
+            except Exception as e:
+                db.session.rollback()
+                logger.warning(f"Post-job re-match failed (non-critical): {e}")
 
         # Finalize job - re-fetch to ensure fresh object
         job = InventoryJob.query.get(job_id)
@@ -1809,6 +1851,7 @@ def report_inventory():
         installations_created = 0
         installations_updated = 0
         installations_removed = 0
+        version_changed_product_ids = set()  # Products whose version changed — need re-matching
 
         for product_data in products:
             vendor = product_data.get('vendor')
@@ -1897,6 +1940,14 @@ def report_inventory():
                 # Update last_agent_report timestamp
                 product.last_agent_report = datetime.utcnow()
 
+                # Update product version to latest agent-reported version.
+                # Critical: check_match() uses product.version for CPE range checking.
+                if version and version != product.version:
+                    old_ver = product.version
+                    product.version = version
+                    version_changed_product_ids.add(product.id)
+                    logger.info(f"Product version updated: {vendor} {product_name} {old_ver} -> {version}")
+
                 # Update source_type/ecosystem if not already set (backfill from agent data)
                 p_source_type = product_data.get('source_type')
                 if p_source_type and not product.source_type:
@@ -1933,7 +1984,7 @@ def report_inventory():
                     version=version,
                     install_path=product_data.get('path'),
                     project_path=product_data.get('project_path'),
-                    is_direct_dependency=product_data.get('is_direct'),
+                    is_direct_dependency=_safe_bool(product_data.get('is_direct')),
                     distro_package_version=product_data.get('distro_package_version'),
                     detected_by='agent',
                     detected_on_os=platform  # Track which OS this came from
@@ -2042,6 +2093,33 @@ def report_inventory():
             f"{installations_removed} removed"
         )
 
+        # Re-match products whose versions changed during this agent push.
+        # This ensures that when software is updated (e.g., Chrome 145 → 150),
+        # CVEs that no longer apply are immediately removed instead of persisting
+        # until the next scheduled sync.
+        rematched_removed = 0
+        if version_changed_product_ids:
+            try:
+                from app.filters import check_match
+                changed_matches = VulnerabilityMatch.query.filter(
+                    VulnerabilityMatch.product_id.in_(list(version_changed_product_ids))
+                ).all()
+                for match in changed_matches:
+                    if match.product and match.vulnerability:
+                        reasons, _, _ = check_match(match.vulnerability, match.product)
+                        if not reasons:
+                            db.session.delete(match)
+                            rematched_removed += 1
+                if rematched_removed:
+                    db.session.commit()
+                    logger.info(
+                        f"Agent push re-match: removed {rematched_removed} stale vulnerability "
+                        f"matches for {len(version_changed_product_ids)} version-changed products"
+                    )
+            except Exception as e:
+                db.session.rollback()
+                logger.warning(f"Post-agent-push re-match failed (non-critical): {e}")
+
         # Build response with license warning if applicable
         response = {
             'status': 'success',
@@ -2053,7 +2131,8 @@ def report_inventory():
                 'installations_created': installations_created,
                 'installations_updated': installations_updated,
                 'installations_removed': installations_removed,
-                'total_products': len(products)
+                'total_products': len(products),
+                'stale_matches_removed': rematched_removed
             }
         }
 

@@ -207,7 +207,12 @@ def update_health_check_settings():
 
         # Update individual check enable/disable
         if 'checks' in data and isinstance(data['checks'], dict):
+            from app.models import HealthCheckResult
+            from app.health_checks import HEALTH_CHECKS
             for check_name, enabled in data['checks'].items():
+                # Validate check_name against known checks to prevent settings pollution
+                if check_name not in HEALTH_CHECKS:
+                    continue
                 key = f'health_check_{check_name}_enabled'
                 setting = SystemSettings.query.filter_by(key=key).first()
                 if setting:
@@ -218,6 +223,9 @@ def update_health_check_settings():
                         value='true' if enabled else 'false',
                         category='health'
                     ))
+                # Clear stored result when disabling so banner disappears
+                if not enabled:
+                    HealthCheckResult.query.filter_by(check_name=check_name).delete()
 
         # Update notification email
         if 'notify_email' in data:
@@ -2485,11 +2493,20 @@ def get_vulnerability_stats():
 
         # Apply source_type filter to narrow product IDs
         source_type_filter = request.args.get('source_type', '').strip().lower()
-        if org_product_ids and source_type_filter in ('os_package', 'extension', 'code_library'):
+        include_extensions = request.args.get('include_extensions', '').lower() == 'true'
+        # Container filter: containers use ContainerImage model, not Product/VulnerabilityMatch.
+        # When container filter is active, zero out product-based IDs so only
+        # container_stats (computed below) are meaningful.
+        if source_type_filter == 'container':
+            org_product_ids = []
+        elif org_product_ids and source_type_filter in ('os_package', 'extension', 'code_library'):
+            source_types = [source_type_filter]
+            if include_extensions and source_type_filter == 'code_library':
+                source_types.append('extension')
             filtered_product_ids = [
                 p.id for p in Product.query.filter(
                     Product.id.in_(org_product_ids),
-                    Product.source_type == source_type_filter
+                    Product.source_type.in_(source_types)
                 ).all()
             ]
             org_product_ids = filtered_product_ids
@@ -3072,13 +3089,27 @@ def get_vulnerabilities_grouped():
             org_id = default_org.id if default_org else None
 
         # Build filters
+        source_type_filter = request.args.get('source_type', '').strip().lower()
+        include_extensions = request.args.get('include_extensions', '').lower() == 'true'
         filters = {
             'organization_id': org_id,
             'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
             'acknowledged': request.args.get('acknowledged'),
             'priority': request.args.get('priority'),
-            'source_key_type': request.args.get('source_key_type'),
+            'source_key_type': request.args.get('source_key_type') if request.args.get('source_key_type') in ('server', 'client') else None,
         }
+        # Container filter: containers use ContainerImage model, not Product/VulnerabilityMatch.
+        # Return empty results for container filter since they don't participate in CVE matching.
+        if source_type_filter == 'container':
+            return jsonify({
+                'items': [], 'total': 0, 'page': 1, 'per_page': 25,
+                'message': 'Container vulnerabilities are tracked separately via container image scanning.'
+            })
+        if source_type_filter in ('os_package', 'extension', 'code_library'):
+            if include_extensions and source_type_filter == 'code_library':
+                filters['source_types'] = ['code_library', 'extension']
+            else:
+                filters['source_type'] = source_type_filter
         filters = {k: v for k, v in filters.items() if v is not None and v != ''}
 
         # Platform filter (windows/linux/macos/container) - applied post-query

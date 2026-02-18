@@ -574,7 +574,7 @@ async function loadAllSettings() {
         const [notifResp, smtpResp, orgsResp] = await Promise.all([
             fetch('/api/settings/notifications', { headers: { 'X-CSRFToken': csrfToken } }),
             fetch('/api/settings/smtp', { headers: { 'X-CSRFToken': csrfToken } }),
-            fetch('/api/alerts/org-overrides', { headers: { 'X-CSRFToken': csrfToken } })
+            fetch('/api/settings/alerts/org-overrides', { headers: { 'X-CSRFToken': csrfToken } })
         ]);
 
         if (notifResp.ok) {
@@ -590,15 +590,18 @@ async function loadAllSettings() {
             document.getElementById('asGenericFormat').value = n.generic_webhook_format || 'slack';
             document.getElementById('genericChannelLabel').textContent = n.generic_webhook_name || 'Custom Webhook';
 
-            // Alert rules (global defaults)
+            // Alert rules - email (global defaults)
             document.getElementById('ruleCriticalEmail').checked = n.notify_on_critical !== false;
-            document.getElementById('ruleCriticalWebhook').checked = n.notify_on_critical !== false;
             document.getElementById('ruleHighEmail').checked = n.notify_on_high === true;
-            document.getElementById('ruleHighWebhook').checked = n.notify_on_high === true;
             document.getElementById('ruleNewCveEmail').checked = n.notify_on_new_cve !== false;
-            document.getElementById('ruleNewCveWebhook').checked = n.notify_on_new_cve !== false;
             document.getElementById('ruleRansomwareEmail').checked = n.notify_on_ransomware !== false;
-            document.getElementById('ruleRansomwareWebhook').checked = n.notify_on_ransomware !== false;
+            // Alert rules - webhook (independent per-channel settings)
+            document.getElementById('ruleCriticalWebhook').checked = n.notify_on_critical_webhook !== false;
+            document.getElementById('ruleHighWebhook').checked = n.notify_on_high_webhook === true;
+            document.getElementById('ruleNewCveWebhook').checked = n.notify_on_new_cve_webhook !== false;
+            document.getElementById('ruleRansomwareWebhook').checked = n.notify_on_ransomware_webhook !== false;
+            // Confidence filtering
+            document.getElementById('ruleIncludeLowConfidence').checked = n.notify_on_low_confidence === true;
 
             // Schedule
             document.getElementById('asAlertMode').value = n.default_alert_mode || 'daily_reminder';
@@ -663,11 +666,17 @@ async function saveAllSettings() {
             generic_webhook_format: document.getElementById('asGenericFormat').value,
             generic_webhook_token: document.getElementById('asGenericToken').value,
 
-            // Alert rules
+            // Alert rules - email
             notify_on_critical: document.getElementById('ruleCriticalEmail').checked,
             notify_on_high: document.getElementById('ruleHighEmail').checked,
             notify_on_new_cve: document.getElementById('ruleNewCveEmail').checked,
             notify_on_ransomware: document.getElementById('ruleRansomwareEmail').checked,
+            notify_on_low_confidence: document.getElementById('ruleIncludeLowConfidence').checked,
+            // Alert rules - webhook (independent per-channel)
+            notify_on_critical_webhook: document.getElementById('ruleCriticalWebhook').checked,
+            notify_on_high_webhook: document.getElementById('ruleHighWebhook').checked,
+            notify_on_new_cve_webhook: document.getElementById('ruleNewCveWebhook').checked,
+            notify_on_ransomware_webhook: document.getElementById('ruleRansomwareWebhook').checked,
 
             // Schedule
             default_alert_mode: document.getElementById('asAlertMode').value,

@@ -525,7 +525,7 @@ function Get-CodeDependencies {
                             product = $Matches[1].Trim()
                             version = $Matches[2].Trim()
                             path = $null
-                            source_type = "code_dependency"
+                            source_type = "code_library"
                             ecosystem = "python"
                         }
                     }
@@ -555,7 +555,7 @@ function Get-CodeDependencies {
                                 product = $_.Name
                                 version = if ($_.Value.version) { $_.Value.version } else { $null }
                                 path = $null
-                                source_type = "code_dependency"
+                                source_type = "code_library"
                                 ecosystem = "nodejs"
                             }
                         }
@@ -587,7 +587,7 @@ function Get-CodeDependencies {
                         product = $pkg.Name
                         version = $versions.Name
                         path = $pkg.FullName
-                        source_type = "code_dependency"
+                        source_type = "code_library"
                         ecosystem = "nuget"
                     }
                 }
@@ -626,7 +626,7 @@ function Get-CodeDependencies {
                                 product = $pkgName
                                 version = if ($pkgVersion) { $pkgVersion } else { $null }
                                 path = $csproj.FullName
-                                source_type = "code_dependency"
+                                source_type = "code_library"
                                 ecosystem = "nuget"
                             }
                         }
@@ -657,7 +657,7 @@ function Get-CodeDependencies {
                             product = $Matches[1]
                             version = $Matches[2]
                             path = $null
-                            source_type = "code_dependency"
+                            source_type = "code_library"
                             ecosystem = "rust"
                         }
                     }
@@ -685,7 +685,7 @@ function Get-CodeDependencies {
                                 product = $pkg.name
                                 version = if ($pkg.version) { ($pkg.version -replace '^v', '') } else { $null }
                                 path = $null
-                                source_type = "code_dependency"
+                                source_type = "code_library"
                                 ecosystem = "composer"
                             }
                         }
@@ -726,7 +726,7 @@ function Get-CodeDependencies {
                                 product = $_.Name
                                 version = if ($_.Value.version) { $_.Value.version } else { $null }
                                 path = $lockFile.DirectoryName
-                                source_type = "code_dependency"
+                                source_type = "code_library"
                                 ecosystem = "nodejs"
                             }
                         }
@@ -752,7 +752,7 @@ function Get-CodeDependencies {
                                 product = $Matches[1]
                                 version = $Matches[2].Trim()
                                 path = $reqFile.DirectoryName
-                                source_type = "code_dependency"
+                                source_type = "code_library"
                                 ecosystem = "python"
                             }
                         }
@@ -763,7 +763,7 @@ function Get-CodeDependencies {
                                 product = $pkgName
                                 version = $null
                                 path = $reqFile.DirectoryName
-                                source_type = "code_dependency"
+                                source_type = "code_library"
                                 ecosystem = "python"
                             }
                         }
@@ -773,7 +773,7 @@ function Get-CodeDependencies {
                                 product = $Matches[1]
                                 version = $null
                                 path = $reqFile.DirectoryName
-                                source_type = "code_dependency"
+                                source_type = "code_library"
                                 ecosystem = "python"
                             }
                         }
