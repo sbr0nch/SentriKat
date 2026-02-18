@@ -1597,6 +1597,10 @@ def download_windows_agent():
     if not script:
         return jsonify({'error': 'Windows agent script not found on server'}), 404
 
+    # Inject current APP_VERSION so the agent reports the correct version
+    from app.agent_api import _inject_agent_version, _get_latest_agent_versions
+    script = _inject_agent_version(script, _get_latest_agent_versions().get('windows', '0.0.0'), 'windows')
+
     # Inject default ServerUrl into the param block
     script = script.replace(
         '[string]$ServerUrl,',
@@ -1632,6 +1636,10 @@ def download_linux_agent():
     if not script:
         return jsonify({'error': 'Linux agent script not found on server'}), 404
 
+    # Inject current APP_VERSION so the agent reports the correct version
+    from app.agent_api import _inject_agent_version, _get_latest_agent_versions
+    script = _inject_agent_version(script, _get_latest_agent_versions().get('linux', '0.0.0'), 'linux')
+
     # Inject default SERVER_URL
     script = script.replace('SERVER_URL=""', f'SERVER_URL="{base_url}"', 1)
 
@@ -1658,6 +1666,10 @@ def download_macos_agent():
     script = _read_agent_script('sentrikat-agent-macos.sh')
     if not script:
         return jsonify({'error': 'macOS agent script not found on server'}), 404
+
+    # Inject current APP_VERSION so the agent reports the correct version
+    from app.agent_api import _inject_agent_version, _get_latest_agent_versions
+    script = _inject_agent_version(script, _get_latest_agent_versions().get('macos', '0.0.0'), 'macos')
 
     # Inject default SERVER_URL
     script = script.replace('SERVER_URL=""', f'SERVER_URL="{base_url}"', 1)
