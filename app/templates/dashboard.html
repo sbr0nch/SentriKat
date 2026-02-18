@@ -1170,9 +1170,9 @@
         document.querySelectorAll('#sourceKeyTypeToggle button').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.source === value);
         });
-        // Reload stats and vulnerabilities with the new filter
+        // Reload stats and grouped vulnerabilities with the new filter
         loadStats();
-        loadVulnerabilities();
+        loadGroupedVulnerabilities();
     }
 
     async function loadStats() {
@@ -2869,6 +2869,7 @@
             if (vendor) params.append('vendor', vendor);
             if (product) params.append('product', product);
             if (platform) params.append('platform', platform);
+            if (dashboardSourceFilter) params.append('source_key_type', dashboardSourceFilter);
             params.append('page', currentPage);
             params.append('per_page', pageSize === Infinity ? 100 : pageSize);
 

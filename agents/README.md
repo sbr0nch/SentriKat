@@ -134,13 +134,15 @@ Configuration is stored at: `/Library/Application Support/SentriKat/agent.conf`
 
 ## What Gets Collected
 
-### Windows
+### OS Packages (all platforms)
+
+#### Windows
 - Installed programs from Windows Registry (Add/Remove Programs)
 - 32-bit and 64-bit applications
 - Windows Features and Roles (on Server editions)
 - **Installed KBs/Hotfixes** (for automatic vendor patch detection)
 
-### Linux
+#### Linux
 - Packages from system package manager:
   - Debian/Ubuntu: dpkg
   - RHEL/CentOS/Fedora: rpm
@@ -149,6 +151,50 @@ Configuration is stored at: `/Library/Application Support/SentriKat/agent.conf`
 - **Full distro package versions** (e.g., `2.4.52-1ubuntu4.6` for backport detection)
 - Snap packages
 - Flatpak packages
+
+#### macOS
+- Homebrew packages
+- MacPorts packages
+- System packages (pkgutil)
+
+### VS Code Extensions (optional, capability-gated)
+
+When enabled on the API key, agents scan for VS Code extensions across all user profiles:
+
+- **VS Code** (`~/.vscode/extensions/`)
+- **VS Code Insiders** (`~/.vscode-insiders/extensions/`)
+- **macOS Application Support** (`~/Library/Application Support/Code/User/extensions/`)
+- Parses `package.json` for name, version, and publisher
+- Symlinks are skipped for security
+
+### Code Dependencies (optional, capability-gated)
+
+When enabled on the API key, agents scan for project dependencies:
+
+| Ecosystem | Detection Method | Files Searched |
+|-----------|-----------------|----------------|
+| Python (PyPI) | `pip3 freeze` + file search | `requirements.txt` in `/home`, `/opt`, `/srv`, `/var/www` |
+| Node.js (npm) | `npm ls -g` + file search | `package-lock.json`, `package.json` |
+| Ruby (gem) | `gem list --local` | Global gems |
+| Rust (cargo) | `cargo install --list` | Global crates |
+| Go | File parsing (no execution) | `go.sum` files |
+| PHP (composer) | `composer global show` | Global packages |
+
+**No extra tools are required.** If a package manager isn't installed, that ecosystem is silently skipped. Dependency scanning searches project directories up to 5 levels deep and limits to 20 files per ecosystem to avoid excessive I/O.
+
+Each dependency is tagged with:
+- `source_type: "code_library"` and the appropriate `ecosystem`
+- `project_path`: the lock/requirements file it was found in
+- `is_direct`: whether it's a direct dependency (from package.json) or transitive (from lock file)
+
+### Enabling Scan Capabilities
+
+Scan capabilities are controlled **per API key** in the SentriKat web interface:
+
+1. Go to **Settings > Agent Keys**
+2. Create or edit an API key
+3. Check **VS Code Extensions** and/or **Code Dependencies**
+4. The agent automatically picks up the new capabilities on its next poll
 
 ### Vendor Backport Detection
 

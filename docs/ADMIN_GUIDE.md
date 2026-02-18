@@ -221,6 +221,60 @@ SentriKat supports push-updating agents remotely. Mark assets for update in the 
 
 Create at **Agents > API Keys** (scoped per org). Keys support auto-approve for agent-discovered products. Rotate by creating a new key, deploying to agents, then revoking the old one.
 
+#### API Key Types
+
+Keys have a **Key Type** that indicates deployment target:
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| **Server** | Deployed on infrastructure servers | Data center, cloud servers, CI/CD |
+| **Client** | Deployed on end-user workstations | Laptops, desktops, developer machines |
+
+The dashboard includes a **Server/Client toggle** to filter vulnerabilities by key type, so you can view server-side vs client-side exposure separately.
+
+#### Scan Capabilities
+
+Each API key controls what the agent is allowed to scan. These are **license-gated** features configurable per key:
+
+| Capability | Default | Description |
+|------------|---------|-------------|
+| **OS Packages** | ON | Standard OS package scanning (dpkg, rpm, apk, etc.) |
+| **VS Code Extensions** | OFF | Scans VS Code and VS Code Insiders extensions on all user profiles |
+| **Code Dependencies** | OFF | Scans project dependency files (requirements.txt, package-lock.json, go.sum, Gemfile, Cargo.toml, composer.json) |
+
+When a capability is **disabled** on the API key, any data the agent sends for that category is silently rejected by the server. This ensures license compliance and prevents accidental data collection.
+
+### Extension & Dependency Scanning
+
+#### How It Works
+
+1. **Create an API key** with the desired scan capabilities enabled (Settings > Agent Keys)
+2. **Deploy the agent** — it automatically polls the server for its capabilities via `/api/agent/commands`
+3. **The agent scans** based on what the server tells it:
+   - **VS Code Extensions**: Reads `package.json` from `~/.vscode/extensions/` (all user profiles)
+   - **Code Dependencies**: Searches for lock/requirements files in `/home`, `/opt`, `/srv`, `/var/www` (up to 5 levels deep)
+4. **Results appear** in Inventory > Products, filterable by type
+
+#### What Gets Scanned (Dependencies)
+
+| Ecosystem | How it's detected | Files parsed |
+|-----------|-------------------|--------------|
+| **Python (PyPI)** | `pip3 freeze` + file search | `requirements.txt` |
+| **Node.js (npm)** | `npm ls -g` + file search | `package-lock.json`, `package.json` |
+| **Ruby (gem)** | `gem list --local` | Global gems |
+| **Rust (cargo)** | `cargo install --list` | Global crates |
+| **Go** | File search | `go.sum` |
+| **PHP (composer)** | `composer global show` | Global packages |
+
+**No extra tools need to be installed.** The agent uses whatever package managers are already present on the machine. Missing tools are silently skipped.
+
+#### Security Notes
+
+- Agent scripts **never execute unknown binaries** (Go scanning reads `go.sum` files, not binaries)
+- Extension scanning **skips symlinks** to prevent path traversal
+- Dependency data is validated against a **whitelist of known ecosystems** before storage
+- The `is_direct` flag distinguishes direct dependencies from transitive ones
+
 ---
 
 ## 5. Backup & Restore
