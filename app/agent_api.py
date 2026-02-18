@@ -2727,11 +2727,20 @@ def create_agent_key():
     key_hash = AgentApiKey.hash_key(raw_key)
     key_prefix = raw_key[:10]
 
+    # Encrypt raw key for later re-download (agent script embedding)
+    encrypted_raw = None
+    try:
+        from app.encryption import encrypt_value
+        encrypted_raw = encrypt_value(raw_key)
+    except Exception as e:
+        logger.warning(f"Could not encrypt API key for re-download: {e}")
+
     agent_key = AgentApiKey(
         organization_id=org_id,
         name=name,
         key_hash=key_hash,
         key_prefix=key_prefix,
+        encrypted_key=encrypted_raw,
         max_assets=data.get('max_assets'),
         auto_approve=data.get('auto_approve', False),
         created_by=user.id
@@ -2761,10 +2770,8 @@ def create_agent_key():
         org_names.append(org.display_name)
     logger.info(f"Agent API key created: {name} for orgs [{', '.join(org_names)}] by {user.username}")
 
-    # Return the raw key ONLY THIS ONE TIME
     result = agent_key.to_dict()
     result['api_key'] = raw_key
-    result['warning'] = 'Save this key now. It will not be shown again.'
 
     return jsonify(result), 201
 

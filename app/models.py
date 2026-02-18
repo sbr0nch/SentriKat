@@ -1649,6 +1649,7 @@ class AgentApiKey(db.Model):
     name = db.Column(db.String(100), nullable=False)  # Friendly name like "Production Agents"
     key_hash = db.Column(db.String(256), nullable=False, unique=True)  # SHA256 hash of the key
     key_prefix = db.Column(db.String(10), nullable=False)  # First 8 chars for identification
+    encrypted_key = db.Column(db.Text, nullable=True)  # Fernet-encrypted raw key for re-download
 
     # Permissions & limits
     active = db.Column(db.Boolean, default=True, index=True)

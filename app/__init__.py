@@ -89,6 +89,8 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerabilities', 'nvd_status', 'VARCHAR(50)', 'VARCHAR(50)'),
         # Actively exploited flag (CISA KEV, EUVD exploited, or manual)
         ('vulnerabilities', 'is_actively_exploited', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        # Encrypted raw API key for agent script re-downloads
+        ('agent_api_keys', 'encrypted_key', 'TEXT', 'TEXT'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
