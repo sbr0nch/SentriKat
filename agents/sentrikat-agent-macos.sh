@@ -365,11 +365,11 @@ get_installed_software() {
 
             # macOS VSCode extensions (Application Support path)
             local vscode_app_ext_dir="$user_home/Library/Application Support/Code/User/extensions"
-            if [[ -d "$vscode_app_ext_dir" ]]; then
+            if [[ -d "$vscode_app_ext_dir" && ! -L "$vscode_app_ext_dir" ]]; then
                 for ext_dir in "$vscode_app_ext_dir"/*/; do
-                    [[ ! -d "$ext_dir" ]] && continue
+                    [[ ! -d "$ext_dir" || -L "$ext_dir" ]] && continue  # Skip symlinks
                     local pkg_json="$ext_dir/package.json"
-                    [[ ! -f "$pkg_json" ]] && continue
+                    [[ ! -f "$pkg_json" || -L "$pkg_json" ]] && continue  # Skip symlinks
 
                     # Parse package.json without jq (grep-based)
                     local ext_name ext_version ext_publisher ext_display
@@ -395,11 +395,11 @@ get_installed_software() {
 
             # VSCode extensions (~/.vscode/extensions)
             local vscode_ext_dir="$user_home/.vscode/extensions"
-            if [[ -d "$vscode_ext_dir" ]]; then
+            if [[ -d "$vscode_ext_dir" && ! -L "$vscode_ext_dir" ]]; then
                 for ext_dir in "$vscode_ext_dir"/*/; do
-                    [[ ! -d "$ext_dir" ]] && continue
+                    [[ ! -d "$ext_dir" || -L "$ext_dir" ]] && continue  # Skip symlinks
                     local pkg_json="$ext_dir/package.json"
-                    [[ ! -f "$pkg_json" ]] && continue
+                    [[ ! -f "$pkg_json" || -L "$pkg_json" ]] && continue  # Skip symlinks
 
                     local ext_name ext_version ext_publisher ext_display
                     ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
@@ -424,11 +424,11 @@ get_installed_software() {
 
             # VSCode Insiders extensions
             local vscode_insiders_dir="$user_home/.vscode-insiders/extensions"
-            if [[ -d "$vscode_insiders_dir" ]]; then
+            if [[ -d "$vscode_insiders_dir" && ! -L "$vscode_insiders_dir" ]]; then
                 for ext_dir in "$vscode_insiders_dir"/*/; do
-                    [[ ! -d "$ext_dir" ]] && continue
+                    [[ ! -d "$ext_dir" || -L "$ext_dir" ]] && continue  # Skip symlinks
                     local pkg_json="$ext_dir/package.json"
-                    [[ ! -f "$pkg_json" ]] && continue
+                    [[ ! -f "$pkg_json" || -L "$pkg_json" ]] && continue  # Skip symlinks
 
                     local ext_name ext_version ext_publisher ext_display
                     ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
@@ -587,23 +587,29 @@ get_installed_software() {
             done < <(cargo install --list 2>/dev/null | grep -E '^[a-zA-Z]') || true
         fi
 
-        # --- Go: global binaries ---
+        # --- Go: parse go.sum files (safe - no binary execution) ---
         if command -v go &>/dev/null; then
-            local gopath="${GOPATH:-$HOME/go}"
-            if [[ -d "$gopath/bin" ]]; then
-                for gobin in "$gopath/bin"/*; do
-                    [[ ! -x "$gobin" ]] && continue
-                    local bin_name
-                    bin_name=$(basename "$gobin")
-                    # Try to get version from binary
-                    local go_ver
-                    go_ver=$("$gobin" --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) || go_ver="unknown"
-                    bin_name=$(json_escape "$bin_name")
-                    go_ver=$(json_escape "$go_ver")
-                    products+=("{\"vendor\": \"Go\", \"product\": \"$bin_name\", \"version\": \"$go_ver\", \"source_type\": \"code_library\", \"ecosystem\": \"go\"}")
-                    ((dep_count++)) || true
-                done
-            fi
+            for search_dir in /Users /opt /var/www; do
+                [[ ! -d "$search_dir" ]] && continue
+                while IFS= read -r gosumfile; do
+                    [[ ! -f "$gosumfile" || -L "$gosumfile" ]] && continue
+                    while IFS= read -r line; do
+                        [[ "$line" == *"/go.mod "* ]] && continue
+                        local go_mod go_ver_raw
+                        go_mod=$(echo "$line" | awk '{print $1}')
+                        go_ver_raw=$(echo "$line" | awk '{print $2}')
+                        [[ -z "$go_mod" || -z "$go_ver_raw" ]] && continue
+                        go_ver_raw="${go_ver_raw#v}"
+                        go_ver_raw="${go_ver_raw%/go.mod}"
+                        go_mod=$(json_escape "$go_mod")
+                        go_ver_raw=$(json_escape "$go_ver_raw")
+                        local gpp
+                        gpp=$(json_escape "$gosumfile")
+                        products+=("{\"vendor\": \"Go\", \"product\": \"$go_mod\", \"version\": \"$go_ver_raw\", \"source_type\": \"code_library\", \"ecosystem\": \"go\", \"project_path\": \"$gpp\"}")
+                        ((dep_count++)) || true
+                    done < "$gosumfile"
+                done < <(find "$search_dir" -maxdepth 5 -name "go.sum" -type f 2>/dev/null | head -20) || true
+            done
         fi
 
         # --- Composer (PHP): global packages ---

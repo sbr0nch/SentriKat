@@ -48,6 +48,26 @@ MAX_VENDOR_LENGTH = 200
 MAX_PRODUCT_NAME_LENGTH = 200
 MAX_VERSION_LENGTH = 100
 MAX_PATH_LENGTH = 500
+
+# Valid source types and ecosystems for inventory processing
+VALID_SOURCE_TYPES = frozenset({'os_package', 'vscode_extension', 'code_library', 'browser_extension'})
+VALID_ECOSYSTEMS = frozenset({
+    'npm', 'pypi', 'maven', 'nuget', 'cargo', 'go', 'gem', 'composer',
+    'vscode', 'chrome', 'firefox', 'apt', 'rpm', 'apk', 'pacman',
+    'snap', 'flatpak', 'brew', 'port', 'chocolatey', 'winget',
+})
+
+
+def _safe_bool(value):
+    """Safely coerce a value to bool or None. Rejects non-boolean types."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    # Accept common truthy/falsy representations
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return None  # Reject strings, lists, dicts etc.
 MAX_PRODUCTS_PER_REQUEST = 10000  # Absolute maximum products in single request (agents send ALL)
 
 # Background worker pool settings
@@ -1300,16 +1320,20 @@ def process_inventory_job(job):
                 p_source_type = product_data.get('source_type', 'os_package')
                 p_ecosystem = product_data.get('ecosystem')
 
-                # Validate source_type against allowed values
-                if p_source_type not in ('os_package', 'vscode_extension', 'code_library', 'browser_extension'):
+                # Validate source_type and ecosystem against allowed values
+                if p_source_type not in VALID_SOURCE_TYPES:
                     p_source_type = 'os_package'
+                if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
+                    p_ecosystem = None  # Reject unknown ecosystems
 
                 # Gate: reject extension/dependency data if API key doesn't have capability
-                if agent_key_for_gating:
-                    if p_source_type == 'vscode_extension' and not getattr(agent_key_for_gating, 'scan_extensions', False):
+                # Hard enforcement: block if key is missing OR capability is disabled
+                if p_source_type == 'vscode_extension':
+                    if not agent_key_for_gating or not getattr(agent_key_for_gating, 'scan_extensions', False):
                         items_processed += 1
                         continue  # Skip - not licensed for extension scanning
-                    if p_source_type == 'code_library' and not getattr(agent_key_for_gating, 'scan_dependencies', False):
+                if p_source_type == 'code_library':
+                    if not agent_key_for_gating or not getattr(agent_key_for_gating, 'scan_dependencies', False):
                         items_processed += 1
                         continue  # Skip - not licensed for dependency scanning
 
@@ -1401,7 +1425,7 @@ def process_inventory_job(job):
                         version=version,
                         install_path=product_data.get('path'),
                         project_path=product_data.get('project_path'),
-                        is_direct_dependency=product_data.get('is_direct'),
+                        is_direct_dependency=_safe_bool(product_data.get('is_direct')),
                         distro_package_version=product_data.get('distro_package_version'),
                         detected_by='agent',
                         detected_on_os=platform  # Track which OS this came from
@@ -1415,7 +1439,8 @@ def process_inventory_job(job):
                     installation.version = version
                     installation.install_path = product_data.get('path')
                     installation.project_path = product_data.get('project_path') or installation.project_path
-                    installation.is_direct_dependency = product_data.get('is_direct') if product_data.get('is_direct') is not None else installation.is_direct_dependency
+                    is_direct_val = _safe_bool(product_data.get('is_direct'))
+                    installation.is_direct_dependency = is_direct_val if is_direct_val is not None else installation.is_direct_dependency
                     installation.distro_package_version = product_data.get('distro_package_version') or installation.distro_package_version
                     installation.last_seen_at = datetime.utcnow()
                     installations_updated += 1
@@ -1818,15 +1843,19 @@ def report_inventory():
                 p_source_type = product_data.get('source_type', 'os_package')
                 p_ecosystem = product_data.get('ecosystem')
 
-                # Validate source_type against allowed values
-                if p_source_type not in ('os_package', 'vscode_extension', 'code_library', 'browser_extension'):
+                # Validate source_type and ecosystem against allowed values
+                if p_source_type not in VALID_SOURCE_TYPES:
                     p_source_type = 'os_package'
+                if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
+                    p_ecosystem = None  # Reject unknown ecosystems
 
                 # Gate: reject extension/dependency data if API key doesn't have capability
-                if agent_key:
-                    if p_source_type == 'vscode_extension' and not getattr(agent_key, 'scan_extensions', False):
+                # Hard enforcement: block if key is missing OR capability is disabled
+                if p_source_type == 'vscode_extension':
+                    if not agent_key or not getattr(agent_key, 'scan_extensions', False):
                         continue  # Skip - not licensed for extension scanning
-                    if p_source_type == 'code_library' and not getattr(agent_key, 'scan_dependencies', False):
+                if p_source_type == 'code_library':
+                    if not agent_key or not getattr(agent_key, 'scan_dependencies', False):
                         continue  # Skip - not licensed for dependency scanning
 
                 # Create product

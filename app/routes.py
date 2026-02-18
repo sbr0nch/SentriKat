@@ -1032,8 +1032,7 @@ def get_products():
         query = query.filter(Product.source_key_type == source_key_type)
 
     # Apply source type filter (os_package, vscode_extension, code_library, browser_extension)
-    valid_source_types = ('os_package', 'vscode_extension', 'code_library', 'browser_extension')
-    if source_type in valid_source_types:
+    if source_type in ('os_package', 'vscode_extension', 'code_library', 'browser_extension'):
         query = query.filter(Product.source_type == source_type)
 
     # Order by requested column or default vendor+product_name
