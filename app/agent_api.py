@@ -2277,6 +2277,31 @@ def list_assets():
             else:
                 query = query.filter(db.literal(False))
 
+        # Filter by CVE (show only endpoints that have products affected by this CVE)
+        filter_cve = request.args.get('cve')
+        if filter_cve:
+            # Find all product IDs that have a VulnerabilityMatch for this CVE
+            from app.models import Vulnerability, VulnerabilityMatch
+            vuln = Vulnerability.query.filter_by(cve_id=filter_cve.upper()).first()
+            if vuln:
+                affected_product_ids = [m.product_id for m in
+                    VulnerabilityMatch.query.filter_by(vulnerability_id=vuln.id).all()]
+                if affected_product_ids:
+                    asset_ids_with_vuln = db.session.query(
+                        ProductInstallation.asset_id
+                    ).filter(
+                        ProductInstallation.product_id.in_(affected_product_ids)
+                    ).distinct().all()
+                    asset_ids = [a[0] for a in asset_ids_with_vuln]
+                    if asset_ids:
+                        query = query.filter(Asset.id.in_(asset_ids))
+                    else:
+                        query = query.filter(db.literal(False))
+                else:
+                    query = query.filter(db.literal(False))
+            else:
+                query = query.filter(db.literal(False))
+
         search = request.args.get('search')
         if search:
             search_term = f"%{search}%"

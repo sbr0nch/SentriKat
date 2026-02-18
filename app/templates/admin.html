@@ -3688,6 +3688,7 @@
     let endpointsSortColumn = 'hostname';
     let endpointsSortDirection = 'asc';
     let endpointsProductFilter = null; // {vendor, product_name} or null
+    let endpointsCveFilter = null; // CVE ID string or null
 
     function sortEndpoints(column) {
         if (endpointsSortColumn === column) {
@@ -3741,11 +3742,20 @@
                 params.set('product_vendor', endpointsProductFilter.vendor);
                 params.set('product_name', endpointsProductFilter.product_name);
             }
+            if (endpointsCveFilter) {
+                params.set('cve', endpointsCveFilter);
+            }
 
-            // Show/hide product filter banner
+            // Show/hide filter banner
             const filterBanner = document.getElementById('endpointsProductFilter');
             if (filterBanner) {
-                if (endpointsProductFilter) {
+                if (endpointsCveFilter) {
+                    filterBanner.innerHTML = `<div class="alert alert-warning py-2 mb-0 d-flex align-items-center justify-content-between">
+                        <span><i class="bi bi-funnel-fill me-2"></i>Showing endpoints affected by: <strong>${escapeHtml(endpointsCveFilter)}</strong></span>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="clearEndpointCveFilter()"><i class="bi bi-x me-1"></i>Clear filter</button>
+                    </div>`;
+                    filterBanner.style.display = 'block';
+                } else if (endpointsProductFilter) {
                     filterBanner.innerHTML = `<div class="alert alert-info py-2 mb-0 d-flex align-items-center justify-content-between">
                         <span><i class="bi bi-funnel-fill me-2"></i>Showing endpoints with: <strong>${escapeHtml(endpointsProductFilter.vendor)} / ${escapeHtml(endpointsProductFilter.product_name)}</strong></span>
                         <button class="btn btn-sm btn-outline-secondary" onclick="clearEndpointProductFilter()"><i class="bi bi-x me-1"></i>Clear filter</button>
@@ -3992,6 +4002,25 @@
 
     function clearEndpointProductFilter() {
         endpointsProductFilter = null;
+        loadEndpoints(1);
+    }
+
+    // Navigate to Endpoints tab filtered by a specific CVE (from dashboard platform icons)
+    function showEndpointsForCve(cveId) {
+        endpointsCveFilter = cveId;
+        endpointsProductFilter = null;
+        endpointsLoaded = false;
+        // Switch to Endpoints tab
+        const endpointsTab = document.getElementById('endpoints-tab');
+        if (endpointsTab) {
+            const tab = new bootstrap.Tab(endpointsTab);
+            tab.show();
+        }
+        loadEndpoints(1);
+    }
+
+    function clearEndpointCveFilter() {
+        endpointsCveFilter = null;
         loadEndpoints(1);
     }
 
@@ -4263,6 +4292,24 @@
     // Unified hash-based tab navigation
     function activateTabFromHash() {
         const hash = window.location.hash;
+
+        // Handle endpointsPane with CVE filter from dashboard: #endpointsPane?cve=CVE-2024-1234
+        if (hash.startsWith('#endpointsPane')) {
+            const params = new URLSearchParams(hash.split('?')[1] || '');
+            const cve = params.get('cve');
+            if (cve) {
+                showEndpointsForCve(cve);
+            } else {
+                const endpointsTab = document.getElementById('endpoints-tab');
+                if (endpointsTab) {
+                    const tab = new bootstrap.Tab(endpointsTab);
+                    tab.show();
+                }
+            }
+            window.scrollTo(0, 0);
+            return;
+        }
+
         const tabMap = {
             '#endpoints': 'endpoints-tab',
             '#import-queue': 'import-queue-tab',

@@ -794,13 +794,14 @@
 
         const iconMap = { 'Windows': 'bi-windows', 'Linux': 'bi-ubuntu', 'macOS': 'bi-apple', 'Container': 'bi-box' };
         const colorMap = { 'Windows': '#0078d4', 'Linux': '#e95420', 'macOS': '#555', 'Container': '#0db7ed' };
+        const cveId = group.cve_id || '';
 
         return Object.entries(platforms).map(([name, count]) => {
             const icon = iconMap[name] || 'bi-hdd';
             const color = colorMap[name] || '#6b7280';
-            return `<span class="badge rounded-pill me-1" style="background-color: ${color}; font-size: 0.75rem;" title="${count} ${name} device${count > 1 ? 's' : ''}">
+            return `<a href="/admin#endpointsPane?cve=${encodeURIComponent(cveId)}" class="badge rounded-pill me-1 text-decoration-none" style="background-color: ${color}; font-size: 0.75rem; cursor: pointer;" title="View ${count} ${name} endpoint${count > 1 ? 's' : ''} affected by ${cveId}" onclick="event.preventDefault(); event.stopPropagation(); window.location.href='/admin#endpointsPane?cve=${encodeURIComponent(cveId)}';">
                 <i class="bi ${icon} me-1"></i>${count}
-            </span>`;
+            </a>`;
         }).join('');
     }
 
@@ -3113,9 +3114,9 @@
                             ${group.product_count} product${group.product_count > 1 ? 's' : ''}${group.unacknowledged_count > 0 ? ` (${group.unacknowledged_count} open)` : ''}
                         </span>
                         ${group.total_affected_assets > 0 ? `
-                        <span class="badge rounded-pill bg-info text-dark" style="font-size: 0.75rem;">
+                        <a href="/admin#endpointsPane?cve=${encodeURIComponent(group.cve_id)}" class="badge rounded-pill bg-info text-dark text-decoration-none" style="font-size: 0.75rem; cursor: pointer;" title="View all endpoints affected by ${escapeHtml(group.cve_id)}" onclick="event.preventDefault(); event.stopPropagation(); window.location.href='/admin#endpointsPane?cve=${encodeURIComponent(group.cve_id)}';">
                             <i class="bi bi-hdd-network"></i> ${group.total_affected_assets} endpoint${group.total_affected_assets > 1 ? 's' : ''}
-                        </span>` : ''}
+                        </a>` : ''}
                         ${getPlatformSummary(group)}
                     </div>
 
