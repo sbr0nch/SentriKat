@@ -155,11 +155,22 @@ if (-not $InstallDir) {
 $InstallDir = (Resolve-Path $InstallDir).Path
 Write-Info "Installation directory: $InstallDir"
 
-# Detect deployment type
+# Detect deployment type - check install dir and parent (nested app/ layout)
 $DeployType = "standalone"
+$ComposeDir = $InstallDir
 if (Get-Command docker -ErrorAction SilentlyContinue) {
-    $DockerCompose = Join-Path $InstallDir "docker-compose.yml"
-    if (Test-Path $DockerCompose) {
+    $DockerCompose = $null
+    $candidate = Join-Path $InstallDir "docker-compose.yml"
+    if (Test-Path $candidate) {
+        $DockerCompose = $candidate
+    } else {
+        $parentCandidate = Join-Path (Split-Path $InstallDir -Parent) "docker-compose.yml"
+        if (Test-Path $parentCandidate) {
+            $DockerCompose = $parentCandidate
+            $ComposeDir = Split-Path $InstallDir -Parent
+        }
+    }
+    if ($DockerCompose) {
         if (Select-String -Path $DockerCompose -Pattern "ghcr.io/sbr0nch/sentrikat" -Quiet) {
             $DeployType = "docker_image"
         } elseif (Select-String -Path $DockerCompose -Pattern '^\s+build:' -Quiet) {
@@ -169,9 +180,13 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 }
 Write-Info "Deployment type: $DeployType"
 
-# Load proxy settings from .env
-$EnvFile = Join-Path $InstallDir ".env"
-if (Test-Path $EnvFile) {
+# Load proxy settings from .env (check install dir and parent)
+$EnvFile = $null
+$candidate = Join-Path $InstallDir ".env"
+$parentCandidate = Join-Path (Split-Path $InstallDir -Parent) ".env"
+if (Test-Path $candidate) { $EnvFile = $candidate }
+elseif (Test-Path $parentCandidate) { $EnvFile = $parentCandidate }
+if ($EnvFile -and (Test-Path $EnvFile)) {
     $envContent = Get-Content $EnvFile
     foreach ($line in $envContent) {
         if ($line -match '^(HTTP_PROXY|HTTPS_PROXY|NO_PROXY)=(.+)$') {
@@ -360,7 +375,7 @@ function Update-SourceFiles {
 
 # --- Docker image update ---
 if ($DeployType -eq "docker_image") {
-    $DockerCompose = Join-Path $InstallDir "docker-compose.yml"
+    $DockerCompose = Join-Path $ComposeDir "docker-compose.yml"
 
     Write-Info "Updating Docker image to v$TargetVersion..."
 
@@ -368,7 +383,7 @@ if ($DeployType -eq "docker_image") {
         Set-Content $DockerCompose
     Write-Info "Updated image tag to $TargetVersion"
 
-    Push-Location $InstallDir
+    Push-Location $ComposeDir
     try {
         Write-Info "Pulling new Docker image..."
         docker compose pull 2>&1
@@ -403,7 +418,7 @@ if ($DeployType -eq "docker_image") {
 
     Update-SourceFiles -InstDir $InstallDir -Ver $TargetVersion
 
-    Push-Location $InstallDir
+    Push-Location $ComposeDir
     try {
         Write-Info "Rebuilding Docker image (this may take a few minutes)..."
         docker compose build 2>&1

@@ -21,6 +21,7 @@
 # ============================================================
 
 set -e
+trap 'echo "[ERROR] Script failed at line $LINENO (exit code $?). Re-run with: bash -x $0 $*" >&2' ERR
 
 REPO="sbr0nch/SentriKat"
 GITHUB_API="https://api.github.com/repos/${REPO}"
@@ -31,11 +32,13 @@ TARGET_VERSION=""
 CHECK_ONLY=false
 INSTALLATION_ID=""
 DEPLOY_TYPE="" # docker_image, docker_build, standalone
+COMPOSE_DIR="" # directory containing docker-compose.yml (may differ from INSTALL_DIR)
 
 # Load proxy settings from .env if present (so curl and docker use them)
 load_proxy_from_env() {
     local env_file=""
-    for candidate in "./.env" "../.env" "${INSTALL_DIR:-.}/.env"; do
+    # Check install dir, its parent, cwd, and cwd parent
+    for candidate in "${INSTALL_DIR:-.}/.env" "$(dirname "${INSTALL_DIR:-.}")/.env" "./.env" "../.env"; do
         if [ -f "$candidate" ]; then
             env_file="$candidate"
             break
@@ -64,9 +67,13 @@ load_proxy_from_env() {
 load_installation_id() {
     local install_dir="${INSTALL_DIR:-.}"
 
-    if [ -f "${install_dir}/data/.installation_id" ]; then
-        INSTALLATION_ID=$(cat "${install_dir}/data/.installation_id" 2>/dev/null | tr -d '[:space:]')
-    fi
+    # Check install dir and its parent (for nested app/ layouts)
+    for candidate in "${install_dir}/data/.installation_id" "$(dirname "${install_dir}")/data/.installation_id"; do
+        if [ -f "$candidate" ]; then
+            INSTALLATION_ID=$(cat "$candidate" 2>/dev/null | tr -d '[:space:]')
+            break
+        fi
+    done
 
     if [ -z "$INSTALLATION_ID" ]; then
         INSTALLATION_ID="${SENTRIKAT_INSTALLATION_ID:-}"
@@ -209,20 +216,30 @@ detect_deploy_type() {
         return
     fi
 
-    if [ ! -f "${dir}/docker-compose.yml" ]; then
+    # Find docker-compose.yml: in install dir, or parent (nested app/ layout)
+    local compose_file=""
+    if [ -f "${dir}/docker-compose.yml" ]; then
+        compose_file="${dir}/docker-compose.yml"
+    elif [ -f "$(dirname "$dir")/docker-compose.yml" ]; then
+        compose_file="$(dirname "$dir")/docker-compose.yml"
+    fi
+
+    if [ -z "$compose_file" ]; then
         DEPLOY_TYPE="standalone"
         return
     fi
 
     # Pre-built image from GHCR
-    if grep -q "ghcr.io/sbr0nch/sentrikat" "${dir}/docker-compose.yml" 2>/dev/null; then
+    if grep -q "ghcr.io/sbr0nch/sentrikat" "$compose_file" 2>/dev/null; then
         DEPLOY_TYPE="docker_image"
+        COMPOSE_DIR="$(dirname "$compose_file")"
         return
     fi
 
     # Build from source (has build: directive)
-    if grep -qE '^\s+build:' "${dir}/docker-compose.yml" 2>/dev/null; then
+    if grep -qE '^\s+build:' "$compose_file" 2>/dev/null; then
         DEPLOY_TYPE="docker_build"
+        COMPOSE_DIR="$(dirname "$compose_file")"
         return
     fi
 
@@ -243,10 +260,16 @@ get_current_version() {
         return
     fi
 
-    # 2. Docker image tag in docker-compose.yml
+    # 2. Docker image tag in docker-compose.yml (check install dir and compose dir)
+    local compose_file=""
     if [ -f "${install_dir}/docker-compose.yml" ]; then
+        compose_file="${install_dir}/docker-compose.yml"
+    elif [ -n "${COMPOSE_DIR:-}" ] && [ -f "${COMPOSE_DIR}/docker-compose.yml" ]; then
+        compose_file="${COMPOSE_DIR}/docker-compose.yml"
+    fi
+    if [ -n "$compose_file" ]; then
         local ver
-        ver=$(grep -o 'ghcr.io/sbr0nch/sentrikat:[^ "]*' "${install_dir}/docker-compose.yml" 2>/dev/null \
+        ver=$(grep -o 'ghcr.io/sbr0nch/sentrikat:[^ "]*' "$compose_file" 2>/dev/null \
             | head -1 | cut -d: -f2)
         if [ -n "$ver" ]; then
             CURRENT_VERSION="$ver"
@@ -422,23 +445,25 @@ update_source_files() {
 update_docker_image() {
     local install_dir="$1"
     local version="$2"
+    local compose_dir="${COMPOSE_DIR:-$install_dir}"
+    local compose_file="${compose_dir}/docker-compose.yml"
 
     log_info "Updating Docker image to v${version}..."
 
     # Update image tag in docker-compose.yml
-    sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${version}|g" "${install_dir}/docker-compose.yml"
+    sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${version}|g" "$compose_file"
     log_info "Updated image tag to ${version}"
 
     # Pull new image
     log_info "Pulling new Docker image..."
-    cd "${install_dir}"
+    cd "$compose_dir"
     if ! (docker compose pull 2>/dev/null || docker-compose pull); then
         log_error "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:${version}"
         log_error "The image may not exist yet, or GHCR packages may not be public."
         log_error "Check: https://github.com/${REPO}/pkgs/container/sentrikat"
         # Revert
         if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "unknown" ]; then
-            sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${CURRENT_VERSION}|g" "${install_dir}/docker-compose.yml"
+            sed -i "s|ghcr.io/sbr0nch/sentrikat:[^ \"]*|ghcr.io/sbr0nch/sentrikat:${CURRENT_VERSION}|g" "$compose_file"
             log_warn "Reverted docker-compose.yml to v${CURRENT_VERSION}"
         fi
         exit 1
@@ -457,6 +482,7 @@ update_docker_image() {
 update_docker_build() {
     local install_dir="$1"
     local version="$2"
+    local compose_dir="${COMPOSE_DIR:-$install_dir}"
 
     log_info "Updating Docker (build from source) to v${version}..."
 
@@ -465,11 +491,11 @@ update_docker_build() {
 
     # Rebuild Docker image from updated source
     log_info "Rebuilding Docker image (this may take a few minutes)..."
-    cd "${install_dir}"
+    cd "$compose_dir"
     if ! (docker compose build 2>&1 || docker-compose build 2>&1); then
         log_error "Docker build failed. Check the output above for errors."
         log_warn "Source files were updated. Retry manually:"
-        log_warn "  cd ${install_dir} && docker compose build && docker compose up -d"
+        log_warn "  cd ${compose_dir} && docker compose build && docker compose up -d"
         exit 1
     fi
     log_ok "Docker image rebuilt"
