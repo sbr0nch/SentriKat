@@ -922,6 +922,7 @@
                                         <tr>
                                             <th data-column="name" data-sort-key="name" data-sort-type="string">Name / Key Prefix</th>
                                             <th data-column="organization" data-sort-key="organization" data-sort-type="string">Organization</th>
+                                            <th data-column="type" data-sort-key="type" data-sort-type="string">Type</th>
                                             <th data-column="mode" data-sort-key="mode" data-sort-type="string">Mode</th>
                                             <th data-column="lastused" data-sort-key="lastused" data-sort-type="date">Last Used</th>
                                             <th data-column="usage" data-sort-key="usage" data-sort-type="number">Usage</th>
@@ -931,7 +932,7 @@
                                     </thead>
                                     <tbody id="agentKeysTableBody">
                                         <tr>
-                                            <td colspan="7" class="text-center py-4">
+                                            <td colspan="8" class="text-center py-4">
                                                 <div class="spinner-border spinner-border-sm text-primary"></div>
                                                 <span class="ms-2">Loading agent keys...</span>
                                             </td>
@@ -3642,6 +3643,14 @@
                     <div class="mb-3">
                         <label for="agentKeyName" class="form-label fw-semibold">Key Name</label>
                         <input type="text" class="form-control" id="agentKeyName" required placeholder="e.g., Production Servers">
+                    </div>
+                    <div class="mb-3">
+                        <label for="agentKeyType" class="form-label fw-semibold">Key Type</label>
+                        <select class="form-select" id="agentKeyType">
+                            <option value="server">Server</option>
+                            <option value="client">Client</option>
+                        </select>
+                        <small class="text-muted">Classifies endpoints and software reported by this key. Use "Server" for infrastructure and "Client" for workstations/desktops.</small>
                     </div>
                     <div class="mb-3">
                         <label for="agentKeyOrg" class="form-label fw-semibold">Primary Organization</label>

@@ -275,6 +275,7 @@ class Product(db.Model):
 
     # Agent product queue fields - for approval workflow
     source = db.Column(db.String(20), default='manual', index=True)  # manual, agent
+    source_key_type = db.Column(db.String(20), nullable=True, index=True)  # server, client - inherited from reporting API key type
     approval_status = db.Column(db.String(20), default='approved', index=True)  # approved, pending, rejected
     pending_since = db.Column(db.DateTime, nullable=True)  # When added to queue
     reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)  # Who approved/rejected
@@ -382,6 +383,7 @@ class Product(db.Model):
             'description': self.description,
             'active': self.active,
             'criticality': self.criticality or 'medium',
+            'source_key_type': self.source_key_type,  # server or client (from reporting API key)
             'platforms': platform_list,  # OS platforms detected on (Windows, Linux, macOS)
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -1393,6 +1395,7 @@ class Asset(db.Model):
     agent_version = db.Column(db.String(50), nullable=True)
     last_checkin = db.Column(db.DateTime, nullable=True)  # Last heartbeat from agent
     last_inventory_at = db.Column(db.DateTime, nullable=True)  # Last successful inventory report
+    reported_by_key_type = db.Column(db.String(20), nullable=True, index=True)  # server or client - inherited from API key used to report
 
     # Status
     active = db.Column(db.Boolean, default=True, index=True)
@@ -1484,6 +1487,7 @@ class Asset(db.Model):
             'ip_address': self.ip_address,
             'fqdn': self.fqdn,
             'asset_type': self.asset_type,
+            'reported_by_key_type': self.reported_by_key_type,
             'os_name': self.os_name,
             'os_version': self.os_version,
             'os_kernel': self.os_kernel,
@@ -1651,6 +1655,9 @@ class AgentApiKey(db.Model):
     key_prefix = db.Column(db.String(10), nullable=False)  # First 8 chars for identification
     encrypted_key = db.Column(db.Text, nullable=True)  # Fernet-encrypted raw key for re-download
 
+    # Key classification
+    key_type = db.Column(db.String(20), default='server', index=True)  # server, client - differentiates deployment target
+
     # Permissions & limits
     active = db.Column(db.Boolean, default=True, index=True)
     max_assets = db.Column(db.Integer, nullable=True)  # NULL = unlimited
@@ -1736,6 +1743,7 @@ class AgentApiKey(db.Model):
             'organization_name': self.organization.display_name if self.organization else None,
             'name': self.name,
             'key_prefix': self.key_prefix,
+            'key_type': self.key_type or 'server',
             'active': self.active,
             'max_assets': self.max_assets,
             'allowed_ips': self.get_allowed_ips(),

@@ -1245,11 +1245,13 @@ def process_inventory_job(job):
         # Check auto_approve setting from API key and get all target orgs
         auto_approve = True  # Default to True for backward compatibility
         all_target_orgs = [organization]  # Start with primary org
+        job_key_type = None  # Track key type for product source attribution
         if job.api_key_id:
             api_key = AgentApiKey.query.get(job.api_key_id)
             if api_key:
                 auto_approve = api_key.auto_approve
-                logger.info(f"Job {job_id}: API key auto_approve={auto_approve}")
+                job_key_type = getattr(api_key, 'key_type', None)
+                logger.info(f"Job {job_id}: API key auto_approve={auto_approve}, key_type={job_key_type}")
                 # Get additional organizations for multi-org deployment
                 additional_orgs = api_key.get_all_organizations()
                 all_target_orgs = additional_orgs if additional_orgs else [organization]
@@ -1321,6 +1323,7 @@ def process_inventory_job(job):
                         active=True,
                         criticality='medium',
                         source='agent',  # Track that this was auto-added by agent
+                        source_key_type=job_key_type,
                         last_agent_report=datetime.utcnow(),
                         organization_id=organization.id
                     )
@@ -1706,6 +1709,10 @@ def report_inventory():
         asset.last_inventory_at = datetime.utcnow()
         asset.status = 'online'
 
+        # Propagate key type to asset for server/client differentiation
+        if agent_key and hasattr(agent_key, 'key_type') and agent_key.key_type:
+            asset.reported_by_key_type = agent_key.key_type
+
         db.session.flush()  # Get asset ID
 
         # Check auto_approve setting from API key and get all target orgs
@@ -1781,6 +1788,7 @@ def report_inventory():
                     active=True,
                     criticality='medium',
                     source='agent',  # Track that this was auto-added by agent
+                    source_key_type=agent_key.key_type if agent_key and hasattr(agent_key, 'key_type') else None,
                     last_agent_report=datetime.utcnow(),
                     organization_id=organization.id
                 )
@@ -2250,6 +2258,11 @@ def list_assets():
         if status:
             query = query.filter_by(status=status)
 
+        # Filter by reporting key type (server/client)
+        reported_by_key_type = request.args.get('reported_by_key_type', '').strip().lower()
+        if reported_by_key_type in ('server', 'client'):
+            query = query.filter(Asset.reported_by_key_type == reported_by_key_type)
+
         active = request.args.get('active')
         if active is not None:
             query = query.filter_by(active=active.lower() == 'true')
@@ -2715,9 +2728,14 @@ def create_agent_key():
     org_id = data.get('organization_id')
     additional_org_ids = data.get('additional_organization_ids', [])
     name = data.get('name')
+    key_type = data.get('key_type', 'server')  # server or client
 
     if not org_id or not name:
         return jsonify({'error': 'organization_id and name required'}), 400
+
+    # Validate key_type
+    if key_type not in ('server', 'client'):
+        return jsonify({'error': 'key_type must be "server" or "client"'}), 400
 
     # Validate additional_org_ids is a list of ints
     if additional_org_ids and not isinstance(additional_org_ids, list):
@@ -2766,6 +2784,7 @@ def create_agent_key():
         key_hash=key_hash,
         key_prefix=key_prefix,
         encrypted_key=encrypted_raw,
+        key_type=key_type,
         max_assets=data.get('max_assets'),
         auto_approve=data.get('auto_approve', False),
         created_by=user.id

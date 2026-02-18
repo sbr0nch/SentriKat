@@ -649,6 +649,20 @@ def get_filtered_vulnerabilities(filters=None):
         if filters.get('acknowledged') is not None:
             query = query.filter(VulnerabilityMatch.acknowledged == filters['acknowledged'])
 
+        # Filter by source key type (server/client) - only show matches for products
+        # reported by the specified key type
+        if filters.get('source_key_type') in ('server', 'client'):
+            from sqlalchemy import select as sa_select
+            key_type_product_ids = db.session.execute(
+                sa_select(Product.id).where(
+                    Product.source_key_type == filters['source_key_type']
+                )
+            ).scalars().all()
+            if key_type_product_ids:
+                query = query.filter(VulnerabilityMatch.product_id.in_(key_type_product_ids))
+            else:
+                return []
+
     # Order by match creation date (newest first)
     query = query.order_by(VulnerabilityMatch.created_at.desc())
 

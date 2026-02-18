@@ -6766,7 +6766,7 @@ async function loadAgentKeys() {
         if (keys.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center py-4 text-muted">
+                    <td colspan="8" class="text-center py-4 text-muted">
                         <i class="bi bi-key text-warning" style="font-size: 2rem;"></i>
                         <p class="mt-2 mb-0">No agent API keys configured</p>
                         <p class="small">Create an API key to download agents with embedded authentication</p>
@@ -6785,6 +6785,11 @@ async function loadAgentKeys() {
                         ${key.additional_organizations && key.additional_organizations.length > 0
                             ? '<br><small class="text-muted">+ ' + key.additional_organizations.map(o => escapeHtml(o.name)).join(', ') + '</small>'
                             : ''}
+                    </td>
+                    <td data-column="type">
+                        ${(key.key_type || 'server') === 'server'
+                            ? '<span class="badge bg-primary" title="Server key"><i class="bi bi-hdd-rack me-1"></i>Server</span>'
+                            : '<span class="badge bg-warning text-dark" title="Client key"><i class="bi bi-laptop me-1"></i>Client</span>'}
                     </td>
                     <td data-column="mode">
                         ${key.auto_approve
@@ -6824,7 +6829,7 @@ async function loadAgentKeys() {
         console.error('Error loading agent keys:', error);
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="text-center py-4 text-danger">
+                <td colspan="8" class="text-center py-4 text-danger">
                     <i class="bi bi-exclamation-triangle text-danger"></i>
                     <span class="ms-2">Error loading agent keys: ${error.message}</span>
                 </td>
@@ -6896,6 +6901,7 @@ async function showCreateAgentKeyModal() {
 async function createAgentKey() {
     const name = SK.DOM.getValue('agentKeyName').trim();
     const orgId = SK.DOM.getValue('agentKeyOrg');
+    const keyType = SK.DOM.getValue('agentKeyType') || 'server';
     const maxAssets = parseInt(SK.DOM.getValue('agentKeyMaxAssets')) || 0;
     const expiresAt = SK.DOM.getValue('agentKeyExpires') || null;
     const autoApprove = SK.DOM.get('agentKeyAutoApprove')?.checked || false;
@@ -6924,6 +6930,7 @@ async function createAgentKey() {
                 name,
                 organization_id: parseInt(orgId),
                 additional_organization_ids: additionalOrgIds,
+                key_type: keyType,
                 max_assets: maxAssets,
                 expires_at: expiresAt,
                 auto_approve: autoApprove

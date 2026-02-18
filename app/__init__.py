@@ -91,6 +91,10 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerabilities', 'is_actively_exploited', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
         # Encrypted raw API key for agent script re-downloads
         ('agent_api_keys', 'encrypted_key', 'TEXT', 'TEXT'),
+        # Server/client API key type differentiation
+        ('agent_api_keys', 'key_type', "VARCHAR(20) DEFAULT 'server'", "VARCHAR(20) DEFAULT 'server'"),
+        ('assets', 'reported_by_key_type', 'VARCHAR(20)', 'VARCHAR(20)'),
+        ('products', 'source_key_type', 'VARCHAR(20)', 'VARCHAR(20)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
