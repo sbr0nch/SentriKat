@@ -3063,6 +3063,7 @@ def get_vulnerabilities_grouped():
             'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
             'acknowledged': request.args.get('acknowledged'),
             'priority': request.args.get('priority'),
+            'source_key_type': request.args.get('source_key_type'),
         }
         filters = {k: v for k, v in filters.items() if v is not None and v != ''}
 
