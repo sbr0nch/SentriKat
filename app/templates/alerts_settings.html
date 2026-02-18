@@ -574,7 +574,7 @@ async function loadAllSettings() {
         const [notifResp, smtpResp, orgsResp] = await Promise.all([
             fetch('/api/settings/notifications', { headers: { 'X-CSRFToken': csrfToken } }),
             fetch('/api/settings/smtp', { headers: { 'X-CSRFToken': csrfToken } }),
-            fetch('/api/alerts/org-overrides', { headers: { 'X-CSRFToken': csrfToken } })
+            fetch('/api/settings/alerts/org-overrides', { headers: { 'X-CSRFToken': csrfToken } })
         ]);
 
         if (notifResp.ok) {

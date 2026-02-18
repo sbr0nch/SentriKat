@@ -208,7 +208,11 @@ def update_health_check_settings():
         # Update individual check enable/disable
         if 'checks' in data and isinstance(data['checks'], dict):
             from app.models import HealthCheckResult
+            from app.health_checks import HEALTH_CHECKS
             for check_name, enabled in data['checks'].items():
+                # Validate check_name against known checks to prevent settings pollution
+                if check_name not in HEALTH_CHECKS:
+                    continue
                 key = f'health_check_{check_name}_enabled'
                 setting = SystemSettings.query.filter_by(key=key).first()
                 if setting:
@@ -2490,7 +2494,12 @@ def get_vulnerability_stats():
         # Apply source_type filter to narrow product IDs
         source_type_filter = request.args.get('source_type', '').strip().lower()
         include_extensions = request.args.get('include_extensions', '').lower() == 'true'
-        if org_product_ids and source_type_filter in ('os_package', 'extension', 'code_library'):
+        # Container filter: containers use ContainerImage model, not Product/VulnerabilityMatch.
+        # When container filter is active, zero out product-based IDs so only
+        # container_stats (computed below) are meaningful.
+        if source_type_filter == 'container':
+            org_product_ids = []
+        elif org_product_ids and source_type_filter in ('os_package', 'extension', 'code_library'):
             source_types = [source_type_filter]
             if include_extensions and source_type_filter == 'code_library':
                 source_types.append('extension')
@@ -3089,6 +3098,13 @@ def get_vulnerabilities_grouped():
             'priority': request.args.get('priority'),
             'source_key_type': request.args.get('source_key_type'),
         }
+        # Container filter: containers use ContainerImage model, not Product/VulnerabilityMatch.
+        # Return empty results for container filter since they don't participate in CVE matching.
+        if source_type_filter == 'container':
+            return jsonify({
+                'items': [], 'total': 0, 'page': 1, 'per_page': 25,
+                'message': 'Container vulnerabilities are tracked separately via container image scanning.'
+            })
         if source_type_filter in ('os_package', 'extension', 'code_library'):
             if include_extensions and source_type_filter == 'code_library':
                 filters['source_types'] = ['code_library', 'extension']

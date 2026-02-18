@@ -76,7 +76,7 @@ def check_cpe_match(vulnerability, product):
         # vendor:product, wildcard entries must be ignored — otherwise a wildcard
         # entry would match products whose version is OUTSIDE the affected range
         # (e.g., Chrome 145 being flagged for a CVE fixed in Chrome 72).
-        version = product.version
+        version = (product.version or '').strip() or None
         ranged_entries = []
         exact_entries = []
         wildcard_entries = []
