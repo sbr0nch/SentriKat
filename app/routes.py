@@ -865,6 +865,13 @@ def dependencies():
     return render_template('dependencies.html')
 
 
+@bp.route('/alerts/settings')
+@admin_required
+def alerts_settings():
+    """Unified alert settings page - delivery channels, rules, scheduling, org overrides."""
+    return render_template('alerts_settings.html')
+
+
 @bp.route('/reports/scheduled')
 @org_admin_required
 def scheduled_reports():
@@ -4671,22 +4678,18 @@ def trigger_critical_cve_alerts():
                 .all()
             )
 
-            # Filter for CRITICAL priority ONLY (not high - too many alerts cause spam)
-            critical_matches = [
-                m for m in unack_matches
-                if m.calculate_effective_priority() == 'critical'
-            ]
-
-            if not critical_matches:
+            # Pass all unacknowledged matches - EmailAlertManager filters
+            # based on org preferences (alert_on_critical, alert_on_high, etc.)
+            if not unack_matches:
                 results.append({
                     'organization': org.name,
                     'status': 'skipped',
-                    'reason': 'No unacknowledged critical CVEs'
+                    'reason': 'No unacknowledged CVEs'
                 })
                 continue
 
-            # Send alert
-            result = EmailAlertManager.send_critical_cve_alert(org, critical_matches)
+            # Send alert - filtering by severity/confidence happens inside
+            result = EmailAlertManager.send_critical_cve_alert(org, unack_matches)
             results.append({
                 'organization': org.name,
                 'status': result.get('status'),

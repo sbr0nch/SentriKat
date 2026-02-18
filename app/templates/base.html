@@ -1863,16 +1863,16 @@
             margin-right: 6px;
         }
         .status-led-green {
-            background: #10b981;
-            box-shadow: 0 0 6px #10b981;
+            background: var(--success-color);
+            box-shadow: 0 0 4px rgba(5, 150, 105, 0.4);
         }
         .status-led-red {
-            background: #ef4444;
-            box-shadow: 0 0 6px #ef4444;
+            background: var(--danger-color);
+            box-shadow: 0 0 4px rgba(185, 28, 28, 0.4);
         }
         .status-led-yellow {
-            background: #f59e0b;
-            box-shadow: 0 0 6px #f59e0b;
+            background: var(--warning-color);
+            box-shadow: 0 0 4px rgba(217, 119, 6, 0.4);
         }
 
         [data-theme="dark"] .status-led-green {
@@ -3125,9 +3125,13 @@
                         </a>
                         {% endif %}
                         {% if license and license.is_professional() %}
+                        <a href="/alerts/settings" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.alerts_settings' else '' }}" data-tooltip="Alert Settings">
+                            <i class="bi bi-bell"></i>
+                            Alerts
+                        </a>
                         <a href="/admin-panel#settings:email" class="sidebar-sublink" data-hash="settings:email">
                             <i class="bi bi-envelope"></i>
-                            Email & Alerts
+                            Email (SMTP)
                         </a>
                         {% endif %}
                         <a href="/admin-panel#settings:system" class="sidebar-sublink" data-hash="settings:system">

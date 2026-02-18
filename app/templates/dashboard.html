@@ -8,12 +8,6 @@
 
 {% block content %}
 <style>
-    /* Actively exploited pulsing badge */
-    @keyframes pulse-badge {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.7; }
-    }
-
     /* Priority Alert Cards - Compact */
     .alert-card {
         border-radius: 8px;
@@ -41,7 +35,7 @@
     .alert-card-critical.active-filter { --active-border-color: var(--critical-color); }
     .alert-card-high.active-filter { --active-border-color: var(--high-color); }
     .alert-card-medium.active-filter { --active-border-color: var(--info-color); }
-    .alert-card-zeroday.active-filter { --active-border-color: #7c3aed; }
+    .alert-card-zeroday.active-filter { --active-border-color: #6d47a8; }
 
     .alert-card-critical {
         --card-bg-start: #fefafa;
@@ -62,9 +56,9 @@
     }
 
     .alert-card-zeroday {
-        --card-bg-start: #faf5ff;
-        --card-bg-end: #f3e8ff;
-        border-left: 3px solid #7c3aed;
+        --card-bg-start: #f8f5ff;
+        --card-bg-end: #f0eaf8;
+        border-left: 3px solid #6d47a8;
     }
 
     .alert-card-label {
@@ -216,10 +210,10 @@
                     <div class="alert-card alert-card-zeroday" data-priority="zeroday" onclick="filterByZeroDay()" title="Click to filter by Zero-Day (Pre-KEV)">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <div class="alert-card-label" style="color: #7c3aed;">0-Day</div>
-                                <div class="alert-card-value"><span id="zeroDayCves" style="color: #7c3aed;">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="zeroDayMatches">-</span>)</small></div>
+                                <div class="alert-card-label" style="color: #6d47a8;">0-Day</div>
+                                <div class="alert-card-value"><span id="zeroDayCves" style="color: #6d47a8;">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="zeroDayMatches">-</span>)</small></div>
                             </div>
-                            <i class="bi bi-lightning-fill alert-icon" style="color: #7c3aed;"></i>
+                            <i class="bi bi-lightning-fill alert-icon" style="color: #6d47a8;"></i>
                         </div>
                     </div>
                 </div>
@@ -787,7 +781,7 @@
         });
 
         const iconMap = { 'Windows': 'bi-windows', 'Linux': 'bi-ubuntu', 'macOS': 'bi-apple', 'Container': 'bi-box' };
-        const colorMap = { 'Windows': '#0078d4', 'Linux': '#e95420', 'macOS': '#555', 'Container': '#0db7ed' };
+        const colorMap = { 'Windows': '#4a7ab5', 'Linux': '#b07050', 'macOS': '#555', 'Container': '#4a8fa5' };
         const cveId = group.cve_id || '';
 
         return Object.entries(platforms).map(([name, count]) => {
@@ -1370,7 +1364,7 @@
                             label: 'Vulnerabilities',
                             data: data.values,
                             backgroundColor: data.labels.map((_, i) => {
-                                const palette = ['#b91c1c', '#c2410c', '#2563eb', '#047857', '#7c3aed', '#be185d', '#0d9488', '#c2410c', '#0891b2', '#65a30d'];
+                                const palette = ['#b91c1c', '#c2410c', '#2563eb', '#047857', '#6d47a8', '#9b4d7c', '#0d9488', '#a16207', '#4a8fa5', '#5a8a30'];
                                 return palette[i % palette.length] + 'CC';
                             }),
                             borderRadius: 4,
@@ -1425,7 +1419,7 @@
                         datasets: [{
                             label: 'CVEs',
                             data: data.values,
-                            backgroundColor: ['#b91c1cCC', '#c2410cCC', '#2563ebCC', '#7c3aedCC', '#6b7280CC', '#374151CC'],
+                            backgroundColor: ['#b91c1cCC', '#c2410cCC', '#2563ebCC', '#6d47a8CC', '#6b7280CC', '#374151CC'],
                             borderRadius: 4
                         }]
                     },
@@ -2751,9 +2745,9 @@
                                 <span class="badge bg-dark fs-6 me-1">${escapeHtml(vuln.cve_id)}</span>
                             </a>
                             <span class="badge bg-secondary" style="font-size: 0.7rem;"><i class="bi bi-calendar3"></i> ${formatDate(vuln.date_added)}</span>
-                            ${vuln.is_zero_day ? '<span class="badge" style="background: linear-gradient(135deg, #7c3aed, #db2777); color: white; font-size: 0.7rem; animation: pulse-badge 2s infinite;" title="Zero-day: detected by SentriKat before CISA KEV publication"><i class="bi bi-lightning-fill me-1"></i>0-DAY</span>' : ''}
+                            ${vuln.is_zero_day ? '<span class="badge" style="background: linear-gradient(135deg, #6d47a8, #9b4d7c); color: white; font-size: 0.7rem;" title="Zero-day: detected by SentriKat before CISA KEV publication"><i class="bi bi-lightning-fill me-1"></i>0-DAY</span>' : ''}
                             ${vuln.nvd_data_incomplete ? `<span class="badge bg-warning text-dark" style="font-size: 0.7rem;" title="NVD status: ${escapeHtml(vuln.nvd_status || 'Unknown')} — CPE data may be incomplete"><i class="bi bi-hourglass-split me-1"></i>${escapeHtml(vuln.nvd_status || 'Pending')}</span>` : ''}
-                            ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1; font-size: 0.7rem;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0; font-size: 0.7rem;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV+EUVD</span>' : vuln.source === 'nvd' ? '<span class="badge" style="background-color: #6d28d9; font-size: 0.7rem;" title="Detected via NVD early import — not yet in CISA KEV"><i class="bi bi-database me-1"></i>NVD Early</span>' : '<span class="badge" style="background-color: #2e7d32; font-size: 0.7rem;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
+                            ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #3b5998; font-size: 0.7rem;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #4a6fa5; font-size: 0.7rem;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV+EUVD</span>' : vuln.source === 'nvd' ? '<span class="badge" style="background-color: #6d47a8; font-size: 0.7rem;" title="Detected via NVD early import — not yet in CISA KEV"><i class="bi bi-database me-1"></i>NVD Early</span>' : '<span class="badge" style="background-color: #3d7a4f; font-size: 0.7rem;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
                         </div>
                     </div>
                     <h6 class="mb-2 fw-semibold" style="line-height: 1.3;">${escapeHtml(vuln.vulnerability_name)}</h6>

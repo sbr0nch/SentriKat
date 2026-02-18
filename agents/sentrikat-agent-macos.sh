@@ -407,7 +407,7 @@ get_installed_software() {
                     ext_version=$(json_escape "${ext_version:-unknown}")
                     products+=("{\"vendor\": \"Chrome Web Store\", \"product\": \"$ext_name\", \"version\": \"$ext_version\", \"source_type\": \"extension\", \"ecosystem\": \"chrome\"}")
                     ((ext_count++)) || true
-                done < <(find "$chrome_dir" -maxdepth 5 -name "manifest.json" -path "*/Extensions/*" -type f 2>/dev/null | head -200) || true
+                done < <(find -P "$chrome_dir" -maxdepth 5 -name "manifest.json" -path "*/Extensions/*" -type f 2>/dev/null | head -200) || true
             fi
 
             # --- Firefox extensions ---
@@ -426,7 +426,7 @@ get_installed_software() {
                     done < <(python3 -c "
 import json, sys
 try:
-    with open('$ff_ext_json') as f:
+    with open(sys.argv[1]) as f:
         data = json.load(f)
     for a in data.get('addons', []):
         if a.get('type') != 'extension': continue
@@ -437,7 +437,7 @@ try:
         creator = loc.get('creator', '')
         if name and not name.startswith('@'): print(f'{name}|{ver}|{creator}')
 except: pass
-" 2>/dev/null) || true
+" "$ff_ext_json" 2>/dev/null) || true
                 fi
             done
 
@@ -454,7 +454,7 @@ except: pass
                     ext_version=$(json_escape "${ext_version:-unknown}")
                     products+=("{\"vendor\": \"Edge Add-ons\", \"product\": \"$ext_name\", \"version\": \"$ext_version\", \"source_type\": \"extension\", \"ecosystem\": \"edge\"}")
                     ((ext_count++)) || true
-                done < <(find "$edge_dir" -maxdepth 5 -name "manifest.json" -path "*/Extensions/*" -type f 2>/dev/null | head -200) || true
+                done < <(find -P "$edge_dir" -maxdepth 5 -name "manifest.json" -path "*/Extensions/*" -type f 2>/dev/null | head -200) || true
             fi
 
             # --- JetBrains IDE plugins ---
@@ -639,7 +639,7 @@ except: pass
                         products+=("{\"vendor\": \"Go\", \"product\": \"$go_mod\", \"version\": \"$go_ver_raw\", \"source_type\": \"code_library\", \"ecosystem\": \"go\", \"project_path\": \"$gpp\"}")
                         ((dep_count++)) || true
                     done < "$gosumfile"
-                done < <(find "$search_dir" -maxdepth 5 -name "go.sum" -type f 2>/dev/null | head -20) || true
+                done < <(find -P "$search_dir" -maxdepth 5 -name "go.sum" -type f 2>/dev/null | head -20) || true
             done
         fi
 
