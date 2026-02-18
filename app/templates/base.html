@@ -3125,9 +3125,9 @@
                         </a>
                         {% endif %}
                         {% if license and license.is_professional() %}
-                        <a href="/alerts/settings" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.alerts_settings' else '' }}" data-tooltip="Alert Settings">
+                        <a href="/alerts/settings" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.alerts_settings' else '' }}" data-tooltip="Alert Rules">
                             <i class="bi bi-bell"></i>
-                            Alerts
+                            Alert Rules
                         </a>
                         <a href="/admin-panel#settings:email" class="sidebar-sublink" data-hash="settings:email">
                             <i class="bi bi-envelope"></i>

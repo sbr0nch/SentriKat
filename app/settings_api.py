@@ -180,7 +180,8 @@ ALLOWED_SETTING_KEYS = {
     'generic_webhook_format', 'generic_webhook_custom_template', 'generic_webhook_token',
     'critical_email_enabled', 'critical_email_time', 'critical_email_max_age_days',
     'default_alert_mode', 'default_escalation_days',
-    'notify_on_critical', 'notify_on_high', 'notify_on_new_cve', 'notify_on_ransomware',
+    'notify_on_critical', 'notify_on_high', 'notify_on_new_cve', 'notify_on_ransomware', 'notify_on_low_confidence',
+    'notify_on_critical_webhook', 'notify_on_high_webhook', 'notify_on_new_cve_webhook', 'notify_on_ransomware_webhook',
     'notification_digest_enabled', 'notification_digest_time',
     # Retention settings
     'audit_log_retention_days', 'audit_retention_days',
