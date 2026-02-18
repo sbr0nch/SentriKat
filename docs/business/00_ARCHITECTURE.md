@@ -4,7 +4,7 @@
 
 ---
 
-**Document Version:** 1.4.0
+**Document Version:** 1.5.0
 **Last Updated:** February 2026
 **Classification:** CONFIDENTIAL - NOT FOR PUBLIC DISTRIBUTION
 **Author:** SentriKat Development Team
@@ -363,11 +363,61 @@ SentriKat/
 |------|------|-------------|
 | 1 | Clean stale installations | Remove ProductInstallation records not seen for 30+ days |
 | 2 | Update asset status | Mark offline agents as stale (14d) or removed (90d) |
-| 3 | Clean orphaned products | Remove products with no installations or matches |
+| 3 | Clean orphaned products | Remove agent-created products with zero installations (includes org-assigned orphans) |
 | 4 | Clean import queue | Purge old processed import queue entries |
 | 5 | Auto-disable stale products | Disable products not reported by agents |
 | 6 | Auto-acknowledge (removed) | Resolve CVEs for products with zero installations |
 | 7 | **Auto-acknowledge (upgraded)** | Resolve CVEs where all installations upgraded past vulnerable range |
+
+### 4.3.2 Endpoint Deletion & Orphan Cleanup
+
+When an endpoint (asset) is deleted — either manually by an admin or automatically after 90 days of inactivity — the system performs **immediate orphan cleanup** to prevent "0 endpoints" ghost products from lingering in the product list.
+
+**Deletion cascade flow:**
+
+```
+Admin deletes endpoint "LT-CLZ8X34"
+    │
+    ├─→ 1. Snapshot affected product IDs (all products installed on this asset)
+    ├─→ 2. Delete ProductVersionHistory for this asset
+    ├─→ 3. Delete ProductInstallation for this asset
+    ├─→ 4. Delete AgentEvent, StaleAssetNotification, InventoryJob, ContainerImage
+    ├─→ 5. Delete Asset record
+    │
+    └─→ 6. IMMEDIATE ORPHAN CLEANUP:
+         ├─→ Check which affected products now have zero installations anywhere
+         ├─→ For agent-created products (source='agent') not linked to service catalog:
+         │   ├─→ Delete VulnerabilityMatch records
+         │   ├─→ Delete ProductVersionHistory records
+         │   ├─→ Remove organization assignments (product_organizations)
+         │   └─→ Delete Product record
+         └─→ Log cleanup count (e.g., "cleaned up 15 orphaned products")
+```
+
+**Why this matters:** Without immediate cleanup, deleting an endpoint and re-registering the same machine would leave old products showing "0 endpoints" in the product list. The agent would then re-report its current inventory (creating new installations), but any products that are no longer installed would remain as ghosts until the daily maintenance ran. Now they are cleaned up immediately.
+
+**Safety guards (products NOT deleted):**
+- Manually created products (`source='manual'`)
+- Products linked to the service catalog
+- Products that still have installations on other endpoints
+
+### 4.3.3 Agent Re-Registration After Endpoint Deletion
+
+When the same physical machine re-registers after its endpoint was deleted:
+
+```
+Machine "LT-CLZ8X34" re-registers with agent
+    │
+    ├─→ Lookup by agent_id (BIOS UUID) → NOT FOUND (asset was deleted)
+    ├─→ Lookup by hostname + org → NOT FOUND (asset was deleted)
+    ├─→ CREATE new Asset record (new auto-increment ID)
+    │
+    └─→ Process inventory:
+         ├─→ For each reported product: find or create Product + ProductInstallation
+         ├─→ Products that already exist in DB: reuse them, create new installation
+         ├─→ Products that were cleaned up: re-created as new products
+         └─→ Result: clean state, no "0 endpoint" ghosts
+```
 
 ---
 
@@ -715,7 +765,46 @@ upstream data sources (NVD, CISA KEV) have incomplete data. This is critical bec
 |--------|----------|-----------------|
 | CISA KEV Sync | Daily 02:00 UTC + manual | Known exploited vulnerabilities with due dates |
 | NVD Recent CVEs | Every 2 hours + manual | All HIGH/CRITICAL CVEs published in the last 6 hours |
+| ENISA EUVD Exploited | Daily (during CISA sync) | EU-tracked exploited CVEs not yet in CISA KEV |
 | Manual CVE Lookup | On-demand (`POST /api/sync/cve/<id>`) | Any specific CVE by ID (admin 0-day response tool) |
+
+#### Three-Phase NVD Sync (`sync_nvd_recent_cves`)
+
+The NVD sync uses three complementary phases to ensure no CVE slips through:
+
+| Phase | Query Strategy | What It Catches |
+|-------|---------------|-----------------|
+| **Phase 1** | `pubStartDate` + `cvssV3Severity=HIGH/CRITICAL` | Analyzed CVEs with NVD-assigned CVSS scores |
+| **Phase 2** | `pubStartDate` without severity filter | "Awaiting Analysis" CVEs with CNA-assigned HIGH/CRITICAL scores |
+| **Phase 3** | `lastModStartDate` + `cvssV3Severity=HIGH/CRITICAL` | Late-analyzed CVEs (published days ago, scored today) |
+
+**Why three phases?** Phase 1 only catches CVEs that NVD has already scored. Zero-days published
+with "Awaiting Analysis" status have no NVD score and would be invisible. Phase 2 solves this by
+importing CVEs where the CNA (vendor/researcher) assigned a HIGH/CRITICAL score, even though NVD
+hasn't analyzed them yet. Phase 3 uses `lastModStartDate` (instead of `pubStartDate`) to catch
+CVEs published during a previous window but only scored after — filling the gap between publication
+and analysis.
+
+**CVSS Source Tracking:**
+
+Each vulnerability tracks where its CVSS score came from via `cvss_source`:
+
+| Value | Meaning |
+|-------|---------|
+| `nvd` | NVD Primary score (highest authority) |
+| `cna` | CNA-assigned score from Phase 2 (pre-NVD analysis) |
+| `cve_org` | CVE.org/Vulnrichment fallback |
+| `euvd` | ENISA EUVD fallback |
+| `pending` | All 3 sources returned nothing on first attempt |
+
+A background re-enrichment job periodically upgrades `cna`/`cve_org`/`euvd`/`pending` scores
+to `nvd` once NVD completes analysis, ensuring CVSS accuracy improves over time.
+
+**API Outage Protection:**
+
+If the NVD API is completely unreachable (all phases return 0 new CVEs, 0 existing, but errors > 0),
+the sync timestamp is NOT advanced. This ensures that CVEs published during the outage are picked
+up on the next successful sync, preventing permanent data gaps.
 
 **Handling "Awaiting Analysis" CVEs:**
 
@@ -727,8 +816,10 @@ When NVD publishes a CVE but hasn't completed analysis (no CPE configurations ye
 
 2. **Description-based vendor/product extraction** — When NVD has no CPE data, the system parses
    the CVE description to identify the affected product (e.g., "Use after free in CSS in
-   **Google Chrome** prior to 145.0.7632.75" → vendor=Google, product=Chrome). This ensures
-   the CVE appears on the correct dashboard even before NVD adds CPE configurations.
+   **Google Chrome** prior to 145.0.7632.75" → vendor=Google, product=Chrome). This uses a
+   two-tier pattern system:
+   - **Seed patterns**: Hardcoded regex for non-obvious vendor aliases (FortiGate, PAN-OS, MOVEit, etc.)
+   - **Dynamic patterns**: Auto-built from the Products table (10-minute cache), including CPE underscore-to-space conversions
 
 3. **Deferred CPE stamping** — CVEs with `nvd_status` of `Awaiting Analysis`, `Received`, or
    `Undergoing Analysis` are NOT marked as "checked with no CPE data." They remain in the
@@ -739,6 +830,28 @@ When NVD publishes a CVE but hasn't completed analysis (no CPE configurations ye
    `nvd_status` tracking was in place, and handles edge cases where NVD analysis takes longer
    than expected.
 
+5. **Recovery mechanism** — During CPE fetching, the system recovers vendor/product for CVEs
+   imported before description-based extraction was implemented, and backfills `nvd_status`
+   for older records missing this field.
+
+**EUVD Exploited Vulnerability Tracking:**
+
+ENISA's EUVD provides an independent feed of actively exploited vulnerabilities, filling the gap
+when CVEs are being exploited but haven't been added to CISA KEV yet:
+
+```
+EUVD Exploited Feed
+    │
+    ├─→ CVE already in CISA KEV?
+    │   YES → Enrich with EUVD CVSS (if missing) + mark is_actively_exploited=True
+    │
+    └─→ CVE NOT in CISA KEV?
+        └─→ Create new Vulnerability with source='euvd', is_actively_exploited=True
+            ├─→ Fetch full details from NVD (CVSS, CPE, description)
+            ├─→ Use EUVD CVSS as fallback if NVD unavailable
+            └─→ If CISA KEV adds it later → source becomes 'cisa_kev+euvd' (dual-source tracking)
+```
+
 **Complete Zero-Day Lifecycle:**
 
 ```
@@ -746,17 +859,21 @@ When NVD publishes a CVE but hasn't completed analysis (no CPE configurations ye
     │
     ├─→ NVD has it within hours (vulnStatus: "Awaiting Analysis")
     │       │
-    │       ├─→ Scheduled NVD sync (every 2h) picks it up
+    │       ├─→ Scheduled NVD sync (every 2h) picks it up via Phase 2 (CNA score)
     │       │   OR admin clicks Sync button (now includes NVD)
     │       │   OR admin uses POST /api/sync/cve/<id> for immediate import
     │       │
     │       ├─→ No CPE configs yet → description parsed → vendor=Google, product=Chrome
     │       ├─→ nvd_status="Awaiting Analysis" → CPE NOT stamped → stays in retry queue
     │       ├─→ rematch runs → keyword match against Chrome products → appears on dashboard
+    │       ├─→ cvss_source='cna' → CVSS from vendor/researcher score
     │       │
-    │       └─→ Days later: NVD completes analysis → CPE data fetched → precise version matching
+    │       ├─→ Hours later: EUVD marks as exploited → is_actively_exploited=True
+    │       ├─→ Days later: NVD completes analysis → CPE data fetched → precise version matching
+    │       └─→ Re-enrichment upgrades cvss_source from 'cna' to 'nvd'
     │
     └─→ CISA KEV adds it (if exploited) → due date tracking + alerts
+        └─→ If already from EUVD → source='cisa_kev+euvd'
 ```
 
 **Admin On-Demand CVE Lookup (`POST /api/sync/cve/<cve_id>`):**
@@ -769,6 +886,9 @@ curl -X POST https://sentrikat.example.com/api/sync/cve/CVE-2026-2441 \
 ```
 
 Returns: CVE details, whether CPE data was available, and how many product matches were created.
+Targeted matching: only rematches active products against the imported CVE (not a full rematch).
+Supports `?force=1` to refresh stale data even if CVE already exists.
+Rate limited: 10/minute.
 
 ## 6.4 Agent API
 
@@ -1436,6 +1556,7 @@ DB_PASSWORD=change-me-to-a-secure-password
 | 1.2.0 | Feb 2026 | Development Team | Added: Automatic vendor advisory sync (OSV.dev, Red Hat, MSRC, Debian), distro-native version comparison (dpkg/RPM/APK), three-tier confidence system (affected/likely resolved/resolved), license server heartbeat, agent distro_package_version support |
 | 1.3.0 | Feb 2026 | Development Team | Added: Online license activation (activation code exchange via portal.sentrikat.com with rate limiting and security hardening), fixed agent product organization assignment, fixed Software Overview N+1 query performance |
 | 1.4.0 | Feb 2026 | Development Team | Added: Configurable dashboard chart widgets (6 types with saved defaults), on-premise asset bundling, gthread Gunicorn workers with auto-scaling, connection pooling, EPSS filter, network requirements audit. Fixed: duplicate sortBy ID bug, VulnerabilitySnapshot multi-tenant mismatch |
+| 1.5.0 | Feb 2026 | Development Team | Added: Immediate orphan cleanup on endpoint deletion (prevents "0 endpoints" ghost products after re-registration), endpoint deletion cascade documentation (§4.3.2), agent re-registration lifecycle (§4.3.3). Enhanced: Zero-day pipeline documentation with three-phase NVD sync, CNA CVSS source tracking, API outage protection, EUVD exploited vulnerability flow, re-enrichment cycle (§6.3.4). Fixed: maintenance cleanup_orphaned_products now handles org-assigned orphans (products with 0 installations but still assigned to organizations) |
 
 ---
 

@@ -2424,8 +2424,16 @@ def delete_asset(asset_id):
             return jsonify({'error': 'Manager access required'}), 403
 
     hostname = asset.hostname
+    org_id = asset.organization_id
 
     try:
+        # Collect product IDs that have installations on this asset BEFORE deleting them.
+        # After deletion, products with zero remaining installations are orphans.
+        affected_product_ids = [
+            pi.product_id for pi in
+            ProductInstallation.query.filter_by(asset_id=asset_id).with_entities(ProductInstallation.product_id).all()
+        ]
+
         # Explicitly delete related records to avoid FK constraint violations
         # on databases where CASCADE was not applied to existing tables
         ProductVersionHistory.query.filter_by(asset_id=asset_id).delete()
@@ -2436,17 +2444,62 @@ def delete_asset(asset_id):
         ContainerImage.query.filter_by(asset_id=asset_id).delete()
 
         db.session.delete(asset)
+
+        # Clean up orphaned products that now have zero installations.
+        # Only auto-created products (source='agent') not linked to a service catalog
+        # are eligible for cleanup. This prevents "0 endpoints" ghost products from
+        # lingering in the product list after an endpoint is deleted and re-registered.
+        orphaned_count = 0
+        if affected_product_ids:
+            from app.models import product_organizations, VulnerabilityMatch
+            # Find which affected products now have zero installations
+            products_still_installed = set(
+                row.product_id for row in
+                ProductInstallation.query.filter(
+                    ProductInstallation.product_id.in_(affected_product_ids)
+                ).with_entities(ProductInstallation.product_id).distinct().all()
+            )
+            orphan_ids = set(affected_product_ids) - products_still_installed
+
+            if orphan_ids:
+                # Only delete agent-created products not linked to service catalog
+                orphans = Product.query.filter(
+                    Product.id.in_(orphan_ids),
+                    Product.source == 'agent',
+                    Product.service_catalog_id.is_(None)
+                ).all()
+                orphan_delete_ids = [p.id for p in orphans]
+
+                if orphan_delete_ids:
+                    VulnerabilityMatch.query.filter(
+                        VulnerabilityMatch.product_id.in_(orphan_delete_ids)
+                    ).delete(synchronize_session=False)
+                    ProductVersionHistory.query.filter(
+                        ProductVersionHistory.product_id.in_(orphan_delete_ids)
+                    ).delete(synchronize_session=False)
+                    db.session.execute(
+                        product_organizations.delete().where(
+                            product_organizations.c.product_id.in_(orphan_delete_ids)
+                        )
+                    )
+                    Product.query.filter(
+                        Product.id.in_(orphan_delete_ids)
+                    ).delete(synchronize_session=False)
+                    orphaned_count = len(orphan_delete_ids)
+
         db.session.commit()
     except Exception as e:
         db.session.rollback()
         logger.error(f"Failed to delete asset {hostname} (id={asset_id}): {e}")
         return jsonify({'error': f'Failed to delete endpoint: {str(e)}'}), 500
 
-    logger.info(f"Asset deleted: {hostname} by user {user.username}")
+    logger.info(f"Asset deleted: {hostname} by user {user.username}"
+                f"{f', cleaned up {orphaned_count} orphaned products' if orphaned_count else ''}")
 
     return jsonify({
         'status': 'success',
-        'message': f'Asset {hostname} deleted'
+        'message': f'Asset {hostname} deleted',
+        'orphaned_products_cleaned': orphaned_count
     })
 
 

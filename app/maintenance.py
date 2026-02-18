@@ -170,10 +170,15 @@ def update_asset_status(stale_days=None, remove_days=None, dry_run=False):
 
 def cleanup_orphaned_products(dry_run=False):
     """
-    Remove products that have no installations and no organization assignments.
+    Remove agent-created products that have no installations remaining.
 
-    Products auto-created by agents that are no longer on any endpoint
-    and not manually assigned to any organization can be cleaned up.
+    Handles two cases:
+    1. Products with no installations AND no organization assignments (classic orphans)
+    2. Products with no installations but still assigned to organizations
+       (caused by endpoint deletion cascading to installations but not org assignments)
+
+    Only deletes products where source='agent' and not linked to service catalog.
+    Manually created products are never auto-deleted.
 
     Args:
         dry_run: If True, don't actually delete
@@ -181,26 +186,23 @@ def cleanup_orphaned_products(dry_run=False):
     Returns:
         Number of products removed
     """
-    # Find products with no installations
+    from app.models import product_organizations, VulnerabilityMatch, ProductVersionHistory
+
+    # Find products with no installations (regardless of org assignment)
     products_with_installations = db.session.query(
         ProductInstallation.product_id
     ).distinct().scalar_subquery()
 
     orphaned = Product.query.filter(
         ~Product.id.in_(products_with_installations),
-        ~Product.organizations.any()  # No organization assignments
+        Product.source == 'agent',              # Only auto-created by agents
+        Product.service_catalog_id.is_(None)    # Not linked to service catalog
     )
 
     count = orphaned.count()
 
     if count > 0 and not dry_run:
-        from app.models import product_organizations, VulnerabilityMatch, ProductVersionHistory
-        # Don't delete products that were manually created or have catalog entries
-        # Only delete auto-discovered products with no references
-        deletable = orphaned.filter(
-            Product.service_catalog_id.is_(None)  # Not linked to catalog
-        )
-        deletable_ids = [p.id for p in deletable.with_entities(Product.id).all()]
+        deletable_ids = [p.id for p in orphaned.with_entities(Product.id).all()]
         if deletable_ids:
             # Clean up related records before deleting products
             VulnerabilityMatch.query.filter(VulnerabilityMatch.product_id.in_(deletable_ids)).delete(synchronize_session=False)
