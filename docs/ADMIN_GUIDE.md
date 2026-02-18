@@ -239,7 +239,7 @@ Each API key controls what the agent is allowed to scan. These are **license-gat
 | Capability | Default | Description |
 |------------|---------|-------------|
 | **OS Packages** | ON | Standard OS package scanning (dpkg, rpm, apk, etc.) |
-| **VS Code Extensions** | OFF | Scans VS Code and VS Code Insiders extensions on all user profiles |
+| **Extensions** | OFF | Scans browser extensions (Chrome, Firefox, Edge) and IDE plugins (VS Code, JetBrains) |
 | **Code Dependencies** | OFF | Scans project dependency files (requirements.txt, package-lock.json, go.sum, Gemfile, Cargo.toml, composer.json) |
 
 When a capability is **disabled** on the API key, any data the agent sends for that category is silently rejected by the server. This ensures license compliance and prevents accidental data collection.
@@ -251,7 +251,7 @@ When a capability is **disabled** on the API key, any data the agent sends for t
 1. **Create an API key** with the desired scan capabilities enabled (Settings > Agent Keys)
 2. **Deploy the agent** — it automatically polls the server for its capabilities via `/api/agent/commands`
 3. **The agent scans** based on what the server tells it:
-   - **VS Code Extensions**: Reads `package.json` from `~/.vscode/extensions/` (all user profiles)
+   - **Extensions**: Scans VS Code, JetBrains, Chrome, Firefox, and Edge extensions/plugins across all user profiles
    - **Code Dependencies**: Searches for lock/requirements files in `/home`, `/opt`, `/srv`, `/var/www` (up to 5 levels deep)
 4. **Results appear** in Inventory > Products, filterable by type
 

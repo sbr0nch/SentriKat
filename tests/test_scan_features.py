@@ -151,14 +151,17 @@ class TestValidationConstants:
     def test_valid_source_types(self):
         from app.agent_api import VALID_SOURCE_TYPES
         assert 'os_package' in VALID_SOURCE_TYPES
-        assert 'vscode_extension' in VALID_SOURCE_TYPES
+        assert 'extension' in VALID_SOURCE_TYPES
         assert 'code_library' in VALID_SOURCE_TYPES
+        # Legacy types still accepted for backwards compatibility (normalized on ingest)
+        assert 'vscode_extension' in VALID_SOURCE_TYPES
         assert 'browser_extension' in VALID_SOURCE_TYPES
         assert 'malicious_type' not in VALID_SOURCE_TYPES
 
     def test_valid_ecosystems(self):
         from app.agent_api import VALID_ECOSYSTEMS
-        for eco in ('npm', 'pypi', 'maven', 'nuget', 'cargo', 'go', 'gem', 'composer', 'vscode'):
+        for eco in ('npm', 'pypi', 'maven', 'nuget', 'cargo', 'go', 'gem', 'composer',
+                    'vscode', 'chrome', 'firefox', 'edge', 'jetbrains'):
             assert eco in VALID_ECOSYSTEMS
         assert 'evil_ecosystem' not in VALID_ECOSYSTEMS
 
@@ -323,9 +326,10 @@ class TestInventoryLicenseGating:
             # If 200/201/202, the extension product should NOT have been created
             if response.status_code in [200, 201, 202]:
                 from app.models import Product
+                # Legacy vscode_extension is normalized to 'extension' on ingest
                 ext = Product.query.filter_by(
                     product_name='Python',
-                    source_type='vscode_extension'
+                    source_type='extension'
                 ).first()
                 assert ext is None, "Extension product should be rejected by OS-only key"
 
@@ -515,24 +519,24 @@ class TestProductSourceTypeFilter:
         response = admin_client.get(f'/api/products?organization_id={test_org.id}&source_type=os_package')
         assert response.status_code == 200
 
-    def test_filter_by_vscode_extension(self, app, admin_client, db_session, test_org):
-        """Filtering by source_type=vscode_extension should work."""
+    def test_filter_by_extension(self, app, admin_client, db_session, test_org):
+        """Filtering by source_type=extension should work."""
         from app.models import Product
 
         p = Product(vendor='Microsoft', product_name='filter-ext-test', version='1.0',
-                    source_type='vscode_extension', ecosystem='vscode',
+                    source_type='extension', ecosystem='vscode',
                     organization_id=test_org.id, active=True)
         db_session.add(p)
         db_session.commit()
 
-        response = admin_client.get(f'/api/products?organization_id={test_org.id}&source_type=vscode_extension')
+        response = admin_client.get(f'/api/products?organization_id={test_org.id}&source_type=extension')
         assert response.status_code == 200
         data = response.get_json()
         # API may return a list directly or a dict with 'products' key
         products = data if isinstance(data, list) else data.get('products', data.get('items', []))
         if products:
             for prod in products:
-                assert prod.get('source_type') == 'vscode_extension'
+                assert prod.get('source_type') == 'extension'
 
     def test_filter_by_code_library(self, app, admin_client, db_session, test_org):
         """Filtering by source_type=code_library should work."""

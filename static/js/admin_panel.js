@@ -6799,7 +6799,7 @@ async function loadAgentKeys() {
                     <td data-column="capabilities">
                         <div class="d-flex flex-wrap gap-1">
                             ${(key.scan_capabilities?.os_packages !== false) ? '<span class="badge bg-secondary-subtle text-secondary" title="OS Packages"><i class="bi bi-box"></i></span>' : ''}
-                            ${key.scan_capabilities?.extensions ? '<span class="badge bg-info-subtle text-info" title="VS Code Extensions"><i class="bi bi-puzzle"></i></span>' : ''}
+                            ${key.scan_capabilities?.extensions ? '<span class="badge bg-info-subtle text-info" title="Extensions"><i class="bi bi-puzzle"></i></span>' : ''}
                             ${key.scan_capabilities?.dependencies ? '<span class="badge bg-success-subtle text-success" title="Code Dependencies"><i class="bi bi-book"></i></span>' : ''}
                         </div>
                     </td>

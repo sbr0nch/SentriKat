@@ -145,21 +145,6 @@
         contain: layout style;
     }
 
-    .vuln-card {
-        content-visibility: auto;
-        contain-intrinsic-size: 0 350px;
-        contain: layout style paint;
-    }
-
-    .vuln-card .card-body {
-        will-change: auto;
-    }
-
-    /* Reduce paint complexity */
-    .vuln-card .badge {
-        will-change: auto;
-    }
-
     /* Lean grouped CVE cards */
     .vuln-card-v2 {
         content-visibility: auto;
@@ -540,7 +525,7 @@
                     </div>
                 </div>
                 <!-- Sort By -->
-                <select class="form-select form-select-sm" id="sortBy" style="width: auto;" onchange="loadVulnerabilities()" title="Sort by">
+                <select class="form-select form-select-sm" id="sortBy" style="width: auto;" onchange="loadGroupedVulnerabilities()" title="Sort by">
                     <option value="priority-asc">Priority (Critical first)</option>
                     <option value="priority-desc">Priority (Low first)</option>
                     <option value="cve-asc">CVE ID (A-Z)</option>
@@ -1037,76 +1022,7 @@
         const select = document.getElementById('pageSize');
         pageSize = select.value === 'all' ? Infinity : parseInt(select.value);
         currentPage = 1;
-        renderCurrentPage();
-    }
-
-    function goToPage(page) {
-        currentPage = page;
-        renderCurrentPage();
-        // Scroll to top of vulnerabilities container
-        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth' });
-    }
-
-    function renderCurrentPage() {
-        const container = document.getElementById('vulnerabilitiesContainer');
-        const total = currentVulnerabilities.length;
-
-        if (total === 0) {
-            // Check if we have any products tracked
-            const productsTracked = document.getElementById('productsTracked').textContent;
-            const hasProducts = productsTracked && productsTracked !== '-' && parseInt(productsTracked) > 0;
-
-            if (!hasProducts) {
-                container.innerHTML = `
-                    <div class="text-center py-5">
-                        <i class="bi bi-box-seam text-primary" style="font-size: 4rem;"></i>
-                        <h4 class="mt-3">No Products Configured</h4>
-                        <p class="text-muted">Add products to your inventory to start tracking vulnerabilities.</p>
-                        <a href="/products" class="btn btn-primary mt-2">
-                            <i class="bi bi-plus-circle me-2"></i>Add Products
-                        </a>
-                    </div>
-                `;
-            } else {
-                container.innerHTML = `
-                    <div class="text-center py-5">
-                        <i class="bi bi-shield-check text-success" style="font-size: 4rem;"></i>
-                        <h4 class="mt-3">No Vulnerabilities Found</h4>
-                        <p class="text-muted">No matches found with the current filter criteria. Your tracked products appear to be secure!</p>
-                    </div>
-                `;
-            }
-            // Hide both pagination controls
-            ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.style.display = 'none';
-            });
-            return;
-        }
-
-        const effectivePageSize = pageSize === Infinity ? total : pageSize;
-        const totalPages = Math.ceil(total / effectivePageSize);
-        const startIdx = (currentPage - 1) * effectivePageSize;
-        const endIdx = Math.min(startIdx + effectivePageSize, total);
-        const pageItems = currentVulnerabilities.slice(startIdx, endIdx);
-
-        // Use requestAnimationFrame for smoother rendering
-        requestAnimationFrame(() => {
-            // Build HTML in chunks to prevent blocking
-            const fragment = document.createDocumentFragment();
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = pageItems.map(match => createVulnCard(match)).join('');
-
-            while (tempDiv.firstChild) {
-                fragment.appendChild(tempDiv.firstChild);
-            }
-
-            container.innerHTML = '';
-            container.appendChild(fragment);
-        });
-
-        // Update pagination info and controls (both top and bottom)
-        updatePaginationControls(totalPages, total, startIdx, endIdx, 'goToPage');
+        loadGroupedVulnerabilities();
     }
 
     // Shared function to update both top and bottom pagination controls
@@ -1617,62 +1533,6 @@
         }
     }
 
-    async function loadVulnerabilities() {
-        showLoading();
-        const container = document.getElementById('vulnerabilitiesContainer');
-        selectedVulns.clear();
-        updateBulkActions();
-
-        try {
-            const params = new URLSearchParams();
-            const cve = document.getElementById('filterCVE').value;
-            const vendor = document.getElementById('filterVendor').value;
-            const product = document.getElementById('filterProduct').value;
-            const ransomware = document.getElementById('filterRansomware').checked;
-            const unack = document.getElementById('filterUnack').checked;
-
-            if (cve) params.append('cve_id', cve);
-            if (vendor) params.append('vendor', vendor);
-            if (product) params.append('product', product);
-            if (ransomware) params.append('ransomware_only', 'true');
-            if (unack) params.append('acknowledged', 'false');
-            if (dashboardSourceFilter) params.append('source_key_type', dashboardSourceFilter);
-
-            const response = await fetchWithRetry(`/api/vulnerabilities?${params}`, {}, 3, 1000);
-
-            // Check if response is OK before parsing
-            if (!response.ok) {
-                if (response.status === 401) {
-                    window.location.href = '/login';
-                    return;
-                }
-                throw new Error(`Server error: ${response.status}`);
-            }
-
-            currentVulnerabilities = await response.json();
-
-            // Apply client-side filtering for priority and age
-            applyClientFilters();
-
-            // Apply sorting
-            sortVulnerabilities();
-
-            document.getElementById('vulnCount').textContent = currentVulnerabilities.length;
-
-            // Reset to page 1 and render
-            currentPage = 1;
-            renderCurrentPage();
-        } catch (error) {
-            container.innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${escapeHtml(error.message)}
-                </div>
-            `;
-        } finally {
-            hideLoading();
-        }
-    }
-
     function applyClientFilters() {
         // Filter by zero-day
         if (zeroDayFilterActive) {
@@ -1756,236 +1616,6 @@
         }
     }
 
-    function sortVulnerabilities() {
-        const sortBy = document.getElementById('sortBy')?.value || 'priority-asc';
-        const priorityOrder = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1};
-
-        switch(sortBy) {
-            case 'priority-asc': // Critical first
-                currentVulnerabilities.sort((a, b) => {
-                    const priorityDiff = priorityOrder[b.effective_priority] - priorityOrder[a.effective_priority];
-                    if (priorityDiff !== 0) return priorityDiff;
-                    return new Date(b.vulnerability.date_added) - new Date(a.vulnerability.date_added);
-                });
-                break;
-            case 'priority-desc': // Low first
-                currentVulnerabilities.sort((a, b) => {
-                    const priorityDiff = priorityOrder[a.effective_priority] - priorityOrder[b.effective_priority];
-                    if (priorityDiff !== 0) return priorityDiff;
-                    return new Date(a.vulnerability.date_added) - new Date(b.vulnerability.date_added);
-                });
-                break;
-            case 'cve-asc':
-                currentVulnerabilities.sort((a, b) =>
-                    a.vulnerability.cve_id.localeCompare(b.vulnerability.cve_id));
-                break;
-            case 'cve-desc':
-                currentVulnerabilities.sort((a, b) =>
-                    b.vulnerability.cve_id.localeCompare(a.vulnerability.cve_id));
-                break;
-            case 'product-asc':
-                currentVulnerabilities.sort((a, b) => {
-                    const aName = `${a.product?.vendor || ''} ${a.product?.product_name || ''}`.trim().toLowerCase();
-                    const bName = `${b.product?.vendor || ''} ${b.product?.product_name || ''}`.trim().toLowerCase();
-                    return aName.localeCompare(bName);
-                });
-                break;
-            case 'product-desc':
-                currentVulnerabilities.sort((a, b) => {
-                    const aName = `${a.product?.vendor || ''} ${a.product?.product_name || ''}`.trim().toLowerCase();
-                    const bName = `${b.product?.vendor || ''} ${b.product?.product_name || ''}`.trim().toLowerCase();
-                    return bName.localeCompare(aName);
-                });
-                break;
-            case 'due-asc': // Soonest first
-                currentVulnerabilities.sort((a, b) => {
-                    const aDue = a.vulnerability.due_date ? new Date(a.vulnerability.due_date) : new Date('2999-12-31');
-                    const bDue = b.vulnerability.due_date ? new Date(b.vulnerability.due_date) : new Date('2999-12-31');
-                    return aDue - bDue;
-                });
-                break;
-            case 'due-desc': // Latest first
-                currentVulnerabilities.sort((a, b) => {
-                    const aDue = a.vulnerability.due_date ? new Date(a.vulnerability.due_date) : new Date('1970-01-01');
-                    const bDue = b.vulnerability.due_date ? new Date(b.vulnerability.due_date) : new Date('1970-01-01');
-                    return bDue - aDue;
-                });
-                break;
-            case 'date-asc': // Oldest first
-                currentVulnerabilities.sort((a, b) =>
-                    new Date(a.vulnerability.date_added) - new Date(b.vulnerability.date_added));
-                break;
-            case 'date-desc': // Newest first
-                currentVulnerabilities.sort((a, b) =>
-                    new Date(b.vulnerability.date_added) - new Date(a.vulnerability.date_added));
-                break;
-        }
-    }
-
-    function createVulnCard(match) {
-        const vuln = match.vulnerability;
-        const product = match.product;
-        const priority = match.effective_priority;
-
-        const ransomwareBadge = vuln.known_ransomware ?
-            '<span class="badge badge-critical"><i class="bi bi-shield-exclamation"></i> Ransomware</span>' : '';
-        const exploitedBadge = vuln.is_actively_exploited ?
-            '<span class="badge" style="background-color: #b91c1c; color: white; animation: pulse-badge 2s infinite;"><i class="bi bi-exclamation-triangle-fill"></i> ACTIVELY EXPLOITED</span>' : '';
-
-        // Zero-Day badge — detected by our system before CISA KEV
-        const zeroDayBadge = vuln.is_zero_day ?
-            '<span class="badge" style="background: linear-gradient(135deg, #7c3aed, #db2777); color: white; animation: pulse-badge 2s infinite;" title="Zero-day: detected by SentriKat before CISA KEV publication"><i class="bi bi-lightning-fill"></i> 0-DAY</span>' : '';
-
-        // NVD Status badge — warn when data is incomplete
-        const nvdStatusBadge = vuln.nvd_data_incomplete ?
-            `<span class="badge bg-warning text-dark" title="NVD status: ${escapeHtml(vuln.nvd_status || 'Unknown')} — CVE data may be incomplete (no CPE version ranges yet)"><i class="bi bi-hourglass-split"></i> ${escapeHtml(vuln.nvd_status || 'Pending')}</span>` : '';
-
-        // Match confidence badge
-        const confidenceConfig = {
-            'high': { cls: 'bg-success', icon: 'bi-patch-check-fill', label: 'CPE Match', tip: 'High confidence: matched via CPE version range' },
-            'medium': { cls: 'bg-info text-dark', icon: 'bi-patch-check', label: 'Vendor Match', tip: 'Medium confidence: matched via vendor + product name' },
-            'low': { cls: 'bg-secondary', icon: 'bi-patch-question', label: 'Keyword Match', tip: 'Low confidence: matched via keyword — verify manually' }
-        };
-        const conf = confidenceConfig[match.match_confidence] || confidenceConfig['medium'];
-        const confidenceBadge = `<span class="badge ${conf.cls}" title="${conf.tip}"><i class="bi ${conf.icon}"></i> ${conf.label}</span>`;
-
-        const ackBadge = match.acknowledged ?
-            '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Acknowledged</span>' :
-            '<span class="badge bg-warning text-dark"><i class="bi bi-circle"></i> Needs Review</span>';
-        const priorityBadge = `<span class="badge ${getPriorityBadgeClass(priority)}"><i class="bi ${getPriorityIcon(priority)}"></i> ${priority.toUpperCase()} Severity</span>`;
-
-        // CVSS Severity Badge (with data source tooltip)
-        const cvssSourceLabel = {'nvd': 'NVD', 'cve_org': 'CVE.org/Vulnrichment', 'euvd': 'ENISA EUVD'}[vuln.cvss_source] || 'Unknown';
-        const cvssTooltip = vuln.cvss_source ? `Source: ${cvssSourceLabel}` : '';
-        const severityBadge = vuln.severity ?
-            `<span class="badge ${getPriorityBadgeClass(vuln.severity.toLowerCase())}" title="${cvssTooltip}"><i class="bi bi-graph-up"></i> CVSS: ${escapeHtml(vuln.severity)} ${vuln.cvss_score ? `(${escapeHtml(String(vuln.cvss_score))})` : ''}</span>` :
-            '<span class="badge bg-secondary"><i class="bi bi-question-circle"></i> No CVSS Data</span>';
-
-        // EPSS (Exploit Prediction Scoring System) Badge
-        const epssBadge = vuln.epss_score != null ?
-            `<span class="badge ${getEpssBadgeClass(vuln.epss_percentile)}" title="EPSS: ${(vuln.epss_score * 100).toFixed(1)}% probability of exploitation in next 30 days (Top ${((1 - vuln.epss_percentile) * 100).toFixed(0)}%)">
-                <i class="bi bi-lightning-charge"></i> EPSS: ${(vuln.epss_score * 100).toFixed(1)}%
-            </span>` :
-            (vuln.epss_fetched_at ? '<span class="badge bg-secondary" title="EPSS data not available for this CVE"><i class="bi bi-lightning-charge"></i> No EPSS</span>' : '');
-
-        // Fix version info from CVE CPE data
-        const fixVersions = vuln.fix_versions || [];
-        let fixVersionHtml = '';
-        if (fixVersions.length > 0) {
-            const fixItems = fixVersions.slice(0, 3).map(fv => {
-                const fixLabel = fv.fix_type === 'excluding'
-                    ? `<strong>${escapeHtml(fv.fix_version)}</strong>`
-                    : `> <strong>${escapeHtml(fv.fix_version)}</strong>`;
-                return `<span class="badge bg-success me-1"><i class="bi bi-arrow-up-circle me-1"></i>${escapeHtml(fv.vendor)} ${escapeHtml(fv.product)}: ${fixLabel}</span>`;
-            }).join('');
-            fixVersionHtml = `
-                            <div class="mb-3">
-                                <small class="text-muted fw-semibold">FIX VERSION</small>
-                                <div>${fixItems}</div>
-                            </div>`;
-        }
-
-        return `
-            <div class="card vuln-card mb-3" id="match-${match.id}" style="border-left: 4px solid ${getPriorityColor(priority)};">
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-auto">
-                            <input class="form-check-input" type="checkbox" value="${match.id}"
-                                   onchange="toggleSelection(${match.id}, this.checked)">
-                        </div>
-                        <div class="col">
-                            <div class="d-flex justify-content-between align-items-start mb-2">
-                                <div>
-                                    <h5 class="card-title mb-2">
-                                        <span class="badge bg-dark">${escapeHtml(vuln.cve_id)}</span>
-                                        ${escapeHtml(vuln.vulnerability_name)}
-                                    </h5>
-                                    <div class="mb-2">
-                                        ${priorityBadge}
-                                        ${severityBadge}
-                                        ${epssBadge}
-                                        ${zeroDayBadge}
-                                        ${exploitedBadge}
-                                        ${ransomwareBadge}
-                                        ${ackBadge}
-                                        ${confidenceBadge}
-                                        ${nvdStatusBadge}
-                                        ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV + EUVD</span>' : vuln.source === 'nvd' ? '<span class="badge" style="background-color: #6d28d9;" title="Detected via NVD early import — not yet in CISA KEV"><i class="bi bi-database me-1"></i>NVD Early</span>' : '<span class="badge" style="background-color: #2e7d32;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
-                                        <span class="badge bg-secondary">
-                                            <i class="bi bi-calendar3"></i> Added: ${formatDate(vuln.date_added)} (${vuln.days_old} days ago)
-                                        </span>
-                                        ${vuln.due_date ? `<span class="badge bg-danger">
-                                            <i class="bi bi-alarm"></i> Due: ${formatDate(vuln.due_date)}
-                                        </span>` : ''}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <small class="text-muted fw-semibold">AFFECTED PRODUCT</small>
-                                    <p class="mb-0"><strong>${escapeHtml(vuln.vendor_project)}</strong> - ${escapeHtml(vuln.product)}</p>
-                                </div>
-                                <div class="col-md-6">
-                                    <small class="text-muted fw-semibold">YOUR PRODUCT</small>
-                                    <p class="mb-0">
-                                        <strong>${escapeHtml(product.vendor)}</strong> - ${escapeHtml(product.product_name)}
-                                        ${product.version ? `<span class="badge bg-info">v${escapeHtml(product.version)}</span>` : ''}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div class="mb-2">
-                                <small class="text-muted fw-semibold">DESCRIPTION</small>
-                                <p class="mb-0">${escapeHtml(vuln.short_description)}</p>
-                            </div>
-
-                            <div class="mb-3">
-                                <small class="text-muted fw-semibold">REQUIRED ACTION</small>
-                                <p class="mb-0 fw-medium text-danger">${escapeHtml(vuln.required_action)}</p>
-                            </div>
-
-                            ${fixVersionHtml}
-
-                            <div class="mb-3">
-                                <small class="text-muted fw-semibold">MATCH REASON</small>
-                                <p class="mb-0 text-primary">${escapeHtml(match.match_reason)}</p>
-                            </div>
-
-                            <div class="btn-group" role="group">
-                                ${!match.acknowledged ?
-                                    `<button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${match.id})">
-                                        <i class="bi bi-check-circle"></i> Acknowledge
-                                    </button>
-                                    <div class="btn-group">
-                                        <button class="btn btn-sm btn-outline-warning dropdown-toggle" data-bs-toggle="dropdown">
-                                            <i class="bi bi-clock"></i> Snooze
-                                        </button>
-                                        <ul class="dropdown-menu">
-                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 24); return false;">24 hours</a></li>
-                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 72); return false;">3 days</a></li>
-                                            <li><a class="dropdown-item" href="#" onclick="snoozeMatch(${match.id}, 168); return false;">1 week</a></li>
-                                        </ul>
-                                    </div>` :
-                                    `<button class="btn btn-sm btn-outline-secondary" onclick="unacknowledgeMatch(${match.id})">
-                                        <i class="bi bi-arrow-counterclockwise"></i> Unacknowledge
-                                    </button>`
-                                }
-                                <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(vuln.cve_id)}" target="_blank"
-                                   class="btn btn-sm btn-outline-primary">
-                                    <i class="bi bi-box-arrow-up-right"></i> View in NVD
-                                </a>
-                                <button class="btn btn-sm btn-outline-info" onclick="shareSingleCVE('${escapeHtml(vuln.cve_id).replace(/'/g, "\\'")}', '${escapeHtml(vuln.vulnerability_name).replace(/'/g, "\\'")}')">
-                                    <i class="bi bi-share"></i> Share
-                                </button>
-                                ${getTrackerButtonsHtml(vuln.id, product.id, vuln.cve_id, vuln.vulnerability_name)}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
 
     function toggleSelection(matchId, selected) {
         if (selected) {
@@ -2101,7 +1731,7 @@
         showToast(`Acknowledged ${success} vulnerabilities${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'success' : 'danger');
         selectedVulns.clear();
         updateBulkActions();
-        loadVulnerabilities();
+        loadGroupedVulnerabilities();
         loadStats();
 
     }
@@ -2135,7 +1765,7 @@
         showToast(`Unacknowledged ${success} vulnerabilities${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'info' : 'danger');
         selectedVulns.clear();
         updateBulkActions();
-        loadVulnerabilities();
+        loadGroupedVulnerabilities();
         loadStats();
     }
 
@@ -2177,7 +1807,7 @@
         showToast(`Snoozed ${success} vulnerabilities for ${timeLabel}${failed > 0 ? `, ${failed} failed` : ''}`, success > 0 ? 'warning' : 'danger');
         selectedVulns.clear();
         updateBulkActions();
-        loadVulnerabilities();
+        loadGroupedVulnerabilities();
     }
 
     async function bulkExport() {
@@ -2218,7 +1848,7 @@
         try {
             await fetch(`/api/matches/${matchId}/acknowledge`, { method: 'POST' });
             showToast('✓ Vulnerability acknowledged', 'success');
-            loadVulnerabilities();
+            loadGroupedVulnerabilities();
             loadStats();
         } catch (error) {
             showToast(`✗ Error: ${error.message}`, 'danger');
@@ -2229,7 +1859,7 @@
         try {
             await fetch(`/api/matches/${matchId}/unacknowledge`, { method: 'POST' });
             showToast('Vulnerability unacknowledged', 'info');
-            loadVulnerabilities();
+            loadGroupedVulnerabilities();
             loadStats();
         } catch (error) {
             showToast(`✗ Error: ${error.message}`, 'danger');
@@ -2247,7 +1877,7 @@
             const data = await response.json();
             const snoozeUntil = new Date(data.snoozed_until);
             showToast(`✓ Snoozed until ${snoozeUntil.toLocaleString()}`, 'warning');
-            loadVulnerabilities();
+            loadGroupedVulnerabilities();
         } catch (error) {
             showToast(`✗ Error: ${error.message}`, 'danger');
         }
@@ -2823,7 +2453,7 @@
                 }
 
                 // Load vulnerabilities with these filters
-                loadVulnerabilities();
+                loadGroupedVulnerabilities();
             } else if (response.status === 410) {
                 showToast('This shared link has expired.', 'warning');
             } else {

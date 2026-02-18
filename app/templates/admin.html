@@ -172,9 +172,8 @@
                     <select class="form-select form-select-sm" id="filterSourceType" onchange="resetAndLoadProducts()">
                         <option value="">All Types</option>
                         <option value="os_package">OS Packages</option>
-                        <option value="vscode_extension">VS Code Extensions</option>
+                        <option value="extension">Extensions</option>
                         <option value="code_library">Code Libraries</option>
-                        <option value="browser_extension">Browser Extensions</option>
                     </select>
                 </div>
                 <div class="col-md-1 text-end">
@@ -1149,13 +1148,12 @@
                         ? '<span class="badge bg-warning-subtle text-warning" title="Reported by client agent"><i class="bi bi-laptop"></i></span> '
                         : '';
 
-                    // Build source type badge (os_package, vscode_extension, code_library, browser_extension)
+                    // Build source type badge (os_package, extension, code_library)
                     const srcType = group.source_type || 'os_package';
                     const ecosystemLabel = group.ecosystem ? ` (${escapeHtml(group.ecosystem)})` : '';
                     const sourceTypeBadges = {
-                        'vscode_extension': `<span class="badge bg-info-subtle text-info ms-1" title="VS Code Extension${ecosystemLabel}"><i class="bi bi-puzzle"></i> Ext</span>`,
+                        'extension': `<span class="badge bg-info-subtle text-info ms-1" title="Extension${ecosystemLabel}"><i class="bi bi-puzzle"></i> ${group.ecosystem || 'Ext'}</span>`,
                         'code_library': `<span class="badge bg-success-subtle text-success ms-1" title="Code Library${ecosystemLabel}"><i class="bi bi-book"></i> ${group.ecosystem || 'Lib'}</span>`,
-                        'browser_extension': `<span class="badge bg-secondary-subtle text-secondary ms-1" title="Browser Extension${ecosystemLabel}"><i class="bi bi-globe"></i> Ext</span>`
                     };
                     const sourceTypeBadge = sourceTypeBadges[srcType] || '';
 

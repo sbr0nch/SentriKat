@@ -274,7 +274,7 @@ class Product(db.Model):
     match_type = db.Column(db.String(20), default='auto')  # auto, cpe, keyword, both
 
     # Software classification
-    source_type = db.Column(db.String(30), default='os_package', index=True)  # os_package, vscode_extension, code_library, browser_extension
+    source_type = db.Column(db.String(30), default='os_package', index=True)  # os_package, extension, code_library
     ecosystem = db.Column(db.String(30), nullable=True, index=True)  # npm, pypi, maven, nuget, cargo, go, gem, composer, vscode, chrome, etc.
 
     # Agent product queue fields - for approval workflow
