@@ -562,6 +562,31 @@ class Vulnerability(db.Model):
 
         return 'medium'
 
+    @property
+    def is_zero_day(self):
+        """Determine if this CVE qualifies as a zero-day detected by our system.
+
+        A zero-day in our context means: we detected it via NVD or EUVD
+        BEFORE CISA KEV published it. Indicators:
+        - source is 'nvd' or 'euvd' (not yet confirmed by CISA KEV)
+        - OR source is 'cisa_kev+euvd' (we had it from EUVD before KEV caught up)
+        - AND it is actively exploited or has HIGH/CRITICAL severity with
+              NVD status still in pre-analysis state
+        """
+        src = self.source or ''
+        # If we got it from EUVD (alone or before KEV caught up), it's a zero-day
+        if src in ('euvd', 'cisa_kev+euvd'):
+            return True
+        # If we got it from NVD while it's still unanalyzed — we caught it early
+        if src == 'nvd' and self.nvd_status in ('Awaiting Analysis', 'Received', 'Undergoing Analysis'):
+            return True
+        return False
+
+    @property
+    def nvd_data_incomplete(self):
+        """True when NVD hasn't finished analyzing this CVE yet."""
+        return self.nvd_status in ('Awaiting Analysis', 'Received', 'Undergoing Analysis')
+
     def get_cpe_entries(self):
         """Get parsed CPE data if available."""
         if not self.cpe_data:
@@ -643,7 +668,11 @@ class Vulnerability(db.Model):
             'epss_fetched_at': self.epss_fetched_at.isoformat() if self.epss_fetched_at else None,
             # Fix version info from NVD CPE data
             'fix_versions': fix_versions,
-            'has_fix_version': len(fix_versions) > 0
+            'has_fix_version': len(fix_versions) > 0,
+            # Zero-day & NVD status indicators
+            'is_zero_day': self.is_zero_day,
+            'nvd_status': self.nvd_status,
+            'nvd_data_incomplete': self.nvd_data_incomplete,
         }
 
 class VulnerabilityMatch(db.Model):

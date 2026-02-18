@@ -283,9 +283,13 @@
                         <small class="text-muted"><i class="bi bi-gear-fill me-1"></i>Products Tracked</small>
                         <span class="fw-bold text-success" id="productsTracked">-</span>
                     </div>
-                    <div class="d-flex justify-content-between align-items-center py-1 px-2">
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
                         <small class="text-muted"><i class="bi bi-lightning-charge me-1"></i>High EPSS Risk</small>
                         <span class="fw-bold text-danger" id="highEpss" title="CVEs with EPSS >= 10% exploit probability">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2" id="zeroDayRow" style="display: none !important;">
+                        <small class="text-muted"><i class="bi bi-lightning-fill me-1" style="color: #7c3aed;"></i>Zero-Day (Pre-KEV)</small>
+                        <span class="fw-bold" style="color: #7c3aed;" id="zeroDayCount" title="CVEs detected by SentriKat before CISA KEV publication">0</span>
                     </div>
                 </div>
             </div>
@@ -1173,6 +1177,19 @@
                 epssEl.title = `${stats.epss.high_epss} CVEs with ≥10% exploit probability (avg: ${(stats.epss.avg_epss * 100).toFixed(1)}%)`;
             }
 
+            // Zero-day counter (show only when > 0)
+            const zdCount = stats.zero_day_count || 0;
+            const zdRow = document.getElementById('zeroDayRow');
+            const zdEl = document.getElementById('zeroDayCount');
+            if (zdCount > 0 && zdRow && zdEl) {
+                zdEl.textContent = formatNumber(zdCount);
+                zdRow.style.display = '';
+                zdRow.style.setProperty('display', 'flex', 'important');
+            } else if (zdRow) {
+                zdRow.style.display = 'none';
+                zdRow.style.setProperty('display', 'none', 'important');
+            }
+
             // Show/hide unmapped products warning (respects dismiss)
             const unmappedWarning = document.getElementById('unmappedWarning');
             const unmappedCount = document.getElementById('unmappedCount');
@@ -1787,6 +1804,24 @@
             '<span class="badge badge-critical"><i class="bi bi-shield-exclamation"></i> Ransomware</span>' : '';
         const exploitedBadge = vuln.is_actively_exploited ?
             '<span class="badge" style="background-color: #b91c1c; color: white; animation: pulse-badge 2s infinite;"><i class="bi bi-exclamation-triangle-fill"></i> ACTIVELY EXPLOITED</span>' : '';
+
+        // Zero-Day badge — detected by our system before CISA KEV
+        const zeroDayBadge = vuln.is_zero_day ?
+            '<span class="badge" style="background: linear-gradient(135deg, #7c3aed, #db2777); color: white; animation: pulse-badge 2s infinite;" title="Zero-day: detected by SentriKat before CISA KEV publication"><i class="bi bi-lightning-fill"></i> 0-DAY</span>' : '';
+
+        // NVD Status badge — warn when data is incomplete
+        const nvdStatusBadge = vuln.nvd_data_incomplete ?
+            `<span class="badge bg-warning text-dark" title="NVD status: ${escapeHtml(vuln.nvd_status || 'Unknown')} — CVE data may be incomplete (no CPE version ranges yet)"><i class="bi bi-hourglass-split"></i> ${escapeHtml(vuln.nvd_status || 'Pending')}</span>` : '';
+
+        // Match confidence badge
+        const confidenceConfig = {
+            'high': { cls: 'bg-success', icon: 'bi-patch-check-fill', label: 'CPE Match', tip: 'High confidence: matched via CPE version range' },
+            'medium': { cls: 'bg-info text-dark', icon: 'bi-patch-check', label: 'Vendor Match', tip: 'Medium confidence: matched via vendor + product name' },
+            'low': { cls: 'bg-secondary', icon: 'bi-patch-question', label: 'Keyword Match', tip: 'Low confidence: matched via keyword — verify manually' }
+        };
+        const conf = confidenceConfig[match.match_confidence] || confidenceConfig['medium'];
+        const confidenceBadge = `<span class="badge ${conf.cls}" title="${conf.tip}"><i class="bi ${conf.icon}"></i> ${conf.label}</span>`;
+
         const ackBadge = match.acknowledged ?
             '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Acknowledged</span>' :
             '<span class="badge bg-warning text-dark"><i class="bi bi-circle"></i> Needs Review</span>';
@@ -1842,10 +1877,13 @@
                                         ${priorityBadge}
                                         ${severityBadge}
                                         ${epssBadge}
+                                        ${zeroDayBadge}
                                         ${exploitedBadge}
                                         ${ransomwareBadge}
                                         ${ackBadge}
-                                        ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV + EUVD</span>' : '<span class="badge" style="background-color: #2e7d32;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
+                                        ${confidenceBadge}
+                                        ${nvdStatusBadge}
+                                        ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV + EUVD</span>' : vuln.source === 'nvd' ? '<span class="badge" style="background-color: #6d28d9;" title="Detected via NVD early import — not yet in CISA KEV"><i class="bi bi-database me-1"></i>NVD Early</span>' : '<span class="badge" style="background-color: #2e7d32;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
                                         <span class="badge bg-secondary">
                                             <i class="bi bi-calendar3"></i> Added: ${formatDate(vuln.date_added)} (${vuln.days_old} days ago)
                                         </span>
@@ -3033,7 +3071,9 @@
                                 <span class="badge bg-dark fs-6 me-1">${escapeHtml(vuln.cve_id)}</span>
                             </a>
                             <span class="badge bg-secondary" style="font-size: 0.7rem;"><i class="bi bi-calendar3"></i> ${formatDate(vuln.date_added)}</span>
-                            ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1; font-size: 0.7rem;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0; font-size: 0.7rem;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV+EUVD</span>' : '<span class="badge" style="background-color: #2e7d32; font-size: 0.7rem;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
+                            ${vuln.is_zero_day ? '<span class="badge" style="background: linear-gradient(135deg, #7c3aed, #db2777); color: white; font-size: 0.7rem; animation: pulse-badge 2s infinite;" title="Zero-day: detected by SentriKat before CISA KEV publication"><i class="bi bi-lightning-fill me-1"></i>0-DAY</span>' : ''}
+                            ${vuln.nvd_data_incomplete ? `<span class="badge bg-warning text-dark" style="font-size: 0.7rem;" title="NVD status: ${escapeHtml(vuln.nvd_status || 'Unknown')} — CPE data may be incomplete"><i class="bi bi-hourglass-split me-1"></i>${escapeHtml(vuln.nvd_status || 'Pending')}</span>` : ''}
+                            ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #0d47a1; font-size: 0.7rem;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #1565c0; font-size: 0.7rem;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV+EUVD</span>' : vuln.source === 'nvd' ? '<span class="badge" style="background-color: #6d28d9; font-size: 0.7rem;" title="Detected via NVD early import — not yet in CISA KEV"><i class="bi bi-database me-1"></i>NVD Early</span>' : '<span class="badge" style="background-color: #2e7d32; font-size: 0.7rem;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
                         </div>
                     </div>
                     <h6 class="mb-2 fw-semibold" style="line-height: 1.3;">${escapeHtml(vuln.vulnerability_name)}</h6>

@@ -2566,6 +2566,19 @@ def get_vulnerability_stats():
     except Exception:
         pass
 
+    # Zero-day count: CVEs detected before CISA KEV (source=nvd/euvd with pre-analysis status)
+    zero_day_count = 0
+    try:
+        if matched_vuln_ids:
+            zd_vulns = Vulnerability.query.filter(
+                Vulnerability.id.in_(matched_vuln_ids)
+            ).all()
+            zero_day_count = sum(1 for v in zd_vulns if v.is_zero_day)
+        else:
+            zero_day_count = 0
+    except Exception:
+        pass
+
     return jsonify({
         'total_vulnerabilities': total_vulns,
         'total_matches': total_matches,
@@ -2589,6 +2602,8 @@ def get_vulnerability_stats():
         'container': container_stats,
         # EPSS exploitability risk
         'epss': epss_stats,
+        # Zero-day detection (pre-KEV)
+        'zero_day_count': zero_day_count,
     })
 
 
