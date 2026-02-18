@@ -103,6 +103,12 @@ HEALTH_CHECKS = {
         'description': 'Tracks whether the CISA sync is retrying after a failure',
         'default_enabled': True,
     },
+    'server_config': {
+        'category': 'system',
+        'label': 'Server Configuration',
+        'description': 'Checks for missing or incomplete server configuration (SMTP, organizations, API keys)',
+        'default_enabled': True,
+    },
 }
 
 
@@ -674,6 +680,67 @@ def check_pending_import_queue():
 # Main Runner
 # ============================================================================
 
+def check_server_config():
+    """Check for missing or incomplete server configuration."""
+    try:
+        missing = []
+        warnings = []
+
+        # Check SMTP configuration
+        smtp_host = SystemSettings.query.filter_by(key='smtp_host').first()
+        has_smtp = smtp_host and smtp_host.value
+        if not has_smtp:
+            env_smtp = os.environ.get('SMTP_HOST') or os.environ.get('SMTP_SERVER') or os.environ.get('MAIL_SERVER')
+            if not env_smtp:
+                missing.append('SMTP not configured (email alerts will not work)')
+
+        # Check organizations have notification emails
+        orgs = Organization.query.filter_by(active=True).all()
+        orgs_without_emails = []
+        for org in orgs:
+            try:
+                emails = json.loads(org.notification_emails or '[]')
+                if isinstance(emails, str):
+                    emails = json.loads(emails)
+                if not any(e and e.strip() for e in emails):
+                    orgs_without_emails.append(org.display_name or org.name)
+            except (json.JSONDecodeError, TypeError):
+                orgs_without_emails.append(org.display_name or org.name)
+        if orgs_without_emails:
+            warnings.append(f'{len(orgs_without_emails)} org(s) have no notification emails')
+
+        # Check for at least one agent API key
+        key_count = AgentApiKey.query.filter_by(active=True).count()
+        if key_count == 0:
+            missing.append('No active agent API keys (agents cannot push data)')
+
+        # Check if any CISA sync has ever run
+        last_sync = SyncLog.query.order_by(SyncLog.id.desc()).first()
+        if not last_sync:
+            warnings.append('CISA KEV sync has never run')
+
+        # Report results
+        total_issues = len(missing) + len(warnings)
+        if missing:
+            details = {'missing': missing, 'warnings': warnings}
+            _record('server_config', 'critical',
+                    f'{len(missing)} critical config issue(s): {missing[0]}',
+                    f'{total_issues} issue(s)',
+                    details)
+        elif warnings:
+            details = {'missing': [], 'warnings': warnings}
+            _record('server_config', 'warning',
+                    f'{len(warnings)} config warning(s): {warnings[0]}',
+                    f'{total_issues} warning(s)',
+                    details)
+        else:
+            _record('server_config', 'ok',
+                    'Server configuration is complete', 'all configured',
+                    {'missing': [], 'warnings': []})
+    except Exception as e:
+        _record('server_config', 'error', f'Config check failed: {str(e)[:200]}')
+
+
 # Map check_name -> function
 CHECK_FUNCTIONS = {
     'database': check_database,
@@ -689,6 +756,7 @@ CHECK_FUNCTIONS = {
     'pending_import_queue': check_pending_import_queue,
     'api_source_status': check_api_source_status,
     'sync_retry_status': check_sync_retry_status,
+    'server_config': check_server_config,
 }
 
 
