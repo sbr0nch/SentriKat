@@ -3640,21 +3640,27 @@ def get_license_tiers():
 
 # Default agent versions — used as fallback if DB settings aren't configured.
 # Admins can override via SystemSettings key 'latest_agent_version_{platform}'.
-_DEFAULT_AGENT_VERSIONS = {
-    'linux': '1.4.0',
-    'windows': '1.4.0',
-    'macos': '1.4.0'
-}
-
-
 def _get_latest_agent_versions():
-    """Get latest agent versions from DB settings, falling back to defaults.
+    """Get latest agent versions, derived from APP_VERSION by default.
 
-    Admins can set 'latest_agent_version_linux', 'latest_agent_version_windows',
-    'latest_agent_version_macos' in SystemSettings to push updates without
-    redeploying SentriKat.
+    The agent version automatically tracks the SentriKat release version (from
+    the VERSION file). This means bumping VERSION for a release automatically
+    makes all agents "outdated", triggering the update mechanism.
+
+    Admins can override per-platform via SystemSettings keys:
+    'latest_agent_version_linux', 'latest_agent_version_windows',
+    'latest_agent_version_macos' — useful for pinning a platform to an older
+    version or testing a new agent on one platform first.
     """
-    versions = dict(_DEFAULT_AGENT_VERSIONS)
+    from app import APP_VERSION
+    # Strip pre-release suffixes (e.g., "1.0.0-beta.1" -> "1.0.0") for version
+    # comparison since agents use simple numeric version strings
+    base_version = APP_VERSION.split('-')[0] if APP_VERSION else '0.0.0'
+    versions = {
+        'linux': base_version,
+        'windows': base_version,
+        'macos': base_version,
+    }
     try:
         from app.models import SystemSettings
         for platform in ('linux', 'windows', 'macos'):
@@ -3666,10 +3672,6 @@ def _get_latest_agent_versions():
     except Exception:
         pass
     return versions
-
-
-# Keep the name for backward compatibility (read-only reference for imports)
-LATEST_AGENT_VERSIONS = _DEFAULT_AGENT_VERSIONS
 
 
 @agent_bp.route('/api/agent/commands', methods=['GET'])
@@ -3904,15 +3906,45 @@ def download_agent_script(platform):
     with open(script_path, 'r') as f:
         script_content = f.read()
 
+    # Inject current APP_VERSION into agent script so the agent reports the
+    # correct version after updating (instead of the hardcoded dev version)
+    latest_version = _get_latest_agent_versions().get(platform, '0.0.0')
+    script_content = _inject_agent_version(script_content, latest_version, platform)
+
     content_type = 'application/octet-stream'
     return Response(
         script_content,
         mimetype=content_type,
         headers={
             'Content-Disposition': f'attachment; filename={filename}',
-            'X-Agent-Version': _get_latest_agent_versions().get(platform, '1.0.0')
+            'X-Agent-Version': latest_version
         }
     )
+
+
+def _inject_agent_version(script_content, version, platform):
+    """Inject the current SentriKat version into an agent script.
+
+    Replaces the hardcoded AGENT_VERSION in the script with the server's
+    APP_VERSION so that after an agent updates, it reports the correct version.
+    """
+    if platform == 'windows':
+        # PowerShell: $AgentVersion = "1.4.0"
+        script_content = re.sub(
+            r'\$AgentVersion\s*=\s*"[^"]*"',
+            f'$AgentVersion = "{version}"',
+            script_content,
+            count=1
+        )
+    else:
+        # Bash (Linux/macOS): AGENT_VERSION="1.4.0"
+        script_content = re.sub(
+            r'AGENT_VERSION="[^"]*"',
+            f'AGENT_VERSION="{version}"',
+            script_content,
+            count=1
+        )
+    return script_content
 
 
 def _version_compare(v1, v2):
