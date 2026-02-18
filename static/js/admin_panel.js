@@ -6798,13 +6798,13 @@ async function loadAgentKeys() {
                     <td data-column="expires">${key.expires_at ? formatDate(key.expires_at) : '<span class="text-muted">-</span>'}</td>
                     <td>
                         <div class="btn-group btn-group-sm">
-                            <button class="btn btn-outline-primary" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'windows')" title="Download Windows Agent">
+                            <button class="btn btn-outline-primary" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'windows', ${key.id})" title="Download Windows Agent">
                                 <i class="bi bi-windows"></i>
                             </button>
-                            <button class="btn btn-outline-success" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'linux')" title="Download Linux Agent">
+                            <button class="btn btn-outline-success" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'linux', ${key.id})" title="Download Linux Agent">
                                 <i class="bi bi-ubuntu"></i>
                             </button>
-                            <button class="btn btn-outline-secondary" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'macos')" title="Download macOS Agent">
+                            <button class="btn btn-outline-secondary" onclick="downloadAgentWithKey('${escapeHtml(key.key_prefix)}', 'macos', ${key.id})" title="Download macOS Agent">
                                 <i class="bi bi-apple"></i>
                             </button>
                             <button class="btn btn-outline-danger" onclick="deleteAgentKey(${key.id}, '${escapeHtml(key.name)}')" title="Delete key">
@@ -7077,20 +7077,22 @@ function fallbackCopyText(text) {
  * Download agent script with a specific API key embedded
  * Called from the API keys table download buttons
  */
-async function downloadAgentWithKey(keyPrefix, platform) {
+async function downloadAgentWithKey(keyPrefix, platform, keyId) {
     // Check if we have the full key stored from recent creation
     const fullKey = recentlyCreatedKeys.get(keyPrefix);
-    const hasKey = !!fullKey;
 
     const platformNames = { windows: 'Windows', linux: 'Linux', macos: 'macOS' };
     const platformName = platformNames[platform] || platform;
-    showToast(`Downloading ${platformName} agent${hasKey ? ' with embedded key' : ''}...`, 'info');
+    showToast(`Downloading ${platformName} agent with embedded key...`, 'info');
 
     try {
-        // If we have the full key, embed it in the download
         let url = `/api/agents/script/${platform}`;
-        if (hasKey) {
+        if (fullKey) {
+            // Use in-memory key from recent creation
             url += `?api_key=${encodeURIComponent(fullKey)}`;
+        } else if (keyId) {
+            // Fall back to server-side decryption of stored encrypted key
+            url += `?key_id=${keyId}`;
         }
 
         const response = await fetch(url);
@@ -7104,11 +7106,7 @@ async function downloadAgentWithKey(keyPrefix, platform) {
         const filename = filenames[platform] || 'sentrikat-agent.sh';
         downloadScript(filename, script);
 
-        if (hasKey) {
-            showToast(`${platformName} agent downloaded with API key embedded!`, 'success');
-        } else {
-            showToast(`Agent script downloaded. Server URL is embedded. Note: API key could not be embedded (key is only available at creation time). You will be prompted for the key when running the script.`, 'warning');
-        }
+        showToast(`${platformName} agent downloaded with API key embedded!`, 'success');
     } catch (error) {
         showToast(`Error downloading agent: ${error.message}`, 'danger');
     }

@@ -1585,12 +1585,36 @@ def _read_agent_script(filename):
         return f.read()
 
 
+def _resolve_agent_api_key():
+    """Resolve the raw agent API key from query params or database lookup.
+
+    Accepts either:
+      - api_key=<raw_key> (from recently created keys in-memory)
+      - key_id=<int> (looks up encrypted_key from the database)
+    """
+    api_key = request.args.get('api_key', '')
+    if api_key and api_key != 'YOUR_API_KEY_HERE':
+        return api_key
+
+    key_id = request.args.get('key_id', type=int)
+    if key_id:
+        from app.models import AgentApiKey
+        from app.encryption import decrypt_value
+        agent_key = AgentApiKey.query.get(key_id)
+        if agent_key and agent_key.encrypted_key:
+            try:
+                return decrypt_value(agent_key.encrypted_key)
+            except Exception as e:
+                logger.warning(f"Could not decrypt API key {key_id}: {e}")
+    return ''
+
+
 @bp.route('/api/agents/script/windows', methods=['GET'])
 @login_required
 @requires_professional('Integrations')
 def download_windows_agent():
     """Download Windows PowerShell agent script with embedded server URL and API key."""
-    api_key = request.args.get('api_key', '')
+    api_key = _resolve_agent_api_key()
     base_url = _get_base_url()
 
     script = _read_agent_script('sentrikat-agent-windows.ps1')
@@ -1629,7 +1653,7 @@ def download_windows_agent():
 @requires_professional('Integrations')
 def download_linux_agent():
     """Download Linux Bash agent script with embedded server URL and API key."""
-    api_key = request.args.get('api_key', '')
+    api_key = _resolve_agent_api_key()
     base_url = _get_base_url()
 
     script = _read_agent_script('sentrikat-agent-linux.sh')
@@ -1660,7 +1684,7 @@ def download_linux_agent():
 @requires_professional('Integrations')
 def download_macos_agent():
     """Download macOS Bash agent script with embedded server URL and API key."""
-    api_key = request.args.get('api_key', '')
+    api_key = _resolve_agent_api_key()
     base_url = _get_base_url()
 
     script = _read_agent_script('sentrikat-agent-macos.sh')
