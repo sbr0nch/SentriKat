@@ -273,6 +273,10 @@ class Product(db.Model):
     cpe_uri = db.Column(db.String(500), nullable=True)  # Full CPE 2.3 URI (optional)
     match_type = db.Column(db.String(20), default='auto')  # auto, cpe, keyword, both
 
+    # Software classification
+    source_type = db.Column(db.String(30), default='os_package', index=True)  # os_package, vscode_extension, code_library, browser_extension
+    ecosystem = db.Column(db.String(30), nullable=True, index=True)  # npm, pypi, maven, nuget, cargo, go, gem, composer, vscode, chrome, etc.
+
     # Agent product queue fields - for approval workflow
     source = db.Column(db.String(20), default='manual', index=True)  # manual, agent
     source_key_type = db.Column(db.String(20), nullable=True, index=True)  # server, client - inherited from reporting API key type
@@ -383,6 +387,8 @@ class Product(db.Model):
             'description': self.description,
             'active': self.active,
             'criticality': self.criticality or 'medium',
+            'source_type': self.source_type or 'os_package',
+            'ecosystem': self.ecosystem,
             'source_key_type': self.source_key_type,  # server or client (from reporting API key)
             'platforms': platform_list,  # OS platforms detected on (Windows, Linux, macOS)
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -1550,9 +1556,11 @@ class ProductInstallation(db.Model):
 
     # Installation details
     install_path = db.Column(db.String(500), nullable=True)  # Where it's installed
+    project_path = db.Column(db.String(500), nullable=True)  # For code libraries: path to project/lock file
     distro_package_version = db.Column(db.String(200), nullable=True)  # Full distro version e.g. 2.4.52-1ubuntu4.6
     detected_by = db.Column(db.String(50), default='agent')  # agent, manual, scan
     detected_on_os = db.Column(db.String(50), nullable=True, index=True)  # linux, windows, macos, etc.
+    is_direct_dependency = db.Column(db.Boolean, nullable=True)  # For code libraries: direct vs transitive
 
     # Status
     is_vulnerable = db.Column(db.Boolean, default=False, index=True)  # Cached: has matching CVEs?
@@ -1658,6 +1666,11 @@ class AgentApiKey(db.Model):
     # Key classification
     key_type = db.Column(db.String(20), default='server', index=True)  # server, client - differentiates deployment target
 
+    # Scan capabilities (license-gated features)
+    scan_os_packages = db.Column(db.Boolean, default=True)  # Standard OS package scanning (always on)
+    scan_extensions = db.Column(db.Boolean, default=False)  # VSCode/IDE extension scanning
+    scan_dependencies = db.Column(db.Boolean, default=False)  # Code library/dependency scanning
+
     # Permissions & limits
     active = db.Column(db.Boolean, default=True, index=True)
     max_assets = db.Column(db.Integer, nullable=True)  # NULL = unlimited
@@ -1744,6 +1757,11 @@ class AgentApiKey(db.Model):
             'name': self.name,
             'key_prefix': self.key_prefix,
             'key_type': self.key_type or 'server',
+            'scan_capabilities': {
+                'os_packages': self.scan_os_packages if self.scan_os_packages is not None else True,
+                'extensions': self.scan_extensions or False,
+                'dependencies': self.scan_dependencies or False,
+            },
             'active': self.active,
             'max_assets': self.max_assets,
             'allowed_ips': self.get_allowed_ips(),

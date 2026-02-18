@@ -917,6 +917,7 @@ def get_products():
     status = request.args.get('status', '').strip().lower()
     cpe_filter = request.args.get('cpe_filter', '').strip().lower()  # with_cpe or without_cpe
     source_key_type = request.args.get('source_key_type', '').strip().lower()  # server or client
+    source_type = request.args.get('source_type', '').strip().lower()  # os_package, vscode_extension, code_library, browser_extension
     page = request.args.get('page', type=int)
     per_page = request.args.get('per_page', 25, type=int)
     per_page = min(per_page, 100)  # Limit max items per page
@@ -1030,6 +1031,11 @@ def get_products():
     if source_key_type in ('server', 'client'):
         query = query.filter(Product.source_key_type == source_key_type)
 
+    # Apply source type filter (os_package, vscode_extension, code_library, browser_extension)
+    valid_source_types = ('os_package', 'vscode_extension', 'code_library', 'browser_extension')
+    if source_type in valid_source_types:
+        query = query.filter(Product.source_type == source_type)
+
     # Order by requested column or default vendor+product_name
     _col_map = {
         'product': Product.product_name,
@@ -1114,6 +1120,8 @@ def get_products():
                     'active': p.active,
                     'source': getattr(p, 'source', 'manual'),
                     'source_key_type': getattr(p, 'source_key_type', None),
+                    'source_type': getattr(p, 'source_type', 'os_package') or 'os_package',
+                    'ecosystem': getattr(p, 'ecosystem', None),
                     'criticality': getattr(p, 'criticality', 'medium'),
                     'versions': [],
                     'organization_ids': set(),
@@ -2458,6 +2466,17 @@ def get_vulnerability_stats():
                 p.id for p in Product.query.filter(
                     Product.id.in_(org_product_ids),
                     Product.source_key_type == source_key_type
+                ).all()
+            ]
+            org_product_ids = filtered_product_ids
+
+        # Apply source_type filter to narrow product IDs
+        source_type_filter = request.args.get('source_type', '').strip().lower()
+        if org_product_ids and source_type_filter in ('os_package', 'vscode_extension', 'code_library', 'browser_extension'):
+            filtered_product_ids = [
+                p.id for p in Product.query.filter(
+                    Product.id.in_(org_product_ids),
+                    Product.source_type == source_type_filter
                 ).all()
             ]
             org_product_ids = filtered_product_ids

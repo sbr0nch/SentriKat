@@ -32,6 +32,8 @@ API_KEY=""
 INTERVAL_HOURS=4
 HEARTBEAT_MINUTES=5
 AGENT_ID=""
+SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-false}"        # VSCode/IDE extension scanning
+SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-false}"    # Code library dependency scanning
 
 # ============================================================================
 # Logging Functions
@@ -119,6 +121,8 @@ API_KEY="${API_KEY}"
 INTERVAL_HOURS=${INTERVAL_HOURS}
 HEARTBEAT_MINUTES=${HEARTBEAT_MINUTES}
 AGENT_ID="${AGENT_ID}"
+SCAN_EXTENSIONS=${SCAN_EXTENSIONS}
+SCAN_DEPENDENCIES=${SCAN_DEPENDENCIES}
 EOF
 
     chmod 600 "$CONFIG_FILE"
@@ -299,7 +303,253 @@ get_installed_software() {
         done < <(flatpak list --columns=name,version,origin 2>/dev/null)
     fi
 
-    log_info "Collected $count installed packages (server-side filtering)"
+    log_info "Collected $count installed OS packages (server-side filtering)"
+
+    # ========================================================================
+    # VSCode / IDE Extension Scanning (if enabled via SCAN_EXTENSIONS=true)
+    # ========================================================================
+    if [[ "${SCAN_EXTENSIONS:-false}" == "true" ]]; then
+        local ext_count=0
+        log_info "Scanning VSCode/IDE extensions..."
+
+        # Scan all user home directories for VSCode extensions
+        for user_home in /home/* /root; do
+            [[ ! -d "$user_home" ]] && continue
+
+            # VSCode extensions
+            local vscode_ext_dir="$user_home/.vscode/extensions"
+            if [[ -d "$vscode_ext_dir" ]]; then
+                for ext_dir in "$vscode_ext_dir"/*/; do
+                    [[ ! -d "$ext_dir" ]] && continue
+                    local pkg_json="$ext_dir/package.json"
+                    [[ ! -f "$pkg_json" ]] && continue
+
+                    # Parse package.json without jq (grep-based)
+                    local ext_name ext_version ext_publisher ext_display
+                    ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                    ext_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                    ext_publisher=$(grep -o '"publisher"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                    ext_display=$(grep -o '"displayName"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+
+                    [[ -z "$ext_name" ]] && continue
+                    local display="${ext_display:-$ext_name}"
+                    local pub="${ext_publisher:-Unknown}"
+
+                    display=$(json_escape "$display")
+                    ext_version=$(json_escape "${ext_version:-unknown}")
+                    pub=$(json_escape "$pub")
+                    local epath
+                    epath=$(json_escape "$ext_dir")
+
+                    products+=("{\"vendor\": \"$pub\", \"product\": \"$display\", \"version\": \"$ext_version\", \"path\": \"$epath\", \"source_type\": \"vscode_extension\", \"ecosystem\": \"vscode\"}")
+                    ((ext_count++)) || true
+                done
+            fi
+
+            # VSCode Insiders
+            local vscode_insiders_dir="$user_home/.vscode-insiders/extensions"
+            if [[ -d "$vscode_insiders_dir" ]]; then
+                for ext_dir in "$vscode_insiders_dir"/*/; do
+                    [[ ! -d "$ext_dir" ]] && continue
+                    local pkg_json="$ext_dir/package.json"
+                    [[ ! -f "$pkg_json" ]] && continue
+
+                    local ext_name ext_version ext_publisher ext_display
+                    ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                    ext_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                    ext_publisher=$(grep -o '"publisher"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                    ext_display=$(grep -o '"displayName"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+
+                    [[ -z "$ext_name" ]] && continue
+                    local display="${ext_display:-$ext_name}"
+                    local pub="${ext_publisher:-Unknown}"
+
+                    display=$(json_escape "$display")
+                    ext_version=$(json_escape "${ext_version:-unknown}")
+                    pub=$(json_escape "$pub")
+
+                    products+=("{\"vendor\": \"$pub\", \"product\": \"$display\", \"version\": \"$ext_version\", \"source_type\": \"vscode_extension\", \"ecosystem\": \"vscode\"}")
+                    ((ext_count++)) || true
+                done
+            fi
+        done
+        log_info "Collected $ext_count VSCode/IDE extensions"
+        count=$((count + ext_count))
+    fi
+
+    # ========================================================================
+    # Code Dependency Scanning (if enabled via SCAN_DEPENDENCIES=true)
+    # ========================================================================
+    if [[ "${SCAN_DEPENDENCIES:-false}" == "true" ]]; then
+        local dep_count=0
+        log_info "Scanning code dependencies..."
+
+        # --- Python: pip freeze (global + virtualenvs) ---
+        if command -v pip3 &>/dev/null || command -v pip &>/dev/null; then
+            local pip_cmd="pip3"
+            command -v pip3 &>/dev/null || pip_cmd="pip"
+            while IFS='==' read -r pkg_name pkg_version; do
+                [[ -z "$pkg_name" || "$pkg_name" == "pip" || "$pkg_name" == "setuptools" || "$pkg_name" == "wheel" ]] && continue
+                pkg_name=$(json_escape "$pkg_name")
+                pkg_version=$(json_escape "$pkg_version")
+                products+=("{\"vendor\": \"PyPI\", \"product\": \"$pkg_name\", \"version\": \"$pkg_version\", \"source_type\": \"code_library\", \"ecosystem\": \"pypi\"}")
+                ((dep_count++)) || true
+            done < <($pip_cmd freeze 2>/dev/null | tr '==' '\t' | awk -F'\t' '{print $1"=="$2}' | sed 's/==$/==/;s/==$//') || true
+        fi
+
+        # --- Python: scan requirements.txt / Pipfile.lock in common dirs ---
+        for search_dir in /home /opt /srv /var/www; do
+            [[ ! -d "$search_dir" ]] && continue
+            while IFS= read -r reqfile; do
+                local proj_dir
+                proj_dir=$(dirname "$reqfile")
+                while IFS= read -r line; do
+                    # Skip comments, empty lines, options
+                    [[ -z "$line" || "$line" == \#* || "$line" == -* ]] && continue
+                    # Parse name==version or name>=version
+                    local pkg_name pkg_version
+                    if [[ "$line" == *"=="* ]]; then
+                        pkg_name="${line%%==*}"
+                        pkg_version="${line#*==}"
+                    elif [[ "$line" == *">="* ]]; then
+                        pkg_name="${line%%>=*}"
+                        pkg_version="${line#*>=}"
+                    else
+                        pkg_name="$line"
+                        pkg_version="unknown"
+                    fi
+                    # Strip extras like package[extra]
+                    pkg_name="${pkg_name%%\[*}"
+                    pkg_name=$(echo "$pkg_name" | tr -d '[:space:]')
+                    [[ -z "$pkg_name" ]] && continue
+
+                    pkg_name=$(json_escape "$pkg_name")
+                    pkg_version=$(json_escape "$pkg_version")
+                    local pp
+                    pp=$(json_escape "$reqfile")
+                    products+=("{\"vendor\": \"PyPI\", \"product\": \"$pkg_name\", \"version\": \"$pkg_version\", \"source_type\": \"code_library\", \"ecosystem\": \"pypi\", \"project_path\": \"$pp\", \"is_direct\": true}")
+                    ((dep_count++)) || true
+                done < "$reqfile"
+            done < <(find "$search_dir" -maxdepth 4 -name "requirements.txt" -readable 2>/dev/null | head -50)
+        done
+
+        # --- Node.js: global npm packages ---
+        if command -v npm &>/dev/null; then
+            while IFS=':' read -r pkg_name pkg_version; do
+                [[ -z "$pkg_name" || "$pkg_name" == "npm" ]] && continue
+                pkg_name=$(json_escape "$pkg_name")
+                pkg_version=$(json_escape "$pkg_version")
+                products+=("{\"vendor\": \"npm\", \"product\": \"$pkg_name\", \"version\": \"$pkg_version\", \"source_type\": \"code_library\", \"ecosystem\": \"npm\"}")
+                ((dep_count++)) || true
+            done < <(npm ls -g --depth=0 --parseable --long 2>/dev/null | tail -n +2 | awk -F'node_modules/' '{print $2}' | awk -F'@' '{if(NF>2){n=""; for(i=1;i<NF;i++){if(i>1)n=n"@"; n=n$i}; print n":"$NF}else{print $1":"$2}}') || true
+        fi
+
+        # --- Node.js: scan package-lock.json for direct deps ---
+        for search_dir in /home /opt /srv /var/www; do
+            [[ ! -d "$search_dir" ]] && continue
+            while IFS= read -r lockfile; do
+                local proj_dir
+                proj_dir=$(dirname "$lockfile")
+                local pkg_json="$proj_dir/package.json"
+                [[ ! -f "$pkg_json" ]] && continue
+
+                # Extract dependencies from package.json (direct deps only)
+                # Parse "dependencies": { "name": "^version", ... }
+                local in_deps=false
+                local brace_count=0
+                while IFS= read -r line; do
+                    if echo "$line" | grep -q '"dependencies"'; then
+                        in_deps=true
+                        brace_count=0
+                        continue
+                    fi
+                    if [[ "$in_deps" == "true" ]]; then
+                        if echo "$line" | grep -q '{'; then
+                            ((brace_count++)) || true
+                            continue
+                        fi
+                        if echo "$line" | grep -q '}'; then
+                            in_deps=false
+                            continue
+                        fi
+                        local dep_name dep_ver
+                        dep_name=$(echo "$line" | grep -o '"[^"]*"' | head -1 | tr -d '"')
+                        dep_ver=$(echo "$line" | grep -o '"[^"]*"' | tail -1 | tr -d '"' | sed 's/[\^~>=<]//g')
+                        [[ -z "$dep_name" ]] && continue
+
+                        dep_name=$(json_escape "$dep_name")
+                        dep_ver=$(json_escape "$dep_ver")
+                        local pp
+                        pp=$(json_escape "$lockfile")
+                        products+=("{\"vendor\": \"npm\", \"product\": \"$dep_name\", \"version\": \"$dep_ver\", \"source_type\": \"code_library\", \"ecosystem\": \"npm\", \"project_path\": \"$pp\", \"is_direct\": true}")
+                        ((dep_count++)) || true
+                    fi
+                done < "$pkg_json"
+            done < <(find "$search_dir" -maxdepth 4 -name "package-lock.json" -readable 2>/dev/null | head -50)
+        done
+
+        # --- Ruby: global gems ---
+        if command -v gem &>/dev/null; then
+            while read -r gem_name gem_version; do
+                [[ -z "$gem_name" ]] && continue
+                # gem list outputs "name (version1, version2)" format
+                gem_version=$(echo "$gem_version" | tr -d '(),' | awk '{print $1}')
+                gem_name=$(json_escape "$gem_name")
+                gem_version=$(json_escape "$gem_version")
+                products+=("{\"vendor\": \"RubyGems\", \"product\": \"$gem_name\", \"version\": \"$gem_version\", \"source_type\": \"code_library\", \"ecosystem\": \"gem\"}")
+                ((dep_count++)) || true
+            done < <(gem list --local 2>/dev/null | grep -v '^\*\*\*') || true
+        fi
+
+        # --- Rust: cargo global packages ---
+        if command -v cargo &>/dev/null; then
+            while IFS=' ' read -r crate_name crate_version _rest; do
+                [[ -z "$crate_name" || "$crate_name" == "warning:" ]] && continue
+                crate_name=$(json_escape "$crate_name")
+                crate_version=$(json_escape "${crate_version:-unknown}")
+                products+=("{\"vendor\": \"crates.io\", \"product\": \"$crate_name\", \"version\": \"$crate_version\", \"source_type\": \"code_library\", \"ecosystem\": \"cargo\"}")
+                ((dep_count++)) || true
+            done < <(cargo install --list 2>/dev/null | grep -E '^[a-zA-Z]') || true
+        fi
+
+        # --- Go: global binaries ---
+        if command -v go &>/dev/null; then
+            local gopath="${GOPATH:-$HOME/go}"
+            if [[ -d "$gopath/bin" ]]; then
+                for gobin in "$gopath/bin"/*; do
+                    [[ ! -x "$gobin" ]] && continue
+                    local bin_name
+                    bin_name=$(basename "$gobin")
+                    # Try to get version from binary
+                    local go_ver
+                    go_ver=$("$gobin" --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) || go_ver="unknown"
+                    bin_name=$(json_escape "$bin_name")
+                    go_ver=$(json_escape "$go_ver")
+                    products+=("{\"vendor\": \"Go\", \"product\": \"$bin_name\", \"version\": \"$go_ver\", \"source_type\": \"code_library\", \"ecosystem\": \"go\"}")
+                    ((dep_count++)) || true
+                done
+            fi
+        fi
+
+        # --- Composer (PHP): global packages ---
+        if command -v composer &>/dev/null; then
+            while IFS= read -r line; do
+                local comp_name comp_ver
+                comp_name=$(echo "$line" | awk '{print $1}')
+                comp_ver=$(echo "$line" | awk '{print $2}')
+                [[ -z "$comp_name" ]] && continue
+                comp_name=$(json_escape "$comp_name")
+                comp_ver=$(json_escape "${comp_ver:-unknown}")
+                products+=("{\"vendor\": \"Packagist\", \"product\": \"$comp_name\", \"version\": \"$comp_ver\", \"source_type\": \"code_library\", \"ecosystem\": \"composer\"}")
+                ((dep_count++)) || true
+            done < <(composer global show 2>/dev/null | awk '{print $1, $2}') || true
+        fi
+
+        log_info "Collected $dep_count code dependencies"
+        count=$((count + dep_count))
+    fi
+
+    log_info "Total collected: $count items"
 
     # Write JSON array directly to a temp file to avoid "Argument list too long"
     # errors. With 1000+ packages the JSON string can exceed bash/kernel ARG_MAX.
@@ -786,6 +1036,23 @@ check_commands() {
         latest_version=$(echo "$response" | grep -o '"latest_version": "[^"]*"' | cut -d'"' -f4)
         log_warn "Agent update available: ${AGENT_VERSION} -> ${latest_version}"
         auto_update_agent "$latest_version"
+    fi
+
+    # Update scan capabilities from server (license-gated features)
+    if echo "$response" | grep -q '"scan_capabilities"'; then
+        local cap_extensions cap_dependencies
+        cap_extensions=$(echo "$response" | grep -o '"extensions": *[a-z]*' | head -1 | grep -o 'true\|false')
+        cap_dependencies=$(echo "$response" | grep -o '"dependencies": *[a-z]*' | head -1 | grep -o 'true\|false')
+        if [[ -n "$cap_extensions" && "$cap_extensions" != "$SCAN_EXTENSIONS" ]]; then
+            log_info "Server updated scan capability: extensions=$cap_extensions"
+            SCAN_EXTENSIONS="$cap_extensions"
+            save_config
+        fi
+        if [[ -n "$cap_dependencies" && "$cap_dependencies" != "$SCAN_DEPENDENCIES" ]]; then
+            log_info "Server updated scan capability: dependencies=$cap_dependencies"
+            SCAN_DEPENDENCIES="$cap_dependencies"
+            save_config
+        fi
     fi
 
     return 1  # No scan needed
