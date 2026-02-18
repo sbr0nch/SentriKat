@@ -28,7 +28,7 @@ from app import db, csrf, limiter
 from app.models import (
     Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob,
     AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification,
-    ContainerImage, ContainerVulnerability
+    ContainerImage, ContainerVulnerability, VulnerabilityMatch
 )
 from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
 from app.auth import login_required, admin_required, org_admin_required
@@ -50,10 +50,11 @@ MAX_VERSION_LENGTH = 100
 MAX_PATH_LENGTH = 500
 
 # Valid source types and ecosystems for inventory processing
-VALID_SOURCE_TYPES = frozenset({'os_package', 'vscode_extension', 'code_library', 'browser_extension'})
+VALID_SOURCE_TYPES = frozenset({'os_package', 'extension', 'code_library', 'vscode_extension', 'browser_extension'})
 VALID_ECOSYSTEMS = frozenset({
     'npm', 'pypi', 'maven', 'nuget', 'cargo', 'go', 'gem', 'composer',
-    'vscode', 'chrome', 'firefox', 'apt', 'rpm', 'apk', 'pacman',
+    'vscode', 'chrome', 'firefox', 'edge', 'jetbrains',
+    'apt', 'rpm', 'apk', 'pacman',
     'snap', 'flatpak', 'brew', 'port', 'chocolatey', 'winget',
 })
 
@@ -1326,9 +1327,13 @@ def process_inventory_job(job):
                 if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
                     p_ecosystem = None  # Reject unknown ecosystems
 
+                # Normalize legacy source types to new unified 'extension'
+                if p_source_type in ('vscode_extension', 'browser_extension'):
+                    p_source_type = 'extension'
+
                 # Gate: reject extension/dependency data if API key doesn't have capability
                 # Hard enforcement: block if key is missing OR capability is disabled
-                if p_source_type == 'vscode_extension':
+                if p_source_type == 'extension':
                     if not agent_key_for_gating or not getattr(agent_key_for_gating, 'scan_extensions', False):
                         items_processed += 1
                         continue  # Skip - not licensed for extension scanning
@@ -1849,9 +1854,13 @@ def report_inventory():
                 if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
                     p_ecosystem = None  # Reject unknown ecosystems
 
+                # Normalize legacy source types to new unified 'extension'
+                if p_source_type in ('vscode_extension', 'browser_extension'):
+                    p_source_type = 'extension'
+
                 # Gate: reject extension/dependency data if API key doesn't have capability
                 # Hard enforcement: block if key is missing OR capability is disabled
-                if p_source_type == 'vscode_extension':
+                if p_source_type == 'extension':
                     if not agent_key or not getattr(agent_key, 'scan_extensions', False):
                         continue  # Skip - not licensed for extension scanning
                 if p_source_type == 'code_library':
@@ -4849,4 +4858,169 @@ def get_container_image_detail(image_id):
         'image': image.to_dict(),
         'vulnerabilities': [v.to_dict() for v in vulns],
         'vulnerability_count': len(vulns),
+    })
+
+
+# =============================================================================
+# Dependencies & Extensions API
+# =============================================================================
+
+@agent_bp.route('/api/dependencies', methods=['GET'])
+@login_required
+def list_dependencies():
+    """List code libraries and extensions for the user's organizations."""
+    from app.auth import get_current_user
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    if user.is_super_admin():
+        org_ids = [o.id for o in Organization.query.filter_by(active=True).all()]
+    else:
+        org_ids = [m.organization_id for m in user.org_memberships.all()]
+
+    # Filters
+    search = request.args.get('search', '').strip()
+    source_type = request.args.get('source_type', '').strip()
+    ecosystem = request.args.get('ecosystem', '').strip()
+
+    query = Product.query.filter(
+        Product.organization_id.in_(org_ids),
+        Product.source_type.in_(['extension', 'code_library'])
+    )
+
+    if source_type in ('extension', 'code_library'):
+        query = query.filter(Product.source_type == source_type)
+
+    if ecosystem:
+        query = query.filter(Product.ecosystem == ecosystem)
+
+    if search:
+        query = query.filter(
+            db.or_(
+                Product.product_name.ilike(f'%{search}%'),
+                Product.vendor.ilike(f'%{search}%'),
+                Product.ecosystem.ilike(f'%{search}%')
+            )
+        )
+
+    products = query.order_by(
+        Product.ecosystem.asc(),
+        Product.vendor.asc(),
+        Product.product_name.asc()
+    ).limit(1000).all()
+
+    # Count vulnerability matches and endpoint installations per product
+    product_ids = [p.id for p in products]
+
+    vuln_counts = {}
+    endpoint_counts = {}
+    if product_ids:
+        # Vuln match counts
+        vuln_rows = db.session.query(
+            VulnerabilityMatch.product_id,
+            db.func.count(VulnerabilityMatch.id)
+        ).filter(
+            VulnerabilityMatch.product_id.in_(product_ids)
+        ).group_by(VulnerabilityMatch.product_id).all()
+        vuln_counts = {row[0]: row[1] for row in vuln_rows}
+
+        # Endpoint counts (distinct assets per product)
+        inst_rows = db.session.query(
+            ProductInstallation.product_id,
+            db.func.count(db.func.distinct(ProductInstallation.asset_id))
+        ).filter(
+            ProductInstallation.product_id.in_(product_ids)
+        ).group_by(ProductInstallation.product_id).all()
+        endpoint_counts = {row[0]: row[1] for row in inst_rows}
+
+    # Collect ecosystems for filter dropdown
+    ecosystems = sorted(set(p.ecosystem for p in products if p.ecosystem))
+
+    # Stats
+    total_code_libraries = sum(1 for p in products if p.source_type == 'code_library')
+    total_extensions = sum(1 for p in products if p.source_type == 'extension')
+    total_vulnerable = sum(1 for p in products if vuln_counts.get(p.id, 0) > 0)
+
+    deps = []
+    for p in products:
+        deps.append({
+            'id': p.id,
+            'vendor': p.vendor,
+            'product_name': p.product_name,
+            'version': p.version,
+            'source_type': p.source_type,
+            'ecosystem': p.ecosystem,
+            'vuln_match_count': vuln_counts.get(p.id, 0),
+            'endpoint_count': endpoint_counts.get(p.id, 0),
+        })
+
+    return jsonify({
+        'dependencies': deps,
+        'ecosystems': ecosystems,
+        'stats': {
+            'total_code_libraries': total_code_libraries,
+            'total_extensions': total_extensions,
+            'total_ecosystems': len(ecosystems),
+            'total_vulnerable': total_vulnerable,
+        }
+    })
+
+
+@agent_bp.route('/api/dependencies/<int:product_id>', methods=['GET'])
+@login_required
+def get_dependency_detail(product_id):
+    """Get detail for a specific dependency including installations across endpoints."""
+    from app.auth import get_current_user
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    product = Product.query.get_or_404(product_id)
+
+    # Authorization check
+    if not user.is_super_admin():
+        org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if product.organization_id not in org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    # Only show extension/code_library products on this endpoint
+    if product.source_type not in ('extension', 'code_library'):
+        return jsonify({'error': 'Not a dependency or extension'}), 404
+
+    # Get installations with asset info
+    installations = db.session.query(
+        ProductInstallation, Asset
+    ).join(
+        Asset, ProductInstallation.asset_id == Asset.id
+    ).filter(
+        ProductInstallation.product_id == product.id
+    ).order_by(Asset.hostname.asc()).all()
+
+    # Count vuln matches
+    vuln_count = VulnerabilityMatch.query.filter_by(product_id=product.id).count()
+
+    inst_list = []
+    for inst, asset in installations:
+        inst_list.append({
+            'hostname': asset.hostname,
+            'asset_id': asset.id,
+            'version': inst.version,
+            'install_path': inst.install_path,
+            'project_path': inst.project_path,
+            'is_direct': inst.is_direct_dependency,
+            'last_seen_at': inst.last_seen_at.isoformat() if inst.last_seen_at else None,
+        })
+
+    return jsonify({
+        'dependency': {
+            'id': product.id,
+            'vendor': product.vendor,
+            'product_name': product.product_name,
+            'version': product.version,
+            'source_type': product.source_type,
+            'ecosystem': product.ecosystem,
+            'vuln_match_count': vuln_count,
+        },
+        'installations': inst_list,
     })

@@ -157,15 +157,22 @@ Configuration is stored at: `/Library/Application Support/SentriKat/agent.conf`
 - MacPorts packages
 - System packages (pkgutil)
 
-### VS Code Extensions (optional, capability-gated)
+### Extensions (optional, capability-gated)
 
-When enabled on the API key, agents scan for VS Code extensions across all user profiles:
+When enabled on the API key, agents scan for browser extensions and IDE plugins across all user profiles:
 
-- **VS Code** (`~/.vscode/extensions/`)
-- **VS Code Insiders** (`~/.vscode-insiders/extensions/`)
-- **macOS Application Support** (`~/Library/Application Support/Code/User/extensions/`)
-- Parses `package.json` for name, version, and publisher
-- Symlinks are skipped for security
+#### IDE Extensions
+- **VS Code** (`~/.vscode/extensions/`, `~/.vscode-insiders/extensions/`)
+- **JetBrains IDEs** (`~/.config/JetBrains/*/plugins/` on Linux, `~/Library/Application Support/JetBrains/` on macOS, `%APPDATA%\JetBrains\` on Windows)
+- Parses `package.json` (VS Code) or `META-INF/plugin.xml` (JetBrains) for name, version, and publisher
+
+#### Browser Extensions
+- **Chrome** (`~/.config/google-chrome/*/Extensions/` on Linux, `~/Library/Application Support/Google/Chrome/` on macOS)
+- **Firefox** (`~/.mozilla/firefox/*.default*/extensions.json` on Linux, `~/Library/Application Support/Firefox/` on macOS)
+- **Edge** (`~/.config/microsoft-edge/*/Extensions/` on Linux, `~/Library/Application Support/Microsoft Edge/` on macOS)
+- Parses `manifest.json` (Chrome/Edge) or `extensions.json` (Firefox)
+
+All extension types use `source_type: "extension"` with an ecosystem tag (`vscode`, `chrome`, `firefox`, `edge`, `jetbrains`). Symlinks are skipped for security.
 
 ### Code Dependencies (optional, capability-gated)
 
@@ -193,7 +200,7 @@ Scan capabilities are controlled **per API key** in the SentriKat web interface:
 
 1. Go to **Settings > Agent Keys**
 2. Create or edit an API key
-3. Check **VS Code Extensions** and/or **Code Dependencies**
+3. Check **Extensions** and/or **Code Dependencies**
 4. The agent automatically picks up the new capabilities on its next poll
 
 ### Vendor Backport Detection

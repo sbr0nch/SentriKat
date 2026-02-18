@@ -159,6 +159,37 @@ def _apply_schema_migrations(logger, db_uri):
             except Exception:
                 pass
 
+    # Data migration: normalize legacy source_type values to 'extension'
+    _apply_data_migrations(logger, db_uri)
+
+
+def _apply_data_migrations(logger, db_uri):
+    """Apply one-time data migrations (idempotent)."""
+    from sqlalchemy.pool import NullPool
+    engine = None
+    try:
+        engine = create_engine(db_uri, poolclass=NullPool, isolation_level="AUTOCOMMIT")
+        conn = engine.connect()
+        try:
+            result = conn.execute(text(
+                "UPDATE products SET source_type = 'extension' "
+                "WHERE source_type IN ('vscode_extension', 'browser_extension')"
+            ))
+            if result.rowcount and result.rowcount > 0:
+                logger.info(f"Migrated {result.rowcount} products from legacy source_type to 'extension'")
+        except Exception as e:
+            logger.debug(f"Data migration (source_type normalize) skipped: {e}")
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug(f"Data migration connection error: {e}")
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+
 
 def create_app(config_class=Config):
     app = Flask(__name__,

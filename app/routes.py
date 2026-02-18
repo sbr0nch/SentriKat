@@ -858,6 +858,13 @@ def containers():
     return render_template('containers.html')
 
 
+@bp.route('/dependencies')
+@login_required
+def dependencies():
+    """Dependencies page - view code libraries and extensions from push agents."""
+    return render_template('dependencies.html')
+
+
 @bp.route('/reports/scheduled')
 @org_admin_required
 def scheduled_reports():
@@ -917,7 +924,7 @@ def get_products():
     status = request.args.get('status', '').strip().lower()
     cpe_filter = request.args.get('cpe_filter', '').strip().lower()  # with_cpe or without_cpe
     source_key_type = request.args.get('source_key_type', '').strip().lower()  # server or client
-    source_type = request.args.get('source_type', '').strip().lower()  # os_package, vscode_extension, code_library, browser_extension
+    source_type = request.args.get('source_type', '').strip().lower()  # os_package, extension, code_library
     page = request.args.get('page', type=int)
     per_page = request.args.get('per_page', 25, type=int)
     per_page = min(per_page, 100)  # Limit max items per page
@@ -1031,8 +1038,8 @@ def get_products():
     if source_key_type in ('server', 'client'):
         query = query.filter(Product.source_key_type == source_key_type)
 
-    # Apply source type filter (os_package, vscode_extension, code_library, browser_extension)
-    if source_type in ('os_package', 'vscode_extension', 'code_library', 'browser_extension'):
+    # Apply source type filter (os_package, extension, code_library)
+    if source_type in ('os_package', 'extension', 'code_library'):
         query = query.filter(Product.source_type == source_type)
 
     # Order by requested column or default vendor+product_name
@@ -2471,7 +2478,7 @@ def get_vulnerability_stats():
 
         # Apply source_type filter to narrow product IDs
         source_type_filter = request.args.get('source_type', '').strip().lower()
-        if org_product_ids and source_type_filter in ('os_package', 'vscode_extension', 'code_library', 'browser_extension'):
+        if org_product_ids and source_type_filter in ('os_package', 'extension', 'code_library'):
             filtered_product_ids = [
                 p.id for p in Product.query.filter(
                     Product.id.in_(org_product_ids),

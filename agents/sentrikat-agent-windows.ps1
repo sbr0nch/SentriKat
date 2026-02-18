@@ -316,76 +316,171 @@ function Get-InstalledSoftware {
 }
 
 # ============================================================================
-# VSCode Extension Scanning
+# Extension Scanning (VS Code, Browsers, JetBrains IDEs)
 # ============================================================================
 
-function Get-VSCodeExtensions {
-    Write-Log "Scanning VSCode extensions..."
+function Get-Extensions {
+    Write-Log "Scanning extensions (VS Code, browsers, IDEs)..."
 
     $extensions = @()
 
-    # Collect all extension directories to scan
+    # --- VS Code extensions ---
     $extensionDirs = @()
-
-    # Current user's VSCode and VSCode Insiders extensions
-    if ($env:USERPROFILE) {
-        $vscodePath = Join-Path $env:USERPROFILE ".vscode\extensions"
-        $vscodeInsidersPath = Join-Path $env:USERPROFILE ".vscode-insiders\extensions"
-        if (Test-Path $vscodePath) { $extensionDirs += $vscodePath }
-        if (Test-Path $vscodeInsidersPath) { $extensionDirs += $vscodeInsidersPath }
-    }
-
-    # Scan all user profiles in C:\Users
     $usersDir = "C:\Users"
     if (Test-Path $usersDir) {
         $userProfiles = Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') }
-
         foreach ($profile in $userProfiles) {
-            $profileVscode = Join-Path $profile.FullName ".vscode\extensions"
-            $profileVscodeInsiders = Join-Path $profile.FullName ".vscode-insiders\extensions"
-
-            if ((Test-Path $profileVscode) -and ($profileVscode -notin $extensionDirs)) {
-                $extensionDirs += $profileVscode
-            }
-            if ((Test-Path $profileVscodeInsiders) -and ($profileVscodeInsiders -notin $extensionDirs)) {
-                $extensionDirs += $profileVscodeInsiders
+            @(".vscode\extensions", ".vscode-insiders\extensions") | ForEach-Object {
+                $p = Join-Path $profile.FullName $_
+                if ((Test-Path $p) -and ($p -notin $extensionDirs)) { $extensionDirs += $p }
             }
         }
     }
-
+    if ($env:USERPROFILE) {
+        @(".vscode\extensions", ".vscode-insiders\extensions") | ForEach-Object {
+            $p = Join-Path $env:USERPROFILE $_
+            if ((Test-Path $p) -and ($p -notin $extensionDirs)) { $extensionDirs += $p }
+        }
+    }
     foreach ($extDir in $extensionDirs) {
-        Write-Log "Scanning extensions in: $extDir"
-
         $extFolders = Get-ChildItem -Path $extDir -Directory -ErrorAction SilentlyContinue
         foreach ($folder in $extFolders) {
             $packageJsonPath = Join-Path $folder.FullName "package.json"
             if (!(Test-Path $packageJsonPath)) { continue }
-
             try {
                 $packageJson = Get-Content $packageJsonPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
-
-                $extName = if ($packageJson.name) { $packageJson.name } else { $folder.Name }
-                $extVersion = if ($packageJson.version) { $packageJson.version } else { $null }
-                $extPublisher = if ($packageJson.publisher) { $packageJson.publisher } else { "Unknown" }
-                $extDisplayName = if ($packageJson.displayName) { $packageJson.displayName } else { $extName }
-
                 $extensions += @{
-                    vendor = $extPublisher
-                    product = $extDisplayName
-                    version = $extVersion
+                    vendor = if ($packageJson.publisher) { $packageJson.publisher } else { "Unknown" }
+                    product = if ($packageJson.displayName) { $packageJson.displayName } elseif ($packageJson.name) { $packageJson.name } else { $folder.Name }
+                    version = if ($packageJson.version) { $packageJson.version } else { $null }
                     path = $folder.FullName
-                    source_type = "vscode_extension"
+                    source_type = "extension"
                     ecosystem = "vscode"
                 }
-            }
-            catch {
-                Write-Log "Failed to parse package.json in $($folder.FullName): $_" -Level "WARN"
+            } catch {
+                Write-Log "Failed to parse VS Code extension in $($folder.FullName): $_" -Level "WARN"
             }
         }
     }
 
-    # Deduplicate by publisher+name (keep first occurrence)
+    # --- Chrome extensions ---
+    if (Test-Path $usersDir) {
+        foreach ($profile in (Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') })) {
+            $chromeExtDir = Join-Path $profile.FullName "AppData\Local\Google\Chrome\User Data\Default\Extensions"
+            if (!(Test-Path $chromeExtDir)) { continue }
+            Get-ChildItem -Path $chromeExtDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $verDirs = Get-ChildItem -Path $_.FullName -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($verDirs) {
+                    $manifest = Join-Path $verDirs.FullName "manifest.json"
+                    if (Test-Path $manifest) {
+                        try {
+                            $m = Get-Content $manifest -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+                            $eName = if ($m.name -and $m.name -notlike "__MSG_*") { $m.name } else { $null }
+                            if ($eName) {
+                                $extensions += @{
+                                    vendor = "Chrome Web Store"
+                                    product = $eName
+                                    version = if ($m.version) { $m.version } else { $null }
+                                    source_type = "extension"
+                                    ecosystem = "chrome"
+                                }
+                            }
+                        } catch {}
+                    }
+                }
+            }
+        }
+    }
+
+    # --- Edge extensions ---
+    if (Test-Path $usersDir) {
+        foreach ($profile in (Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') })) {
+            $edgeExtDir = Join-Path $profile.FullName "AppData\Local\Microsoft\Edge\User Data\Default\Extensions"
+            if (!(Test-Path $edgeExtDir)) { continue }
+            Get-ChildItem -Path $edgeExtDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $verDirs = Get-ChildItem -Path $_.FullName -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($verDirs) {
+                    $manifest = Join-Path $verDirs.FullName "manifest.json"
+                    if (Test-Path $manifest) {
+                        try {
+                            $m = Get-Content $manifest -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+                            $eName = if ($m.name -and $m.name -notlike "__MSG_*") { $m.name } else { $null }
+                            if ($eName) {
+                                $extensions += @{
+                                    vendor = "Edge Add-ons"
+                                    product = $eName
+                                    version = if ($m.version) { $m.version } else { $null }
+                                    source_type = "extension"
+                                    ecosystem = "edge"
+                                }
+                            }
+                        } catch {}
+                    }
+                }
+            }
+        }
+    }
+
+    # --- Firefox extensions ---
+    if (Test-Path $usersDir) {
+        foreach ($profile in (Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') })) {
+            $ffDir = Join-Path $profile.FullName "AppData\Roaming\Mozilla\Firefox\Profiles"
+            if (!(Test-Path $ffDir)) { continue }
+            Get-ChildItem -Path $ffDir -Directory -Filter "*.default*" -ErrorAction SilentlyContinue | ForEach-Object {
+                $extJson = Join-Path $_.FullName "extensions.json"
+                if (Test-Path $extJson) {
+                    try {
+                        $data = Get-Content $extJson -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+                        foreach ($addon in $data.addons) {
+                            if ($addon.type -ne 'extension') { continue }
+                            $ffName = if ($addon.defaultLocale.name) { $addon.defaultLocale.name } else { $addon.id }
+                            if ($ffName -and !$ffName.StartsWith('@')) {
+                                $extensions += @{
+                                    vendor = if ($addon.defaultLocale.creator) { $addon.defaultLocale.creator } else { "Mozilla Add-ons" }
+                                    product = $ffName
+                                    version = if ($addon.version) { $addon.version } else { $null }
+                                    source_type = "extension"
+                                    ecosystem = "firefox"
+                                }
+                            }
+                        }
+                    } catch {}
+                }
+            }
+        }
+    }
+
+    # --- JetBrains IDE plugins ---
+    if (Test-Path $usersDir) {
+        foreach ($profile in (Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') })) {
+            $jbBase = Join-Path $profile.FullName "AppData\Roaming\JetBrains"
+            if (!(Test-Path $jbBase)) { continue }
+            Get-ChildItem -Path $jbBase -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $pluginsDir = Join-Path $_.FullName "plugins"
+                if (!(Test-Path $pluginsDir)) { return }
+                Get-ChildItem -Path $pluginsDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                    $pluginXml = Join-Path $_.FullName "META-INF\plugin.xml"
+                    if (Test-Path $pluginXml) {
+                        try {
+                            [xml]$xml = Get-Content $pluginXml -Raw -ErrorAction SilentlyContinue
+                            $pName = if ($xml.'idea-plugin'.name) { $xml.'idea-plugin'.name } else { $_.Name }
+                            $pVer = $xml.'idea-plugin'.version
+                            $extensions += @{
+                                vendor = "JetBrains Marketplace"
+                                product = $pName
+                                version = if ($pVer) { $pVer } else { $null }
+                                source_type = "extension"
+                                ecosystem = "jetbrains"
+                            }
+                        } catch {}
+                    }
+                }
+            }
+        }
+    }
+
+    # Deduplicate by vendor+name+version (keep first occurrence)
     $uniqueExtensions = @{}
     foreach ($ext in $extensions) {
         $key = "$($ext.vendor)|$($ext.product)|$($ext.version)".ToLower()
@@ -395,7 +490,7 @@ function Get-VSCodeExtensions {
     }
 
     $result = @($uniqueExtensions.Values)
-    Write-Log "Found $($result.Count) VSCode extensions"
+    Write-Log "Found $($result.Count) extensions (VS Code, browsers, IDEs)"
     return $result
 }
 
@@ -1408,10 +1503,10 @@ function Main {
             # Include extensions and dependencies in initial scan if enabled
             if ($config.ScanExtensions) {
                 try {
-                    $extensions = Get-VSCodeExtensions
+                    $extensions = Get-Extensions
                     if ($extensions.Count -gt 0) { $products = @($products) + @($extensions) }
                 } catch {
-                    Write-Log "VSCode extension scanning failed during initial scan: $_" -Level "WARN"
+                    Write-Log "Extension scanning failed during initial scan: $_" -Level "WARN"
                 }
             }
             if ($config.ScanDependencies) {
@@ -1475,14 +1570,14 @@ function Main {
         # VSCode extension scanning (conditional)
         if ($config.ScanExtensions) {
             try {
-                $extensions = Get-VSCodeExtensions
+                $extensions = Get-Extensions
                 if ($extensions.Count -gt 0) {
                     $products = @($products) + @($extensions)
-                    Write-Log "Added $($extensions.Count) VSCode extensions to inventory"
+                    Write-Log "Added $($extensions.Count) extensions to inventory"
                 }
             }
             catch {
-                Write-Log "VSCode extension scanning failed (non-fatal): $_" -Level "WARN"
+                Write-Log "Extension scanning failed (non-fatal): $_" -Level "WARN"
             }
         }
 

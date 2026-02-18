@@ -35,7 +35,7 @@ API_KEY=""
 INTERVAL_HOURS=4
 HEARTBEAT_MINUTES=5
 AGENT_ID=""
-SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-false}"        # VSCode/IDE extension scanning
+SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-false}"        # Extension scanning (VS Code, browsers, IDEs)
 SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-false}"    # Code library dependency scanning
 
 # ============================================================================
@@ -353,103 +353,134 @@ get_installed_software() {
     log_info "Collected $count installed packages total (server-side filtering)"
 
     # ========================================================================
-    # VSCode / IDE Extension Scanning (if enabled via SCAN_EXTENSIONS=true)
+    # Extension Scanning (if enabled via SCAN_EXTENSIONS=true)
+    # Scans: VS Code, Chrome, Firefox, Edge, JetBrains IDEs
     # ========================================================================
     if [[ "${SCAN_EXTENSIONS:-false}" == "true" ]]; then
         local ext_count=0
-        log_info "Scanning VSCode/IDE extensions..."
+        log_info "Scanning extensions (VS Code, browsers, IDEs)..."
 
-        # Scan all user home directories for VSCode extensions
+        # Helper: parse a package.json-style extension directory
+        _scan_vscode_dir() {
+            local scan_dir="$1" eco="$2"
+            [[ ! -d "$scan_dir" || -L "$scan_dir" ]] && return
+            for ext_dir in "$scan_dir"/*/; do
+                [[ ! -d "$ext_dir" || -L "$ext_dir" ]] && continue
+                local pkg_json="$ext_dir/package.json"
+                [[ ! -f "$pkg_json" || -L "$pkg_json" ]] && continue
+                local ext_name ext_version ext_publisher ext_display
+                ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                ext_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                ext_publisher=$(grep -o '"publisher"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                ext_display=$(grep -o '"displayName"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
+                [[ -z "$ext_name" ]] && continue
+                local display="${ext_display:-$ext_name}"
+                local pub="${ext_publisher:-Unknown}"
+                display=$(json_escape "$display")
+                ext_version=$(json_escape "${ext_version:-unknown}")
+                pub=$(json_escape "$pub")
+                local epath
+                epath=$(json_escape "$ext_dir")
+                products+=("{\"vendor\": \"$pub\", \"product\": \"$display\", \"version\": \"$ext_version\", \"path\": \"$epath\", \"source_type\": \"extension\", \"ecosystem\": \"$eco\"}")
+                ((ext_count++)) || true
+            done
+        }
+
         for user_home in /Users/*; do
             [[ ! -d "$user_home" ]] && continue
 
-            # macOS VSCode extensions (Application Support path)
-            local vscode_app_ext_dir="$user_home/Library/Application Support/Code/User/extensions"
-            if [[ -d "$vscode_app_ext_dir" && ! -L "$vscode_app_ext_dir" ]]; then
-                for ext_dir in "$vscode_app_ext_dir"/*/; do
-                    [[ ! -d "$ext_dir" || -L "$ext_dir" ]] && continue  # Skip symlinks
-                    local pkg_json="$ext_dir/package.json"
-                    [[ ! -f "$pkg_json" || -L "$pkg_json" ]] && continue  # Skip symlinks
+            # --- VS Code extensions (macOS paths) ---
+            _scan_vscode_dir "$user_home/Library/Application Support/Code/User/extensions" "vscode"
+            _scan_vscode_dir "$user_home/.vscode/extensions" "vscode"
+            _scan_vscode_dir "$user_home/.vscode-insiders/extensions" "vscode"
 
-                    # Parse package.json without jq (grep-based)
-                    local ext_name ext_version ext_publisher ext_display
-                    ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_publisher=$(grep -o '"publisher"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_display=$(grep -o '"displayName"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-
-                    [[ -z "$ext_name" ]] && continue
-                    local display="${ext_display:-$ext_name}"
-                    local pub="${ext_publisher:-Unknown}"
-
-                    display=$(json_escape "$display")
+            # --- Chrome extensions ---
+            local chrome_dir="$user_home/Library/Application Support/Google/Chrome"
+            if [[ -d "$chrome_dir" && ! -L "$chrome_dir" ]]; then
+                while IFS= read -r manifest; do
+                    [[ -L "$manifest" ]] && continue
+                    local ext_name ext_version
+                    ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" 2>/dev/null | head -1 | cut -d'"' -f4)
+                    ext_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" 2>/dev/null | head -1 | cut -d'"' -f4)
+                    [[ -z "$ext_name" || "$ext_name" == "__MSG_"* ]] && continue
+                    ext_name=$(json_escape "$ext_name")
                     ext_version=$(json_escape "${ext_version:-unknown}")
-                    pub=$(json_escape "$pub")
-                    local epath
-                    epath=$(json_escape "$ext_dir")
-
-                    products+=("{\"vendor\": \"$pub\", \"product\": \"$display\", \"version\": \"$ext_version\", \"path\": \"$epath\", \"source_type\": \"vscode_extension\", \"ecosystem\": \"vscode\"}")
+                    products+=("{\"vendor\": \"Chrome Web Store\", \"product\": \"$ext_name\", \"version\": \"$ext_version\", \"source_type\": \"extension\", \"ecosystem\": \"chrome\"}")
                     ((ext_count++)) || true
-                done
+                done < <(find "$chrome_dir" -maxdepth 5 -name "manifest.json" -path "*/Extensions/*" -type f 2>/dev/null | head -200) || true
             fi
 
-            # VSCode extensions (~/.vscode/extensions)
-            local vscode_ext_dir="$user_home/.vscode/extensions"
-            if [[ -d "$vscode_ext_dir" && ! -L "$vscode_ext_dir" ]]; then
-                for ext_dir in "$vscode_ext_dir"/*/; do
-                    [[ ! -d "$ext_dir" || -L "$ext_dir" ]] && continue  # Skip symlinks
-                    local pkg_json="$ext_dir/package.json"
-                    [[ ! -f "$pkg_json" || -L "$pkg_json" ]] && continue  # Skip symlinks
+            # --- Firefox extensions ---
+            for ff_profile in "$user_home"/Library/Application\ Support/Firefox/Profiles/*.default*; do
+                [[ ! -d "$ff_profile" || -L "$ff_profile" ]] && continue
+                local ff_ext_json="$ff_profile/extensions.json"
+                [[ ! -f "$ff_ext_json" || -L "$ff_ext_json" ]] && continue
+                if command -v python3 &>/dev/null; then
+                    while IFS='|' read -r ff_name ff_ver ff_creator; do
+                        [[ -z "$ff_name" ]] && continue
+                        ff_name=$(json_escape "$ff_name")
+                        ff_ver=$(json_escape "${ff_ver:-unknown}")
+                        ff_creator=$(json_escape "${ff_creator:-Mozilla Add-ons}")
+                        products+=("{\"vendor\": \"$ff_creator\", \"product\": \"$ff_name\", \"version\": \"$ff_ver\", \"source_type\": \"extension\", \"ecosystem\": \"firefox\"}")
+                        ((ext_count++)) || true
+                    done < <(python3 -c "
+import json, sys
+try:
+    with open('$ff_ext_json') as f:
+        data = json.load(f)
+    for a in data.get('addons', []):
+        if a.get('type') != 'extension': continue
+        if a.get('location') not in ('app-profile', 'app-global', None): continue
+        loc = a.get('defaultLocale', {})
+        name = loc.get('name', a.get('id', ''))
+        ver = a.get('version', '')
+        creator = loc.get('creator', '')
+        if name and not name.startswith('@'): print(f'{name}|{ver}|{creator}')
+except: pass
+" 2>/dev/null) || true
+                fi
+            done
 
-                    local ext_name ext_version ext_publisher ext_display
-                    ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_publisher=$(grep -o '"publisher"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_display=$(grep -o '"displayName"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-
-                    [[ -z "$ext_name" ]] && continue
-                    local display="${ext_display:-$ext_name}"
-                    local pub="${ext_publisher:-Unknown}"
-
-                    display=$(json_escape "$display")
+            # --- Edge extensions ---
+            local edge_dir="$user_home/Library/Application Support/Microsoft Edge"
+            if [[ -d "$edge_dir" && ! -L "$edge_dir" ]]; then
+                while IFS= read -r manifest; do
+                    [[ -L "$manifest" ]] && continue
+                    local ext_name ext_version
+                    ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" 2>/dev/null | head -1 | cut -d'"' -f4)
+                    ext_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" 2>/dev/null | head -1 | cut -d'"' -f4)
+                    [[ -z "$ext_name" || "$ext_name" == "__MSG_"* ]] && continue
+                    ext_name=$(json_escape "$ext_name")
                     ext_version=$(json_escape "${ext_version:-unknown}")
-                    pub=$(json_escape "$pub")
-                    local epath
-                    epath=$(json_escape "$ext_dir")
-
-                    products+=("{\"vendor\": \"$pub\", \"product\": \"$display\", \"version\": \"$ext_version\", \"path\": \"$epath\", \"source_type\": \"vscode_extension\", \"ecosystem\": \"vscode\"}")
+                    products+=("{\"vendor\": \"Edge Add-ons\", \"product\": \"$ext_name\", \"version\": \"$ext_version\", \"source_type\": \"extension\", \"ecosystem\": \"edge\"}")
                     ((ext_count++)) || true
-                done
+                done < <(find "$edge_dir" -maxdepth 5 -name "manifest.json" -path "*/Extensions/*" -type f 2>/dev/null | head -200) || true
             fi
 
-            # VSCode Insiders extensions
-            local vscode_insiders_dir="$user_home/.vscode-insiders/extensions"
-            if [[ -d "$vscode_insiders_dir" && ! -L "$vscode_insiders_dir" ]]; then
-                for ext_dir in "$vscode_insiders_dir"/*/; do
-                    [[ ! -d "$ext_dir" || -L "$ext_dir" ]] && continue  # Skip symlinks
-                    local pkg_json="$ext_dir/package.json"
-                    [[ ! -f "$pkg_json" || -L "$pkg_json" ]] && continue  # Skip symlinks
-
-                    local ext_name ext_version ext_publisher ext_display
-                    ext_name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_publisher=$(grep -o '"publisher"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-                    ext_display=$(grep -o '"displayName"[[:space:]]*:[[:space:]]*"[^"]*"' "$pkg_json" | head -1 | cut -d'"' -f4)
-
-                    [[ -z "$ext_name" ]] && continue
-                    local display="${ext_display:-$ext_name}"
-                    local pub="${ext_publisher:-Unknown}"
-
-                    display=$(json_escape "$display")
-                    ext_version=$(json_escape "${ext_version:-unknown}")
-                    pub=$(json_escape "$pub")
-
-                    products+=("{\"vendor\": \"$pub\", \"product\": \"$display\", \"version\": \"$ext_version\", \"source_type\": \"vscode_extension\", \"ecosystem\": \"vscode\"}")
-                    ((ext_count++)) || true
+            # --- JetBrains IDE plugins ---
+            for jb_dir in "$user_home/Library/Application Support/JetBrains"/*/; do
+                [[ ! -d "$jb_dir" || -L "$jb_dir" ]] && continue
+                local jb_plugins="$jb_dir/plugins"
+                [[ ! -d "$jb_plugins" || -L "$jb_plugins" ]] && continue
+                for plugin_dir in "$jb_plugins"/*/; do
+                    [[ ! -d "$plugin_dir" || -L "$plugin_dir" ]] && continue
+                    local plugin_xml="$plugin_dir/META-INF/plugin.xml"
+                    if [[ -f "$plugin_xml" && ! -L "$plugin_xml" ]]; then
+                        local p_name p_version
+                        p_name=$(grep -oP '(?<=<name>)[^<]+' "$plugin_xml" 2>/dev/null | head -1) || \
+                        p_name=$(sed -n 's/.*<name>\(.*\)<\/name>.*/\1/p' "$plugin_xml" 2>/dev/null | head -1)
+                        p_version=$(grep -oP '(?<=<version>)[^<]+' "$plugin_xml" 2>/dev/null | head -1) || \
+                        p_version=$(sed -n 's/.*<version>\(.*\)<\/version>.*/\1/p' "$plugin_xml" 2>/dev/null | head -1)
+                        [[ -z "$p_name" ]] && p_name=$(basename "$plugin_dir")
+                        p_name=$(json_escape "$p_name")
+                        p_version=$(json_escape "${p_version:-unknown}")
+                        products+=("{\"vendor\": \"JetBrains Marketplace\", \"product\": \"$p_name\", \"version\": \"$p_version\", \"source_type\": \"extension\", \"ecosystem\": \"jetbrains\"}")
+                        ((ext_count++)) || true
+                    fi
                 done
-            fi
+            done
         done
-        log_info "Collected $ext_count VSCode/IDE extensions"
+        log_info "Collected $ext_count extensions"
         count=$((count + ext_count))
     fi
 
