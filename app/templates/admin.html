@@ -161,6 +161,13 @@
                         <option value="without_cpe">Without CPE ⚠️</option>
                     </select>
                 </div>
+                <div class="col-md-2">
+                    <select class="form-select form-select-sm" id="filterSourceKeyType" onchange="resetAndLoadProducts()">
+                        <option value="">All Sources</option>
+                        <option value="server">Servers</option>
+                        <option value="client">Clients</option>
+                    </select>
+                </div>
                 <div class="col-md-1 text-end">
                     <span class="text-muted small" id="productCount">-</span>
                 </div>
@@ -1002,6 +1009,9 @@
         const cpeFilter = document.getElementById('filterCpe')?.value;
         if (cpeFilter) params.append('cpe_filter', cpeFilter);
 
+        const sourceKeyType = document.getElementById('filterSourceKeyType')?.value;
+        if (sourceKeyType) params.append('source_key_type', sourceKeyType);
+
         const perPage = parseInt(document.getElementById('perPage')?.value || '25');
         params.append('page', currentPage);
         params.append('per_page', perPage);
@@ -1046,7 +1056,7 @@
             }
 
             if (products.length === 0) {
-                const hasFilters = search || status || cpeFilter || (filterOrgEl && filterOrgEl.value);
+                const hasFilters = search || status || cpeFilter || sourceKeyType || (filterOrgEl && filterOrgEl.value);
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="text-center py-5">
@@ -1119,11 +1129,19 @@
                         ? '<span class="badge bg-success" title="CPE mapped - vulnerability matching active"><i class="bi bi-check-circle-fill"></i></span>'
                         : `<a href="#" class="badge bg-warning text-dark text-decoration-none" title="No CPE mapping - click to assign" onclick="event.preventDefault(); event.stopPropagation(); assignCpe(${firstVersionId}, '${escapeHtml(group.product_name)}')"><i class="bi bi-exclamation-triangle-fill me-1"></i>Assign</a>`;
 
+                    // Build source key type badge
+                    const sourceKeyType = group.source_key_type;
+                    const sourceKeyBadge = sourceKeyType === 'server'
+                        ? '<span class="badge bg-primary-subtle text-primary" title="Reported by server agent"><i class="bi bi-hdd-rack"></i></span> '
+                        : sourceKeyType === 'client'
+                        ? '<span class="badge bg-warning-subtle text-warning" title="Reported by client agent"><i class="bi bi-laptop"></i></span> '
+                        : '';
+
                     // Build platform display
                     const platforms = group.platforms || [];
                     let platformDisplay;
                     if (platforms.length === 0) {
-                        platformDisplay = '<span class="text-muted">-</span>';
+                        platformDisplay = sourceKeyBadge || '<span class="text-muted">-</span>';
                     } else {
                         // Map supports both lowercase (from backend) and capitalized versions
                         const platformIcons = {
@@ -1133,7 +1151,7 @@
                             'bsd': '<i class="bi bi-terminal text-danger" title="BSD"></i>',
                             'unix': '<i class="bi bi-terminal-fill text-success" title="Unix"></i>'
                         };
-                        platformDisplay = platforms.map(p => {
+                        platformDisplay = sourceKeyBadge + platforms.map(p => {
                             // Normalize to lowercase for lookup
                             const icon = platformIcons[p.toLowerCase()] || `<span class="badge bg-secondary">${escapeHtml(p)}</span>`;
                             return icon;
@@ -1244,6 +1262,8 @@
         document.getElementById('filterStatus').value = '';
         const filterCpeEl = document.getElementById('filterCpe');
         if (filterCpeEl) filterCpeEl.value = '';
+        const filterSourceKeyTypeEl = document.getElementById('filterSourceKeyType');
+        if (filterSourceKeyTypeEl) filterSourceKeyTypeEl.value = '';
         currentPage = 1;
         loadProducts();
     }

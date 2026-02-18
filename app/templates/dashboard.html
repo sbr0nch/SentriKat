@@ -216,6 +216,15 @@
     <div class="row g-3 mb-3">
         <!-- Left Column: Priority + Stats -->
         <div class="col-lg-5 col-xl-4">
+            <!-- Source Type Filter (Server/Client toggle) -->
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <small class="text-muted"><i class="bi bi-funnel me-1"></i>Source:</small>
+                <div class="btn-group btn-group-sm" role="group" id="sourceKeyTypeToggle">
+                    <button type="button" class="btn btn-outline-secondary active" data-source="" onclick="setDashboardSourceFilter('')" title="Show all">All</button>
+                    <button type="button" class="btn btn-outline-secondary" data-source="server" onclick="setDashboardSourceFilter('server')" title="Server-reported only"><i class="bi bi-hdd-rack me-1"></i>Servers</button>
+                    <button type="button" class="btn btn-outline-secondary" data-source="client" onclick="setDashboardSourceFilter('client')" title="Client-reported only"><i class="bi bi-laptop me-1"></i>Clients</button>
+                </div>
+            </div>
             <!-- Priority Alert Cards (compact 2x2 grid) -->
             <div class="row g-2 mb-2" id="priorityAlerts">
                 <div class="col-6">
@@ -1152,9 +1161,26 @@
         }
     }
 
+    // Dashboard source key type filter state
+    let dashboardSourceFilter = '';
+
+    function setDashboardSourceFilter(value) {
+        dashboardSourceFilter = value;
+        // Update toggle button states
+        document.querySelectorAll('#sourceKeyTypeToggle button').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.source === value);
+        });
+        // Reload stats and vulnerabilities with the new filter
+        loadStats();
+        loadVulnerabilities();
+    }
+
     async function loadStats() {
         try {
-            const response = await fetchWithRetry('/api/vulnerabilities/stats', {}, 4, 1000);
+            const statsUrl = dashboardSourceFilter
+                ? `/api/vulnerabilities/stats?source_key_type=${dashboardSourceFilter}`
+                : '/api/vulnerabilities/stats';
+            const response = await fetchWithRetry(statsUrl, {}, 4, 1000);
 
             // Check if response is OK before parsing
             if (!response.ok) {
@@ -1610,6 +1636,7 @@
             if (product) params.append('product', product);
             if (ransomware) params.append('ransomware_only', 'true');
             if (unack) params.append('acknowledged', 'false');
+            if (dashboardSourceFilter) params.append('source_key_type', dashboardSourceFilter);
 
             const response = await fetchWithRetry(`/api/vulnerabilities?${params}`, {}, 3, 1000);
 

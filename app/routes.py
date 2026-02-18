@@ -889,6 +889,7 @@ def get_products():
     - filter_org: Filter by organization ID (super admin only)
     - criticality: Filter by criticality (critical, high, medium, low)
     - status: Filter by status (active, inactive)
+    - source_key_type: Filter by reporting key type (server, client)
     - page: Page number (1-indexed)
     - per_page: Items per page (default 25, max 100)
     - grouped: If 'true', group products by vendor+product_name with versions as array
@@ -915,6 +916,7 @@ def get_products():
     criticality = request.args.get('criticality', '').strip().lower()
     status = request.args.get('status', '').strip().lower()
     cpe_filter = request.args.get('cpe_filter', '').strip().lower()  # with_cpe or without_cpe
+    source_key_type = request.args.get('source_key_type', '').strip().lower()  # server or client
     page = request.args.get('page', type=int)
     per_page = request.args.get('per_page', 25, type=int)
     per_page = min(per_page, 100)  # Limit max items per page
@@ -1024,6 +1026,10 @@ def get_products():
             )
         )
 
+    # Apply source key type filter (server/client)
+    if source_key_type in ('server', 'client'):
+        query = query.filter(Product.source_key_type == source_key_type)
+
     # Order by requested column or default vendor+product_name
     _col_map = {
         'product': Product.product_name,
@@ -1107,6 +1113,7 @@ def get_products():
                     'keywords': p.keywords,
                     'active': p.active,
                     'source': getattr(p, 'source', 'manual'),
+                    'source_key_type': getattr(p, 'source_key_type', None),
                     'criticality': getattr(p, 'criticality', 'medium'),
                     'versions': [],
                     'organization_ids': set(),
@@ -2360,6 +2367,7 @@ def get_vulnerabilities():
             'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
             'acknowledged': request.args.get('acknowledged'),
             'priority': request.args.get('priority'),  # critical, high, medium, low
+            'source_key_type': request.args.get('source_key_type', '').strip().lower() or None,
         }
 
         # Remove None values
@@ -2415,9 +2423,16 @@ def get_vulnerabilities():
 @bp.route('/api/vulnerabilities/stats', methods=['GET'])
 @login_required
 def get_vulnerability_stats():
-    """Get vulnerability statistics with priority breakdown for current organization"""
+    """Get vulnerability statistics with priority breakdown for current organization.
+
+    Optional query parameter:
+    - source_key_type: Filter to only include products reported by server or client API keys
+    """
     from app.models import product_organizations
     from sqlalchemy import select
+
+    # Optional server/client filter
+    source_key_type = request.args.get('source_key_type', '').strip().lower()
 
     # Get current organization
     org_id = session.get('organization_id')
@@ -2436,6 +2451,16 @@ def get_vulnerability_stats():
                 product_organizations.c.organization_id == org_id
             )
         ).scalars().all()
+
+        # Apply source_key_type filter to narrow product IDs
+        if org_product_ids and source_key_type in ('server', 'client'):
+            filtered_product_ids = [
+                p.id for p in Product.query.filter(
+                    Product.id.in_(org_product_ids),
+                    Product.source_key_type == source_key_type
+                ).all()
+            ]
+            org_product_ids = filtered_product_ids
 
         if org_product_ids:
             total_matches_query = VulnerabilityMatch.query.filter(
