@@ -44,7 +44,7 @@ load_proxy_from_env() {
             break
         fi
     done
-    [ -z "$env_file" ] && return
+    [ -z "$env_file" ] && return 0
 
     if [ -z "${HTTP_PROXY:-}" ]; then
         local val
@@ -61,6 +61,7 @@ load_proxy_from_env() {
         val=$(grep -E '^NO_PROXY=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2-)
         [ -n "$val" ] && export NO_PROXY="$val"
     fi
+    return 0
 }
 
 # Load installation ID for portal API calls
