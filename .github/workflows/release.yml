@@ -294,36 +294,60 @@ jobs:
           ls -lh "sentrikat-${VERSION}.tar.gz"
 
       # Create the GitHub Release with the package attached
+      # Uses gh CLI instead of softprops/action-gh-release to avoid
+      # transient "Finalizing release..." failures (retries exhausted on API 500s).
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          name: "SentriKat v${{ steps.version.outputs.VERSION }}"
-          body: |
-            ## SentriKat v${{ steps.version.outputs.VERSION }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Determine if this is a prerelease (tag contains hyphen: v1.0.0-beta.1)
+          PRERELEASE_FLAG=""
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
 
-            ### Docker Image
-            ```bash
-            docker pull ghcr.io/sbr0nch/sentrikat:${{ steps.version.outputs.VERSION }}
-            ```
+          # Delete any leftover draft release from a previous failed attempt
+          gh release delete "${{ github.ref_name }}" --yes 2>/dev/null || true
 
-            ### Quick Start
-            1. Download `sentrikat-${{ steps.version.outputs.VERSION }}.tar.gz` below
-            2. Extract: `tar xzf sentrikat-${{ steps.version.outputs.VERSION }}.tar.gz`
-            3. Configure: `cp .env.example .env && nano .env`
-            4. Start: `docker compose up -d`
-            5. Open: http://localhost:5000
+          # Create the release with retry logic (5 attempts, exponential backoff)
+          for attempt in 1 2 3 4 5; do
+            echo "Attempt ${attempt}: Creating release ${{ github.ref_name }}..."
+            if gh release create "${{ github.ref_name }}" \
+              "sentrikat-${VERSION}.tar.gz" \
+              --title "SentriKat v${VERSION}" \
+              --notes "## SentriKat v${VERSION}
 
-            ### Demo vs Professional
-            - **Demo** (no license): 1 user, 50 products, 5 agents
-            - **Professional**: Unlimited + all features
+          ### Docker Image
+          \`\`\`bash
+          docker pull ghcr.io/sbr0nch/sentrikat:${VERSION}
+          \`\`\`
 
-            ### What's Changed
-            See [CHANGELOG](https://github.com/sbr0nch/SentriKat/blob/main/CHANGELOG.md)
-          files: |
-            sentrikat-${{ steps.version.outputs.VERSION }}.tar.gz
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          ### Quick Start
+          1. Download \`sentrikat-${VERSION}.tar.gz\` below
+          2. Extract: \`tar xzf sentrikat-${VERSION}.tar.gz\`
+          3. Configure: \`cp .env.example .env && nano .env\`
+          4. Start: \`docker compose up -d\`
+          5. Open: http://localhost:5000
+
+          ### Demo vs Professional
+          - **Demo** (no license): 1 user, 50 products, 5 agents
+          - **Professional**: Unlimited + all features
+
+          ### What's Changed
+          See [CHANGELOG](https://github.com/sbr0nch/SentriKat/blob/main/CHANGELOG.md)" \
+              ${PRERELEASE_FLAG}; then
+              echo "Release created successfully!"
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Failed after 5 attempts"
+              exit 1
+            fi
+            SLEEP=$((attempt * 3))
+            echo "Failed, retrying in ${SLEEP}s..."
+            sleep ${SLEEP}
+          done
 
       # ── Notify the portal about the new release ──
       - name: Notify Portal

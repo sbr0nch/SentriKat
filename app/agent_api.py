@@ -1836,15 +1836,16 @@ def report_inventory():
                 installations_created += 1
                 seen_installation_ids.add(installation.id)
 
-                # Record version history for new installation
-                ProductVersionHistory.record_change(
-                    installation_id=installation.id,
-                    asset_id=asset.id,
-                    product_id=product.id,
-                    old_version=None,
-                    new_version=version,
-                    detected_by='agent'
-                )
+                # Record version history for new installation (skip if no version reported)
+                if version:
+                    ProductVersionHistory.record_change(
+                        installation_id=installation.id,
+                        asset_id=asset.id,
+                        product_id=product.id,
+                        old_version=None,
+                        new_version=version,
+                        detected_by='agent'
+                    )
             else:
                 seen_installation_ids.add(installation.id)
 

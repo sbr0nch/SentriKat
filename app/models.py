@@ -2263,6 +2263,10 @@ class ProductVersionHistory(db.Model):
     @staticmethod
     def record_change(installation_id, asset_id, product_id, old_version, new_version, detected_by='agent'):
         """Record a version change with upgrade/downgrade detection."""
+        # Cannot record history without a new_version (DB constraint: NOT NULL)
+        if not new_version:
+            return None
+
         # Determine change type
         if new_version == '(uninstalled)':
             change_type = 'uninstall'
