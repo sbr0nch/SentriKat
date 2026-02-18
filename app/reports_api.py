@@ -1007,7 +1007,7 @@ def export_vulnerabilities_csv():
                 days_overdue,
                 'Yes' if vuln.known_ransomware else 'No',
                 str(vuln.epss_score) if hasattr(vuln, 'epss_score') and vuln.epss_score else '',
-                (vuln.description or '')[:500],
+                (vuln.short_description or '')[:500],
                 m.vendor_fix_confidence or '',
                 m.acknowledged_at.isoformat() if m.acknowledged_at else '',
                 m.created_at.isoformat() if m.created_at else '',

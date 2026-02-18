@@ -41,7 +41,7 @@
     .alert-card-critical.active-filter { --active-border-color: var(--critical-color); }
     .alert-card-high.active-filter { --active-border-color: var(--high-color); }
     .alert-card-medium.active-filter { --active-border-color: var(--info-color); }
-    .alert-card-low.active-filter { --active-border-color: var(--low-color); }
+    .alert-card-zeroday.active-filter { --active-border-color: #7c3aed; }
 
     .alert-card-critical {
         --card-bg-start: #fefafa;
@@ -61,10 +61,10 @@
         border-left: 3px solid var(--info-color);
     }
 
-    .alert-card-low {
-        --card-bg-start: #f7fdfb;
-        --card-bg-end: #ecfdf5;
-        border-left: 3px solid var(--low-color);
+    .alert-card-zeroday {
+        --card-bg-start: #faf5ff;
+        --card-bg-end: #f3e8ff;
+        border-left: 3px solid #7c3aed;
     }
 
     .alert-card-label {
@@ -219,6 +219,17 @@
             <!-- Priority Alert Cards (compact 2x2 grid) -->
             <div class="row g-2 mb-2" id="priorityAlerts">
                 <div class="col-6">
+                    <div class="alert-card alert-card-zeroday" data-priority="zeroday" onclick="filterByZeroDay()" title="Click to filter by Zero-Day (Pre-KEV)">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="alert-card-label" style="color: #7c3aed;">0-Day</div>
+                                <div class="alert-card-value"><span id="zeroDayCves" style="color: #7c3aed;">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="zeroDayMatches">-</span>)</small></div>
+                            </div>
+                            <i class="bi bi-lightning-fill alert-icon" style="color: #7c3aed;"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
                     <div class="alert-card alert-card-critical" data-priority="critical" onclick="filterBySeverity('CRITICAL')" title="Click to filter by Critical">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
@@ -251,17 +262,6 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-6">
-                    <div class="alert-card alert-card-low" data-priority="low" onclick="filterBySeverity('LOW')" title="Click to filter by Low">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <div class="alert-card-label">Low</div>
-                                <div class="alert-card-value"><span id="lowCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="lowCount">-</span>)</small></div>
-                            </div>
-                            <i class="bi bi-shield-check alert-icon"></i>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <!-- Stats (compact list) -->
@@ -287,9 +287,9 @@
                         <small class="text-muted"><i class="bi bi-lightning-charge me-1"></i>High EPSS Risk</small>
                         <span class="fw-bold text-danger" id="highEpss" title="CVEs with EPSS >= 10% exploit probability">-</span>
                     </div>
-                    <div class="d-flex justify-content-between align-items-center py-1 px-2" id="zeroDayRow" style="display: none !important;">
-                        <small class="text-muted"><i class="bi bi-lightning-fill me-1" style="color: #7c3aed;"></i>Zero-Day (Pre-KEV)</small>
-                        <span class="fw-bold" style="color: #7c3aed;" id="zeroDayCount" title="CVEs detected by SentriKat before CISA KEV publication">0</span>
+                    <div class="d-flex justify-content-between align-items-center py-1 px-2">
+                        <small class="text-muted"><i class="bi bi-shield-check me-1"></i>Low Priority</small>
+                        <span class="fw-bold text-success" id="lowCves" title="Low priority vulnerability matches">-</span>
                     </div>
                 </div>
             </div>
@@ -1021,6 +1021,7 @@
     let selectedVulns = new Set();
     let currentPage = 1;
     let pageSize = 15;
+    let zeroDayFilterActive = false;
 
     function changePageSize() {
         const select = document.getElementById('pageSize');
@@ -1177,18 +1178,8 @@
                 epssEl.title = `${stats.epss.high_epss} CVEs with ≥10% exploit probability (avg: ${(stats.epss.avg_epss * 100).toFixed(1)}%)`;
             }
 
-            // Zero-day counter (show only when > 0)
-            const zdCount = stats.zero_day_count || 0;
-            const zdRow = document.getElementById('zeroDayRow');
-            const zdEl = document.getElementById('zeroDayCount');
-            if (zdCount > 0 && zdRow && zdEl) {
-                zdEl.textContent = formatNumber(zdCount);
-                zdRow.style.display = '';
-                zdRow.style.setProperty('display', 'flex', 'important');
-            } else if (zdRow) {
-                zdRow.style.display = 'none';
-                zdRow.style.setProperty('display', 'none', 'important');
-            }
+            // Low priority count (moved from quadrant to stats row)
+            document.getElementById('lowCves').textContent = formatNumber(stats.low_cves || 0);
 
             // Show/hide unmapped products warning (respects dismiss)
             const unmappedWarning = document.getElementById('unmappedWarning');
@@ -1214,14 +1205,14 @@
             }
 
             // Update priority counts - CVE counts and match counts
+            document.getElementById('zeroDayCves').textContent = formatNumber(stats.zero_day_count || 0);
+            document.getElementById('zeroDayMatches').textContent = formatNumber(stats.zero_day_matches || 0);
             document.getElementById('criticalCves').textContent = formatNumber(stats.critical_cves || 0);
             document.getElementById('criticalCount').textContent = formatNumber(stats.critical_count || 0);
             document.getElementById('highCves').textContent = formatNumber(stats.high_cves || 0);
             document.getElementById('highCount').textContent = formatNumber(stats.high_count || 0);
             document.getElementById('mediumCves').textContent = formatNumber(stats.medium_cves || 0);
             document.getElementById('mediumCount').textContent = formatNumber(stats.medium_count || 0);
-            document.getElementById('lowCves').textContent = formatNumber(stats.low_cves || 0);
-            document.getElementById('lowCount').textContent = formatNumber(stats.low_count || 0);
 
             // Update configurable dashboard widgets with stats data
             lastStatsData = stats;
@@ -1234,14 +1225,14 @@
             document.getElementById('unacknowledged').textContent = '-';
             document.getElementById('productsTracked').textContent = '-';
             document.getElementById('highEpss').textContent = '-';
+            document.getElementById('zeroDayCves').textContent = '-';
+            document.getElementById('zeroDayMatches').textContent = '-';
             document.getElementById('criticalCves').textContent = '-';
             document.getElementById('criticalCount').textContent = '-';
             document.getElementById('highCves').textContent = '-';
             document.getElementById('highCount').textContent = '-';
             document.getElementById('mediumCves').textContent = '-';
             document.getElementById('mediumCount').textContent = '-';
-            document.getElementById('lowCves').textContent = '-';
-            document.getElementById('lowCount').textContent = '-';
             showToast('Failed to load statistics. Try refreshing.', 'danger');
         }
     }
@@ -1358,11 +1349,11 @@
         const canvas = document.getElementById('widgetCanvas' + slot);
         const colors = getChartColors();
 
+        const zeroDay = (stats && stats.zero_day_matches) || 0;
         const critical = (stats && stats.critical_count) || 0;
         const high = (stats && stats.high_count) || 0;
         const medium = (stats && stats.medium_count) || 0;
-        const low = (stats && stats.low_count) || 0;
-        const total = critical + high + medium + low;
+        const total = zeroDay + critical + high + medium;
 
         if (total === 0) {
             container.classList.add('d-none');
@@ -1376,10 +1367,10 @@
         widgetInstances[slot] = new Chart(canvas.getContext('2d'), {
             type: 'doughnut',
             data: {
-                labels: ['Critical', 'High', 'Medium', 'Low'],
+                labels: ['0-Day', 'Critical', 'High', 'Medium'],
                 datasets: [{
-                    data: [critical, high, medium, low],
-                    backgroundColor: ['rgba(185, 28, 28, 0.75)', 'rgba(194, 65, 12, 0.75)', 'rgba(37, 99, 235, 0.75)', 'rgba(4, 120, 87, 0.75)'],
+                    data: [zeroDay, critical, high, medium],
+                    backgroundColor: ['rgba(124, 58, 237, 0.75)', 'rgba(185, 28, 28, 0.75)', 'rgba(194, 65, 12, 0.75)', 'rgba(37, 99, 235, 0.75)'],
                     borderColor: colors.borderColor,
                     borderWidth: 2,
                     hoverOffset: 6
@@ -1655,6 +1646,14 @@
     }
 
     function applyClientFilters() {
+        // Filter by zero-day
+        if (zeroDayFilterActive) {
+            currentVulnerabilities = currentVulnerabilities.filter(match => {
+                const vuln = match.vulnerability;
+                return vuln && vuln.is_zero_day;
+            });
+        }
+
         // Filter by priority
         const priorityFilter = document.getElementById('filterPriority').value;
         if (priorityFilter) {
@@ -2276,6 +2275,7 @@
     }
 
     function resetFilters() {
+        zeroDayFilterActive = false;
         document.getElementById('filterPriority').value = '';
         document.getElementById('filterSeverity').value = '';
         document.getElementById('filterUrgency').value = '';
@@ -2486,7 +2486,8 @@
         } else {
             priorityFilter.value = priorityValue;
         }
-        // Clear severity filter to avoid conflict
+        // Clear zero-day filter and severity filter to avoid conflict
+        zeroDayFilterActive = false;
         document.getElementById('filterSeverity').value = '';
         // Highlight active card
         document.querySelectorAll('.alert-card').forEach(card => card.classList.remove('active-filter'));
@@ -2494,6 +2495,23 @@
             const cardClass = 'alert-card-' + priorityValue;
             const activeCard = document.querySelector('.' + cardClass);
             if (activeCard) activeCard.classList.add('active-filter');
+        }
+        // Scroll to vulnerability list
+        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        resetAndLoadVulnerabilities();
+    }
+
+    function filterByZeroDay() {
+        // Toggle zero-day filter
+        zeroDayFilterActive = !zeroDayFilterActive;
+        // Clear priority filter to avoid conflict
+        document.getElementById('filterPriority').value = '';
+        document.getElementById('filterSeverity').value = '';
+        // Highlight active card
+        document.querySelectorAll('.alert-card').forEach(card => card.classList.remove('active-filter'));
+        if (zeroDayFilterActive) {
+            const zdCard = document.querySelector('.alert-card-zeroday');
+            if (zdCard) zdCard.classList.add('active-filter');
         }
         // Scroll to vulnerability list
         document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2526,6 +2544,7 @@
     function getCurrentFilters() {
         return {
             priority: document.getElementById('filterPriority').value,
+            zero_day: zeroDayFilterActive,
             severity: document.getElementById('filterSeverity').value,
             urgency: document.getElementById('filterUrgency').value,
             age: document.getElementById('filterAge').value,
@@ -2751,6 +2770,7 @@
 
                 // Apply filters to form
                 if (filters.priority) document.getElementById('filterPriority').value = filters.priority;
+                if (filters.zero_day) { zeroDayFilterActive = true; document.querySelector('.alert-card-zeroday')?.classList.add('active-filter'); }
                 if (filters.severity) document.getElementById('filterSeverity').value = filters.severity;
                 if (filters.urgency) document.getElementById('filterUrgency').value = filters.urgency;
                 if (filters.age) document.getElementById('filterAge').value = filters.age;
@@ -2814,6 +2834,7 @@
             if (ransomware) params.append('ransomware_only', 'true');
             if (unack) params.append('acknowledged', 'false');
             if (priority) params.append('priority', priority);
+            if (zeroDayFilterActive) params.append('zero_day', 'true');
             if (severity) params.append('severity', severity);
             if (urgency) params.append('urgency', urgency);
             if (age) params.append('age', age);

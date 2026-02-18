@@ -30,8 +30,8 @@ class EmailAlertManager:
         if not organization.alert_time_start or not organization.alert_time_end:
             return True  # No time restriction
 
-        current_time = datetime.now().time()
-        current_day = datetime.now().strftime('%a').lower()
+        current_time = datetime.utcnow().time()
+        current_day = datetime.utcnow().strftime('%a').lower()
 
         # Check if today is in alert days
         alert_days = [day.strip() for day in organization.alert_days.split(',')]

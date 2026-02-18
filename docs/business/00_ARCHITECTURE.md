@@ -82,8 +82,8 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 | Metric | Value |
 |--------|-------|
 | Total Python Code | 32,428 lines |
-| Database Models | 24 SQLAlchemy models |
-| API Endpoints | 80+ REST endpoints |
+| Database Models | 28 SQLAlchemy models |
+| API Endpoints | 250+ REST endpoints |
 | Frontend Templates | 6 major pages (800+ KB HTML) |
 | External Integrations | 15+ (Jira, LDAP, SAML, etc.) |
 | Test Coverage | pytest suite included |
@@ -607,16 +607,17 @@ CREATE TABLE product_installation (
 );
 ```
 
-## 5.3 Total: 24 Tables
+## 5.3 Total: 28 Tables
 
 | Category | Tables |
 |----------|--------|
 | Auth/Users | User, Organization, UserOrganization, SystemSettings |
-| Products | Product, ServiceCatalog, ProductExclusion, UserCpeMapping |
+| Products | Product, ServiceCatalog, ProductExclusion, UserCpeMapping, CpeDictionaryEntry, ProductVersionHistory |
 | Vulnerabilities | Vulnerability, VulnerabilityMatch, VulnerabilitySnapshot, VendorFixOverride |
-| Agents | AgentApiKey, Asset, ProductInstallation, AgentEvent, InventoryJob |
-| Integrations | Integration, ImportQueue, AgentRegistration |
-| Logging | SyncLog, AlertLog, ScheduledReport, StaleAssetNotification |
+| Agents | AgentApiKey, Asset, ProductInstallation, AgentEvent, InventoryJob, AgentLicense, AgentUsageRecord |
+| Containers | ContainerImage, ContainerVulnerability |
+| Reporting | ScheduledReport, HealthCheckResult |
+| Logging | SyncLog, AlertLog, StaleAssetNotification |
 
 ---
 

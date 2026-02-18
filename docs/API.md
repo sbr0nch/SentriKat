@@ -1187,6 +1187,7 @@ Authorization: X-Agent-Key
 ```
 
 Platforms: `linux`, `windows`, `macos`. Returns the script file with `X-Agent-Version` header.
+The server automatically injects the current `APP_VERSION` (from the `VERSION` file) into the downloaded script's `AGENT_VERSION` variable. This means agent versions track the SentriKat release version automatically — bumping the `VERSION` file for a release is sufficient to trigger agent updates.
 
 ### Agent Update Push
 

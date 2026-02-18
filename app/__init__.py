@@ -328,13 +328,32 @@ def create_app(config_class=Config):
             except Exception:
                 pass
 
+        # Load display settings (timezone, date format) for frontend date formatting
+        display_settings = {
+            'timezone': 'UTC',
+            'date_format': 'YYYY-MM-DD HH:mm'
+        }
+        try:
+            tz_setting = SystemSettings.query.filter_by(key='display_timezone').first()
+            fmt_setting = SystemSettings.query.filter_by(key='date_format').first()
+            if tz_setting and tz_setting.value:
+                display_settings['timezone'] = tz_setting.value
+            if fmt_setting and fmt_setting.value:
+                display_settings['date_format'] = fmt_setting.value
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
         return dict(
             current_user=current_user,
             auth_enabled=auth_enabled,
             branding=branding,
             license=license_info,
             session_timeout_minutes=session_timeout_minutes,
-            app_version=APP_VERSION
+            app_version=APP_VERSION,
+            display_settings=display_settings
         )
 
     # Setup wizard redirect

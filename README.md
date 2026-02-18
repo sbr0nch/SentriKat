@@ -232,6 +232,7 @@ ContainerVulnerability
 | Stuck Job Recovery | Every 10 minutes | Reset stuck inventory jobs to pending |
 | Asset Type Auto-Detection | Daily 06:00 | Infer server/workstation from OS version |
 | Unmapped CPE Retry | Weekly (Mon 05:00) | Retry CPE mapping for unmapped products |
+| KB Sync | Every 12 hours | Push/pull community CPE mappings to licensing server |
 | License Heartbeat | Every 12 hours | License validation + telemetry |
 | Vulnerability Snapshots | Daily 02:00 UTC | Historical vulnerability state for trending |
 
@@ -539,7 +540,7 @@ Agents automatically detect Docker/Podman and scan container images:
 
 ## API Reference
 
-SentriKat provides 100+ REST API endpoints. Full interactive documentation is available at `/api/docs` on your SentriKat instance.
+SentriKat provides 250+ REST API endpoints. Full interactive documentation is available at `/api/docs` on your SentriKat instance.
 
 ### Authentication
 

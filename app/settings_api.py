@@ -921,6 +921,10 @@ def save_general_settings():
         set_setting('https_proxy', data.get('https_proxy', ''), 'general', 'HTTPS proxy URL')
         set_setting('no_proxy', data.get('no_proxy', ''), 'general', 'No proxy bypass list')
 
+        log_audit_event('UPDATE', 'settings', details={
+            'category': 'general',
+            'fields': ['display_timezone', 'date_format', 'verify_ssl', 'http_proxy', 'https_proxy', 'no_proxy']
+        })
         return jsonify({'success': True, 'message': 'General settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save general settings")
@@ -967,6 +971,12 @@ def save_security_settings():
         set_setting('password_expiry_days', str(data.get('password_expiry_days', 0)), 'security', 'Password expiration (days, 0 = disabled)')
         set_setting('require_2fa', 'true' if data.get('require_2fa') else 'false', 'security', 'Require 2FA for all local users')
 
+        log_audit_event('UPDATE', 'settings', details={
+            'category': 'security',
+            'fields': ['session_timeout', 'max_failed_logins', 'lockout_duration',
+                       'password_min_length', 'password_require_uppercase',
+                       'password_require_numbers', 'password_require_special', 'require_2fa']
+        })
         return jsonify({'success': True, 'message': 'Security settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save security settings")

@@ -1387,6 +1387,12 @@ def create_product():
 
     db.session.commit()
 
+    # Audit log for product creation
+    from app.logging_config import log_audit_event
+    log_audit_event('CREATE', 'products', product.id,
+                    new_value={'vendor': product.vendor, 'product': product.product_name,
+                               'version': product.version, 'cpe': f"{cpe_vendor}:{cpe_product}"})
+
     # Re-run matching for new product
     match_vulnerabilities_to_products()
 
@@ -1526,6 +1532,12 @@ def update_product(product_id):
                 product.organizations.append(new_org)
 
     db.session.commit()
+
+    # Audit log for product update
+    from app.logging_config import log_audit_event
+    log_audit_event('UPDATE', 'products', product.id,
+                    details={'vendor': product.vendor, 'product': product.product_name,
+                             'version': product.version, 'updated_by': current_user_id})
 
     # Re-run matching after update
     match_vulnerabilities_to_products()
@@ -2568,14 +2580,16 @@ def get_vulnerability_stats():
 
     # Zero-day count: CVEs detected before CISA KEV (source=nvd/euvd with pre-analysis status)
     zero_day_count = 0
+    zero_day_matches = 0
     try:
         if matched_vuln_ids:
             zd_vulns = Vulnerability.query.filter(
                 Vulnerability.id.in_(matched_vuln_ids)
             ).all()
-            zero_day_count = sum(1 for v in zd_vulns if v.is_zero_day)
-        else:
-            zero_day_count = 0
+            zd_vuln_ids = set(v.id for v in zd_vulns if v.is_zero_day)
+            zero_day_count = len(zd_vuln_ids)
+            # Count product-level matches for zero-day CVEs
+            zero_day_matches = sum(1 for m in all_matches if m.vulnerability_id in zd_vuln_ids)
     except Exception:
         pass
 
@@ -2604,6 +2618,7 @@ def get_vulnerability_stats():
         'epss': epss_stats,
         # Zero-day detection (pre-KEV)
         'zero_day_count': zero_day_count,
+        'zero_day_matches': zero_day_matches,
     })
 
 
@@ -3223,6 +3238,11 @@ def get_vulnerabilities_grouped():
         priority_filter = request.args.get('priority')
         if priority_filter:
             results = [r for r in results if r['highest_priority'] == priority_filter.lower()]
+
+        # Filter by zero-day if specified
+        zero_day_filter = request.args.get('zero_day')
+        if zero_day_filter and zero_day_filter.lower() == 'true':
+            results = [r for r in results if r['vulnerability'].get('is_zero_day', False)]
 
         # Filter by CVE severity (CVSS-based)
         severity_filter = request.args.get('severity')
