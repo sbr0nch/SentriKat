@@ -205,10 +205,19 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                 if m.vulnerability and m.vulnerability.is_actively_exploited
             )
 
+            # Count zero-day CVEs (detected by SentriKat before CISA KEV)
+            zero_day_cves = set()
+            for m in new_matches:
+                if m.vulnerability and getattr(m.vulnerability, 'is_zero_day', False):
+                    zero_day_cves.add(m.vulnerability.cve_id)
+            zero_day_count = len(zero_day_cves)
+
             # Build payload based on format - BATCHED message
             if webhook_format in ('slack', 'rocketchat'):
                 text = f"🔒 *SentriKat Alert for {org.display_name}*\n"
                 text += f"*{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:* {cve_list_str}"
+                if zero_day_count > 0:
+                    text += f"\n⚡ *{zero_day_count} ZERO-DAY{'S' if zero_day_count != 1 else ''}* (detected before CISA KEV)"
                 if exploited_count > 0:
                     text += f"\n🚨 *{exploited_count} ACTIVELY EXPLOITED*"
                 if critical_count > 0:
@@ -219,6 +228,8 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
             elif webhook_format == 'discord':
                 content = f"🔒 **SentriKat Alert for {org.display_name}**\n"
                 content += f"**{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:** {cve_list_str}"
+                if zero_day_count > 0:
+                    content += f"\n⚡ **{zero_day_count} ZERO-DAY{'S' if zero_day_count != 1 else ''}** (detected before CISA KEV)"
                 if exploited_count > 0:
                     content += f"\n🚨 **{exploited_count} ACTIVELY EXPLOITED**"
                 if critical_count > 0:
@@ -231,6 +242,8 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                     {"name": "New CVEs", "value": str(new_cve_count)},
                     {"name": "CVE IDs", "value": cve_list_str},
                 ]
+                if zero_day_count > 0:
+                    facts.append({"name": "Zero-Day (Pre-KEV)", "value": str(zero_day_count)})
                 if exploited_count > 0:
                     facts.append({"name": "Actively Exploited", "value": str(exploited_count)})
                 facts.append({"name": "Critical", "value": str(critical_count)})
@@ -238,8 +251,8 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                     facts.append({"name": "Likely Resolved (Verify)", "value": str(verify_count)})
                 payload = {
                     "@type": "MessageCard",
-                    "themeColor": "dc2626" if critical_count > 0 or exploited_count > 0 else "1e40af",
-                    "summary": f"SentriKat: {new_cve_count} new CVEs for {org.display_name}",
+                    "themeColor": "7c3aed" if zero_day_count > 0 else ("dc2626" if critical_count > 0 or exploited_count > 0 else "1e40af"),
+                    "summary": f"SentriKat: {new_cve_count} new CVEs for {org.display_name}" + (f" ({zero_day_count} zero-day)" if zero_day_count > 0 else ""),
                     "sections": [{
                         "activityTitle": f"🔒 SentriKat Alert for {org.display_name}",
                         "facts": facts
@@ -253,6 +266,8 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                     "cve_ids": new_cve_ids,
                     "critical_count": critical_count,
                     "exploited_count": exploited_count,
+                    "zero_day_count": zero_day_count,
+                    "zero_day_cve_ids": list(zero_day_cves),
                     "verify_count": verify_count
                 }
 

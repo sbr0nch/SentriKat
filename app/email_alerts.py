@@ -261,6 +261,13 @@ class EmailAlertManager:
         # Count amber-tier (likely resolved, needs verification)
         amber_count = sum(1 for m in matches if getattr(m, 'vendor_fix_confidence', None) == 'medium')
 
+        # Count zero-day CVEs (detected by us before CISA KEV)
+        zero_day_cves = set()
+        for match in matches:
+            if match.vulnerability and getattr(match.vulnerability, 'is_zero_day', False):
+                zero_day_cves.add(match.vulnerability.cve_id)
+        zero_day_count = len(zero_day_cves)
+
         # Group by product for executive summary
         by_product = {}
         product_cves = {}  # Track unique CVEs per product
@@ -353,19 +360,23 @@ class EmailAlertManager:
                             <!-- Stats Row -->
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom: 24px;">
                                 <tr>
-                                    <td width="25%" style="text-align: center; padding: 12px 8px;">
+                                    <td width="{'20%' if zero_day_count > 0 else '25%'}" style="text-align: center; padding: 12px 8px;">
                                         <div style="font-size: 28px; font-weight: 700; color: #059669;">{new_count}</div>
                                         <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">New</div>
                                     </td>
-                                    <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
+                                    {f'''<td width="20%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
+                                        <div style="font-size: 28px; font-weight: 700; color: #7c3aed;">{zero_day_count}</div>
+                                        <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Zero-Day</div>
+                                    </td>''' if zero_day_count > 0 else ''}
+                                    <td width="{'20%' if zero_day_count > 0 else '25%'}" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
                                         <div style="font-size: 28px; font-weight: 700; color: #dc2626;">{len(by_priority['critical'])}</div>
                                         <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Critical</div>
                                     </td>
-                                    <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
+                                    <td width="{'20%' if zero_day_count > 0 else '25%'}" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
                                         <div style="font-size: 28px; font-weight: 700; color: #ea580c;">{len(by_priority['high'])}</div>
                                         <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">High</div>
                                     </td>
-                                    <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
+                                    <td width="{'20%' if zero_day_count > 0 else '25%'}" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
                                         <div style="font-size: 28px; font-weight: 700; color: {('#d97706' if amber_count > 0 else '#374151')};">{amber_count if amber_count > 0 else len(by_product)}</div>
                                         <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">{'Verify' if amber_count > 0 else 'Products'}</div>
                                     </td>
@@ -503,8 +514,10 @@ class EmailAlertManager:
                                             <tr>
                                                 <td>
                                                     <a href="https://nvd.nist.gov/vuln/detail/{vuln.cve_id}" style="font-size: 15px; font-weight: 700; color: #1e40af; text-decoration: none;">{vuln.cve_id}</a>
+                                                    {f'<span style="background: linear-gradient(135deg, #7c3aed, #db2777); color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">0-DAY</span>' if getattr(vuln, 'is_zero_day', False) else ''}
                                                     {f'<span style="background: #b91c1c; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">ACTIVELY EXPLOITED</span>' if vuln.is_actively_exploited else ''}
                                                     {f'<span style="background: #7c2d12; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">RANSOMWARE</span>' if vuln.known_ransomware else ''}
+                                                    {f'<span style="background: #ca8a04; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">{vuln.nvd_status}</span>' if getattr(vuln, 'nvd_data_incomplete', False) else ''}
                                                 </td>
                                                 <td align="right">
                                                     {urgency_html}
