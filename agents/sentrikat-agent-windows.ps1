@@ -461,9 +461,15 @@ function Get-Extensions {
                 if (!(Test-Path $pluginsDir)) { return }
                 Get-ChildItem -Path $pluginsDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
                     $pluginXml = Join-Path $_.FullName "META-INF\plugin.xml"
-                    if (Test-Path $pluginXml) {
+                    if ((Test-Path $pluginXml) -and -not (Get-Item $pluginXml -ErrorAction SilentlyContinue).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {
                         try {
-                            [xml]$xml = Get-Content $pluginXml -Raw -ErrorAction SilentlyContinue
+                            $xmlSettings = New-Object System.Xml.XmlReaderSettings
+                            $xmlSettings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+                            $xmlSettings.XmlResolver = $null
+                            $xmlContent = Get-Content $pluginXml -Raw -ErrorAction SilentlyContinue
+                            $xmlReader = [System.Xml.XmlReader]::Create((New-Object System.IO.StringReader($xmlContent)), $xmlSettings)
+                            $xml = New-Object System.Xml.XmlDocument
+                            $xml.Load($xmlReader)
                             $pName = if ($xml.'idea-plugin'.name) { $xml.'idea-plugin'.name } else { $_.Name }
                             $pVer = $xml.'idea-plugin'.version
                             $extensions += @{
@@ -602,7 +608,14 @@ function Get-CodeDependencies {
             $csprojFiles = Get-ChildItem -Path $scanPath -Filter "*.csproj" -Recurse -Depth 4 -ErrorAction SilentlyContinue | Select-Object -First 100
             foreach ($csproj in $csprojFiles) {
                 try {
-                    [xml]$csprojXml = Get-Content $csproj.FullName -Raw -ErrorAction SilentlyContinue
+                    if ($csproj.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) { continue }
+                    $xmlSettings = New-Object System.Xml.XmlReaderSettings
+                    $xmlSettings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+                    $xmlSettings.XmlResolver = $null
+                    $csprojContent = Get-Content $csproj.FullName -Raw -ErrorAction SilentlyContinue
+                    $csprojReader = [System.Xml.XmlReader]::Create((New-Object System.IO.StringReader($csprojContent)), $xmlSettings)
+                    $csprojXml = New-Object System.Xml.XmlDocument
+                    $csprojXml.Load($csprojReader)
                     $packageRefs = $csprojXml.SelectNodes("//PackageReference")
                     foreach ($ref in $packageRefs) {
                         $pkgName = $ref.GetAttribute("Include")

@@ -1,0 +1,776 @@
+{% extends 'base.html' %}
+
+{% block title %}Alert Settings - SentriKat{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item active" aria-current="page"><i class="bi bi-bell me-1"></i>Alert Settings</li>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .channel-card {
+        border: 1px solid var(--border-color);
+        border-radius: 0.5rem;
+        padding: 1.25rem;
+        transition: all 0.2s;
+        background: var(--surface-color);
+    }
+    .channel-card.configured {
+        border-left: 3px solid var(--success-color);
+    }
+    .channel-card.not-configured {
+        border-left: 3px solid var(--gray-300);
+        opacity: 0.8;
+    }
+    .channel-card .channel-icon {
+        font-size: 1.5rem;
+        width: 40px;
+        text-align: center;
+    }
+    .channel-card .channel-status {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .channel-card .channel-status.active { color: var(--success-color); }
+    .channel-card .channel-status.inactive { color: var(--gray-400); }
+
+    /* Alert rules matrix */
+    .rule-row {
+        display: flex;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--border-color);
+        gap: 1rem;
+    }
+    .rule-row:last-child { border-bottom: none; }
+    .rule-row:hover { background: var(--gray-50); }
+    .rule-label {
+        flex: 1;
+        min-width: 200px;
+    }
+    .rule-label .rule-name {
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+    .rule-label .rule-desc {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+    }
+    .rule-channels {
+        display: flex;
+        gap: 1.5rem;
+        align-items: center;
+    }
+    .rule-channels .form-check {
+        margin-bottom: 0;
+    }
+    .rule-channels .form-check-label {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+
+    /* Section headers */
+    .settings-section {
+        margin-bottom: 2rem;
+    }
+    .settings-section .section-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid var(--primary-color);
+    }
+    .settings-section .section-header h5 {
+        margin: 0;
+        font-weight: 600;
+        font-size: 1rem;
+    }
+    .settings-section .section-header i {
+        color: var(--primary-color);
+        font-size: 1.1rem;
+    }
+
+    /* Org override table */
+    .org-override-row {
+        font-size: 0.85rem;
+    }
+    .org-override-row .badge {
+        font-size: 0.7rem;
+    }
+    .override-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 4px;
+    }
+    .override-indicator.overridden { background: var(--warning-color); }
+    .override-indicator.inherited { background: var(--gray-300); }
+
+    /* Save bar */
+    .save-bar {
+        position: sticky;
+        bottom: 0;
+        background: var(--surface-color);
+        border-top: 1px solid var(--border-color);
+        padding: 0.75rem 1.5rem;
+        margin: 0 -1.5rem -1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+        z-index: 10;
+    }
+
+    [data-theme="dark"] .channel-card { background: var(--surface-color); }
+    [data-theme="dark"] .rule-row:hover { background: rgba(59, 130, 246, 0.05); }
+    [data-theme="dark"] .save-bar { background: var(--surface-color); box-shadow: 0 -2px 8px rgba(0,0,0,0.2); }
+
+    /* Nav pills for this page */
+    .alerts-nav .nav-link {
+        border-radius: 0.375rem;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--text-muted);
+        border: 1px solid transparent;
+        transition: all 0.15s ease;
+    }
+    .alerts-nav .nav-link:hover {
+        background-color: var(--gray-100);
+        color: var(--text-color);
+    }
+    .alerts-nav .nav-link.active {
+        background-color: var(--primary-color);
+        color: #fff;
+        border-color: var(--primary-color);
+        box-shadow: 0 2px 4px rgba(30, 64, 175, 0.2);
+    }
+    [data-theme="dark"] .alerts-nav .nav-link.active {
+        background-color: var(--primary-dark);
+        border-color: var(--primary-light);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h4 class="mb-0">Alert Settings</h4>
+        <small class="text-muted">Configure how and when vulnerability alerts are delivered</small>
+    </div>
+</div>
+
+<!-- Navigation Pills -->
+<ul class="nav nav-pills alerts-nav mb-4" id="alertsTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="channels-tab" data-bs-toggle="pill" data-bs-target="#channelsPane" type="button" role="tab">
+            <i class="bi bi-broadcast me-1"></i>Delivery Channels
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="rules-tab" data-bs-toggle="pill" data-bs-target="#rulesPane" type="button" role="tab">
+            <i class="bi bi-funnel me-1"></i>Alert Rules
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="schedule-tab" data-bs-toggle="pill" data-bs-target="#schedulePane" type="button" role="tab">
+            <i class="bi bi-clock me-1"></i>Scheduling
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="orgs-tab" data-bs-toggle="pill" data-bs-target="#orgsPane" type="button" role="tab">
+            <i class="bi bi-building me-1"></i>Organization Overrides
+        </button>
+    </li>
+</ul>
+
+<!-- Tab Content -->
+<div class="tab-content" id="alertsTabContent">
+
+    <!-- ================================================================ -->
+    <!-- TAB 1: Delivery Channels -->
+    <!-- ================================================================ -->
+    <div class="tab-pane fade show active" id="channelsPane" role="tabpanel">
+        <div class="settings-section">
+            <div class="section-header">
+                <i class="bi bi-broadcast"></i>
+                <h5>Delivery Channels</h5>
+            </div>
+            <p class="text-muted small mb-3">Configure where alerts are sent. Each channel can be enabled or disabled independently.</p>
+
+            <div class="row g-3" id="channelCards">
+                <!-- Email / SMTP -->
+                <div class="col-md-6 col-lg-4">
+                    <div class="channel-card not-configured" id="channelEmail">
+                        <div class="d-flex align-items-start gap-3">
+                            <div class="channel-icon text-primary"><i class="bi bi-envelope-fill"></i></div>
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <strong>Email (SMTP)</strong>
+                                    <span class="channel-status inactive" id="emailStatus">Not Configured</span>
+                                </div>
+                                <small class="text-muted d-block mb-2">Critical CVE alerts and scheduled reports</small>
+                                <a href="/admin-panel#settings:email" class="btn btn-outline-primary btn-sm">
+                                    <i class="bi bi-gear me-1"></i>Configure SMTP
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Slack -->
+                <div class="col-md-6 col-lg-4">
+                    <div class="channel-card not-configured" id="channelSlack">
+                        <div class="d-flex align-items-start gap-3">
+                            <div class="channel-icon" style="color: #4a154b;"><i class="bi bi-slack"></i></div>
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <strong>Slack</strong>
+                                    <span class="channel-status inactive" id="slackStatus">Disabled</span>
+                                </div>
+                                <small class="text-muted d-block mb-2">Real-time alerts via incoming webhook</small>
+                                <div class="form-check form-switch mb-2">
+                                    <input type="checkbox" class="form-check-input" id="asSlackEnabled" onchange="markDirty()">
+                                    <label class="form-check-label small" for="asSlackEnabled">Enable</label>
+                                </div>
+                                <input type="text" class="form-control form-control-sm" id="asSlackUrl" placeholder="https://hooks.slack.com/services/..." onchange="markDirty()">
+                                <div class="mt-2">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="testChannel('slack')"><i class="bi bi-send me-1"></i>Test</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Microsoft Teams -->
+                <div class="col-md-6 col-lg-4">
+                    <div class="channel-card not-configured" id="channelTeams">
+                        <div class="d-flex align-items-start gap-3">
+                            <div class="channel-icon" style="color: #5059c9;"><i class="bi bi-microsoft-teams"></i></div>
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <strong>Microsoft Teams</strong>
+                                    <span class="channel-status inactive" id="teamsStatus">Disabled</span>
+                                </div>
+                                <small class="text-muted d-block mb-2">Alerts via Teams incoming webhook</small>
+                                <div class="form-check form-switch mb-2">
+                                    <input type="checkbox" class="form-check-input" id="asTeamsEnabled" onchange="markDirty()">
+                                    <label class="form-check-label small" for="asTeamsEnabled">Enable</label>
+                                </div>
+                                <input type="text" class="form-control form-control-sm" id="asTeamsUrl" placeholder="https://outlook.office.com/webhook/..." onchange="markDirty()">
+                                <div class="mt-2">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="testChannel('teams')"><i class="bi bi-send me-1"></i>Test</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generic Webhook -->
+                <div class="col-md-6 col-lg-4">
+                    <div class="channel-card not-configured" id="channelGeneric">
+                        <div class="d-flex align-items-start gap-3">
+                            <div class="channel-icon text-secondary"><i class="bi bi-webhook"></i></div>
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <strong id="genericChannelLabel">Custom Webhook</strong>
+                                    <span class="channel-status inactive" id="genericStatus">Disabled</span>
+                                </div>
+                                <small class="text-muted d-block mb-2">Discord, RocketChat, Mattermost, or custom</small>
+                                <div class="form-check form-switch mb-2">
+                                    <input type="checkbox" class="form-check-input" id="asGenericEnabled" onchange="markDirty()">
+                                    <label class="form-check-label small" for="asGenericEnabled">Enable</label>
+                                </div>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-6">
+                                        <input type="text" class="form-control form-control-sm" id="asGenericName" placeholder="Name" onchange="markDirty()">
+                                    </div>
+                                    <div class="col-6">
+                                        <select class="form-select form-select-sm" id="asGenericFormat" onchange="markDirty()">
+                                            <option value="slack">Slack-compatible</option>
+                                            <option value="discord">Discord</option>
+                                            <option value="custom">Custom JSON</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <input type="text" class="form-control form-control-sm mb-1" id="asGenericUrl" placeholder="Webhook URL" onchange="markDirty()">
+                                <input type="password" class="form-control form-control-sm" id="asGenericToken" placeholder="Auth token (optional)" onchange="markDirty()">
+                                <div class="mt-2">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="testChannel('generic')"><i class="bi bi-send me-1"></i>Test</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- TAB 2: Alert Rules -->
+    <!-- ================================================================ -->
+    <div class="tab-pane fade" id="rulesPane" role="tabpanel">
+        <div class="settings-section">
+            <div class="section-header">
+                <i class="bi bi-funnel"></i>
+                <h5>Alert Rules</h5>
+            </div>
+            <p class="text-muted small mb-3">Choose which vulnerability events trigger alerts. These are <strong>global defaults</strong> &mdash; organizations can override them.</p>
+
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center py-2">
+                    <span class="fw-semibold small">Alert Type</span>
+                    <div class="d-flex gap-4 small text-muted fw-semibold">
+                        <span style="width: 60px; text-align: center;"><i class="bi bi-envelope me-1"></i>Email</span>
+                        <span style="width: 60px; text-align: center;"><i class="bi bi-broadcast me-1"></i>Webhook</span>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <!-- Critical Severity -->
+                    <div class="rule-row">
+                        <div class="rule-label">
+                            <div class="rule-name"><span class="badge bg-danger me-1" style="font-size: 0.65rem;">CRITICAL</span> Critical Severity CVEs</div>
+                            <div class="rule-desc">Alert when a critical severity vulnerability matches your products</div>
+                        </div>
+                        <div class="rule-channels">
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" id="ruleCriticalEmail" checked onchange="markDirty()">
+                            </div>
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" id="ruleCriticalWebhook" checked onchange="markDirty()">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- High Severity -->
+                    <div class="rule-row">
+                        <div class="rule-label">
+                            <div class="rule-name"><span class="badge me-1" style="font-size: 0.65rem; background: var(--high-color);">HIGH</span> High Severity CVEs</div>
+                            <div class="rule-desc">Alert when a high severity vulnerability matches your products</div>
+                        </div>
+                        <div class="rule-channels">
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" id="ruleHighEmail" onchange="markDirty()">
+                            </div>
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" id="ruleHighWebhook" onchange="markDirty()">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- New CVEs -->
+                    <div class="rule-row">
+                        <div class="rule-label">
+                            <div class="rule-name"><i class="bi bi-plus-circle text-info me-1"></i> New CVE Discovered</div>
+                            <div class="rule-desc">Alert when a CVE is matched to your products for the first time</div>
+                        </div>
+                        <div class="rule-channels">
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" id="ruleNewCveEmail" checked onchange="markDirty()">
+                            </div>
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" id="ruleNewCveWebhook" checked onchange="markDirty()">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Ransomware -->
+                    <div class="rule-row">
+                        <div class="rule-label">
+                            <div class="rule-name"><i class="bi bi-shield-exclamation text-danger me-1"></i> Known Ransomware Exploitation</div>
+                            <div class="rule-desc">Alert when a CVE is flagged as used in ransomware campaigns</div>
+                        </div>
+                        <div class="rule-channels">
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" id="ruleRansomwareEmail" checked onchange="markDirty()">
+                            </div>
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" id="ruleRansomwareWebhook" checked onchange="markDirty()">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Active Exploitation -->
+                    <div class="rule-row" style="background: rgba(185, 28, 28, 0.03);">
+                        <div class="rule-label">
+                            <div class="rule-name"><i class="bi bi-exclamation-triangle-fill text-danger me-1"></i> Active Exploitation (0-Day)</div>
+                            <div class="rule-desc">Always alerts &mdash; cannot be disabled. Includes CISA KEV, EUVD, and pre-KEV detections.</div>
+                        </div>
+                        <div class="rule-channels">
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" checked disabled>
+                            </div>
+                            <div class="form-check" style="width: 60px; text-align: center;">
+                                <input type="checkbox" class="form-check-input" checked disabled>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="section-header">
+                <i class="bi bi-filter"></i>
+                <h5>Confidence Filtering</h5>
+            </div>
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-check form-switch">
+                        <input type="checkbox" class="form-check-input" id="ruleIncludeLowConfidence" onchange="markDirty()">
+                        <label class="form-check-label fw-semibold" for="ruleIncludeLowConfidence">Include low-confidence matches</label>
+                    </div>
+                    <small class="text-muted d-block mt-1">Low-confidence matches use keyword-only detection and may produce false positives. By default, only medium and high confidence matches (CPE or vendor+product) trigger alerts.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- TAB 3: Scheduling -->
+    <!-- ================================================================ -->
+    <div class="tab-pane fade" id="schedulePane" role="tabpanel">
+        <div class="settings-section">
+            <div class="section-header">
+                <i class="bi bi-clock"></i>
+                <h5>Alert Mode</h5>
+            </div>
+            <p class="text-muted small mb-3">Control how frequently alerts are sent. These are global defaults; organizations can override.</p>
+
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="asAlertMode" class="form-label fw-semibold">Default Alert Mode</label>
+                            <select class="form-select" id="asAlertMode" onchange="markDirty()">
+                                <option value="new_only">New Only</option>
+                                <option value="daily_reminder" selected>Daily Reminder</option>
+                                <option value="escalation">Escalation</option>
+                            </select>
+                            <div class="mt-2 small text-muted">
+                                <strong>New Only</strong> &mdash; Alert only when new vulnerabilities are discovered.<br>
+                                <strong>Daily Reminder</strong> &mdash; Daily digest of all unacknowledged critical CVEs due within 7 days.<br>
+                                <strong>Escalation</strong> &mdash; Re-alert when a CVE approaches its remediation deadline.
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="asEscalationDays" class="form-label fw-semibold">Escalation Days</label>
+                            <input type="number" class="form-control" id="asEscalationDays" value="3" min="1" max="14" onchange="markDirty()">
+                            <small class="text-muted">Days before due date to escalate</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="section-header">
+                <i class="bi bi-envelope-exclamation"></i>
+                <h5>Email Reminders</h5>
+            </div>
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input type="checkbox" class="form-check-input" id="asCriticalEmailEnabled" checked onchange="markDirty()">
+                        <label class="form-check-label fw-semibold" for="asCriticalEmailEnabled">Enable Daily Critical CVE Reminder Emails</label>
+                    </div>
+                    <small class="text-muted d-block mb-3">Sends a daily email digest of unacknowledged critical CVEs to each organization's notification email addresses.</small>
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label for="asCriticalEmailTime" class="form-label">Send Time (UTC)</label>
+                            <input type="time" class="form-control" id="asCriticalEmailTime" value="09:00" onchange="markDirty()">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="asCriticalEmailMaxAge" class="form-label">Max CVE Age (days)</label>
+                            <input type="number" class="form-control" id="asCriticalEmailMaxAge" value="30" min="7" max="90" onchange="markDirty()">
+                            <small class="text-muted">Only CVEs discovered within this window</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- TAB 4: Organization Overrides -->
+    <!-- ================================================================ -->
+    <div class="tab-pane fade" id="orgsPane" role="tabpanel">
+        <div class="settings-section">
+            <div class="section-header">
+                <i class="bi bi-building"></i>
+                <h5>Organization Overrides</h5>
+            </div>
+            <p class="text-muted small mb-3">Organizations can override global alert settings. A <span class="override-indicator overridden"></span><strong>yellow</strong> dot indicates a custom override; <span class="override-indicator inherited"></span><strong>gray</strong> means the global default is inherited.</p>
+
+            <div class="card">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0" id="orgOverridesTable">
+                            <thead>
+                                <tr>
+                                    <th class="small fw-semibold">Organization</th>
+                                    <th class="small fw-semibold text-center">Critical</th>
+                                    <th class="small fw-semibold text-center">High</th>
+                                    <th class="small fw-semibold text-center">New CVE</th>
+                                    <th class="small fw-semibold text-center">Ransomware</th>
+                                    <th class="small fw-semibold text-center">Alert Mode</th>
+                                    <th class="small fw-semibold text-center">SMTP</th>
+                                    <th class="small fw-semibold text-center">Webhook</th>
+                                    <th class="small fw-semibold text-center">Recipients</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orgOverridesBody">
+                                <tr><td colspan="9" class="text-center text-muted py-4"><i class="bi bi-hourglass-split me-1"></i>Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sticky Save Bar -->
+<div class="save-bar" id="saveBar" style="display: none;">
+    <div class="text-muted small"><i class="bi bi-pencil me-1"></i>You have unsaved changes</div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadAllSettings()"><i class="bi bi-arrow-counterclockwise me-1"></i>Discard</button>
+        <button class="btn btn-primary btn-sm" onclick="saveAllSettings()"><i class="bi bi-check-circle me-1"></i>Save All Settings</button>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let isDirty = false;
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+function markDirty() {
+    isDirty = true;
+    document.getElementById('saveBar').style.display = 'flex';
+}
+
+function markClean() {
+    isDirty = false;
+    document.getElementById('saveBar').style.display = 'none';
+}
+
+function showToast(msg, type) {
+    // Use global showNotification if available, otherwise alert
+    if (typeof showNotification === 'function') {
+        showNotification(msg, type);
+    } else {
+        alert(msg);
+    }
+}
+
+// ========================================================
+// Load settings
+// ========================================================
+async function loadAllSettings() {
+    try {
+        const [notifResp, smtpResp, orgsResp] = await Promise.all([
+            fetch('/api/settings/notifications', { headers: { 'X-CSRFToken': csrfToken } }),
+            fetch('/api/settings/smtp', { headers: { 'X-CSRFToken': csrfToken } }),
+            fetch('/api/alerts/org-overrides', { headers: { 'X-CSRFToken': csrfToken } })
+        ]);
+
+        if (notifResp.ok) {
+            const n = await notifResp.json();
+            // Channels
+            document.getElementById('asSlackEnabled').checked = n.slack_enabled;
+            document.getElementById('asSlackUrl').value = n.slack_webhook_url || '';
+            document.getElementById('asTeamsEnabled').checked = n.teams_enabled;
+            document.getElementById('asTeamsUrl').value = n.teams_webhook_url || '';
+            document.getElementById('asGenericEnabled').checked = n.generic_webhook_enabled;
+            document.getElementById('asGenericUrl').value = n.generic_webhook_url || '';
+            document.getElementById('asGenericName').value = n.generic_webhook_name || 'Custom Webhook';
+            document.getElementById('asGenericFormat').value = n.generic_webhook_format || 'slack';
+            document.getElementById('genericChannelLabel').textContent = n.generic_webhook_name || 'Custom Webhook';
+
+            // Alert rules (global defaults)
+            document.getElementById('ruleCriticalEmail').checked = n.notify_on_critical !== false;
+            document.getElementById('ruleCriticalWebhook').checked = n.notify_on_critical !== false;
+            document.getElementById('ruleHighEmail').checked = n.notify_on_high === true;
+            document.getElementById('ruleHighWebhook').checked = n.notify_on_high === true;
+            document.getElementById('ruleNewCveEmail').checked = n.notify_on_new_cve !== false;
+            document.getElementById('ruleNewCveWebhook').checked = n.notify_on_new_cve !== false;
+            document.getElementById('ruleRansomwareEmail').checked = n.notify_on_ransomware !== false;
+            document.getElementById('ruleRansomwareWebhook').checked = n.notify_on_ransomware !== false;
+
+            // Schedule
+            document.getElementById('asAlertMode').value = n.default_alert_mode || 'daily_reminder';
+            document.getElementById('asEscalationDays').value = n.default_escalation_days || 3;
+            document.getElementById('asCriticalEmailEnabled').checked = n.critical_email_enabled;
+            document.getElementById('asCriticalEmailTime').value = n.critical_email_time || '09:00';
+            document.getElementById('asCriticalEmailMaxAge').value = n.critical_email_max_age_days || 30;
+
+            // Update channel card states
+            updateChannelCard('channelSlack', n.slack_enabled, !!n.slack_webhook_url, 'slackStatus');
+            updateChannelCard('channelTeams', n.teams_enabled, !!n.teams_webhook_url, 'teamsStatus');
+            updateChannelCard('channelGeneric', n.generic_webhook_enabled, !!n.generic_webhook_url, 'genericStatus');
+        }
+
+        if (smtpResp.ok) {
+            const smtp = await smtpResp.json();
+            const configured = !!smtp.smtp_host;
+            const emailCard = document.getElementById('channelEmail');
+            const emailStatusEl = document.getElementById('emailStatus');
+            emailCard.classList.toggle('configured', configured);
+            emailCard.classList.toggle('not-configured', !configured);
+            emailStatusEl.textContent = configured ? 'Configured' : 'Not Configured';
+            emailStatusEl.className = 'channel-status ' + (configured ? 'active' : 'inactive');
+        }
+
+        if (orgsResp.ok) {
+            const orgs = await orgsResp.json();
+            renderOrgOverrides(orgs);
+        }
+
+        markClean();
+    } catch (err) {
+        console.error('Failed to load alert settings:', err);
+        showToast('Failed to load settings', 'danger');
+    }
+}
+
+function updateChannelCard(cardId, enabled, hasUrl, statusId) {
+    const card = document.getElementById(cardId);
+    const statusEl = document.getElementById(statusId);
+    const isActive = enabled && hasUrl;
+    card.classList.toggle('configured', isActive);
+    card.classList.toggle('not-configured', !isActive);
+    statusEl.textContent = isActive ? 'Active' : (hasUrl ? 'Disabled' : 'Not Configured');
+    statusEl.className = 'channel-status ' + (isActive ? 'active' : 'inactive');
+}
+
+// ========================================================
+// Save settings
+// ========================================================
+async function saveAllSettings() {
+    try {
+        const payload = {
+            // Channels
+            slack_enabled: document.getElementById('asSlackEnabled').checked,
+            slack_webhook_url: document.getElementById('asSlackUrl').value,
+            teams_enabled: document.getElementById('asTeamsEnabled').checked,
+            teams_webhook_url: document.getElementById('asTeamsUrl').value,
+            generic_webhook_enabled: document.getElementById('asGenericEnabled').checked,
+            generic_webhook_url: document.getElementById('asGenericUrl').value,
+            generic_webhook_name: document.getElementById('asGenericName').value,
+            generic_webhook_format: document.getElementById('asGenericFormat').value,
+            generic_webhook_token: document.getElementById('asGenericToken').value,
+
+            // Alert rules
+            notify_on_critical: document.getElementById('ruleCriticalEmail').checked,
+            notify_on_high: document.getElementById('ruleHighEmail').checked,
+            notify_on_new_cve: document.getElementById('ruleNewCveEmail').checked,
+            notify_on_ransomware: document.getElementById('ruleRansomwareEmail').checked,
+
+            // Schedule
+            default_alert_mode: document.getElementById('asAlertMode').value,
+            default_escalation_days: parseInt(document.getElementById('asEscalationDays').value) || 3,
+            critical_email_enabled: document.getElementById('asCriticalEmailEnabled').checked,
+            critical_email_time: document.getElementById('asCriticalEmailTime').value,
+            critical_email_max_age_days: parseInt(document.getElementById('asCriticalEmailMaxAge').value) || 30
+        };
+
+        const resp = await fetch('/api/settings/notifications', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await resp.json();
+        if (resp.ok && result.success) {
+            showToast('Alert settings saved successfully', 'success');
+            loadAllSettings();
+        } else {
+            showToast(result.error || 'Failed to save settings', 'danger');
+        }
+    } catch (err) {
+        console.error('Save error:', err);
+        showToast('Failed to save settings', 'danger');
+    }
+}
+
+// ========================================================
+// Test channel
+// ========================================================
+async function testChannel(type) {
+    try {
+        const resp = await fetch('/api/settings/notifications/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ type })
+        });
+        const result = await resp.json();
+        if (result.success) {
+            showToast(result.message, 'success');
+        } else {
+            showToast(result.error || 'Test failed', 'danger');
+        }
+    } catch (err) {
+        showToast('Connection error', 'danger');
+    }
+}
+
+// ========================================================
+// Org overrides table
+// ========================================================
+function renderOrgOverrides(orgs) {
+    const tbody = document.getElementById('orgOverridesBody');
+    if (!orgs || orgs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No organizations found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = orgs.map(org => {
+        const emailCount = org.notification_email_count || 0;
+        return `<tr class="org-override-row">
+            <td>
+                <strong>${escapeHtml(org.display_name || org.name)}</strong>
+                ${!org.active ? '<span class="badge bg-secondary ms-1">Inactive</span>' : ''}
+            </td>
+            <td class="text-center">${boolBadge(org.alert_on_critical, true)}</td>
+            <td class="text-center">${boolBadge(org.alert_on_high, false)}</td>
+            <td class="text-center">${boolBadge(org.alert_on_new_cve, true)}</td>
+            <td class="text-center">${boolBadge(org.alert_on_ransomware, true)}</td>
+            <td class="text-center">
+                ${org.alert_mode ? `<span class="override-indicator overridden"></span><span class="badge bg-warning text-dark">${escapeHtml(org.alert_mode)}</span>` : '<span class="override-indicator inherited"></span><span class="text-muted small">Global</span>'}
+            </td>
+            <td class="text-center">${org.has_smtp ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-dash text-muted"></i>'}</td>
+            <td class="text-center">${org.webhook_enabled ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-dash text-muted"></i>'}</td>
+            <td class="text-center"><span class="badge ${emailCount > 0 ? 'bg-primary' : 'bg-secondary'}">${emailCount}</span></td>
+        </tr>`;
+    }).join('');
+}
+
+function boolBadge(val, defaultVal) {
+    const isDefault = val === defaultVal || val === null || val === undefined;
+    const effective = val !== null && val !== undefined ? val : defaultVal;
+    const dot = isDefault ? '<span class="override-indicator inherited"></span>' : '<span class="override-indicator overridden"></span>';
+    if (effective) {
+        return dot + '<i class="bi bi-check-circle text-success"></i>';
+    } else {
+        return dot + '<i class="bi bi-x-circle text-muted"></i>';
+    }
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ========================================================
+// Init
+// ========================================================
+document.addEventListener('DOMContentLoaded', function() {
+    loadAllSettings();
+});
+</script>
+{% endblock %}

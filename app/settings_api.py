@@ -1051,7 +1051,12 @@ def get_notification_settings():
         # daily_reminder: Alert on ALL unacknowledged critical CVEs due within 7 days
         # escalation: Re-alert when CVE is within X days of due date
         'default_alert_mode': get_setting('default_alert_mode', 'daily_reminder'),
-        'default_escalation_days': int(get_setting('default_escalation_days', '3') or '3')
+        'default_escalation_days': int(get_setting('default_escalation_days', '3') or '3'),
+        # Alert rules (what to notify on)
+        'notify_on_critical': get_setting('notify_on_critical', 'true') == 'true',
+        'notify_on_high': get_setting('notify_on_high', 'false') == 'true',
+        'notify_on_new_cve': get_setting('notify_on_new_cve', 'true') == 'true',
+        'notify_on_ransomware': get_setting('notify_on_ransomware', 'true') == 'true',
     }
     return jsonify(settings)
 
@@ -1107,10 +1112,60 @@ def save_notification_settings():
             days = int(data.get('default_escalation_days', 3))
             set_setting('default_escalation_days', str(days), 'notifications', 'Default escalation days before due date')
 
+        # Alert rules (what to notify on)
+        if 'notify_on_critical' in data:
+            set_setting('notify_on_critical', 'true' if data.get('notify_on_critical') else 'false', 'notifications', 'Alert on critical severity CVEs')
+        if 'notify_on_high' in data:
+            set_setting('notify_on_high', 'true' if data.get('notify_on_high') else 'false', 'notifications', 'Alert on high severity CVEs')
+        if 'notify_on_new_cve' in data:
+            set_setting('notify_on_new_cve', 'true' if data.get('notify_on_new_cve') else 'false', 'notifications', 'Alert on newly discovered CVEs')
+        if 'notify_on_ransomware' in data:
+            set_setting('notify_on_ransomware', 'true' if data.get('notify_on_ransomware') else 'false', 'notifications', 'Alert on ransomware-linked CVEs')
+
         return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save notification settings")
         return jsonify({'error': ERROR_MSGS['config']}), 500
+
+@settings_bp.route('/alerts/org-overrides', methods=['GET'])
+@admin_required
+def get_alert_org_overrides():
+    """Get all organizations' alert settings for the unified alerts overview page."""
+    from app.models import Organization
+    try:
+        orgs = Organization.query.order_by(Organization.name).all()
+        result = []
+        for org in orgs:
+            # Parse notification emails count
+            email_count = 0
+            try:
+                emails = json.loads(org.notification_emails or '[]')
+                if isinstance(emails, str):
+                    emails = json.loads(emails)
+                email_count = len([e for e in emails if e and e.strip()])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            result.append({
+                'id': org.id,
+                'name': org.name,
+                'display_name': org.display_name,
+                'active': org.active,
+                'alert_on_critical': org.alert_on_critical,
+                'alert_on_high': org.alert_on_high,
+                'alert_on_new_cve': org.alert_on_new_cve,
+                'alert_on_ransomware': org.alert_on_ransomware,
+                'alert_mode': org.alert_mode,
+                'escalation_days': org.escalation_days,
+                'has_smtp': bool(org.smtp_host),
+                'webhook_enabled': org.webhook_enabled if hasattr(org, 'webhook_enabled') else False,
+                'notification_email_count': email_count,
+            })
+        return jsonify(result)
+    except Exception as e:
+        logger.exception("Failed to get org alert overrides")
+        return jsonify({'error': 'Failed to load organization data'}), 500
+
 
 def _is_ssrf_safe_url(url):
     """Validate that a URL does not target internal/private network addresses."""
