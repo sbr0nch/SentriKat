@@ -1984,7 +1984,7 @@ def report_inventory():
                     version=version,
                     install_path=product_data.get('path'),
                     project_path=product_data.get('project_path'),
-                    is_direct_dependency=product_data.get('is_direct'),
+                    is_direct_dependency=_safe_bool(product_data.get('is_direct')),
                     distro_package_version=product_data.get('distro_package_version'),
                     detected_by='agent',
                     detected_on_os=platform  # Track which OS this came from

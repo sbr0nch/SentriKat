@@ -601,6 +601,15 @@ def get_filtered_vulnerabilities(filters=None):
         selectinload(VulnerabilityMatch.vulnerability)
     )
 
+    # Exclude matches for inactive products (disabled by admin or auto-disabled)
+    active_product_ids = db.session.execute(
+        select(Product.id).where(Product.active == True)
+    ).scalars().all()
+    if active_product_ids:
+        query = query.filter(VulnerabilityMatch.product_id.in_(active_product_ids))
+    else:
+        return []
+
     if filters:
         # Filter by organization - combine many-to-many AND legacy FK
         if filters.get('organization_id'):
@@ -676,9 +685,8 @@ def get_filtered_vulnerabilities(filters=None):
         # Filter by source key type (server/client) - only show matches for products
         # reported by the specified key type
         if filters.get('source_key_type') in ('server', 'client'):
-            from sqlalchemy import select as sa_select
             key_type_product_ids = db.session.execute(
-                sa_select(Product.id).where(
+                select(Product.id).where(
                     Product.source_key_type == filters['source_key_type']
                 )
             ).scalars().all()
@@ -689,9 +697,8 @@ def get_filtered_vulnerabilities(filters=None):
 
         # Filter by source type (os_package, extension, code_library)
         if filters.get('source_type'):
-            from sqlalchemy import select as sa_select
             st_product_ids = db.session.execute(
-                sa_select(Product.id).where(
+                select(Product.id).where(
                     Product.source_type == filters['source_type']
                 )
             ).scalars().all()
@@ -702,9 +709,8 @@ def get_filtered_vulnerabilities(filters=None):
 
         # Filter by multiple source types (e.g., code_library + extension)
         if filters.get('source_types'):
-            from sqlalchemy import select as sa_select
             st_product_ids = db.session.execute(
-                sa_select(Product.id).where(
+                select(Product.id).where(
                     Product.source_type.in_(filters['source_types'])
                 )
             ).scalars().all()

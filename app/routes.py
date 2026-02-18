@@ -3096,7 +3096,7 @@ def get_vulnerabilities_grouped():
             'ransomware_only': request.args.get('ransomware_only', 'false').lower() == 'true',
             'acknowledged': request.args.get('acknowledged'),
             'priority': request.args.get('priority'),
-            'source_key_type': request.args.get('source_key_type'),
+            'source_key_type': request.args.get('source_key_type') if request.args.get('source_key_type') in ('server', 'client') else None,
         }
         # Container filter: containers use ContainerImage model, not Product/VulnerabilityMatch.
         # Return empty results for container filter since they don't participate in CVE matching.
