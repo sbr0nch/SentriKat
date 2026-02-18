@@ -56,16 +56,23 @@ def fetch_epss_scores(cve_ids: List[str]) -> Dict[str, Dict]:
 
             data = response.json()
 
+            batch_count = 0
             if data.get('status') == 'OK' and 'data' in data:
                 for item in data['data']:
                     cve_id = item.get('cve')
                     if cve_id:
+                        epss_val = float(item.get('epss', 0))
+                        pctl_val = float(item.get('percentile', 0))
+                        # Clamp to valid 0-1 range
+                        epss_val = max(0.0, min(1.0, epss_val))
+                        pctl_val = max(0.0, min(1.0, pctl_val))
                         results[cve_id] = {
-                            'epss': float(item.get('epss', 0)),
-                            'percentile': float(item.get('percentile', 0))
+                            'epss': epss_val,
+                            'percentile': pctl_val
                         }
+                        batch_count += 1
 
-            logger.debug(f"Fetched EPSS scores for {len(batch)} CVEs, got {len(results)} results")
+            logger.debug(f"Fetched EPSS scores for {len(batch)} CVEs, got {batch_count} results")
 
         except requests.RequestException as e:
             logger.warning(f"EPSS API request failed for batch: {e}")
@@ -89,7 +96,7 @@ def sync_epss_scores(force: bool = False) -> Tuple[int, int, str]:
     from app.models import Vulnerability
 
     updated = 0
-    errors = 0
+    not_found = 0
 
     try:
         # Get vulnerabilities that need EPSS update
@@ -126,19 +133,19 @@ def sync_epss_scores(force: bool = False) -> Tuple[int, int, str]:
                 vuln.epss_fetched_at = now
                 updated += 1
             else:
-                # CVE not found in EPSS (might be too old or not indexed)
+                # CVE not found in EPSS (too old or not yet indexed) — normal
                 # Still mark as fetched to avoid repeated lookups
                 vuln.epss_fetched_at = now
-                errors += 1
+                not_found += 1
 
         db.session.commit()
 
         message = f"Updated {updated} EPSS scores"
-        if errors > 0:
-            message += f" ({errors} CVEs not found in EPSS)"
+        if not_found > 0:
+            message += f" ({not_found} CVEs not indexed by EPSS)"
 
         logger.info(message)
-        return updated, errors, message
+        return updated, not_found, message
 
     except Exception as e:
         logger.exception("EPSS sync failed")
@@ -197,7 +204,7 @@ def format_epss_display(epss_score: float, epss_percentile: float) -> Dict:
     Returns:
         Dict with formatted values and risk level
     """
-    if epss_score is None:
+    if epss_score is None or epss_percentile is None:
         return {
             'score_display': 'N/A',
             'percentile_display': 'N/A',

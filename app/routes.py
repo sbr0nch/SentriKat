@@ -1387,6 +1387,12 @@ def create_product():
 
     db.session.commit()
 
+    # Audit log for product creation
+    from app.logging_config import log_audit_event
+    log_audit_event('CREATE', 'products', product.id,
+                    new_value={'vendor': product.vendor, 'product': product.product_name,
+                               'version': product.version, 'cpe': f"{cpe_vendor}:{cpe_product}"})
+
     # Re-run matching for new product
     match_vulnerabilities_to_products()
 
@@ -1526,6 +1532,12 @@ def update_product(product_id):
                 product.organizations.append(new_org)
 
     db.session.commit()
+
+    # Audit log for product update
+    from app.logging_config import log_audit_event
+    log_audit_event('UPDATE', 'products', product.id,
+                    details={'vendor': product.vendor, 'product': product.product_name,
+                             'version': product.version, 'updated_by': current_user_id})
 
     # Re-run matching after update
     match_vulnerabilities_to_products()
