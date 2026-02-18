@@ -95,6 +95,16 @@ def _apply_schema_migrations(logger, db_uri):
         ('agent_api_keys', 'key_type', "VARCHAR(20) DEFAULT 'server'", "VARCHAR(20) DEFAULT 'server'"),
         ('assets', 'reported_by_key_type', 'VARCHAR(20)', 'VARCHAR(20)'),
         ('products', 'source_key_type', 'VARCHAR(20)', 'VARCHAR(20)'),
+        # Software classification (extension + dependency scanning)
+        ('products', 'source_type', "VARCHAR(30) DEFAULT 'os_package'", "VARCHAR(30) DEFAULT 'os_package'"),
+        ('products', 'ecosystem', 'VARCHAR(30)', 'VARCHAR(30)'),
+        # Scan capabilities (license-gated)
+        ('agent_api_keys', 'scan_os_packages', 'BOOLEAN DEFAULT 1', 'BOOLEAN DEFAULT TRUE'),
+        ('agent_api_keys', 'scan_extensions', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('agent_api_keys', 'scan_dependencies', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        # Dependency tracking on installations
+        ('product_installations', 'project_path', 'VARCHAR(500)', 'VARCHAR(500)'),
+        ('product_installations', 'is_direct_dependency', 'BOOLEAN', 'BOOLEAN'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

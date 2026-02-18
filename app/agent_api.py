@@ -48,6 +48,26 @@ MAX_VENDOR_LENGTH = 200
 MAX_PRODUCT_NAME_LENGTH = 200
 MAX_VERSION_LENGTH = 100
 MAX_PATH_LENGTH = 500
+
+# Valid source types and ecosystems for inventory processing
+VALID_SOURCE_TYPES = frozenset({'os_package', 'vscode_extension', 'code_library', 'browser_extension'})
+VALID_ECOSYSTEMS = frozenset({
+    'npm', 'pypi', 'maven', 'nuget', 'cargo', 'go', 'gem', 'composer',
+    'vscode', 'chrome', 'firefox', 'apt', 'rpm', 'apk', 'pacman',
+    'snap', 'flatpak', 'brew', 'port', 'chocolatey', 'winget',
+})
+
+
+def _safe_bool(value):
+    """Safely coerce a value to bool or None. Rejects non-boolean types."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    # Accept common truthy/falsy representations
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return None  # Reject strings, lists, dicts etc.
 MAX_PRODUCTS_PER_REQUEST = 10000  # Absolute maximum products in single request (agents send ALL)
 
 # Background worker pool settings
@@ -1276,6 +1296,11 @@ def process_inventory_job(job):
         items_failed = 0
         items_processed = 0
 
+        # Resolve the agent_key for license gating (reuse from above if loaded)
+        agent_key_for_gating = None
+        if job.api_key_id:
+            agent_key_for_gating = AgentApiKey.query.get(job.api_key_id)
+
         for product_data in products:
             try:
                 vendor = product_data.get('vendor')
@@ -1290,6 +1315,27 @@ def process_inventory_job(job):
                 if _should_skip_software(vendor, product_name):
                     items_processed += 1
                     continue
+
+                # Determine source_type and ecosystem from agent payload
+                p_source_type = product_data.get('source_type', 'os_package')
+                p_ecosystem = product_data.get('ecosystem')
+
+                # Validate source_type and ecosystem against allowed values
+                if p_source_type not in VALID_SOURCE_TYPES:
+                    p_source_type = 'os_package'
+                if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
+                    p_ecosystem = None  # Reject unknown ecosystems
+
+                # Gate: reject extension/dependency data if API key doesn't have capability
+                # Hard enforcement: block if key is missing OR capability is disabled
+                if p_source_type == 'vscode_extension':
+                    if not agent_key_for_gating or not getattr(agent_key_for_gating, 'scan_extensions', False):
+                        items_processed += 1
+                        continue  # Skip - not licensed for extension scanning
+                if p_source_type == 'code_library':
+                    if not agent_key_for_gating or not getattr(agent_key_for_gating, 'scan_dependencies', False):
+                        items_processed += 1
+                        continue  # Skip - not licensed for dependency scanning
 
                 # Find or create product
                 product = Product.query.filter_by(
@@ -1323,6 +1369,8 @@ def process_inventory_job(job):
                         active=True,
                         criticality='medium',
                         source='agent',  # Track that this was auto-added by agent
+                        source_type=p_source_type,
+                        ecosystem=p_ecosystem,
                         source_key_type=job_key_type,
                         last_agent_report=datetime.utcnow(),
                         organization_id=organization.id
@@ -1342,6 +1390,12 @@ def process_inventory_job(job):
                 else:
                     # Update last_agent_report timestamp
                     product.last_agent_report = datetime.utcnow()
+
+                    # Update source_type/ecosystem if not already set (backfill from agent data)
+                    if p_source_type and not product.source_type:
+                        product.source_type = p_source_type
+                    if p_ecosystem and not product.ecosystem:
+                        product.ecosystem = p_ecosystem
 
                     # Re-enable if it was auto-disabled
                     if product.auto_disabled:
@@ -1370,6 +1424,8 @@ def process_inventory_job(job):
                         product_id=product.id,
                         version=version,
                         install_path=product_data.get('path'),
+                        project_path=product_data.get('project_path'),
+                        is_direct_dependency=_safe_bool(product_data.get('is_direct')),
                         distro_package_version=product_data.get('distro_package_version'),
                         detected_by='agent',
                         detected_on_os=platform  # Track which OS this came from
@@ -1382,6 +1438,9 @@ def process_inventory_job(job):
                     seen_installation_ids.add(installation.id)
                     installation.version = version
                     installation.install_path = product_data.get('path')
+                    installation.project_path = product_data.get('project_path') or installation.project_path
+                    is_direct_val = _safe_bool(product_data.get('is_direct'))
+                    installation.is_direct_dependency = is_direct_val if is_direct_val is not None else installation.is_direct_dependency
                     installation.distro_package_version = product_data.get('distro_package_version') or installation.distro_package_version
                     installation.last_seen_at = datetime.utcnow()
                     installations_updated += 1
@@ -1780,6 +1839,25 @@ def report_inventory():
                         products_updated += 1
                     continue
 
+                # Determine source_type and ecosystem from agent payload
+                p_source_type = product_data.get('source_type', 'os_package')
+                p_ecosystem = product_data.get('ecosystem')
+
+                # Validate source_type and ecosystem against allowed values
+                if p_source_type not in VALID_SOURCE_TYPES:
+                    p_source_type = 'os_package'
+                if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
+                    p_ecosystem = None  # Reject unknown ecosystems
+
+                # Gate: reject extension/dependency data if API key doesn't have capability
+                # Hard enforcement: block if key is missing OR capability is disabled
+                if p_source_type == 'vscode_extension':
+                    if not agent_key or not getattr(agent_key, 'scan_extensions', False):
+                        continue  # Skip - not licensed for extension scanning
+                if p_source_type == 'code_library':
+                    if not agent_key or not getattr(agent_key, 'scan_dependencies', False):
+                        continue  # Skip - not licensed for dependency scanning
+
                 # Create product
                 product = Product(
                     vendor=vendor,
@@ -1788,6 +1866,8 @@ def report_inventory():
                     active=True,
                     criticality='medium',
                     source='agent',  # Track that this was auto-added by agent
+                    source_type=p_source_type,
+                    ecosystem=p_ecosystem,
                     source_key_type=agent_key.key_type if agent_key and hasattr(agent_key, 'key_type') else None,
                     last_agent_report=datetime.utcnow(),
                     organization_id=organization.id
@@ -1807,6 +1887,14 @@ def report_inventory():
             else:
                 # Update last_agent_report timestamp
                 product.last_agent_report = datetime.utcnow()
+
+                # Update source_type/ecosystem if not already set (backfill from agent data)
+                p_source_type = product_data.get('source_type')
+                if p_source_type and not product.source_type:
+                    product.source_type = p_source_type
+                p_ecosystem = product_data.get('ecosystem')
+                if p_ecosystem and not product.ecosystem:
+                    product.ecosystem = p_ecosystem
 
                 # Re-enable if it was auto-disabled
                 if product.auto_disabled:
@@ -1835,6 +1923,8 @@ def report_inventory():
                     product_id=product.id,
                     version=version,
                     install_path=product_data.get('path'),
+                    project_path=product_data.get('project_path'),
+                    is_direct_dependency=product_data.get('is_direct'),
                     distro_package_version=product_data.get('distro_package_version'),
                     detected_by='agent',
                     detected_on_os=platform  # Track which OS this came from
@@ -2785,6 +2875,9 @@ def create_agent_key():
         key_prefix=key_prefix,
         encrypted_key=encrypted_raw,
         key_type=key_type,
+        scan_os_packages=data.get('scan_os_packages', True),
+        scan_extensions=data.get('scan_extensions', False),
+        scan_dependencies=data.get('scan_dependencies', False),
         max_assets=data.get('max_assets'),
         auto_approve=data.get('auto_approve', False),
         created_by=user.id
@@ -3855,8 +3948,23 @@ def get_agent_commands():
                 'message': f'Agent update available: {agent_version} → {latest_version}'
             })
 
+    # Include scan capabilities from the API key so agents know what to scan
+    agent_key = getattr(request, 'agent_key', None)
+    scan_capabilities = {
+        'os_packages': True,
+        'extensions': False,
+        'dependencies': False
+    }
+    if agent_key:
+        scan_capabilities = {
+            'os_packages': getattr(agent_key, 'scan_os_packages', True),
+            'extensions': getattr(agent_key, 'scan_extensions', False),
+            'dependencies': getattr(agent_key, 'scan_dependencies', False)
+        }
+
     return jsonify({
         'commands': commands,
+        'scan_capabilities': scan_capabilities,
         'server_time': datetime.utcnow().isoformat(),
         'next_poll_seconds': 300  # Suggest polling every 5 minutes
     })

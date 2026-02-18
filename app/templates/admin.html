@@ -168,6 +168,15 @@
                         <option value="client">Clients</option>
                     </select>
                 </div>
+                <div class="col-md-2">
+                    <select class="form-select form-select-sm" id="filterSourceType" onchange="resetAndLoadProducts()">
+                        <option value="">All Types</option>
+                        <option value="os_package">OS Packages</option>
+                        <option value="vscode_extension">VS Code Extensions</option>
+                        <option value="code_library">Code Libraries</option>
+                        <option value="browser_extension">Browser Extensions</option>
+                    </select>
+                </div>
                 <div class="col-md-1 text-end">
                     <span class="text-muted small" id="productCount">-</span>
                 </div>
@@ -1012,6 +1021,9 @@
         const sourceKeyType = document.getElementById('filterSourceKeyType')?.value;
         if (sourceKeyType) params.append('source_key_type', sourceKeyType);
 
+        const sourceType = document.getElementById('filterSourceType')?.value;
+        if (sourceType) params.append('source_type', sourceType);
+
         const perPage = parseInt(document.getElementById('perPage')?.value || '25');
         params.append('page', currentPage);
         params.append('per_page', perPage);
@@ -1056,7 +1068,7 @@
             }
 
             if (products.length === 0) {
-                const hasFilters = search || status || cpeFilter || sourceKeyType || (filterOrgEl && filterOrgEl.value);
+                const hasFilters = search || status || cpeFilter || sourceKeyType || sourceType || (filterOrgEl && filterOrgEl.value);
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="text-center py-5">
@@ -1137,6 +1149,16 @@
                         ? '<span class="badge bg-warning-subtle text-warning" title="Reported by client agent"><i class="bi bi-laptop"></i></span> '
                         : '';
 
+                    // Build source type badge (os_package, vscode_extension, code_library, browser_extension)
+                    const srcType = group.source_type || 'os_package';
+                    const ecosystemLabel = group.ecosystem ? ` (${escapeHtml(group.ecosystem)})` : '';
+                    const sourceTypeBadges = {
+                        'vscode_extension': `<span class="badge bg-info-subtle text-info ms-1" title="VS Code Extension${ecosystemLabel}"><i class="bi bi-puzzle"></i> Ext</span>`,
+                        'code_library': `<span class="badge bg-success-subtle text-success ms-1" title="Code Library${ecosystemLabel}"><i class="bi bi-book"></i> ${group.ecosystem || 'Lib'}</span>`,
+                        'browser_extension': `<span class="badge bg-secondary-subtle text-secondary ms-1" title="Browser Extension${ecosystemLabel}"><i class="bi bi-globe"></i> Ext</span>`
+                    };
+                    const sourceTypeBadge = sourceTypeBadges[srcType] || '';
+
                     // Build platform display
                     const platforms = group.platforms || [];
                     let platformDisplay;
@@ -1166,7 +1188,7 @@
                                        onchange="toggleGroupSelect('${allVersionIds.join(',')}', this)">
                             </td>
                             <td data-column="product" class="fw-semibold">
-                                ${escapeHtml(group.product_name)}
+                                ${escapeHtml(group.product_name)}${sourceTypeBadge}
                                 ${group.has_vulnerable_version ? '<i class="bi bi-exclamation-triangle-fill text-danger ms-1" title="Has vulnerable versions"></i>' : ''}
                             </td>
                             <td data-column="vendor">${escapeHtml(group.vendor)}</td>
@@ -1264,6 +1286,8 @@
         if (filterCpeEl) filterCpeEl.value = '';
         const filterSourceKeyTypeEl = document.getElementById('filterSourceKeyType');
         if (filterSourceKeyTypeEl) filterSourceKeyTypeEl.value = '';
+        const filterSourceTypeEl = document.getElementById('filterSourceType');
+        if (filterSourceTypeEl) filterSourceTypeEl.value = '';
         currentPage = 1;
         loadProducts();
     }

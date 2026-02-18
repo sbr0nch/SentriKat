@@ -104,6 +104,8 @@ function Get-AgentConfig {
         ApiKey = $ApiKey
         IntervalMinutes = $IntervalMinutes
         AgentId = $null
+        ScanExtensions = $false
+        ScanDependencies = $false
     }
 
     # Load from config file if exists
@@ -114,6 +116,8 @@ function Get-AgentConfig {
             if ($savedConfig.ApiKey -and !$ApiKey) { $config.ApiKey = $savedConfig.ApiKey }
             if ($savedConfig.IntervalMinutes) { $config.IntervalMinutes = $savedConfig.IntervalMinutes }
             if ($savedConfig.AgentId) { $config.AgentId = $savedConfig.AgentId }
+            if ($null -ne $savedConfig.ScanExtensions) { $config.ScanExtensions = [bool]$savedConfig.ScanExtensions }
+            if ($null -ne $savedConfig.ScanDependencies) { $config.ScanDependencies = [bool]$savedConfig.ScanDependencies }
         } catch {
             Write-Log "Failed to load config file: $_" -Level "WARN"
         }
@@ -308,6 +312,386 @@ function Get-InstalledSoftware {
     $result = $uniqueSoftware.Values | Sort-Object { $_.vendor }, { $_.product }
     Write-Log "Collected $($result.Count) installed packages (server-side filtering)"
 
+    return $result
+}
+
+# ============================================================================
+# VSCode Extension Scanning
+# ============================================================================
+
+function Get-VSCodeExtensions {
+    Write-Log "Scanning VSCode extensions..."
+
+    $extensions = @()
+
+    # Collect all extension directories to scan
+    $extensionDirs = @()
+
+    # Current user's VSCode and VSCode Insiders extensions
+    if ($env:USERPROFILE) {
+        $vscodePath = Join-Path $env:USERPROFILE ".vscode\extensions"
+        $vscodeInsidersPath = Join-Path $env:USERPROFILE ".vscode-insiders\extensions"
+        if (Test-Path $vscodePath) { $extensionDirs += $vscodePath }
+        if (Test-Path $vscodeInsidersPath) { $extensionDirs += $vscodeInsidersPath }
+    }
+
+    # Scan all user profiles in C:\Users
+    $usersDir = "C:\Users"
+    if (Test-Path $usersDir) {
+        $userProfiles = Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') }
+
+        foreach ($profile in $userProfiles) {
+            $profileVscode = Join-Path $profile.FullName ".vscode\extensions"
+            $profileVscodeInsiders = Join-Path $profile.FullName ".vscode-insiders\extensions"
+
+            if ((Test-Path $profileVscode) -and ($profileVscode -notin $extensionDirs)) {
+                $extensionDirs += $profileVscode
+            }
+            if ((Test-Path $profileVscodeInsiders) -and ($profileVscodeInsiders -notin $extensionDirs)) {
+                $extensionDirs += $profileVscodeInsiders
+            }
+        }
+    }
+
+    foreach ($extDir in $extensionDirs) {
+        Write-Log "Scanning extensions in: $extDir"
+
+        $extFolders = Get-ChildItem -Path $extDir -Directory -ErrorAction SilentlyContinue
+        foreach ($folder in $extFolders) {
+            $packageJsonPath = Join-Path $folder.FullName "package.json"
+            if (!(Test-Path $packageJsonPath)) { continue }
+
+            try {
+                $packageJson = Get-Content $packageJsonPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+
+                $extName = if ($packageJson.name) { $packageJson.name } else { $folder.Name }
+                $extVersion = if ($packageJson.version) { $packageJson.version } else { $null }
+                $extPublisher = if ($packageJson.publisher) { $packageJson.publisher } else { "Unknown" }
+                $extDisplayName = if ($packageJson.displayName) { $packageJson.displayName } else { $extName }
+
+                $extensions += @{
+                    vendor = $extPublisher
+                    product = $extDisplayName
+                    version = $extVersion
+                    path = $folder.FullName
+                    source_type = "vscode_extension"
+                    ecosystem = "vscode"
+                }
+            }
+            catch {
+                Write-Log "Failed to parse package.json in $($folder.FullName): $_" -Level "WARN"
+            }
+        }
+    }
+
+    # Deduplicate by publisher+name (keep first occurrence)
+    $uniqueExtensions = @{}
+    foreach ($ext in $extensions) {
+        $key = "$($ext.vendor)|$($ext.product)|$($ext.version)".ToLower()
+        if (!$uniqueExtensions.ContainsKey($key)) {
+            $uniqueExtensions[$key] = $ext
+        }
+    }
+
+    $result = @($uniqueExtensions.Values)
+    Write-Log "Found $($result.Count) VSCode extensions"
+    return $result
+}
+
+# ============================================================================
+# Code Dependency Scanning
+# ============================================================================
+
+function Get-CodeDependencies {
+    Write-Log "Scanning code dependencies..."
+
+    $dependencies = @()
+
+    # --- Python: pip freeze ---
+    foreach ($pipCmd in @("pip3", "pip")) {
+        try {
+            $pipExe = Get-Command $pipCmd -ErrorAction SilentlyContinue
+            if (!$pipExe) { continue }
+
+            Write-Log "Running $pipCmd freeze for global Python packages..."
+            $pipOutput = & $pipCmd freeze 2>&1
+            if ($LASTEXITCODE -eq 0 -and $pipOutput) {
+                foreach ($line in $pipOutput) {
+                    if ($line -match '^([^=]+)==(.+)$') {
+                        $dependencies += @{
+                            vendor = "PyPI"
+                            product = $Matches[1].Trim()
+                            version = $Matches[2].Trim()
+                            path = $null
+                            source_type = "code_dependency"
+                            ecosystem = "python"
+                        }
+                    }
+                }
+            }
+            # Only run the first pip variant that succeeds
+            break
+        }
+        catch {
+            Write-Log "Failed to run $pipCmd freeze: $_" -Level "WARN"
+        }
+    }
+
+    # --- Node.js: npm ls -g ---
+    try {
+        $npmExe = Get-Command npm -ErrorAction SilentlyContinue
+        if ($npmExe) {
+            Write-Log "Running npm ls -g for global Node.js packages..."
+            $npmOutput = & npm ls -g --depth=0 --json 2>&1
+            if ($LASTEXITCODE -eq 0 -and $npmOutput) {
+                try {
+                    $npmJson = $npmOutput | Out-String | ConvertFrom-Json
+                    if ($npmJson.dependencies) {
+                        $npmJson.dependencies.PSObject.Properties | ForEach-Object {
+                            $dependencies += @{
+                                vendor = "npm"
+                                product = $_.Name
+                                version = if ($_.Value.version) { $_.Value.version } else { $null }
+                                path = $null
+                                source_type = "code_dependency"
+                                ecosystem = "nodejs"
+                            }
+                        }
+                    }
+                }
+                catch {
+                    Write-Log "Failed to parse npm ls output: $_" -Level "WARN"
+                }
+            }
+        }
+    }
+    catch {
+        Write-Log "Failed to run npm ls: $_" -Level "WARN"
+    }
+
+    # --- .NET/NuGet: scan user NuGet cache and *.csproj files ---
+    try {
+        # Check user-level NuGet package cache
+        $nugetCachePath = Join-Path $env:USERPROFILE ".nuget\packages"
+        if (Test-Path $nugetCachePath) {
+            Write-Log "Scanning NuGet package cache..."
+            $nugetPackages = Get-ChildItem -Path $nugetCachePath -Directory -ErrorAction SilentlyContinue
+            foreach ($pkg in $nugetPackages) {
+                $versions = Get-ChildItem -Path $pkg.FullName -Directory -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending | Select-Object -First 1
+                if ($versions) {
+                    $dependencies += @{
+                        vendor = "NuGet"
+                        product = $pkg.Name
+                        version = $versions.Name
+                        path = $pkg.FullName
+                        source_type = "code_dependency"
+                        ecosystem = "nuget"
+                    }
+                }
+            }
+        }
+
+        # Scan common project directories for .csproj files with PackageReference
+        $projectScanPaths = @()
+        if ($env:USERPROFILE) {
+            $devPaths = @("source", "repos", "projects", "dev", "src", "Documents\source", "Documents\repos", "Documents\projects")
+            foreach ($devPath in $devPaths) {
+                $fullPath = Join-Path $env:USERPROFILE $devPath
+                if (Test-Path $fullPath) { $projectScanPaths += $fullPath }
+            }
+        }
+
+        foreach ($scanPath in $projectScanPaths) {
+            $csprojFiles = Get-ChildItem -Path $scanPath -Filter "*.csproj" -Recurse -Depth 4 -ErrorAction SilentlyContinue | Select-Object -First 100
+            foreach ($csproj in $csprojFiles) {
+                try {
+                    [xml]$csprojXml = Get-Content $csproj.FullName -Raw -ErrorAction SilentlyContinue
+                    $packageRefs = $csprojXml.SelectNodes("//PackageReference")
+                    foreach ($ref in $packageRefs) {
+                        $pkgName = $ref.GetAttribute("Include")
+                        $pkgVersion = $ref.GetAttribute("Version")
+                        if ($pkgName) {
+                            $dependencies += @{
+                                vendor = "NuGet"
+                                product = $pkgName
+                                version = if ($pkgVersion) { $pkgVersion } else { $null }
+                                path = $csproj.FullName
+                                source_type = "code_dependency"
+                                ecosystem = "nuget"
+                            }
+                        }
+                    }
+                }
+                catch {
+                    # Silently skip malformed csproj files
+                }
+            }
+        }
+    }
+    catch {
+        Write-Log "Failed to scan NuGet dependencies: $_" -Level "WARN"
+    }
+
+    # --- Rust: cargo install --list ---
+    try {
+        $cargoExe = Get-Command cargo -ErrorAction SilentlyContinue
+        if ($cargoExe) {
+            Write-Log "Running cargo install --list for Rust packages..."
+            $cargoOutput = & cargo install --list 2>&1
+            if ($LASTEXITCODE -eq 0 -and $cargoOutput) {
+                foreach ($line in $cargoOutput) {
+                    # Lines like: "ripgrep v14.1.0:"
+                    if ($line -match '^(\S+)\s+v([\d.]+)') {
+                        $dependencies += @{
+                            vendor = "crates.io"
+                            product = $Matches[1]
+                            version = $Matches[2]
+                            path = $null
+                            source_type = "code_dependency"
+                            ecosystem = "rust"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    catch {
+        Write-Log "Failed to run cargo install --list: $_" -Level "WARN"
+    }
+
+    # --- Composer: composer global show ---
+    try {
+        $composerExe = Get-Command composer -ErrorAction SilentlyContinue
+        if ($composerExe) {
+            Write-Log "Running composer global show for PHP packages..."
+            $composerOutput = & composer global show --format=json 2>&1
+            if ($LASTEXITCODE -eq 0 -and $composerOutput) {
+                try {
+                    $composerJson = $composerOutput | Out-String | ConvertFrom-Json
+                    if ($composerJson.installed) {
+                        foreach ($pkg in $composerJson.installed) {
+                            $dependencies += @{
+                                vendor = "Packagist"
+                                product = $pkg.name
+                                version = if ($pkg.version) { ($pkg.version -replace '^v', '') } else { $null }
+                                path = $null
+                                source_type = "code_dependency"
+                                ecosystem = "composer"
+                            }
+                        }
+                    }
+                }
+                catch {
+                    Write-Log "Failed to parse composer output: $_" -Level "WARN"
+                }
+            }
+        }
+    }
+    catch {
+        Write-Log "Failed to run composer global show: $_" -Level "WARN"
+    }
+
+    # --- Scan common project directories for lock files / manifests ---
+    try {
+        $projectScanPaths = @()
+        if ($env:USERPROFILE) {
+            $devPaths = @("source", "repos", "projects", "dev", "src", "Documents\source", "Documents\repos", "Documents\projects")
+            foreach ($devPath in $devPaths) {
+                $fullPath = Join-Path $env:USERPROFILE $devPath
+                if (Test-Path $fullPath) { $projectScanPaths += $fullPath }
+            }
+        }
+
+        foreach ($scanPath in $projectScanPaths) {
+            # Node.js: package-lock.json
+            $lockFiles = Get-ChildItem -Path $scanPath -Filter "package-lock.json" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 50
+            foreach ($lockFile in $lockFiles) {
+                try {
+                    $lockJson = Get-Content $lockFile.FullName -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+                    if ($lockJson.dependencies) {
+                        $lockJson.dependencies.PSObject.Properties | ForEach-Object {
+                            # Skip deeply nested deps, only top-level
+                            $dependencies += @{
+                                vendor = "npm"
+                                product = $_.Name
+                                version = if ($_.Value.version) { $_.Value.version } else { $null }
+                                path = $lockFile.DirectoryName
+                                source_type = "code_dependency"
+                                ecosystem = "nodejs"
+                            }
+                        }
+                    }
+                }
+                catch {
+                    Write-Log "Failed to parse $($lockFile.FullName): $_" -Level "WARN"
+                }
+            }
+
+            # Python: requirements.txt
+            $reqFiles = Get-ChildItem -Path $scanPath -Filter "requirements.txt" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 50
+            foreach ($reqFile in $reqFiles) {
+                try {
+                    $lines = Get-Content $reqFile.FullName -ErrorAction SilentlyContinue
+                    foreach ($line in $lines) {
+                        $line = $line.Trim()
+                        # Skip comments and empty lines
+                        if (!$line -or $line.StartsWith("#") -or $line.StartsWith("-")) { continue }
+                        if ($line -match '^([A-Za-z0-9_.-]+)\s*==\s*(.+)$') {
+                            $dependencies += @{
+                                vendor = "PyPI"
+                                product = $Matches[1]
+                                version = $Matches[2].Trim()
+                                path = $reqFile.DirectoryName
+                                source_type = "code_dependency"
+                                ecosystem = "python"
+                            }
+                        }
+                        elseif ($line -match '^([A-Za-z0-9_.-]+)\s*[><=!~]') {
+                            $pkgName = $Matches[1]
+                            $dependencies += @{
+                                vendor = "PyPI"
+                                product = $pkgName
+                                version = $null
+                                path = $reqFile.DirectoryName
+                                source_type = "code_dependency"
+                                ecosystem = "python"
+                            }
+                        }
+                        elseif ($line -match '^([A-Za-z0-9_.-]+)\s*$') {
+                            $dependencies += @{
+                                vendor = "PyPI"
+                                product = $Matches[1]
+                                version = $null
+                                path = $reqFile.DirectoryName
+                                source_type = "code_dependency"
+                                ecosystem = "python"
+                            }
+                        }
+                    }
+                }
+                catch {
+                    Write-Log "Failed to parse $($reqFile.FullName): $_" -Level "WARN"
+                }
+            }
+        }
+    }
+    catch {
+        Write-Log "Failed to scan project dependency files: $_" -Level "WARN"
+    }
+
+    # Deduplicate by ecosystem+product+version (keep first occurrence)
+    $uniqueDeps = @{}
+    foreach ($dep in $dependencies) {
+        $key = "$($dep.ecosystem)|$($dep.product)|$($dep.version)".ToLower()
+        if (!$uniqueDeps.ContainsKey($key)) {
+            $uniqueDeps[$key] = $dep
+        }
+    }
+
+    $result = @($uniqueDeps.Values)
+    Write-Log "Found $($result.Count) code dependencies"
     return $result
 }
 
@@ -539,6 +923,54 @@ function Check-Commands {
                             Save-AgentConfig $Config
                             # Note: Would need to reinstall scheduled task to apply new interval
                         }
+                    }
+                    # Handle scan_capabilities from config update
+                    if ($cmd.config.scan_capabilities) {
+                        $caps = $cmd.config.scan_capabilities
+                        $configChanged = $false
+                        if ($null -ne $caps.scan_extensions) {
+                            $newVal = [bool]$caps.scan_extensions
+                            if ($newVal -ne $Config.ScanExtensions) {
+                                Write-Log "Updating ScanExtensions: $($Config.ScanExtensions) -> $newVal"
+                                $Config.ScanExtensions = $newVal
+                                $configChanged = $true
+                            }
+                        }
+                        if ($null -ne $caps.scan_dependencies) {
+                            $newVal = [bool]$caps.scan_dependencies
+                            if ($newVal -ne $Config.ScanDependencies) {
+                                Write-Log "Updating ScanDependencies: $($Config.ScanDependencies) -> $newVal"
+                                $Config.ScanDependencies = $newVal
+                                $configChanged = $true
+                            }
+                        }
+                        if ($configChanged) {
+                            Save-AgentConfig $Config
+                        }
+                    }
+                }
+                "scan_capabilities" {
+                    Write-Log "Received scan_capabilities command"
+                    $configChanged = $false
+                    if ($null -ne $cmd.scan_extensions) {
+                        $newVal = [bool]$cmd.scan_extensions
+                        if ($newVal -ne $Config.ScanExtensions) {
+                            Write-Log "Updating ScanExtensions: $($Config.ScanExtensions) -> $newVal"
+                            $Config.ScanExtensions = $newVal
+                            $configChanged = $true
+                        }
+                    }
+                    if ($null -ne $cmd.scan_dependencies) {
+                        $newVal = [bool]$cmd.scan_dependencies
+                        if ($newVal -ne $Config.ScanDependencies) {
+                            Write-Log "Updating ScanDependencies: $($Config.ScanDependencies) -> $newVal"
+                            $Config.ScanDependencies = $newVal
+                            $configChanged = $true
+                        }
+                    }
+                    if ($configChanged) {
+                        Save-AgentConfig $Config
+                        $scanRequested = $true
                     }
                 }
                 "update_available" {
@@ -972,6 +1404,25 @@ function Main {
         try {
             $systemInfo = Get-SystemInfo
             $products = Get-InstalledSoftware
+
+            # Include extensions and dependencies in initial scan if enabled
+            if ($config.ScanExtensions) {
+                try {
+                    $extensions = Get-VSCodeExtensions
+                    if ($extensions.Count -gt 0) { $products = @($products) + @($extensions) }
+                } catch {
+                    Write-Log "VSCode extension scanning failed during initial scan: $_" -Level "WARN"
+                }
+            }
+            if ($config.ScanDependencies) {
+                try {
+                    $deps = Get-CodeDependencies
+                    if ($deps.Count -gt 0) { $products = @($products) + @($deps) }
+                } catch {
+                    Write-Log "Dependency scanning failed during initial scan: $_" -Level "WARN"
+                }
+            }
+
             if ($products.Count -gt 0) {
                 $success = Send-Inventory $config $systemInfo $products
                 if ($success) {
@@ -1020,6 +1471,34 @@ function Main {
         Write-Log "System: $($systemInfo.hostname) ($($systemInfo.os.version))"
 
         $products = Get-InstalledSoftware
+
+        # VSCode extension scanning (conditional)
+        if ($config.ScanExtensions) {
+            try {
+                $extensions = Get-VSCodeExtensions
+                if ($extensions.Count -gt 0) {
+                    $products = @($products) + @($extensions)
+                    Write-Log "Added $($extensions.Count) VSCode extensions to inventory"
+                }
+            }
+            catch {
+                Write-Log "VSCode extension scanning failed (non-fatal): $_" -Level "WARN"
+            }
+        }
+
+        # Code dependency scanning (conditional)
+        if ($config.ScanDependencies) {
+            try {
+                $deps = Get-CodeDependencies
+                if ($deps.Count -gt 0) {
+                    $products = @($products) + @($deps)
+                    Write-Log "Added $($deps.Count) code dependencies to inventory"
+                }
+            }
+            catch {
+                Write-Log "Code dependency scanning failed (non-fatal): $_" -Level "WARN"
+            }
+        }
 
         if ($products.Count -eq 0) {
             Write-Log "No software found to report" -Level "WARN"

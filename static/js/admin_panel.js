@@ -6766,7 +6766,7 @@ async function loadAgentKeys() {
         if (keys.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="text-center py-4 text-muted">
+                    <td colspan="9" class="text-center py-4 text-muted">
                         <i class="bi bi-key text-warning" style="font-size: 2rem;"></i>
                         <p class="mt-2 mb-0">No agent API keys configured</p>
                         <p class="small">Create an API key to download agents with embedded authentication</p>
@@ -6795,6 +6795,13 @@ async function loadAgentKeys() {
                         ${key.auto_approve
                             ? '<span class="badge bg-success" title="Products are added directly to inventory"><i class="bi bi-check-circle me-1"></i>Auto</span>'
                             : '<span class="badge bg-info" title="Products go to Import Queue for review"><i class="bi bi-inbox me-1"></i>Queue</span>'}
+                    </td>
+                    <td data-column="capabilities">
+                        <div class="d-flex flex-wrap gap-1">
+                            ${(key.scan_capabilities?.os_packages !== false) ? '<span class="badge bg-secondary-subtle text-secondary" title="OS Packages"><i class="bi bi-box"></i></span>' : ''}
+                            ${key.scan_capabilities?.extensions ? '<span class="badge bg-info-subtle text-info" title="VS Code Extensions"><i class="bi bi-puzzle"></i></span>' : ''}
+                            ${key.scan_capabilities?.dependencies ? '<span class="badge bg-success-subtle text-success" title="Code Dependencies"><i class="bi bi-book"></i></span>' : ''}
+                        </div>
                     </td>
                     <td data-column="lastused">${key.last_used_at ? formatRelativeTime(key.last_used_at) : '<span class="text-muted">Never</span>'}</td>
                     <td data-column="usage">
@@ -6829,7 +6836,7 @@ async function loadAgentKeys() {
         console.error('Error loading agent keys:', error);
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" class="text-center py-4 text-danger">
+                <td colspan="9" class="text-center py-4 text-danger">
                     <i class="bi bi-exclamation-triangle text-danger"></i>
                     <span class="ms-2">Error loading agent keys: ${error.message}</span>
                 </td>
@@ -6902,6 +6909,9 @@ async function createAgentKey() {
     const name = SK.DOM.getValue('agentKeyName').trim();
     const orgId = SK.DOM.getValue('agentKeyOrg');
     const keyType = SK.DOM.getValue('agentKeyType') || 'server';
+    const scanOsPackages = SK.DOM.get('agentKeyScanOsPackages')?.checked ?? true;
+    const scanExtensions = SK.DOM.get('agentKeyScanExtensions')?.checked || false;
+    const scanDependencies = SK.DOM.get('agentKeyScanDependencies')?.checked || false;
     const maxAssets = parseInt(SK.DOM.getValue('agentKeyMaxAssets')) || 0;
     const expiresAt = SK.DOM.getValue('agentKeyExpires') || null;
     const autoApprove = SK.DOM.get('agentKeyAutoApprove')?.checked || false;
@@ -6931,6 +6941,9 @@ async function createAgentKey() {
                 organization_id: parseInt(orgId),
                 additional_organization_ids: additionalOrgIds,
                 key_type: keyType,
+                scan_os_packages: scanOsPackages,
+                scan_extensions: scanExtensions,
+                scan_dependencies: scanDependencies,
                 max_assets: maxAssets,
                 expires_at: expiresAt,
                 auto_approve: autoApprove
@@ -7199,7 +7212,7 @@ async function loadAssets(page = 1) {
         if (assets.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="text-center py-4 text-muted">
+                    <td colspan="9" class="text-center py-4 text-muted">
                         <i class="bi bi-pc-display text-primary" style="font-size: 2rem;"></i>
                         <p class="mt-2 mb-0">No endpoints discovered</p>
                         <p class="small">Endpoints will appear here when agents report their inventory</p>

@@ -924,6 +924,7 @@
                                             <th data-column="organization" data-sort-key="organization" data-sort-type="string">Organization</th>
                                             <th data-column="type" data-sort-key="type" data-sort-type="string">Type</th>
                                             <th data-column="mode" data-sort-key="mode" data-sort-type="string">Mode</th>
+                                            <th data-column="capabilities">Scan</th>
                                             <th data-column="lastused" data-sort-key="lastused" data-sort-type="date">Last Used</th>
                                             <th data-column="usage" data-sort-key="usage" data-sort-type="number">Usage</th>
                                             <th data-column="expires" data-sort-key="expires" data-sort-type="date">Expires</th>
@@ -932,7 +933,7 @@
                                     </thead>
                                     <tbody id="agentKeysTableBody">
                                         <tr>
-                                            <td colspan="8" class="text-center py-4">
+                                            <td colspan="9" class="text-center py-4">
                                                 <div class="spinner-border spinner-border-sm text-primary"></div>
                                                 <span class="ms-2">Loading agent keys...</span>
                                             </td>
@@ -3675,6 +3676,31 @@
                         <label for="agentKeyExpires" class="form-label fw-semibold">Expires</label>
                         <input type="date" class="form-control" id="agentKeyExpires">
                         <small class="text-muted">Leave empty for no expiration</small>
+                    </div>
+                    <hr>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Scan Capabilities</label>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="agentKeyScanOsPackages" checked>
+                            <label class="form-check-label" for="agentKeyScanOsPackages">
+                                <i class="bi bi-box me-1"></i>OS Packages
+                            </label>
+                            <small class="text-muted d-block ms-4">Scan installed operating system packages and software</small>
+                        </div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="agentKeyScanExtensions">
+                            <label class="form-check-label" for="agentKeyScanExtensions">
+                                <i class="bi bi-puzzle me-1"></i>VS Code Extensions
+                            </label>
+                            <small class="text-muted d-block ms-4">Scan VS Code / VS Code Insiders extensions for vulnerabilities</small>
+                        </div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="agentKeyScanDependencies">
+                            <label class="form-check-label" for="agentKeyScanDependencies">
+                                <i class="bi bi-book me-1"></i>Code Dependencies
+                            </label>
+                            <small class="text-muted d-block ms-4">Scan code libraries and dependencies (pip, npm, cargo, gem, go, composer)</small>
+                        </div>
                     </div>
                     <hr>
                     <div class="mb-3">
