@@ -1455,7 +1455,7 @@ class Asset(db.Model):
             return []
         try:
             return json.loads(self.tags)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return []
 
     def set_tags(self, tag_list):
@@ -1468,7 +1468,7 @@ class Asset(db.Model):
             return {}
         try:
             return json.loads(self.metadata_json)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return {}
 
     def set_metadata(self, data):
@@ -1737,7 +1737,7 @@ class AgentApiKey(db.Model):
             return []
         try:
             return json.loads(self.allowed_ips)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return []
 
     def to_dict(self, include_key=False):
@@ -1938,7 +1938,7 @@ class AgentLicense(db.Model):
             return {}
         try:
             return json.loads(self.features)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return {}
 
     def has_feature(self, feature_name):
@@ -2178,7 +2178,7 @@ class AgentEvent(db.Model):
             return {}
         try:
             return json.loads(self.details)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return {}
 
     @staticmethod
@@ -3068,4 +3068,284 @@ class HealthCheckResult(db.Model):
             'value': self.value,
             'details': json.loads(self.details) if self.details else None,
             'checked_at': self.checked_at.isoformat() if self.checked_at else None,
+        }
+
+
+# =============================================================================
+# SaaS Foundation Models
+# =============================================================================
+# These models prepare the database schema for future SaaS migration.
+# On-premise installations can ignore these - they are not used unless
+# SaaS mode is explicitly enabled.
+# =============================================================================
+
+
+class SubscriptionPlan(db.Model):
+    """
+    Defines available subscription plans for SaaS billing.
+
+    On-premise: Not used (license file controls features).
+    SaaS: Controls feature access and resource limits per organization.
+    """
+    __tablename__ = 'subscription_plans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)  # free, pro, business, enterprise
+    display_name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+
+    # Resource limits
+    max_agents = db.Column(db.Integer, default=5)
+    max_users = db.Column(db.Integer, default=1)
+    max_organizations = db.Column(db.Integer, default=1)
+    max_products = db.Column(db.Integer, default=50)
+    max_api_keys = db.Column(db.Integer, default=1)
+    max_storage_mb = db.Column(db.Integer, default=100)  # File storage limit
+
+    # Feature flags (JSON dict of feature_name: bool)
+    features = db.Column(db.Text, nullable=True)  # JSON
+
+    # Pricing
+    price_monthly_cents = db.Column(db.Integer, default=0)  # Price in cents
+    price_annual_cents = db.Column(db.Integer, default=0)
+    currency = db.Column(db.String(3), default='USD')
+
+    # Stripe integration
+    stripe_price_id_monthly = db.Column(db.String(100), nullable=True)
+    stripe_price_id_annual = db.Column(db.String(100), nullable=True)
+    stripe_product_id = db.Column(db.String(100), nullable=True)
+
+    # Plan metadata
+    is_active = db.Column(db.Boolean, default=True)
+    is_default = db.Column(db.Boolean, default=False)  # Default plan for new signups
+    sort_order = db.Column(db.Integer, default=0)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def get_features(self):
+        """Get features as dict."""
+        if not self.features:
+            return {}
+        try:
+            return json.loads(self.features)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
+
+    def has_feature(self, feature_name):
+        """Check if plan includes a feature."""
+        return self.get_features().get(feature_name, False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'display_name': self.display_name,
+            'description': self.description,
+            'max_agents': self.max_agents,
+            'max_users': self.max_users,
+            'max_organizations': self.max_organizations,
+            'max_products': self.max_products,
+            'max_api_keys': self.max_api_keys,
+            'max_storage_mb': self.max_storage_mb,
+            'features': self.get_features(),
+            'price_monthly_cents': self.price_monthly_cents,
+            'price_annual_cents': self.price_annual_cents,
+            'currency': self.currency,
+            'is_active': self.is_active,
+            'is_default': self.is_default,
+        }
+
+    # Default plans for seeding
+    DEFAULT_PLANS = [
+        {
+            'name': 'free',
+            'display_name': 'Free',
+            'description': 'For individuals and small teams getting started',
+            'max_agents': 5, 'max_users': 2, 'max_organizations': 1,
+            'max_products': 50, 'max_api_keys': 1, 'max_storage_mb': 100,
+            'price_monthly_cents': 0, 'price_annual_cents': 0,
+            'features': json.dumps({
+                'email_alerts': False, 'ldap': False, 'sso': False,
+                'webhooks': False, 'white_label': False, 'api_access': False,
+                'compliance_reports': False, 'jira_integration': False,
+            }),
+            'is_default': True, 'sort_order': 0,
+        },
+        {
+            'name': 'pro',
+            'display_name': 'Professional',
+            'description': 'For growing teams with advanced security needs',
+            'max_agents': 50, 'max_users': 10, 'max_organizations': 3,
+            'max_products': -1, 'max_api_keys': 5, 'max_storage_mb': 1000,
+            'price_monthly_cents': 9900, 'price_annual_cents': 99900,
+            'features': json.dumps({
+                'email_alerts': True, 'ldap': True, 'sso': False,
+                'webhooks': True, 'white_label': False, 'api_access': True,
+                'compliance_reports': True, 'jira_integration': True,
+            }),
+            'is_default': False, 'sort_order': 1,
+        },
+        {
+            'name': 'business',
+            'display_name': 'Business',
+            'description': 'For organizations with enterprise security requirements',
+            'max_agents': 250, 'max_users': 50, 'max_organizations': 10,
+            'max_products': -1, 'max_api_keys': 20, 'max_storage_mb': 5000,
+            'price_monthly_cents': 29900, 'price_annual_cents': 299900,
+            'features': json.dumps({
+                'email_alerts': True, 'ldap': True, 'sso': True,
+                'webhooks': True, 'white_label': True, 'api_access': True,
+                'compliance_reports': True, 'jira_integration': True,
+            }),
+            'is_default': False, 'sort_order': 2,
+        },
+        {
+            'name': 'enterprise',
+            'display_name': 'Enterprise',
+            'description': 'Custom limits and dedicated support',
+            'max_agents': -1, 'max_users': -1, 'max_organizations': -1,
+            'max_products': -1, 'max_api_keys': -1, 'max_storage_mb': -1,
+            'price_monthly_cents': 99900, 'price_annual_cents': 999900,
+            'features': json.dumps({
+                'email_alerts': True, 'ldap': True, 'sso': True,
+                'webhooks': True, 'white_label': True, 'api_access': True,
+                'compliance_reports': True, 'jira_integration': True,
+            }),
+            'is_default': False, 'sort_order': 3,
+        },
+    ]
+
+    @classmethod
+    def seed_default_plans(cls):
+        """Seed default subscription plans if none exist."""
+        if cls.query.count() > 0:
+            return  # Plans already exist
+
+        for plan_data in cls.DEFAULT_PLANS:
+            plan = cls(**plan_data)
+            db.session.add(plan)
+
+        db.session.commit()
+
+
+class Subscription(db.Model):
+    """
+    Tracks an organization's active subscription.
+
+    On-premise: Not used (license file controls access).
+    SaaS: Links an organization to a plan with billing details.
+
+    IMPORTANT: This model is for SaaS billing only. On-premise enforcement
+    uses the RSA-signed license system in app/licensing.py.
+    """
+    __tablename__ = 'subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    plan_id = db.Column(db.Integer, db.ForeignKey('subscription_plans.id'), nullable=False)
+
+    # Subscription status
+    status = db.Column(db.String(20), default='active', index=True)
+    # active, trialing, past_due, canceled, paused, expired
+
+    # Billing period
+    billing_cycle = db.Column(db.String(20), default='monthly')  # monthly, annual
+    current_period_start = db.Column(db.DateTime, nullable=True)
+    current_period_end = db.Column(db.DateTime, nullable=True)
+
+    # Trial
+    trial_start = db.Column(db.DateTime, nullable=True)
+    trial_end = db.Column(db.DateTime, nullable=True)
+
+    # Stripe integration
+    stripe_customer_id = db.Column(db.String(100), nullable=True, index=True)
+    stripe_subscription_id = db.Column(db.String(100), nullable=True, unique=True)
+
+    # Cancellation
+    canceled_at = db.Column(db.DateTime, nullable=True)
+    cancel_at_period_end = db.Column(db.Boolean, default=False)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('subscription', uselist=False))
+    plan = db.relationship('SubscriptionPlan', backref='subscriptions')
+
+    def is_active(self):
+        """Check if subscription is currently active (including trial)."""
+        return self.status in ('active', 'trialing')
+
+    def is_trialing(self):
+        """Check if subscription is in trial period."""
+        return self.status == 'trialing'
+
+    def has_feature(self, feature_name):
+        """Check if current plan includes a feature."""
+        if not self.plan:
+            return False
+        return self.plan.has_feature(feature_name)
+
+    def get_limit(self, resource):
+        """Get a resource limit from the plan. -1 means unlimited."""
+        if not self.plan:
+            return 0
+        return getattr(self.plan, f'max_{resource}', 0)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'plan': self.plan.to_dict() if self.plan else None,
+            'status': self.status,
+            'billing_cycle': self.billing_cycle,
+            'current_period_start': self.current_period_start.isoformat() if self.current_period_start else None,
+            'current_period_end': self.current_period_end.isoformat() if self.current_period_end else None,
+            'trial_start': self.trial_start.isoformat() if self.trial_start else None,
+            'trial_end': self.trial_end.isoformat() if self.trial_end else None,
+            'cancel_at_period_end': self.cancel_at_period_end,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class UsageRecord(db.Model):
+    """
+    Tracks resource usage per organization for billing and quotas.
+
+    Records are aggregated periodically for billing reports.
+    On-premise: Can be used for usage dashboards.
+    SaaS: Used for metered billing and quota enforcement.
+    """
+    __tablename__ = 'usage_records'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    # Usage metrics
+    metric = db.Column(db.String(50), nullable=False, index=True)
+    # Metrics: agents_active, api_calls, storage_bytes, products_total,
+    #          users_active, reports_generated, alerts_sent
+
+    value = db.Column(db.BigInteger, default=0)
+    period_start = db.Column(db.DateTime, nullable=False, index=True)
+    period_end = db.Column(db.DateTime, nullable=False)
+
+    # Metadata
+    recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('idx_usage_org_metric_period', 'organization_id', 'metric', 'period_start'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'metric': self.metric,
+            'value': self.value,
+            'period_start': self.period_start.isoformat() if self.period_start else None,
+            'period_end': self.period_end.isoformat() if self.period_end else None,
+            'recorded_at': self.recorded_at.isoformat() if self.recorded_at else None,
         }

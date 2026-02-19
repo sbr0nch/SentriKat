@@ -227,7 +227,7 @@ def saml_acs():
     # Log the login
     try:
         log_user_login(user, 'saml')
-    except:
+    except Exception:
         pass
 
     # Redirect to RelayState (return URL) or dashboard

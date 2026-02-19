@@ -647,13 +647,13 @@ def parse_and_store_vulnerabilities(kev_data):
         due_date = None
         try:
             date_added = datetime.strptime(vuln_data.get('dateAdded'), '%Y-%m-%d').date()
-        except:
+        except (ValueError, TypeError, AttributeError):
             pass
 
         try:
             if vuln_data.get('dueDate'):
                 due_date = datetime.strptime(vuln_data.get('dueDate'), '%Y-%m-%d').date()
-        except:
+        except (ValueError, TypeError, AttributeError):
             pass
 
         # Check if vulnerability already exists

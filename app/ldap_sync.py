@@ -177,7 +177,7 @@ class LDAPSyncEngine:
                 )
                 db.session.add(audit_log)
                 db.session.commit()
-            except:
+            except Exception:
                 pass
 
             return {
@@ -424,7 +424,7 @@ class LDAPSyncEngine:
                 )
                 db.session.add(sync_log)
                 db.session.commit()
-            except:
+            except Exception:
                 pass
 
             return {

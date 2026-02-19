@@ -52,7 +52,7 @@ def get_critical_email_settings(app):
 
         try:
             hour, minute = map(int, email_time.split(':'))
-        except:
+        except (ValueError, AttributeError):
             hour, minute = 9, 0
 
         return enabled, hour, minute
@@ -295,7 +295,7 @@ def reschedule_critical_email():
     # Remove existing job if any
     try:
         _scheduler.remove_job('daily_critical_cve_reminder')
-    except:
+    except Exception:
         pass
 
     if enabled:
