@@ -1,0 +1,66 @@
+[
+  {
+    "httpRequest": { "method": "GET", "path": "/rest/api/2/serverInfo" },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": { "Content-Type": ["application/json"] },
+      "body": "{\"baseUrl\":\"http://localhost:8180\",\"version\":\"9.12.0\",\"versionNumbers\":[9,12,0],\"deploymentType\":\"Server\",\"serverTitle\":\"SentriKat Test Jira\"}"
+    }
+  },
+  {
+    "httpRequest": { "method": "GET", "path": "/rest/api/2/myself" },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": { "Content-Type": ["application/json"] },
+      "body": "{\"key\":\"admin\",\"name\":\"admin\",\"displayName\":\"Jira Admin\",\"emailAddress\":\"admin@sentrikat.test\",\"active\":true}"
+    }
+  },
+  {
+    "httpRequest": { "method": "GET", "path": "/rest/api/2/project/VULN" },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": { "Content-Type": ["application/json"] },
+      "body": "{\"id\":\"10001\",\"key\":\"VULN\",\"name\":\"Vulnerability Tracking\",\"projectTypeKey\":\"software\"}"
+    }
+  },
+  {
+    "httpRequest": { "method": "GET", "path": "/rest/api/2/project" },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": { "Content-Type": ["application/json"] },
+      "body": "[{\"id\":\"10001\",\"key\":\"VULN\",\"name\":\"Vulnerability Tracking\"},{\"id\":\"10002\",\"key\":\"SEC\",\"name\":\"Security Operations\"}]"
+    }
+  },
+  {
+    "httpRequest": { "method": "POST", "path": "/rest/api/2/issue" },
+    "httpResponse": {
+      "statusCode": 201,
+      "headers": { "Content-Type": ["application/json"] },
+      "body": "{\"id\":\"10042\",\"key\":\"VULN-42\",\"self\":\"http://localhost:8180/rest/api/2/issue/10042\"}"
+    }
+  },
+  {
+    "httpRequest": { "method": "GET", "path": "/rest/api/2/search" },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": { "Content-Type": ["application/json"] },
+      "body": "{\"startAt\":0,\"maxResults\":50,\"total\":1,\"issues\":[{\"id\":\"10040\",\"key\":\"VULN-40\",\"fields\":{\"summary\":\"[CVE-2024-1234] Test vulnerability\",\"status\":{\"name\":\"Open\"},\"priority\":{\"name\":\"Critical\"}}}]}"
+    }
+  },
+  {
+    "httpRequest": { "method": "GET", "path": "/rest/api/2/issuetype" },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": { "Content-Type": ["application/json"] },
+      "body": "[{\"id\":\"10001\",\"name\":\"Bug\",\"subtask\":false},{\"id\":\"10002\",\"name\":\"Task\",\"subtask\":false},{\"id\":\"10003\",\"name\":\"Vulnerability\",\"subtask\":false}]"
+    }
+  },
+  {
+    "httpRequest": { "method": "GET", "path": "/rest/api/2/priority" },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": { "Content-Type": ["application/json"] },
+      "body": "[{\"id\":\"1\",\"name\":\"Highest\"},{\"id\":\"2\",\"name\":\"High\"},{\"id\":\"3\",\"name\":\"Medium\"},{\"id\":\"4\",\"name\":\"Low\"}]"
+    }
+  }
+]

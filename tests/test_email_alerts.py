@@ -383,7 +383,7 @@ class TestSendUserInviteEmail:
         db_session.add(user)
         db_session.commit()
 
-        with patch('app.email_alerts.get_setting', return_value=None):
+        with patch('app.settings_api.get_setting', return_value=None):
             success, msg = send_user_invite_email(user)
 
         # Should fail because both org and global SMTP are unconfigured
@@ -492,7 +492,7 @@ class TestSendUserStatusEmail:
         db_session.add(user)
         db_session.commit()
 
-        with patch('app.email_alerts.get_setting', return_value=None):
+        with patch('app.settings_api.get_setting', return_value=None):
             success, msg = send_user_status_email(user, is_blocked=True)
 
         assert success is False
@@ -589,7 +589,7 @@ class TestSendCriticalCveAlert:
         product = _make_product(db_session, org)
         match = _make_match(db_session, product, vuln)
 
-        with patch('app.email_alerts.get_setting', return_value=None):
+        with patch('app.settings_api.get_setting', return_value=None):
             result = EmailAlertManager.send_critical_cve_alert(org, [match])
 
         assert result['status'] == 'error'

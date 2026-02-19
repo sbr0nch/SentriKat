@@ -1,15 +1,63 @@
-# SentriKat Test Environment
-# Adds Keycloak (SAML/OIDC IdP), OpenLDAP, and a Syslog receiver
-# for testing SSO, LDAP auth, and SIEM forwarding.
+# SentriKat Full Test Environment
+# Provides all external services needed to test every SentriKat feature.
 #
 # Usage:
-#   ./tests/setup-test-env.sh        # Start everything + auto-configure
-#   docker compose -f docker-compose.test.yml down -v   # Tear down
+#   docker compose -f docker-compose.test.yml up -d   # Start all services
+#   docker compose -f docker-compose.test.yml down -v  # Tear down
 #
-# Access:
-#   Keycloak Admin:  http://localhost:8080  (admin / admin)
-#   SentriKat:       http://localhost:5000  (or via nginx on :80)
-#   Syslog viewer:   docker logs -f sentrikat-syslog
+# On Windows (Docker Desktop), replace 'localhost' with 'host.docker.internal'
+# when configuring SentriKat to reach these services.
+#
+# ┌─────────────────────────────────────────────────────────────────┐
+# │ Service              │ Port(s)       │ Purpose                  │
+# ├─────────────────────────────────────────────────────────────────┤
+# │ Keycloak (SAML IdP)  │ 8080          │ SSO / SAML testing       │
+# │ OpenLDAP             │ 389, 636      │ LDAP authentication      │
+# │ phpLDAPadmin         │ 6443 (HTTPS)  │ LDAP admin UI            │
+# │ Syslog-ng            │ 5514 UDP/TCP  │ SIEM/CEF forwarding      │
+# │ MailHog              │ 1025, 8025    │ SMTP + email web UI      │
+# │ Webhook Tester       │ 8800          │ Webhook receiver         │
+# │ Jira Mock            │ 8180          │ Jira integration test    │
+# │ Squid Proxy          │ 3128          │ HTTP proxy testing       │
+# └─────────────────────────────────────────────────────────────────┘
+#
+# SentriKat Configuration Cheat Sheet:
+#
+#   LDAP:
+#     Host: localhost (or host.docker.internal)  Port: 389
+#     Bind DN: cn=admin,dc=sentrikat,dc=test     Password: admin
+#     User Search: ou=users,dc=sentrikat,dc=test
+#     User Filter: (uid={username})
+#     Group Search: ou=groups,dc=sentrikat,dc=test
+#     Admin Group: sentrikat-admins
+#     Test users: john.doe / jane.admin / marco.rossi (all pw: password123)
+#
+#   Email (SMTP):
+#     Host: localhost (or host.docker.internal)  Port: 1025
+#     TLS: No  Auth: None
+#     Web UI: http://localhost:8025
+#
+#   Webhook:
+#     Open http://localhost:8800, create session, copy URL
+#     Replace 'localhost' with 'host.docker.internal' in SentriKat
+#
+#   Jira:
+#     URL: http://localhost:8180 (or host.docker.internal:8180)
+#     User: admin   Token: mock-token
+#     Project: VULN  Issue Type: Vulnerability
+#
+#   Syslog/SIEM:
+#     Host: localhost (or host.docker.internal)  Port: 5514
+#     Protocol: UDP or TCP   Format: CEF/JSON/RFC5424
+#     View: docker logs -f sentrikat-syslog
+#
+#   Proxy:
+#     HTTP_PROXY=http://localhost:3128
+#     HTTPS_PROXY=http://localhost:3128
+#
+#   Keycloak (SAML):
+#     Admin: http://localhost:8080 (admin/admin)
+#     Realm: sentrikat   Client: sentrikat-app
 
 services:
   # ── Keycloak (SAML + OIDC Identity Provider) ─────────────────────
@@ -21,14 +69,13 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
       KC_HTTP_PORT: 8080
-      # Import realm on first boot
       KC_FEATURES: preview
     ports:
       - "8080:8080"
     volumes:
       - ./tests/keycloak:/opt/keycloak/data/import:ro
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\n\r\n' >&3 && cat <&3 | grep -q 'UP'"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3 | grep -q 'UP'"]
       interval: 15s
       timeout: 10s
       retries: 15
@@ -59,6 +106,20 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── phpLDAPadmin (LDAP browser UI) ───────────────────────────────
+  ldap-admin:
+    image: osixia/phpldapadmin:0.9.0
+    container_name: sentrikat-ldap-admin
+    ports:
+      - "6443:443"
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "true"
+    depends_on:
+      openldap:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ── Syslog receiver (for SIEM/CEF testing) ───────────────────────
   syslog:
     image: balabit/syslog-ng:4.6.0
@@ -70,5 +131,42 @@ services:
       - ./tests/syslog/syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro
     restart: unless-stopped
 
-volumes:
-  keycloak_data:
+  # ── MailHog (fake SMTP + web UI for email testing) ───────────────
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: sentrikat-mailhog
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    restart: unless-stopped
+
+  # ── Webhook Tester (catch webhooks from SentriKat) ───────────────
+  webhook-receiver:
+    image: tarampampam/webhook-tester:2
+    container_name: sentrikat-webhooks
+    ports:
+      - "8800:8080"
+    restart: unless-stopped
+
+  # ── Jira Mock (MockServer with Jira REST API expectations) ───────
+  jira-mock:
+    image: mockserver/mockserver:5.15.0
+    container_name: sentrikat-jira-mock
+    ports:
+      - "8180:1080"
+    environment:
+      MOCKSERVER_INITIALIZATION_JSON_PATH: /config/jira-expectations.json
+      MOCKSERVER_LOG_LEVEL: INFO
+    volumes:
+      - ./tests/mock-configs/jira-expectations.json:/config/jira-expectations.json:ro
+    restart: unless-stopped
+
+  # ── Squid Proxy (for proxy/outbound testing) ─────────────────────
+  squid-proxy:
+    image: ubuntu/squid:latest
+    container_name: sentrikat-proxy
+    ports:
+      - "3128:3128"
+    volumes:
+      - ./tests/proxy-config/squid.conf:/etc/squid/squid.conf:ro
+    restart: unless-stopped

@@ -229,7 +229,8 @@ def test_api_key(db_session, test_org):
         name='Test API Key',
         key_hash=key_hash,
         key_prefix=raw_key[:8],
-        active=True
+        active=True,
+        auto_approve=True
     )
     db_session.add(api_key)
     db_session.commit()
