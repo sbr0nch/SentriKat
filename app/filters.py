@@ -510,6 +510,22 @@ def match_vulnerabilities_to_products(target_products=None, target_vulnerabiliti
                     )
                     db.session.add(match)
                     matches_count += 1
+
+                    # Forward new match to SIEM if configured
+                    try:
+                        from app.reports_api import send_syslog_event
+                        send_syslog_event(
+                            event_type='new_vulnerability',
+                            cve_id=vulnerability.cve_id,
+                            severity=vulnerability.severity or 'MEDIUM',
+                            product=f"{product.vendor} {product.product_name}",
+                            message=vulnerability.short_description or vulnerability.vulnerability_name or '',
+                            vendor=product.vendor or '',
+                            due_date=str(vulnerability.due_date) if vulnerability.due_date else '',
+                            ransomware=bool(vulnerability.known_ransomware),
+                        )
+                    except Exception:
+                        pass  # SIEM forwarding is best-effort, never block matching
                 else:
                     # Update existing match with new method/confidence if different
                     if existing_match.match_method != match_method or existing_match.match_confidence != match_confidence:

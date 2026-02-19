@@ -5,6 +5,7 @@ from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from config import Config
+from datetime import timedelta
 import os
 
 # Read version from VERSION file (single source of truth)
@@ -429,6 +430,24 @@ def create_app(config_class=Config):
             # Redirect to setup wizard for browser requests
             if request.endpoint != 'setup.setup_wizard':
                 return redirect(url_for('setup.setup_wizard'))
+
+    # Server-side session timeout enforcement
+    # The database setting `session_timeout` (minutes) controls the actual timeout.
+    # This dynamically updates Flask's PERMANENT_SESSION_LIFETIME to match.
+    @app.before_request
+    def enforce_session_timeout():
+        from flask import session
+        from app.models import SystemSettings
+        if 'user_id' not in session:
+            return None
+        try:
+            timeout_setting = SystemSettings.query.filter_by(key='session_timeout').first()
+            if timeout_setting and timeout_setting.value:
+                timeout_minutes = int(timeout_setting.value)
+                if timeout_minutes > 0:
+                    app.permanent_session_lifetime = timedelta(minutes=timeout_minutes)
+        except Exception:
+            pass  # Use default if DB unavailable
 
     # Add API version headers to all API responses
     @app.after_request

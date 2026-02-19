@@ -487,11 +487,22 @@ def api_login():
         user.reset_failed_login_attempts()
         logger.info(f"Reset failed login attempts for {username}")
 
-    # Check if user must set up 2FA (admin required it but not yet enabled)
+    # Check if user must set up 2FA (admin required it OR global setting)
     must_setup_2fa = False
-    if user.auth_type == 'local' and getattr(user, 'totp_required', False) and not user.totp_enabled:
-        must_setup_2fa = True
-        logger.info(f"2FA setup required for {username} (admin mandated)")
+    if user.auth_type == 'local' and not user.totp_enabled:
+        if getattr(user, 'totp_required', False):
+            must_setup_2fa = True
+            logger.info(f"2FA setup required for {username} (admin mandated)")
+        else:
+            # Check global 2FA enforcement setting
+            try:
+                from app.settings_api import get_setting
+                global_2fa = get_setting('require_2fa', 'false') == 'true'
+                if global_2fa:
+                    must_setup_2fa = True
+                    logger.info(f"2FA setup required for {username} (global policy)")
+            except Exception:
+                pass
 
     # Check for password expiration (local users only)
     password_expired = False
