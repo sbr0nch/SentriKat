@@ -19,6 +19,7 @@ class Config:
     _KNOWN_INSECURE_KEYS = {
         'dev-secret-key-change-in-production',
         'change-this-secret-key-in-production',
+        'your-secret-key-here-change-in-production',
         'changeme', 'secret', 'password', 'default',
     }
     _is_production = (
