@@ -798,7 +798,7 @@ def send_user_invite_email(user):
             return False, msg
 
         logger.info(f"Sending invite email to {user.email} via {smtp_source} SMTP: {smtp_config['host']}:{smtp_config['port']}")
-        logger.info(f"SMTP config: host={smtp_config['host']}, port={smtp_config['port']}, from={smtp_config['from_email']}, tls={smtp_config['use_tls']}, ssl={smtp_config['use_ssl']}, user={smtp_config['username'] or 'none'}")
+        logger.info(f"SMTP config: host={smtp_config['host']}, port={smtp_config['port']}, from={smtp_config['from_email']}, tls={smtp_config['use_tls']}, ssl={smtp_config['use_ssl']}, user={'configured' if smtp_config['username'] else 'none'}")
 
         # Build welcome email
         subject = f"Welcome to SentriKat - {organization.display_name}"
