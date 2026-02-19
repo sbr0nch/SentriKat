@@ -793,6 +793,21 @@
             }
         }
 
+        // Check if setup is already complete (handles browser-cached page)
+        async function checkSetupStatus() {
+            try {
+                const response = await fetch('/api/setup/status');
+                const data = await response.json();
+                if (data.setup_complete) {
+                    window.location.href = '/';
+                    return;
+                }
+            } catch (e) {
+                // If status check fails, let the page load normally
+            }
+        }
+        checkSetupStatus();
+
         // Initialize
         updateProgress();
     </script>
