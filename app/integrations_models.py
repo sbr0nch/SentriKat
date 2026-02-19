@@ -67,7 +67,7 @@ class Integration(db.Model):
             # Fallback to unencrypted (for migration)
             try:
                 return json.loads(self.config_encrypted)
-            except:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 return {}
 
     def set_config(self, config_dict):
@@ -165,7 +165,7 @@ class ImportQueue(db.Model):
             return []
         try:
             return json.loads(self.available_versions)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return []
 
     def set_available_versions(self, versions):
@@ -178,7 +178,7 @@ class ImportQueue(db.Model):
             return {}
         try:
             return json.loads(self.source_data)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return {}
 
     def set_source_data(self, data):
@@ -262,7 +262,7 @@ class AgentRegistration(db.Model):
             return {}
         try:
             return json.loads(self.system_info)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return {}
 
     def set_system_info(self, info):

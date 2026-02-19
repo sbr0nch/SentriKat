@@ -593,7 +593,7 @@ def get_cpe_versions(cpe_vendor, cpe_product):
                 return products[cpe_product].get('versions', [])[:20]
 
         return []
-    except:
+    except Exception:
         return []
 
 

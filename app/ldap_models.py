@@ -141,7 +141,7 @@ class LDAPSyncLog(db.Model):
         if self.errors:
             try:
                 errors_list = json.loads(self.errors)
-            except:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
         return {
@@ -225,14 +225,14 @@ class LDAPAuditLog(db.Model):
         if self.ldap_groups:
             try:
                 groups_list = json.loads(self.ldap_groups)
-            except:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
         metadata_dict = {}
         if self.extra_metadata:
             try:
                 metadata_dict = json.loads(self.extra_metadata)
-            except:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
         return {

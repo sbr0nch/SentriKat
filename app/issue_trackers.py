@@ -60,6 +60,12 @@ class JiraTracker(IssueTrackerBase):
     """Jira Cloud and Server integration."""
 
     def __init__(self, url: str, email: str, api_token: str, verify_ssl: bool = True, use_pat: bool = False):
+        # SSRF protection: validate base URL targets external hosts
+        from app.network_security import validate_url_for_request
+        is_safe, error = validate_url_for_request(url, context="Jira tracker setup")
+        if not is_safe:
+            raise ValueError(f"Invalid Jira URL: {error}")
+
         self.base_url = url.rstrip('/')
         self.email = email.strip()
         self.api_token = api_token.strip()  # Strip whitespace to avoid auth failures
@@ -959,10 +965,13 @@ class WebhookTracker(IssueTrackerBase):
         return headers
 
     def test_connection(self) -> Tuple[bool, str]:
-        # For webhooks, we just validate the URL format
+        # Validate URL format and SSRF safety
         try:
             if not self.webhook_url.startswith(('http://', 'https://')):
                 return False, "Invalid URL - must start with http:// or https://"
+            from app.network_security import is_ssrf_safe_url
+            if not is_ssrf_safe_url(self.webhook_url):
+                return False, "Webhook URL must not target internal or private network addresses"
             return True, f"Webhook configured: {self.webhook_url}"
         except Exception as e:
             return False, f"Configuration error: {str(e)}"
@@ -976,6 +985,11 @@ class WebhookTracker(IssueTrackerBase):
         **kwargs
     ) -> Tuple[bool, str, Optional[str], Optional[str]]:
         try:
+            # SSRF protection
+            from app.network_security import is_ssrf_safe_url
+            if not is_ssrf_safe_url(self.webhook_url):
+                return False, "Webhook URL must not target internal or private network addresses", None, None
+
             payload = {
                 'title': summary,
                 'summary': summary,

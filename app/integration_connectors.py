@@ -235,6 +235,11 @@ class GenericRestConnector(BaseConnector):
 
         # auth_type == 'none' - no authentication added
 
+        # SSRF protection: validate URL targets external hosts
+        from app.network_security import is_ssrf_safe_url
+        if not is_ssrf_safe_url(url):
+            raise ValueError(f"URL must not target internal or private network addresses: {url}")
+
         return requests.request(
             method,
             url,

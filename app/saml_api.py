@@ -227,7 +227,7 @@ def saml_acs():
     # Log the login
     try:
         log_user_login(user, 'saml')
-    except:
+    except Exception:
         pass
 
     # Redirect to RelayState (return URL) or dashboard
@@ -244,14 +244,13 @@ def saml_sls():
     Single Logout Service - Handle IdP-initiated logout.
     """
     from app.saml_manager import init_saml_auth, is_saml_available
-    from app.auth import logout_user
 
     if not is_saml_available():
         return redirect(url_for('main.login'))
 
     auth = init_saml_auth(request)
     if not auth:
-        logout_user()
+        session.clear()
         return redirect(url_for('main.login'))
 
     # Process logout request/response
@@ -264,13 +263,13 @@ def saml_sls():
         if errors:
             logger.error(f"SAML SLS errors: {errors}")
 
-        logout_user()
+        session.clear()
 
         if url:
             return redirect(url)
     except Exception as e:
         logger.exception("SAML SLS failed")
-        logout_user()
+        session.clear()
 
     return redirect(url_for('main.login'))
 

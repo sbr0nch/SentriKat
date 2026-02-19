@@ -211,7 +211,7 @@ def process_saml_response(request) -> Tuple[bool, Optional[Dict], Optional[str]]
         mapping_str = get_setting('saml_user_mapping', '{}')
         try:
             mapping = json.loads(mapping_str)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             mapping = {}
 
         # Default mapping

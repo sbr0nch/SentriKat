@@ -3306,7 +3306,7 @@ def get_vulnerabilities_grouped():
                     from datetime import datetime
                     date_obj = datetime.fromisoformat(date_added.replace('Z', '+00:00'))
                     date_sort = -date_obj.timestamp()
-                except:
+                except (ValueError, TypeError, AttributeError):
                     date_sort = 0
             else:
                 date_sort = 0
@@ -3354,7 +3354,7 @@ def get_vulnerabilities_grouped():
                 try:
                     due_date = datetime.fromisoformat(due_date_str.replace('Z', '+00:00')).date()
                     days_until_due = (due_date - today).days
-                except:
+                except (ValueError, TypeError, AttributeError):
                     return False
 
                 if urgency_filter == 'critical':

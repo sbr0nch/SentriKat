@@ -4215,7 +4215,7 @@ def _version_compare(v1, v2):
             if p1 > p2:
                 return 1
         return 0
-    except:
+    except (ValueError, TypeError, IndexError):
         return 0
 
 

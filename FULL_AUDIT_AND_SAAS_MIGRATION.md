@@ -933,17 +933,19 @@ chrome.management.getAll(function(extensions) {
 
 ## 6.2 Revenue Model Suggestion
 
-| Plan | Price/month | Includes | Target |
-|------|------------|----------|--------|
-| Free | $0 | 5 agents, 1 org, community features | Try-before-buy |
-| Pro | $49-99 | 50 agents, LDAP, alerts, webhooks | Small business |
-| Business | $199-399 | 250 agents, SSO, API, white-label | Mid-market |
-| Enterprise | $999+ | Unlimited, dedicated instance, SLA | Large companies |
+| Plan | Price/month | Agents | Per-Agent/yr | Target |
+|------|------------|--------|-------------|--------|
+| Free | €0 | 5 | - | Try-before-buy |
+| Starter | €29 | 25 | ~€14 | Freelancers, small IT teams |
+| Professional | €79 | 100 | ~€8 | Growing organizations |
+| Business | €199 | 500 | ~€4 | Mid-market, MSPs |
+| Enterprise | €499+ | Unlimited | Custom | Large companies |
 
 **Break-even example:**
-- Infrastructure: $273/month (Tier 2)
-- 10 Pro customers at $99 = $990/month
-- **Profit: $717/month with just 10 customers**
+- Infrastructure: ~€240/month (Tier 2)
+- 10 Pro customers at €79 = €790/month
+- 5 Business customers at €199 = €995/month
+- **Break-even at ~15 Pro customers or ~8 Business customers**
 
 ---
 

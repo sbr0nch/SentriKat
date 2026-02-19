@@ -632,7 +632,7 @@ def test_smtp_connection():
             if server:
                 try:
                     server.quit()
-                except:
+                except Exception:
                     pass
 
         return jsonify({
@@ -1195,38 +1195,11 @@ def get_alert_org_overrides():
 
 
 def _is_ssrf_safe_url(url):
-    """Validate that a URL does not target internal/private network addresses."""
-    from urllib.parse import urlparse
-    import ipaddress
-    import socket
-
-    try:
-        parsed = urlparse(url)
-        hostname = parsed.hostname
-        if not hostname or parsed.scheme not in ('http', 'https'):
-            return False
-
-        # Resolve hostname to IP and check against private ranges
-        try:
-            ip = ipaddress.ip_address(hostname)
-        except ValueError:
-            # It's a hostname, resolve it
-            try:
-                resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-                ip = ipaddress.ip_address(resolved[0][4][0])
-            except (socket.gaierror, IndexError, OSError):
-                return True  # Can't resolve - let the request fail naturally
-
-        # Block private, loopback, link-local, and metadata addresses
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            return False
-        # Block AWS/GCP/Azure metadata endpoints
-        if str(ip) in ('169.254.169.254', '169.254.170.2'):
-            return False
-
-        return True
-    except Exception:
-        return False
+    """Validate that a URL does not target internal/private network addresses.
+    Delegates to shared network_security module.
+    """
+    from app.network_security import is_ssrf_safe_url
+    return is_ssrf_safe_url(url)
 
 
 @settings_bp.route('/notifications/test', methods=['POST'])
