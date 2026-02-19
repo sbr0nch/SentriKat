@@ -3157,62 +3157,124 @@ class SubscriptionPlan(db.Model):
         }
 
     # Default plans for seeding
+    #
+    # Pricing rationale (competitive analysis, Feb 2026):
+    #
+    # On-premise Professional = €2,499/yr (10 agents) + agent packs
+    # On-premise with 100 agents = ~€4,000/yr (~€40/agent/yr)
+    #
+    # Competitors (per-asset/yr):
+    #   Rapid7 InsightVM:    ~€23/asset/yr (min 512 assets)
+    #   Tenable VM Cloud:    ~€22-27/asset/yr (min 128 assets)
+    #   Nucleus Security:    ~€10-12/asset/yr
+    #   ManageEngine VM+:    ~€7-12/workstation/yr
+    #   Qualys VMDR:         ~€40-199/asset/yr (enterprise discounts)
+    #
+    # SaaS strategy: Lower entry point than on-premise to attract SMBs
+    # who can't afford €2,499 upfront. On-premise remains attractive for
+    # compliance-driven orgs that need data in their own network.
+    #
+    # All prices in EUR cents. Currency configurable per-plan.
     DEFAULT_PLANS = [
         {
             'name': 'free',
             'display_name': 'Free',
-            'description': 'For individuals and small teams getting started',
-            'max_agents': 5, 'max_users': 2, 'max_organizations': 1,
+            'description': 'Try SentriKat with up to 5 agents - no credit card required',
+            'max_agents': 5, 'max_users': 1, 'max_organizations': 1,
             'max_products': 50, 'max_api_keys': 1, 'max_storage_mb': 100,
             'price_monthly_cents': 0, 'price_annual_cents': 0,
+            'currency': 'EUR',
             'features': json.dumps({
                 'email_alerts': False, 'ldap': False, 'sso': False,
                 'webhooks': False, 'white_label': False, 'api_access': False,
                 'compliance_reports': False, 'jira_integration': False,
+                'push_agents': False, 'backup_restore': False,
+                'audit_export': False, 'multi_org': False,
             }),
             'is_default': True, 'sort_order': 0,
         },
         {
-            'name': 'pro',
-            'display_name': 'Professional',
-            'description': 'For growing teams with advanced security needs',
-            'max_agents': 50, 'max_users': 10, 'max_organizations': 3,
-            'max_products': -1, 'max_api_keys': 5, 'max_storage_mb': 1000,
-            'price_monthly_cents': 9900, 'price_annual_cents': 99900,
+            # Starter: €29/mo, ~€14/agent/yr at 25 agents
+            # Targets: freelancers, small IT teams, MSPs getting started
+            # Cheaper than ManageEngine VM+ ($695/yr) with more features
+            'name': 'starter',
+            'display_name': 'Starter',
+            'description': 'For small teams and IT consultants - 25 agents',
+            'max_agents': 25, 'max_users': 3, 'max_organizations': 1,
+            'max_products': -1, 'max_api_keys': 2, 'max_storage_mb': 500,
+            'price_monthly_cents': 2900, 'price_annual_cents': 29000,
+            'currency': 'EUR',
             'features': json.dumps({
-                'email_alerts': True, 'ldap': True, 'sso': False,
+                'email_alerts': True, 'ldap': False, 'sso': False,
                 'webhooks': True, 'white_label': False, 'api_access': True,
-                'compliance_reports': True, 'jira_integration': True,
+                'compliance_reports': False, 'jira_integration': False,
+                'push_agents': False, 'backup_restore': False,
+                'audit_export': False, 'multi_org': False,
             }),
             'is_default': False, 'sort_order': 1,
         },
         {
-            'name': 'business',
-            'display_name': 'Business',
-            'description': 'For organizations with enterprise security requirements',
-            'max_agents': 250, 'max_users': 50, 'max_organizations': 10,
-            'max_products': -1, 'max_api_keys': 20, 'max_storage_mb': 5000,
-            'price_monthly_cents': 29900, 'price_annual_cents': 299900,
+            # Professional: €79/mo (€790/yr), ~€8/agent/yr at 100 agents
+            # Undercuts Rapid7 (~€23/asset) and Tenable (~€22/asset)
+            # Comparable to Nucleus Security (~€10-12/asset)
+            # Much cheaper than on-premise (€2,499/yr) but SaaS = recurring
+            'name': 'pro',
+            'display_name': 'Professional',
+            'description': 'For growing organizations - 100 agents with LDAP and integrations',
+            'max_agents': 100, 'max_users': 10, 'max_organizations': 3,
+            'max_products': -1, 'max_api_keys': 5, 'max_storage_mb': 2000,
+            'price_monthly_cents': 7900, 'price_annual_cents': 79000,
+            'currency': 'EUR',
             'features': json.dumps({
-                'email_alerts': True, 'ldap': True, 'sso': True,
-                'webhooks': True, 'white_label': True, 'api_access': True,
+                'email_alerts': True, 'ldap': True, 'sso': False,
+                'webhooks': True, 'white_label': False, 'api_access': True,
                 'compliance_reports': True, 'jira_integration': True,
+                'push_agents': True, 'backup_restore': False,
+                'audit_export': True, 'multi_org': True,
             }),
             'is_default': False, 'sort_order': 2,
         },
         {
-            'name': 'enterprise',
-            'display_name': 'Enterprise',
-            'description': 'Custom limits and dedicated support',
-            'max_agents': -1, 'max_users': -1, 'max_organizations': -1,
-            'max_products': -1, 'max_api_keys': -1, 'max_storage_mb': -1,
-            'price_monthly_cents': 99900, 'price_annual_cents': 999900,
+            # Business: €199/mo (€1,990/yr), ~€4/agent/yr at 500 agents
+            # Massive volume advantage - cheapest per-agent in the market
+            # Includes SSO, white-label = MSP/MSSP friendly
+            # Close to on-premise Pro price but with 5x more agents
+            'name': 'business',
+            'display_name': 'Business',
+            'description': 'For mid-market and MSPs - 500 agents with SSO and white-label',
+            'max_agents': 500, 'max_users': 50, 'max_organizations': 10,
+            'max_products': -1, 'max_api_keys': 25, 'max_storage_mb': 10000,
+            'price_monthly_cents': 19900, 'price_annual_cents': 199000,
+            'currency': 'EUR',
             'features': json.dumps({
                 'email_alerts': True, 'ldap': True, 'sso': True,
                 'webhooks': True, 'white_label': True, 'api_access': True,
                 'compliance_reports': True, 'jira_integration': True,
+                'push_agents': True, 'backup_restore': True,
+                'audit_export': True, 'multi_org': True,
             }),
             'is_default': False, 'sort_order': 3,
+        },
+        {
+            # Enterprise: Custom pricing, contact sales
+            # For 1000+ agents, dedicated infrastructure option, SLA
+            # Competes with Qualys/Rapid7 enterprise deals
+            # Price shown is starting point - actual negotiated per-deal
+            'name': 'enterprise',
+            'display_name': 'Enterprise',
+            'description': 'Unlimited agents with dedicated support and custom SLA',
+            'max_agents': -1, 'max_users': -1, 'max_organizations': -1,
+            'max_products': -1, 'max_api_keys': -1, 'max_storage_mb': -1,
+            'price_monthly_cents': 49900, 'price_annual_cents': 499000,
+            'currency': 'EUR',
+            'features': json.dumps({
+                'email_alerts': True, 'ldap': True, 'sso': True,
+                'webhooks': True, 'white_label': True, 'api_access': True,
+                'compliance_reports': True, 'jira_integration': True,
+                'push_agents': True, 'backup_restore': True,
+                'audit_export': True, 'multi_org': True,
+            }),
+            'is_default': False, 'sort_order': 4,
         },
     ]
 
