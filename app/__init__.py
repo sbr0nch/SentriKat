@@ -166,6 +166,7 @@ def _apply_schema_migrations(logger, db_uri):
 
 def _apply_data_migrations(logger, db_uri):
     """Apply one-time data migrations (idempotent)."""
+    from sqlalchemy import create_engine, text
     from sqlalchemy.pool import NullPool
     engine = None
     try:

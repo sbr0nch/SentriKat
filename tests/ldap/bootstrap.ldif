@@ -1,6 +1,15 @@
 # SentriKat Test LDAP Users
 # Loaded by OpenLDAP on first boot
 # Base DN: dc=sentrikat,dc=test
+#
+# Test credentials (all passwords: password123):
+#   john.doe    - Regular user   (sentrikat-users)
+#   jane.admin  - Administrator  (sentrikat-admins)
+#   marco.rossi - Regular user   (sentrikat-users)
+#   sec.analyst - Security role  (sentrikat-analysts)
+#   it.manager  - IT admin       (sentrikat-admins)
+#   viewer      - Read-only      (sentrikat-viewers)
+#   disabled    - Disabled shell (should fail login)
 
 # Organizational Units
 dn: ou=users,dc=sentrikat,dc=test
@@ -58,15 +67,91 @@ homeDirectory: /home/marco.rossi
 userPassword: password123
 displayName: Marco Rossi
 
+dn: uid=sec.analyst,ou=users,dc=sentrikat,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Security Analyst
+sn: Analyst
+givenName: Security
+uid: sec.analyst
+mail: analyst@sentrikat.test
+uidNumber: 1004
+gidNumber: 1001
+homeDirectory: /home/sec.analyst
+userPassword: password123
+displayName: Security Analyst
+
+dn: uid=it.manager,ou=users,dc=sentrikat,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: IT Manager
+sn: Manager
+givenName: IT
+uid: it.manager
+mail: itmanager@sentrikat.test
+uidNumber: 1005
+gidNumber: 1001
+homeDirectory: /home/it.manager
+userPassword: password123
+displayName: IT Manager
+
+dn: uid=viewer,ou=users,dc=sentrikat,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Read Only Viewer
+sn: Viewer
+givenName: ReadOnly
+uid: viewer
+mail: viewer@sentrikat.test
+uidNumber: 1006
+gidNumber: 1002
+homeDirectory: /home/viewer
+userPassword: password123
+displayName: Read Only Viewer
+
+dn: uid=disabled,ou=users,dc=sentrikat,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Disabled User
+sn: Disabled
+givenName: User
+uid: disabled
+mail: disabled@sentrikat.test
+uidNumber: 1007
+gidNumber: 1002
+homeDirectory: /home/disabled
+loginShell: /bin/false
+userPassword: password123
+displayName: Disabled User
+
 # ── Groups ─────────────────────────────────────────────────────────
 
 dn: cn=sentrikat-admins,ou=groups,dc=sentrikat,dc=test
 objectClass: groupOfNames
 cn: sentrikat-admins
+description: SentriKat Administrators
 member: uid=jane.admin,ou=users,dc=sentrikat,dc=test
+member: uid=it.manager,ou=users,dc=sentrikat,dc=test
 
 dn: cn=sentrikat-users,ou=groups,dc=sentrikat,dc=test
 objectClass: groupOfNames
 cn: sentrikat-users
+description: SentriKat Regular Users
 member: uid=john.doe,ou=users,dc=sentrikat,dc=test
 member: uid=marco.rossi,ou=users,dc=sentrikat,dc=test
+
+dn: cn=sentrikat-analysts,ou=groups,dc=sentrikat,dc=test
+objectClass: groupOfNames
+cn: sentrikat-analysts
+description: SentriKat Security Analysts
+member: uid=sec.analyst,ou=users,dc=sentrikat,dc=test
+
+dn: cn=sentrikat-viewers,ou=groups,dc=sentrikat,dc=test
+objectClass: groupOfNames
+cn: sentrikat-viewers
+description: SentriKat Read-Only Viewers
+member: uid=viewer,ou=users,dc=sentrikat,dc=test
