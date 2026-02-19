@@ -42,15 +42,17 @@ COPY . .
 
 # Download vendor assets (Bootstrap, Chart.js, etc.) for offline/on-premise deployment
 # Uses CDN during build; falls back gracefully if unavailable
-RUN chmod +x /app/scripts/download_vendor_assets.sh \
+RUN sed -i 's/\r$//' /app/scripts/download_vendor_assets.sh \
+    && chmod +x /app/scripts/download_vendor_assets.sh \
     && /app/scripts/download_vendor_assets.sh /app/static/vendor || true
 
 # Create data directory for uploads/backups and custom CA certs directory
 RUN mkdir -p /app/data /app/custom-certs
 
 # Copy and prepare entrypoint script
+# Strip Windows CRLF line endings (fixes "no such file or directory" on Windows-cloned repos)
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 # Create non-root user for running the application
 RUN groupadd -r sentrikat && useradd -r -g sentrikat -d /app -s /sbin/nologin sentrikat \

@@ -88,7 +88,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: sentrikat-nginx
-    entrypoint: ["/docker-entrypoint-custom.sh"]
+    entrypoint: ["/bin/sh", "-c", "sed -i 's/\\r$//' /docker-entrypoint-custom.sh && exec /docker-entrypoint-custom.sh"]
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
