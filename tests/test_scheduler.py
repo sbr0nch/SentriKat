@@ -113,7 +113,7 @@ class TestStartScheduler:
 
     @patch('app.scheduler.BackgroundScheduler')
     @patch('app.scheduler.get_critical_email_settings', return_value=(True, 9, 0))
-    @patch('app.scheduler.refresh_known_cve_products', create=True)
+    @patch('app.scheduler.refresh_known_cve_products')
     def test_start_scheduler_returns_scheduler_and_starts_it(
         self, mock_refresh, mock_email_settings, MockScheduler, app
     ):
@@ -242,10 +242,10 @@ class TestCisaSyncJob:
 
         with app.app_context():
             # Need to mock the sub-steps that import app modules
-            with patch('app.scheduler.sync_epss_scores', create=True, return_value=(0, 0, 'ok')), \
-                 patch('app.scheduler.build_cpe_dictionary', create=True, return_value={}), \
-                 patch('app.scheduler.batch_apply_cpe_mappings', create=True, return_value=(0, 0)), \
-                 patch('app.scheduler.cleanup_bad_auto_mappings', create=True, return_value=0):
+            with patch('app.scheduler.sync_epss_scores', return_value=(0, 0, 'ok')), \
+                 patch('app.scheduler.build_cpe_dictionary', return_value={}), \
+                 patch('app.scheduler.batch_apply_cpe_mappings', return_value=(0, 0)), \
+                 patch('app.scheduler.cleanup_bad_auto_mappings', return_value=0):
                 cisa_sync_job(app)
 
         mock_sync.assert_called_once()
@@ -459,7 +459,7 @@ class TestGetCriticalEmailSettings:
 class TestIndividualJobHandlers:
     """Tests for individual job wrappers (ldap, critical cve, data retention, etc.)."""
 
-    @patch('app.scheduler.LDAPSyncEngine', create=True)
+    @patch('app.scheduler.LDAPSyncEngine')
     def test_ldap_sync_job_calls_sync_all(self, MockEngine, app):
         """ldap_sync_job should invoke LDAPSyncEngine.sync_all_ldap_users."""
         from app.scheduler import ldap_sync_job
@@ -481,12 +481,12 @@ class TestIndividualJobHandlers:
         from app.scheduler import ldap_sync_job
 
         with app.app_context():
-            with patch('app.scheduler.LDAPSyncEngine', create=True,
+            with patch('app.scheduler.LDAPSyncEngine',
                        side_effect=ImportError("no ldap module")):
                 # Should not raise
                 ldap_sync_job(app)
 
-    @patch('app.scheduler.VulnerabilitySnapshot', create=True)
+    @patch('app.scheduler.VulnerabilitySnapshot')
     def test_vulnerability_snapshot_job(self, MockSnapshot, app, db_session):
         """vulnerability_snapshot_job should take snapshots for each org + global."""
         from app.scheduler import vulnerability_snapshot_job
@@ -509,7 +509,7 @@ class TestIndividualJobHandlers:
         from app.scheduler import vendor_advisory_sync_job
 
         with app.app_context():
-            with patch('app.scheduler.sync_vendor_advisories', create=True,
+            with patch('app.scheduler.sync_vendor_advisories',
                        return_value={'overrides_created': 0, 'matches_resolved': 0, 'feeds_checked': 3}) as mock_sync:
                 vendor_advisory_sync_job(app)
                 mock_sync.assert_called_once()
@@ -519,7 +519,7 @@ class TestIndividualJobHandlers:
         from app.scheduler import license_heartbeat_job
 
         with app.app_context():
-            with patch('app.scheduler.license_heartbeat', create=True,
+            with patch('app.scheduler.license_heartbeat',
                        return_value={'success': True, 'message': 'ok'}) as mock_hb:
                 license_heartbeat_job(app)
                 mock_hb.assert_called_once()
@@ -529,7 +529,7 @@ class TestIndividualJobHandlers:
         from app.scheduler import health_check_job
 
         with app.app_context():
-            with patch('app.scheduler.run_all_health_checks', create=True,
+            with patch('app.scheduler.run_all_health_checks',
                        return_value={'db': 'ok', 'disk': 'ok'}) as mock_hc:
                 health_check_job(app)
                 mock_hc.assert_called_once()
@@ -547,7 +547,7 @@ class TestJobErrorHandling:
         from app.scheduler import data_retention_cleanup_job
 
         with app.app_context():
-            with patch('app.scheduler.SystemSettings', create=True,
+            with patch('app.scheduler.SystemSettings',
                        side_effect=Exception("DB gone")):
                 # Should not raise
                 data_retention_cleanup_job(app)
@@ -557,7 +557,7 @@ class TestJobErrorHandling:
         from app.scheduler import euvd_sync_job
 
         with app.app_context():
-            with patch('app.scheduler.enrich_with_euvd_exploited', create=True,
+            with patch('app.scheduler.enrich_with_euvd_exploited',
                        side_effect=RuntimeError("EUVD unreachable")):
                 euvd_sync_job(app)  # should not raise
 
@@ -566,7 +566,7 @@ class TestJobErrorHandling:
         from app.scheduler import nvd_cve_sync_job
 
         with app.app_context():
-            with patch('app.scheduler.sync_nvd_recent_cves', create=True,
+            with patch('app.scheduler.sync_nvd_recent_cves',
                        side_effect=RuntimeError("NVD down")):
                 nvd_cve_sync_job(app)  # should not raise
 
@@ -575,7 +575,7 @@ class TestJobErrorHandling:
         from app.scheduler import cvss_reenrich_job
 
         with app.app_context():
-            with patch('app.scheduler.reenrich_fallback_cvss', create=True,
+            with patch('app.scheduler.reenrich_fallback_cvss',
                        side_effect=RuntimeError("NVD rate limited")):
                 cvss_reenrich_job(app)  # should not raise
 
@@ -584,7 +584,7 @@ class TestJobErrorHandling:
         from app.scheduler import kb_sync_job
 
         with app.app_context():
-            with patch('app.scheduler.kb_sync', create=True,
+            with patch('app.scheduler.kb_sync',
                        side_effect=RuntimeError("KB server unreachable")):
                 kb_sync_job(app)  # should not raise
 
@@ -593,7 +593,7 @@ class TestJobErrorHandling:
         from app.scheduler import unmapped_cpe_retry_job
 
         with app.app_context():
-            with patch('app.scheduler.batch_apply_cpe_mappings', create=True,
+            with patch('app.scheduler.batch_apply_cpe_mappings',
                        side_effect=RuntimeError("mapping error")):
                 unmapped_cpe_retry_job(app)  # should not raise
 

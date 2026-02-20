@@ -296,8 +296,9 @@ def deprovision_tenant(org_id, confirm_name=None):
 
     org_name = org.name
     try:
-        # Explicitly delete agent API keys first to avoid NOT NULL constraint
-        # violations on organization_id when the ORM tries to nullify the FK
+        # Explicitly delete related records first to avoid NOT NULL constraint
+        # violations when the ORM tries to nullify foreign keys
+        UserOrganization.query.filter_by(organization_id=org_id).delete()
         AgentApiKey.query.filter_by(organization_id=org_id).delete()
         db.session.delete(org)
         db.session.commit()
