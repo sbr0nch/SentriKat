@@ -909,6 +909,166 @@ send_container_scan_results() {
 }
 
 # ============================================================================
+# Dependency Lock File Scanning (OSV.dev Integration)
+# ============================================================================
+
+LOCKFILE_SCAN_ENABLED="${LOCKFILE_SCAN_ENABLED:-auto}"  # auto, true, false
+# Lock file types to search for
+LOCKFILE_NAMES="package-lock.json yarn.lock pnpm-lock.yaml Pipfile.lock poetry.lock Cargo.lock go.sum Gemfile.lock composer.lock packages.lock.json"
+# Max lock file size to send (5 MB)
+MAX_LOCKFILE_SIZE=$((5 * 1024 * 1024))
+# Max number of lock files to send per scan
+MAX_LOCKFILES=50
+
+collect_and_send_lockfiles() {
+    # Check if lock file scanning is enabled
+    if [[ "$LOCKFILE_SCAN_ENABLED" == "false" ]]; then
+        log_info "Lock file scanning disabled by configuration"
+        return 0
+    fi
+
+    # Only scan if dependency scanning is enabled (license-gated)
+    if [[ "${SCAN_DEPENDENCIES:-false}" != "true" && "$LOCKFILE_SCAN_ENABLED" != "true" ]]; then
+        if [[ "$LOCKFILE_SCAN_ENABLED" == "auto" ]]; then
+            log_info "Lock file scanning: SCAN_DEPENDENCIES not enabled, skipping"
+            return 0
+        fi
+    fi
+
+    log_info "Scanning for dependency lock files..."
+
+    local lockfiles_json="["
+    local file_count=0
+    local first=true
+
+    for search_dir in /home /opt /srv /var/www /root; do
+        [[ ! -d "$search_dir" ]] && continue
+
+        for lockfile_name in $LOCKFILE_NAMES; do
+            while IFS= read -r filepath; do
+                [[ -z "$filepath" ]] && continue
+                [[ ! -f "$filepath" ]] && continue
+                [[ -L "$filepath" ]] && continue  # Skip symlinks
+
+                # Check file size
+                local fsize
+                fsize=$(stat -c%s "$filepath" 2>/dev/null || stat -f%z "$filepath" 2>/dev/null || echo 0)
+                if [[ "$fsize" -gt "$MAX_LOCKFILE_SIZE" ]]; then
+                    log_warn "Lock file too large, skipping: $filepath ($fsize bytes)"
+                    continue
+                fi
+                if [[ "$fsize" -eq 0 ]]; then
+                    continue
+                fi
+
+                # Read file content and JSON-escape it
+                local content
+                content=$(cat "$filepath" 2>/dev/null) || continue
+                [[ -z "$content" ]] && continue
+
+                # Get project path (directory containing the lock file)
+                local project_path
+                project_path=$(dirname "$filepath")
+
+                # JSON-escape the content (escape backslashes, quotes, newlines, tabs)
+                local escaped_content
+                escaped_content=$(printf '%s' "$content" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
+                if [[ -z "$escaped_content" ]]; then
+                    # Fallback: basic escaping if python3 not available
+                    log_warn "python3 not available for JSON escaping, skipping $filepath"
+                    continue
+                fi
+
+                local escaped_filename
+                escaped_filename=$(json_escape "$lockfile_name")
+                local escaped_project
+                escaped_project=$(json_escape "$project_path")
+
+                if [[ "$first" == "true" ]]; then
+                    first=false
+                else
+                    lockfiles_json+=","
+                fi
+                lockfiles_json+="{\"filename\": \"$escaped_filename\", \"project_path\": \"$escaped_project\", \"content\": $escaped_content}"
+
+                ((file_count++)) || true
+                log_info "  Found: $filepath ($fsize bytes)"
+
+                if [[ $file_count -ge $MAX_LOCKFILES ]]; then
+                    log_warn "Reached $MAX_LOCKFILES lock file limit"
+                    break 3
+                fi
+            done < <(find "$search_dir" -maxdepth 5 -name "$lockfile_name" -readable -type f 2>/dev/null | head -20)
+        done
+    done
+
+    lockfiles_json+="]"
+
+    if [[ $file_count -eq 0 ]]; then
+        log_info "No lock files found"
+        return 0
+    fi
+
+    log_info "Found $file_count lock files, sending for OSV.dev vulnerability scan..."
+
+    # Write payload to temp file
+    local tmpfile
+    tmpfile=$(mktemp /tmp/sentrikat-lockfiles-XXXXXX.json)
+    local my_hostname
+    my_hostname=$(hostname)
+
+    printf '{"agent_id": "%s", "hostname": "%s", "lockfiles": %s}' \
+        "$AGENT_ID" "$my_hostname" "$lockfiles_json" > "$tmpfile"
+
+    # Send to server
+    local endpoint="${SERVER_URL}/api/agent/dependency-scan"
+    local max_retries=3
+    local retry_delay=5
+
+    for ((i=1; i<=max_retries; i++)); do
+        local response http_code
+
+        response=$(curl -s -w "\n%{http_code}" -X POST "$endpoint" \
+            -H "X-Agent-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
+            --data-binary "@${tmpfile}" \
+            --max-time 300 \
+            2>&1) || true
+
+        http_code=$(echo "$response" | tail -n1)
+        local body
+        body=$(echo "$response" | sed '$d')
+
+        if [[ "$http_code" == "200" ]]; then
+            log_info "Dependency scan results received (HTTP $http_code)"
+            # Parse and log summary
+            local vuln_count
+            vuln_count=$(echo "$body" | grep -o '"total_vulnerabilities": [0-9]*' | grep -o '[0-9]*' | head -1)
+            local vuln_pkgs
+            vuln_pkgs=$(echo "$body" | grep -o '"vulnerable_packages": [0-9]*' | grep -o '[0-9]*' | head -1)
+            if [[ -n "$vuln_count" && "$vuln_count" -gt 0 ]]; then
+                log_warn "OSV scan found $vuln_count vulnerabilities in $vuln_pkgs packages"
+            else
+                log_info "OSV scan: no vulnerabilities found"
+            fi
+            rm -f "$tmpfile"
+            return 0
+        else
+            log_warn "Dependency scan upload attempt $i failed: HTTP $http_code"
+            if [[ $i -lt $max_retries ]]; then
+                sleep $retry_delay
+                retry_delay=$((retry_delay * 2))
+            fi
+        fi
+    done
+
+    rm -f "$tmpfile"
+    log_error "Failed to send dependency scan after $max_retries attempts"
+    return 1
+}
+
+# ============================================================================
 # API Communication
 # ============================================================================
 
@@ -1392,6 +1552,9 @@ main() {
 
     # Run container image scan (if Docker/Podman detected)
     scan_container_images || log_warn "Container scanning encountered issues (non-fatal)"
+
+    # Run dependency lock file scan (OSV.dev vulnerability detection)
+    collect_and_send_lockfiles || log_warn "Lock file scanning encountered issues (non-fatal)"
 }
 
 # Parse arguments

@@ -28,7 +28,8 @@ from app import db, csrf, limiter
 from app.models import (
     Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob,
     AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification,
-    ContainerImage, ContainerVulnerability, VulnerabilityMatch
+    ContainerImage, ContainerVulnerability, VulnerabilityMatch,
+    DependencyScan, DependencyScanResult
 )
 from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
 from app.auth import login_required, admin_required, org_admin_required
@@ -4869,6 +4870,349 @@ def report_container_scan():
         db.session.rollback()
         logger.error(f"Container scan processing error: {e}")
         return jsonify({'error': 'Failed to process container scan results'}), 500
+
+
+# ============================================================================
+# Dependency Lock File Scanning Endpoints (OSV.dev Integration)
+# ============================================================================
+
+MAX_LOCKFILES_PER_REQUEST = 50
+MAX_LOCKFILE_CONTENT_SIZE = 10 * 1024 * 1024  # 10MB per lock file
+
+
+@agent_bp.route('/api/agent/dependency-scan', methods=['POST'])
+@agent_auth_required
+@limiter.limit("30/minute", key_func=lambda: request.headers.get('X-Agent-Key', 'anonymous'))
+def report_dependency_scan():
+    """
+    Receive lock file contents from an agent, parse dependencies, and scan
+    against OSV.dev for known vulnerabilities.
+
+    Expected JSON body:
+    {
+        "agent_id": "unique-agent-id",
+        "hostname": "server-1",
+        "lockfiles": [
+            {
+                "filename": "package-lock.json",
+                "project_path": "/home/user/myproject",
+                "content": "{ ... raw lock file content ... }"
+            }
+        ]
+    }
+
+    Returns vulnerability scan results with precise package+version matching.
+    No CPE guesswork — uses native ecosystem queries via OSV.dev.
+    """
+    organization = request.organization
+    agent_key = request.agent_key
+
+    if not organization:
+        return jsonify({'error': 'API key not associated with an organization'}), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    hostname = (data.get('hostname') or '').strip()
+    agent_id = (data.get('agent_id') or '').strip()
+    lockfiles = data.get('lockfiles', [])
+
+    if not hostname and not agent_id:
+        return jsonify({'error': 'hostname or agent_id required'}), 400
+
+    if not lockfiles:
+        return jsonify({'status': 'ok', 'message': 'No lock files to process'}), 200
+
+    if len(lockfiles) > MAX_LOCKFILES_PER_REQUEST:
+        return jsonify({'error': f'Maximum {MAX_LOCKFILES_PER_REQUEST} lock files per request'}), 400
+
+    # Check request payload size (limit to 50MB to prevent memory exhaustion)
+    content_length = request.content_length or 0
+    if content_length > 50 * 1024 * 1024:
+        return jsonify({'error': 'Request too large (max 50MB)'}), 413
+
+    # Find the asset
+    asset = None
+    if agent_id:
+        asset = Asset.query.filter_by(
+            agent_id=agent_id,
+            organization_id=organization.id
+        ).first()
+    if not asset and hostname:
+        asset = Asset.query.filter_by(
+            organization_id=organization.id,
+            hostname=hostname[:MAX_HOSTNAME_LENGTH]
+        ).first()
+
+    if not asset:
+        return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
+
+    # Verify asset belongs to the API key's organization
+    if asset.organization_id != organization.id:
+        return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
+
+    # Validate and sanitize lock file entries
+    clean_lockfiles = []
+    for lf in lockfiles:
+        filename = (lf.get('filename') or '').strip()
+        content = lf.get('content', '')
+
+        if not filename or not content:
+            continue
+
+        # Sanitize filename (path traversal prevention)
+        filename = filename.replace('\\', '/').split('/')[-1]
+
+        # Size check per file
+        if len(content) > MAX_LOCKFILE_CONTENT_SIZE:
+            logger.warning(f"Lock file too large, skipping: {filename} ({len(content)} bytes)")
+            continue
+
+        clean_lockfiles.append({
+            'filename': filename,
+            'content': content,
+            'project_path': (lf.get('project_path') or '')[:MAX_PATH_LENGTH],
+        })
+
+    if not clean_lockfiles:
+        return jsonify({'status': 'ok', 'message': 'No valid lock files to process'}), 200
+
+    try:
+        # Create dependency scan record
+        scan = DependencyScan(
+            organization_id=organization.id,
+            asset_id=asset.id,
+            scan_status='processing',
+            lockfiles_submitted=len(clean_lockfiles),
+            started_at=datetime.utcnow(),
+        )
+        db.session.add(scan)
+        db.session.flush()
+
+        # Step 1: Parse lock files
+        from app.lockfile_parser import parse_lockfiles_batch
+        parse_result = parse_lockfiles_batch(clean_lockfiles)
+
+        dependencies = parse_result['dependencies']
+        parse_stats = parse_result['stats']
+
+        scan.lockfiles_parsed = parse_stats['files_parsed']
+        scan.total_dependencies = parse_stats['total_dependencies']
+        scan.direct_dependencies = parse_stats['direct_dependencies']
+        scan.transitive_dependencies = parse_stats['transitive_dependencies']
+
+        if not dependencies:
+            scan.scan_status = 'completed'
+            scan.completed_at = datetime.utcnow()
+            scan.scan_duration_seconds = 0
+            db.session.commit()
+
+            return jsonify({
+                'status': 'success',
+                'scan_id': scan.id,
+                'message': 'No dependencies found in lock files',
+                'parse_stats': parse_stats,
+            }), 200
+
+        # Step 2: Query OSV.dev for vulnerabilities
+        from app.osv_client import scan_dependencies_osv
+        osv_result = scan_dependencies_osv(dependencies)
+
+        # Step 3: Store results
+        critical_count = 0
+        high_count = 0
+        medium_count = 0
+        low_count = 0
+        total_vulns = 0
+
+        for vuln_pkg in osv_result.get('vulnerable', []):
+            for vuln in vuln_pkg.get('vulnerabilities', []):
+                severity = (vuln.get('severity') or 'UNKNOWN').upper()
+
+                result_record = DependencyScanResult(
+                    scan_id=scan.id,
+                    pkg_name=vuln_pkg['name'][:300],
+                    pkg_version=vuln_pkg['version'][:100],
+                    pkg_ecosystem=vuln_pkg['ecosystem'][:30],
+                    purl=vuln_pkg.get('purl', '')[:500] or None,
+                    is_direct=vuln_pkg.get('is_direct', False),
+                    source_file=vuln_pkg.get('source_file', '')[:500] or None,
+                    vuln_id=vuln['id'][:100],
+                    cve_id=vuln.get('cve_id', '')[:50] or None,
+                    severity=severity[:20],
+                    cvss_score=vuln.get('cvss_score'),
+                    summary=(vuln.get('summary') or '')[:1000] or None,
+                    primary_url=(vuln.get('primary_url') or '')[:500] or None,
+                    fixed_versions=json.dumps(vuln.get('fixed_versions', [])),
+                    aliases=json.dumps(vuln.get('aliases', [])),
+                )
+                db.session.add(result_record)
+                total_vulns += 1
+
+                if severity == 'CRITICAL':
+                    critical_count += 1
+                elif severity == 'HIGH':
+                    high_count += 1
+                elif severity == 'MEDIUM':
+                    medium_count += 1
+                elif severity == 'LOW':
+                    low_count += 1
+
+        # Update scan summary
+        scan.scan_status = 'completed'
+        scan.completed_at = datetime.utcnow()
+        scan.vulnerable_count = len(osv_result.get('vulnerable', []))
+        scan.total_vulnerabilities = total_vulns
+        scan.critical_count = critical_count
+        scan.high_count = high_count
+        scan.medium_count = medium_count
+        scan.low_count = low_count
+        scan.scan_duration_seconds = osv_result.get('stats', {}).get('scan_duration_seconds', 0)
+
+        # Update agent API key usage
+        agent_key.last_used_at = datetime.utcnow()
+        agent_key.usage_count = (agent_key.usage_count or 0) + 1
+
+        db.session.commit()
+
+        logger.info(
+            f"Dependency scan from {hostname}: {parse_stats['total_dependencies']} deps, "
+            f"{total_vulns} vulnerabilities found in {len(osv_result.get('vulnerable', []))} packages"
+        )
+
+        # Log scan event
+        try:
+            AgentEvent.log_event(
+                organization_id=organization.id,
+                event_type='dependency_scan',
+                asset_id=asset.id,
+                api_key_id=agent_key.id,
+                details=json.dumps({
+                    'scan_id': scan.id,
+                    'lockfiles_parsed': parse_stats['files_parsed'],
+                    'total_dependencies': parse_stats['total_dependencies'],
+                    'vulnerable_packages': scan.vulnerable_count,
+                    'total_vulnerabilities': total_vulns,
+                }),
+                source_ip=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', '')[:500]
+            )
+            db.session.commit()
+        except Exception:
+            pass
+
+        return jsonify({
+            'status': 'success',
+            'scan_id': scan.id,
+            'summary': {
+                'lockfiles_parsed': parse_stats['files_parsed'],
+                'total_dependencies': parse_stats['total_dependencies'],
+                'direct_dependencies': parse_stats['direct_dependencies'],
+                'transitive_dependencies': parse_stats['transitive_dependencies'],
+                'vulnerable_packages': scan.vulnerable_count,
+                'total_vulnerabilities': total_vulns,
+                'severity': {
+                    'critical': critical_count,
+                    'high': high_count,
+                    'medium': medium_count,
+                    'low': low_count,
+                },
+            },
+            'vulnerable': [
+                {
+                    'name': vp['name'],
+                    'version': vp['version'],
+                    'ecosystem': vp['ecosystem'],
+                    'is_direct': vp.get('is_direct', False),
+                    'purl': vp.get('purl'),
+                    'vulnerabilities': vp['vulnerabilities'],
+                }
+                for vp in osv_result.get('vulnerable', [])
+            ],
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Dependency scan processing error: {e}")
+        return jsonify({'error': 'Failed to process dependency scan'}), 500
+
+
+@agent_bp.route('/api/dependency-scans', methods=['GET'])
+@login_required
+def list_dependency_scans():
+    """List dependency scan results for the user's organizations."""
+    from app.auth import get_current_user
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Get user's organizations
+    if user.is_super_admin():
+        org_ids = [o.id for o in Organization.query.filter_by(active=True).all()]
+    else:
+        org_ids = [m.organization_id for m in user.org_memberships.all()]
+
+    if not org_ids:
+        return jsonify({'scans': [], 'stats': {}}), 200
+
+    # Query scans
+    scans = DependencyScan.query.filter(
+        DependencyScan.organization_id.in_(org_ids),
+        DependencyScan.scan_status == 'completed',
+    ).order_by(DependencyScan.created_at.desc()).limit(100).all()
+
+    # Aggregate stats
+    total_scans = len(scans)
+    total_vulns = sum(s.total_vulnerabilities or 0 for s in scans)
+    total_critical = sum(s.critical_count or 0 for s in scans)
+
+    return jsonify({
+        'scans': [s.to_dict() for s in scans],
+        'stats': {
+            'total_scans': total_scans,
+            'total_vulnerabilities': total_vulns,
+            'total_critical': total_critical,
+        }
+    }), 200
+
+
+@agent_bp.route('/api/dependency-scans/<int:scan_id>', methods=['GET'])
+@login_required
+def get_dependency_scan_detail(scan_id):
+    """Get detailed results for a specific dependency scan."""
+    from app.auth import get_current_user
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    scan = DependencyScan.query.get_or_404(scan_id)
+
+    # Authorization check
+    if not user.is_super_admin():
+        org_ids = [m.organization_id for m in user.org_memberships.all()]
+        if scan.organization_id not in org_ids:
+            return jsonify({'error': 'Access denied'}), 403
+
+    # Get vulnerability results
+    results = DependencyScanResult.query.filter_by(
+        scan_id=scan.id
+    ).order_by(
+        db.case(
+            (DependencyScanResult.severity == 'CRITICAL', 0),
+            (DependencyScanResult.severity == 'HIGH', 1),
+            (DependencyScanResult.severity == 'MEDIUM', 2),
+            (DependencyScanResult.severity == 'LOW', 3),
+            else_=4
+        ),
+        DependencyScanResult.is_direct.desc(),
+        DependencyScanResult.pkg_name.asc()
+    ).all()
+
+    return jsonify({
+        'scan': scan.to_dict(),
+        'results': [r.to_dict() for r in results],
+    }), 200
 
 
 @agent_bp.route('/api/containers', methods=['GET'])
