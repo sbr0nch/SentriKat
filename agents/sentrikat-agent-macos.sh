@@ -876,6 +876,98 @@ scan_container_images() {
 }
 
 # ============================================================================
+# Dependency Lock File Scanning (OSV.dev Integration)
+# ============================================================================
+
+LOCKFILE_SCAN_ENABLED="${LOCKFILE_SCAN_ENABLED:-auto}"
+LOCKFILE_NAMES="package-lock.json yarn.lock pnpm-lock.yaml Pipfile.lock poetry.lock Cargo.lock go.sum Gemfile.lock composer.lock packages.lock.json"
+MAX_LOCKFILE_SIZE=$((5 * 1024 * 1024))
+MAX_LOCKFILES=50
+
+collect_and_send_lockfiles() {
+    if [[ "$LOCKFILE_SCAN_ENABLED" == "false" ]]; then
+        log_info "Lock file scanning disabled by configuration"
+        return 0
+    fi
+
+    if [[ "${SCAN_DEPENDENCIES:-false}" != "true" && "$LOCKFILE_SCAN_ENABLED" != "true" ]]; then
+        if [[ "$LOCKFILE_SCAN_ENABLED" == "auto" ]]; then
+            log_info "Lock file scanning: SCAN_DEPENDENCIES not enabled, skipping"
+            return 0
+        fi
+    fi
+
+    log_info "Scanning for dependency lock files..."
+
+    local lockfiles_json="["
+    local file_count=0
+    local first=true
+
+    for search_dir in /Users /opt /srv /var/www "$HOME"; do
+        [[ ! -d "$search_dir" ]] && continue
+
+        for lockfile_name in $LOCKFILE_NAMES; do
+            while IFS= read -r filepath; do
+                [[ -z "$filepath" || ! -f "$filepath" || -L "$filepath" ]] && continue
+
+                local fsize
+                fsize=$(stat -f%z "$filepath" 2>/dev/null || stat -c%s "$filepath" 2>/dev/null || echo 0)
+                [[ "$fsize" -gt "$MAX_LOCKFILE_SIZE" || "$fsize" -eq 0 ]] && continue
+
+                local content
+                content=$(cat "$filepath" 2>/dev/null) || continue
+                [[ -z "$content" ]] && continue
+
+                local project_path
+                project_path=$(dirname "$filepath")
+
+                local escaped_content
+                escaped_content=$(printf '%s' "$content" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
+                [[ -z "$escaped_content" ]] && continue
+
+                local escaped_filename escaped_project
+                escaped_filename=$(json_escape "$lockfile_name")
+                escaped_project=$(json_escape "$project_path")
+
+                [[ "$first" == "true" ]] && first=false || lockfiles_json+=","
+                lockfiles_json+="{\"filename\": \"$escaped_filename\", \"project_path\": \"$escaped_project\", \"content\": $escaped_content}"
+                ((file_count++)) || true
+
+                [[ $file_count -ge $MAX_LOCKFILES ]] && break 3
+            done < <(find "$search_dir" -maxdepth 5 -name "$lockfile_name" -readable -type f 2>/dev/null | head -20)
+        done
+    done
+
+    lockfiles_json+="]"
+
+    if [[ $file_count -eq 0 ]]; then
+        log_info "No lock files found"
+        return 0
+    fi
+
+    log_info "Found $file_count lock files, sending for OSV.dev vulnerability scan..."
+
+    local tmpfile
+    tmpfile=$(mktemp /tmp/sentrikat-lockfiles-XXXXXX.json)
+    local my_hostname
+    my_hostname=$(hostname)
+
+    printf '{"agent_id": "%s", "hostname": "%s", "lockfiles": %s}' \
+        "$AGENT_ID" "$my_hostname" "$lockfiles_json" > "$tmpfile"
+
+    local endpoint="${SERVER_URL}/api/agent/dependency-scan"
+
+    curl -s -X POST "$endpoint" \
+        -H "X-Agent-Key: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (macOS)" \
+        --data-binary "@${tmpfile}" \
+        --max-time 300 >/dev/null 2>&1 || log_warn "Failed to send dependency scan results"
+
+    rm -f "$tmpfile"
+}
+
+# ============================================================================
 # API Communication
 # ============================================================================
 
@@ -1281,6 +1373,9 @@ main() {
 
     # Run container image scan (if Docker detected)
     scan_container_images || log_warn "Container scanning encountered issues (non-fatal)"
+
+    # Run dependency lock file scan (OSV.dev vulnerability detection)
+    collect_and_send_lockfiles || log_warn "Lock file scanning encountered issues (non-fatal)"
 }
 
 # Parse arguments

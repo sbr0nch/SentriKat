@@ -1309,6 +1309,115 @@ function Invoke-ContainerScan {
 }
 
 # ============================================================================
+# Dependency Lock File Scanning (OSV.dev Integration)
+# ============================================================================
+
+$LockfileScanEnabled = if ($env:LOCKFILE_SCAN_ENABLED) { $env:LOCKFILE_SCAN_ENABLED } else { "auto" }
+$LockfileNames = @("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Pipfile.lock", "poetry.lock", "Cargo.lock", "go.sum", "Gemfile.lock", "composer.lock", "packages.lock.json")
+$MaxLockfileSize = 5MB
+$MaxLockfiles = 50
+
+function Invoke-DependencyScan {
+    param($Config, $SystemInfo)
+
+    if ($LockfileScanEnabled -eq "false") {
+        Write-Log "Lock file scanning disabled by configuration"
+        return
+    }
+
+    if ($env:SCAN_DEPENDENCIES -ne "true" -and $LockfileScanEnabled -ne "true") {
+        if ($LockfileScanEnabled -eq "auto") {
+            Write-Log "Lock file scanning: SCAN_DEPENDENCIES not enabled, skipping"
+            return
+        }
+    }
+
+    Write-Log "Scanning for dependency lock files..."
+
+    $lockfiles = @()
+    $searchDirs = @()
+
+    # Build search paths (user profiles + common dev dirs)
+    if (Test-Path "C:\Users") {
+        Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $searchDirs += $_.FullName
+        }
+    }
+    foreach ($d in @("C:\Projects", "C:\Dev", "C:\src", "D:\Projects", "D:\Dev", "$env:USERPROFILE")) {
+        if ($d -and (Test-Path $d -ErrorAction SilentlyContinue)) {
+            $searchDirs += $d
+        }
+    }
+
+    foreach ($searchDir in $searchDirs) {
+        foreach ($lockfileName in $LockfileNames) {
+            try {
+                $found = Get-ChildItem -Path $searchDir -Filter $lockfileName -Recurse -Depth 5 -File -ErrorAction SilentlyContinue | Select-Object -First 20
+                foreach ($file in $found) {
+                    if ($file.Length -gt $MaxLockfileSize -or $file.Length -eq 0) { continue }
+                    if ($lockfiles.Count -ge $MaxLockfiles) { break }
+
+                    try {
+                        $content = Get-Content $file.FullName -Raw -ErrorAction Stop
+                        if ([string]::IsNullOrWhiteSpace($content)) { continue }
+
+                        $lockfiles += @{
+                            filename = $lockfileName
+                            project_path = $file.DirectoryName
+                            content = $content
+                        }
+
+                        Write-Log "  Found: $($file.FullName) ($($file.Length) bytes)"
+                    }
+                    catch {
+                        Write-Log "  Cannot read $($file.FullName): $_" -Level "WARN"
+                    }
+                }
+            }
+            catch {}
+        }
+        if ($lockfiles.Count -ge $MaxLockfiles) { break }
+    }
+
+    if ($lockfiles.Count -eq 0) {
+        Write-Log "No lock files found"
+        return
+    }
+
+    Write-Log "Found $($lockfiles.Count) lock files, sending for OSV.dev vulnerability scan..."
+
+    $payload = @{
+        agent_id = $SystemInfo.agent.id
+        hostname = $SystemInfo.hostname
+        lockfiles = $lockfiles
+    }
+
+    $jsonPayload = $payload | ConvertTo-Json -Depth 10 -Compress
+    $endpoint = "$($Config.ServerUrl)/api/agent/dependency-scan"
+
+    $headers = @{
+        "X-Agent-Key" = $Config.ApiKey
+        "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
+    }
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($jsonPayload)
+        $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 300
+        Write-Log "Dependency scan results received"
+
+        if ($response.summary -and $response.summary.total_vulnerabilities -gt 0) {
+            Write-Log "OSV scan found $($response.summary.total_vulnerabilities) vulnerabilities in $($response.summary.vulnerable_packages) packages" -Level "WARN"
+        } else {
+            Write-Log "OSV scan: no vulnerabilities found"
+        }
+    }
+    catch {
+        Write-Log "Failed to send dependency scan results: $_" -Level "WARN"
+    }
+}
+
+# ============================================================================
 # Installation Functions
 # ============================================================================
 
@@ -1627,6 +1736,13 @@ function Main {
             Invoke-ContainerScan $config $systemInfo
         } catch {
             Write-Log "Container scanning encountered issues (non-fatal): $_" -Level "WARN"
+        }
+
+        # Run dependency lock file scan (OSV.dev vulnerability detection)
+        try {
+            Invoke-DependencyScan $config $systemInfo
+        } catch {
+            Write-Log "Lock file scanning encountered issues (non-fatal): $_" -Level "WARN"
         }
     }
     catch {

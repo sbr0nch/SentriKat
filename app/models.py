@@ -3015,6 +3015,174 @@ class ContainerVulnerability(db.Model):
         }
 
 
+class DependencyScan(db.Model):
+    """
+    Represents a lock-file-based dependency scan from an agent.
+
+    Each scan processes one or more lock files (package-lock.json, Cargo.lock, etc.)
+    and queries OSV.dev to find vulnerabilities affecting exact package versions.
+    Unlike CPE-based matching, this uses native ecosystem+version queries for
+    precise, false-positive-free results.
+    """
+    __tablename__ = 'dependency_scans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id', ondelete='CASCADE'), nullable=True, index=True)
+
+    # Scan metadata
+    scan_status = db.Column(db.String(20), default='pending', index=True)  # pending, processing, completed, failed
+    lockfiles_submitted = db.Column(db.Integer, default=0)  # Number of lock files processed
+    lockfiles_parsed = db.Column(db.Integer, default=0)  # Successfully parsed
+    total_dependencies = db.Column(db.Integer, default=0)
+    direct_dependencies = db.Column(db.Integer, default=0)
+    transitive_dependencies = db.Column(db.Integer, default=0)
+
+    # Vulnerability summary (cached aggregates)
+    vulnerable_count = db.Column(db.Integer, default=0)
+    total_vulnerabilities = db.Column(db.Integer, default=0)
+    critical_count = db.Column(db.Integer, default=0)
+    high_count = db.Column(db.Integer, default=0)
+    medium_count = db.Column(db.Integer, default=0)
+    low_count = db.Column(db.Integer, default=0)
+
+    # Scan timing
+    scan_duration_seconds = db.Column(db.Float, nullable=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = db.relationship('Organization', backref=db.backref('dependency_scans', lazy='dynamic'))
+    asset = db.relationship('Asset', backref=db.backref('dependency_scans', lazy='dynamic'))
+    results = db.relationship('DependencyScanResult', backref='scan', cascade='all, delete-orphan', lazy='dynamic')
+
+    __table_args__ = (
+        db.Index('idx_depscan_org_status', 'organization_id', 'scan_status'),
+        db.Index('idx_depscan_asset', 'asset_id', 'created_at'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'asset_id': self.asset_id,
+            'asset_hostname': self.asset.hostname if self.asset else None,
+            'scan_status': self.scan_status,
+            'lockfiles_submitted': self.lockfiles_submitted,
+            'lockfiles_parsed': self.lockfiles_parsed,
+            'total_dependencies': self.total_dependencies,
+            'direct_dependencies': self.direct_dependencies,
+            'transitive_dependencies': self.transitive_dependencies,
+            'vulnerable_count': self.vulnerable_count,
+            'total_vulnerabilities': self.total_vulnerabilities,
+            'severity': {
+                'critical': self.critical_count or 0,
+                'high': self.high_count or 0,
+                'medium': self.medium_count or 0,
+                'low': self.low_count or 0,
+            },
+            'scan_duration_seconds': self.scan_duration_seconds,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class DependencyScanResult(db.Model):
+    """
+    Individual vulnerability found via OSV.dev for a lock-file dependency.
+
+    Each record maps a vulnerability ID (GHSA, CVE, PYSEC, RUSTSEC, etc.)
+    to a specific package+version from a lock file scan.
+    """
+    __tablename__ = 'dependency_scan_results'
+
+    id = db.Column(db.Integer, primary_key=True)
+    scan_id = db.Column(db.Integer, db.ForeignKey('dependency_scans.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    # Package identification
+    pkg_name = db.Column(db.String(300), nullable=False, index=True)  # e.g. "express", "requests"
+    pkg_version = db.Column(db.String(100), nullable=False)  # Installed version
+    pkg_ecosystem = db.Column(db.String(30), nullable=False, index=True)  # npm, PyPI, crates.io, Go, etc.
+    purl = db.Column(db.String(500), nullable=True)  # Package URL
+    is_direct = db.Column(db.Boolean, default=False)  # Direct vs transitive dependency
+    source_file = db.Column(db.String(500), nullable=True)  # Lock file path
+
+    # Vulnerability identification
+    vuln_id = db.Column(db.String(100), nullable=False, index=True)  # GHSA-xxx, PYSEC-xxx, CVE-xxx, RUSTSEC-xxx
+    cve_id = db.Column(db.String(50), nullable=True, index=True)  # CVE alias if available
+    severity = db.Column(db.String(20), nullable=True, index=True)  # CRITICAL, HIGH, MEDIUM, LOW
+    cvss_score = db.Column(db.Float, nullable=True)
+    summary = db.Column(db.String(1000), nullable=True)
+    primary_url = db.Column(db.String(500), nullable=True)
+
+    # Fix information
+    fixed_versions = db.Column(db.Text, nullable=True)  # JSON array of fix versions
+    aliases = db.Column(db.Text, nullable=True)  # JSON array of all aliases (CVE, GHSA, etc.)
+
+    # Status tracking
+    acknowledged = db.Column(db.Boolean, default=False)
+    acknowledged_at = db.Column(db.DateTime, nullable=True)
+    acknowledged_by = db.Column(db.String(100), nullable=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('idx_depresult_scan_severity', 'scan_id', 'severity'),
+        db.Index('idx_depresult_pkg', 'pkg_ecosystem', 'pkg_name'),
+        db.Index('idx_depresult_vuln', 'vuln_id'),
+        db.Index('idx_depresult_cve', 'cve_id'),
+    )
+
+    def get_fixed_versions(self):
+        """Return list of fix versions."""
+        if not self.fixed_versions:
+            return []
+        try:
+            import json
+            return json.loads(self.fixed_versions)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def get_aliases(self):
+        """Return list of vulnerability aliases."""
+        if not self.aliases:
+            return []
+        try:
+            import json
+            return json.loads(self.aliases)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'scan_id': self.scan_id,
+            'pkg_name': self.pkg_name,
+            'pkg_version': self.pkg_version,
+            'pkg_ecosystem': self.pkg_ecosystem,
+            'purl': self.purl,
+            'is_direct': self.is_direct,
+            'source_file': self.source_file,
+            'vuln_id': self.vuln_id,
+            'cve_id': self.cve_id,
+            'severity': self.severity,
+            'cvss_score': self.cvss_score,
+            'summary': self.summary,
+            'primary_url': self.primary_url,
+            'fixed_versions': self.get_fixed_versions(),
+            'aliases': self.get_aliases(),
+            'acknowledged': self.acknowledged,
+            'acknowledged_at': self.acknowledged_at.isoformat() if self.acknowledged_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class HealthCheckResult(db.Model):
     """
     Stores results from background health checks.
