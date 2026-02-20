@@ -172,18 +172,18 @@ def saml_login():
     Redirects user to IdP for authentication.
     """
     if not is_saml_available():
-        return redirect(url_for('main.login', error='saml_unavailable'))
+        return redirect(url_for('auth.login', error='saml_unavailable'))
 
     if get_setting('saml_enabled', 'false') != 'true':
-        return redirect(url_for('main.login', error='saml_disabled'))
+        return redirect(url_for('auth.login', error='saml_disabled'))
 
     # Get return URL
-    return_to = request.args.get('next') or url_for('main.dashboard')
+    return_to = request.args.get('next') or url_for('main.index')
 
     # Generate login URL
     login_url = generate_login_url(request, return_to)
     if not login_url:
-        return redirect(url_for('main.login', error='saml_config'))
+        return redirect(url_for('auth.login', error='saml_config'))
 
     return redirect(login_url)
 
@@ -195,17 +195,17 @@ def saml_acs():
     Validates response and creates user session.
     """
     if not is_saml_available():
-        return redirect(url_for('main.login', error='saml_unavailable'))
+        return redirect(url_for('auth.login', error='saml_unavailable'))
 
     if get_setting('saml_enabled', 'false') != 'true':
-        return redirect(url_for('main.login', error='saml_disabled'))
+        return redirect(url_for('auth.login', error='saml_disabled'))
 
     # Process SAML response
     success, user_data, error = process_saml_response(request)
 
     if not success:
         logger.error(f"SAML authentication failed: {error}")
-        return redirect(url_for('main.login', error='saml_auth_failed'))
+        return redirect(url_for('auth.login', error='saml_auth_failed'))
 
     # Get or create user
     auto_provision = get_setting('saml_auto_provision', 'true') == 'true'
@@ -216,11 +216,11 @@ def saml_acs():
         user = User.query.filter_by(email=user_data.get('email')).first()
         if not user:
             logger.warning(f"SAML user not found and auto-provision disabled: {user_data.get('email')}")
-            return redirect(url_for('main.login', error='saml_user_not_found'))
+            return redirect(url_for('auth.login', error='saml_user_not_found'))
     else:
         user, created = get_or_create_saml_user(user_data)
         if not user:
-            return redirect(url_for('main.login', error='saml_user_create_failed'))
+            return redirect(url_for('auth.login', error='saml_user_create_failed'))
 
         if created:
             logger.info(f"Created new SAML user: {user.username}")
@@ -239,7 +239,7 @@ def saml_acs():
     if relay_state and relay_state.startswith('/'):
         return redirect(relay_state)
 
-    return redirect(url_for('main.dashboard'))
+    return redirect(url_for('main.index'))
 
 
 @saml_bp.route('/saml/sls', methods=['GET', 'POST'])
@@ -248,16 +248,16 @@ def saml_sls():
     Single Logout Service - Handle IdP-initiated logout.
     """
     if not is_saml_available():
-        return redirect(url_for('main.login'))
+        return redirect(url_for('auth.login'))
 
     auth = init_saml_auth(request)
     if not auth:
         session.clear()
-        return redirect(url_for('main.login'))
+        return redirect(url_for('auth.login'))
 
     # Process logout request/response
     def redirect_callback():
-        return redirect(url_for('main.login'))
+        return redirect(url_for('auth.login'))
 
     try:
         url = auth.process_slo(delete_session_cb=redirect_callback)
@@ -273,7 +273,7 @@ def saml_sls():
         logger.exception("SAML SLS failed")
         session.clear()
 
-    return redirect(url_for('main.login'))
+    return redirect(url_for('auth.login'))
 
 
 # ============================================================================

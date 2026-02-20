@@ -7,6 +7,7 @@ import smtplib
 import json
 import logging
 import os
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date, time as dt_time
