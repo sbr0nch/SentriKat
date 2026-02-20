@@ -212,63 +212,120 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                     zero_day_cves.add(m.vulnerability.cve_id)
             zero_day_count = len(zero_day_cves)
 
+            # Collect affected product names for context
+            product_names = []
+            seen_products = set()
+            for m in new_matches:
+                if m.product:
+                    pkey = f"{m.product.vendor} {m.product.product_name}"
+                    if pkey not in seen_products:
+                        seen_products.add(pkey)
+                        product_names.append(pkey)
+            products_str = ", ".join(product_names[:4])
+            if len(product_names) > 4:
+                products_str += f" +{len(product_names) - 4} more"
+
+            # Severity breakdown
+            high_count = sum(
+                1 for m in new_matches
+                if m.vulnerability and m.calculate_effective_priority() == 'high'
+            )
+
             # Build payload based on format - BATCHED message
             if webhook_format in ('slack', 'rocketchat'):
-                text = f"🔒 *SentriKat Alert for {org.display_name}*\n"
-                text += f"*{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:* {cve_list_str}"
+                # Header with org context
+                text = f"{'🚨' if critical_count > 0 or exploited_count > 0 else '🔒'} *SentriKat Security Alert*\n"
+                text += f"*Organization:* {org.display_name}\n"
+                text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+                # What happened
+                text += f"*{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''} detected*\n"
+
+                # Threat indicators (why this matters)
                 if zero_day_count > 0:
-                    text += f"\n⚡ *{zero_day_count} ZERO-DAY{'S' if zero_day_count != 1 else ''}* (detected before CISA KEV)"
+                    text += f"⚡ *{zero_day_count} ZERO-DAY{'S' if zero_day_count != 1 else ''}* — detected before CISA KEV listing\n"
                 if exploited_count > 0:
-                    text += f"\n🚨 *{exploited_count} ACTIVELY EXPLOITED*"
+                    text += f"🚨 *{exploited_count} ACTIVELY EXPLOITED* — immediate patching required\n"
                 if critical_count > 0:
-                    text += f"\n⚠️ *{critical_count} critical*"
+                    text += f"🔴 *{critical_count} Critical severity*\n"
+                if high_count > 0:
+                    text += f"🟠 *{high_count} High severity*\n"
                 if verify_count > 0:
-                    text += f"\n🟡 *{verify_count} likely resolved* (vendor fix detected - verify manually)"
+                    text += f"🟡 *{verify_count} Likely resolved* — vendor fix detected, verify manually\n"
+
+                # CVE IDs
+                text += f"\n*CVEs:* {cve_list_str}\n"
+
+                # Affected products
+                if products_str:
+                    text += f"*Affected:* {products_str}\n"
+
                 payload = {"text": text}
             elif webhook_format == 'discord':
-                content = f"🔒 **SentriKat Alert for {org.display_name}**\n"
-                content += f"**{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''}:** {cve_list_str}"
+                # Header
+                content = f"{'🚨' if critical_count > 0 or exploited_count > 0 else '🔒'} **SentriKat Security Alert**\n"
+                content += f"**Organization:** {org.display_name}\n"
+                content += f"───────────────────────\n"
+
+                content += f"**{new_cve_count} new CVE{'s' if new_cve_count != 1 else ''} detected**\n"
+
                 if zero_day_count > 0:
-                    content += f"\n⚡ **{zero_day_count} ZERO-DAY{'S' if zero_day_count != 1 else ''}** (detected before CISA KEV)"
+                    content += f"⚡ **{zero_day_count} ZERO-DAY{'S' if zero_day_count != 1 else ''}** — detected before CISA KEV listing\n"
                 if exploited_count > 0:
-                    content += f"\n🚨 **{exploited_count} ACTIVELY EXPLOITED**"
+                    content += f"🚨 **{exploited_count} ACTIVELY EXPLOITED** — immediate patching required\n"
                 if critical_count > 0:
-                    content += f"\n⚠️ **{critical_count} critical**"
+                    content += f"🔴 **{critical_count} Critical severity**\n"
+                if high_count > 0:
+                    content += f"🟠 **{high_count} High severity**\n"
                 if verify_count > 0:
-                    content += f"\n🟡 **{verify_count} likely resolved** (vendor fix detected - verify manually)"
+                    content += f"🟡 **{verify_count} Likely resolved** — vendor fix detected, verify manually\n"
+
+                content += f"\n**CVEs:** {cve_list_str}\n"
+                if products_str:
+                    content += f"**Affected:** {products_str}\n"
+
                 payload = {"content": content}
             elif webhook_format == 'teams':
                 facts = [
+                    {"name": "Organization", "value": org.display_name},
                     {"name": "New CVEs", "value": str(new_cve_count)},
                     {"name": "CVE IDs", "value": cve_list_str},
                 ]
                 if zero_day_count > 0:
-                    facts.append({"name": "Zero-Day (Pre-KEV)", "value": str(zero_day_count)})
+                    facts.append({"name": "Zero-Day (Pre-KEV)", "value": f"{zero_day_count} — detected before CISA KEV"})
                 if exploited_count > 0:
-                    facts.append({"name": "Actively Exploited", "value": str(exploited_count)})
-                facts.append({"name": "Critical", "value": str(critical_count)})
+                    facts.append({"name": "Actively Exploited", "value": f"{exploited_count} — immediate patching required"})
+                if critical_count > 0:
+                    facts.append({"name": "Critical Severity", "value": str(critical_count)})
+                if high_count > 0:
+                    facts.append({"name": "High Severity", "value": str(high_count)})
                 if verify_count > 0:
                     facts.append({"name": "Likely Resolved (Verify)", "value": str(verify_count)})
+                if products_str:
+                    facts.append({"name": "Affected Products", "value": products_str})
                 payload = {
                     "@type": "MessageCard",
                     "themeColor": "7c3aed" if zero_day_count > 0 else ("dc2626" if critical_count > 0 or exploited_count > 0 else "1e40af"),
                     "summary": f"SentriKat: {new_cve_count} new CVEs for {org.display_name}" + (f" ({zero_day_count} zero-day)" if zero_day_count > 0 else ""),
                     "sections": [{
-                        "activityTitle": f"🔒 SentriKat Alert for {org.display_name}",
-                        "facts": facts
+                        "activityTitle": f"{'🚨' if critical_count > 0 or exploited_count > 0 else '🔒'} SentriKat Security Alert — {org.display_name}",
+                        "facts": facts,
+                        "markdown": True
                     }]
                 }
             else:  # custom or fallback JSON
                 payload = {
-                    "text": f"SentriKat Alert: {new_cve_count} new CVEs for {org.display_name}: {cve_list_str}",
+                    "text": f"SentriKat Security Alert: {new_cve_count} new CVEs for {org.display_name}: {cve_list_str}",
                     "organization": org.display_name,
                     "new_cve_count": new_cve_count,
                     "cve_ids": new_cve_ids,
                     "critical_count": critical_count,
+                    "high_count": high_count,
                     "exploited_count": exploited_count,
                     "zero_day_count": zero_day_count,
                     "zero_day_cve_ids": list(zero_day_cves),
-                    "verify_count": verify_count
+                    "verify_count": verify_count,
+                    "affected_products": product_names
                 }
 
             response = requests.post(webhook_url, json=payload, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)
@@ -323,39 +380,24 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
 
                 # Use batched format if CVE IDs provided
                 if cve_list_str:
-                    payload = {
-                        "text": f"🔒 *SentriKat Alert*\n*{new_cves_count} new CVE{'s' if new_cves_count != 1 else ''}:* {cve_list_str}" + (f"\n⚠️ *{critical_count} critical*" if critical_count > 0 else "")
-                    }
-                else:
-                    payload = {
-                        "blocks": [
-                            {
-                                "type": "header",
-                                "text": {
-                                    "type": "plain_text",
-                                    "text": "🔒 SentriKat CVE Sync Complete",
-                                    "emoji": True
-                                }
-                            },
-                            {
-                                "type": "section",
-                                "fields": [
-                                    {"type": "mrkdwn", "text": f"*New CVEs:*\n{new_cves_count}"},
-                                    {"type": "mrkdwn", "text": f"*Critical:*\n{critical_count}"},
-                                    {"type": "mrkdwn", "text": f"*Product Matches:*\n{total_matches}"}
-                                ]
-                            }
-                        ]
-                    }
-
+                    text = f"{'🚨' if critical_count > 0 else '🔒'} *SentriKat Security Alert*\n"
+                    text += f"*Source:* Global CVE Sync\n"
+                    text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    text += f"*{new_cves_count} new CVE{'s' if new_cves_count != 1 else ''} detected*\n"
                     if critical_count > 0:
-                        payload["blocks"].append({
-                            "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": f"⚠️ *{critical_count} critical vulnerabilities* require immediate attention!"
-                            }
-                        })
+                        text += f"🔴 *{critical_count} Critical severity* — immediate action required\n"
+                    text += f"\n*CVEs:* {cve_list_str}\n"
+                    text += f"*Product matches:* {total_matches}\n"
+                    payload = {"text": text}
+                else:
+                    text = f"🔒 *SentriKat — CVE Sync Complete*\n"
+                    text += f"*Source:* Global CVE Sync\n"
+                    text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    text += f"*New CVEs:* {new_cves_count}\n"
+                    if critical_count > 0:
+                        text += f"🔴 *Critical:* {critical_count} — immediate action required\n"
+                    text += f"*Product matches:* {total_matches}\n"
+                    payload = {"text": text}
 
                 response = requests.post(webhook_url, json=payload, timeout=10)
                 results.append({'slack': response.status_code in [200, 204]})
@@ -369,40 +411,88 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
                 from app.encryption import decrypt_value
                 webhook_url = decrypt_value(teams_url.value) if teams_url.value.startswith('gAAAA') else teams_url.value
 
-                # Use batched format if CVE IDs provided
+                facts = [
+                    {"name": "Source", "value": "Global CVE Sync"},
+                    {"name": "New CVEs", "value": str(new_cves_count)},
+                ]
                 if cve_list_str:
-                    facts = [
-                        {"name": "New CVEs", "value": str(new_cves_count)},
-                        {"name": "CVE IDs", "value": cve_list_str},
-                        {"name": "Critical", "value": str(critical_count)}
-                    ]
-                else:
-                    facts = [
-                        {"name": "New CVEs", "value": str(new_cves_count)},
-                        {"name": "Critical", "value": str(critical_count)},
-                        {"name": "Product Matches", "value": str(total_matches)}
-                    ]
+                    facts.append({"name": "CVE IDs", "value": cve_list_str})
+                if critical_count > 0:
+                    facts.append({"name": "Critical Severity", "value": f"{critical_count} — immediate action required"})
+                facts.append({"name": "Product Matches", "value": str(total_matches)})
 
                 payload = {
                     "@type": "MessageCard",
                     "@context": "http://schema.org/extensions",
                     "themeColor": "dc2626" if critical_count > 0 else "1e40af",
-                    "summary": f"SentriKat: {new_cves_count} new CVEs",
+                    "summary": f"SentriKat: {new_cves_count} new CVEs" + (f" ({critical_count} critical)" if critical_count > 0 else ""),
                     "sections": [{
-                        "activityTitle": "🔒 SentriKat Alert",
+                        "activityTitle": f"{'🚨' if critical_count > 0 else '🔒'} SentriKat Security Alert — Global CVE Sync",
                         "facts": facts,
                         "markdown": True
                     }]
                 }
-
-                if critical_count > 0:
-                    payload["sections"][0]["text"] = f"⚠️ **{critical_count} critical vulnerabilities** require immediate attention!"
 
                 response = requests.post(webhook_url, json=payload, timeout=10)
                 results.append({'teams': response.status_code in [200, 204]})
             except Exception as e:
                 logger.error(f"Teams webhook failed: {e}")
                 results.append({'teams': False, 'error': str(e)})
+
+        # Send to Generic webhook if enabled (RocketChat, Mattermost, Discord, etc.)
+        from app.settings_api import get_setting
+        generic_enabled = get_setting('generic_webhook_enabled') == 'true'
+        generic_url_raw = get_setting('generic_webhook_url')
+        if generic_enabled and generic_url_raw:
+            try:
+                from app.encryption import decrypt_value, is_encrypted
+                generic_url = decrypt_value(generic_url_raw) if is_encrypted(generic_url_raw) else generic_url_raw
+                generic_format = get_setting('generic_webhook_format', 'slack')
+                generic_name = get_setting('generic_webhook_name', 'Custom Webhook')
+                generic_token = get_setting('generic_webhook_token', '')
+                if generic_token and is_encrypted(generic_token):
+                    generic_token = decrypt_value(generic_token)
+
+                proxies = Config.get_proxies()
+                verify_ssl = Config.get_verify_ssl()
+
+                headers = {'Content-Type': 'application/json'}
+                if generic_token:
+                    headers['Authorization'] = f'Bearer {generic_token}'
+                    headers['X-Auth-Token'] = generic_token
+
+                if generic_format in ('slack', 'rocketchat'):
+                    text = f"{'🚨' if critical_count > 0 else '🔒'} *SentriKat Security Alert*\n"
+                    text += f"*Source:* Global CVE Sync\n"
+                    text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    text += f"*{new_cves_count} new CVE{'s' if new_cves_count != 1 else ''} detected*\n"
+                    if critical_count > 0:
+                        text += f"🔴 *{critical_count} Critical severity* — immediate action required\n"
+                    if cve_list_str:
+                        text += f"\n*CVEs:* {cve_list_str}\n"
+                    text += f"*Product matches:* {total_matches}\n"
+                    payload = {"text": text}
+                elif generic_format == 'discord':
+                    content = f"{'🚨' if critical_count > 0 else '🔒'} **SentriKat Security Alert**\n"
+                    content += f"**Source:** Global CVE Sync\n"
+                    content += f"───────────────────────\n"
+                    content += f"**{new_cves_count} new CVE{'s' if new_cves_count != 1 else ''} detected**\n"
+                    if critical_count > 0:
+                        content += f"🔴 **{critical_count} Critical severity** — immediate action required\n"
+                    if cve_list_str:
+                        content += f"\n**CVEs:** {cve_list_str}\n"
+                    content += f"**Product matches:** {total_matches}\n"
+                    payload = {"content": content}
+                else:
+                    payload = {
+                        "text": f"SentriKat Security Alert: {new_cves_count} new CVEs ({critical_count} critical), {total_matches} product matches"
+                    }
+
+                response = requests.post(generic_url, json=payload, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)
+                results.append({'generic': response.status_code in [200, 204]})
+            except Exception as e:
+                logger.error(f"Generic webhook failed: {e}")
+                results.append({'generic': False, 'error': str(e)})
 
         return results
     except Exception as e:

@@ -321,7 +321,7 @@ class EmailAlertManager:
             <td align="center" style="padding: 32px 16px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
 
-                    <!-- Simple Header -->
+                    <!-- Header -->
                     <tr>
                         <td style="padding: 24px 32px; border-bottom: 1px solid #e5e7eb;">
                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
@@ -342,16 +342,25 @@ class EmailAlertManager:
                     <!-- Alert Summary -->
                     <tr>
                         <td style="padding: 32px;">
+                            <!-- Organization & Reason -->
+                            <div style="margin-bottom: 16px;">
+                                <span style="display: inline-block; background: #1e40af; color: #ffffff; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{organization.display_name}</span>
+                                {f'<span style="display: inline-block; background: #7c3aed; color: #ffffff; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; margin-left: 6px;">ZERO-DAY DETECTED</span>' if zero_day_count > 0 else ''}
+                            </div>
+
                             <!-- Alert Badge -->
-                            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 16px 20px; margin-bottom: 24px;">
+                            <div style="background: {'#fef2f2' if len(by_priority['critical']) > 0 else '#fff7ed'}; border: 1px solid {'#fecaca' if len(by_priority['critical']) > 0 else '#fed7aa'}; border-radius: 6px; padding: 16px 20px; margin-bottom: 24px;">
                                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                                     <tr>
                                         <td>
                                             <span style="font-size: 18px; font-weight: 700; color: #991b1b;">
-                                                {f'{new_count} New CVE{"s" if new_count != 1 else ""} ({unique_cve_count} total CVEs)' if new_count > 0 else f'{unique_cve_count} Unique CVEs Detected'}
+                                                {f'{new_count} New CVE{"s" if new_count != 1 else ""} ({unique_cve_count} total unacknowledged)' if new_count > 0 else f'{unique_cve_count} Unacknowledged CVEs'}
                                             </span>
                                             <p style="margin: 4px 0 0 0; font-size: 14px; color: #7f1d1d;">
-                                                Affecting <strong>{organization.display_name}</strong> - Immediate action required
+                                                Affecting <strong>{organization.display_name}</strong> products{' — immediate action required' if len(by_priority['critical']) > 0 else ''}
+                                            </p>
+                                            <p style="margin: 6px 0 0 0; font-size: 12px; color: #9ca3af;">
+                                                Source: SentriKat automated vulnerability monitoring (CISA KEV, NVD, EUVD)
                                             </p>
                                         </td>
                                     </tr>
