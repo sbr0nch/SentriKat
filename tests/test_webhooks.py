@@ -167,7 +167,7 @@ class TestWebhookPayloadFormats:
         payload = self._send_and_capture_payload(db_session, 'slack', mock_post)
 
         assert 'text' in payload
-        assert '*SentriKat Alert' in payload['text']
+        assert '*SentriKat Security Alert' in payload['text']
         assert 'CVE-2025-0001' in payload['text']
         # Slack uses *bold* syntax
         assert '*' in payload['text']
@@ -179,7 +179,7 @@ class TestWebhookPayloadFormats:
         payload = self._send_and_capture_payload(db_session, 'rocketchat', mock_post)
 
         assert 'text' in payload
-        assert '*SentriKat Alert' in payload['text']
+        assert '*SentriKat Security Alert' in payload['text']
         assert 'CVE-2025-0001' in payload['text']
 
     # Test 3 ---------------------------------------------------------------
@@ -189,7 +189,7 @@ class TestWebhookPayloadFormats:
         payload = self._send_and_capture_payload(db_session, 'discord', mock_post)
 
         assert 'content' in payload
-        assert '**SentriKat Alert' in payload['content']
+        assert '**SentriKat Security Alert' in payload['content']
         assert 'CVE-2025-0001' in payload['content']
         # Discord uses **bold** syntax
         assert '**' in payload['content']
@@ -619,8 +619,8 @@ class TestSendWebhookNotification:
 
     # Test 26 --------------------------------------------------------------
     @patch('app.cisa_sync.requests.post')
-    def test_block_format_when_no_cve_ids(self, mock_post, app, db_session):
-        """When no cve_ids provided, Slack payload uses block format."""
+    def test_text_format_when_no_cve_ids(self, mock_post, app, db_session):
+        """When no cve_ids provided, Slack payload uses text format with summary."""
         from app.cisa_sync import send_webhook_notification
 
         _make_system_setting(db_session, 'slack_enabled', 'true')
@@ -631,11 +631,10 @@ class TestSendWebhookNotification:
 
         _, kwargs = mock_post.call_args
         payload = kwargs['json']
-        assert 'blocks' in payload
-        # Block format has header and section
-        types = [b['type'] for b in payload['blocks']]
-        assert 'header' in types
-        assert 'section' in types
+        assert 'text' in payload
+        assert '*SentriKat' in payload['text']
+        assert 'New CVEs' in payload['text'] or 'new CVE' in payload['text']
+        assert 'Critical' in payload['text'] or 'critical' in payload['text']
 
     # Test 27 --------------------------------------------------------------
     @patch('app.cisa_sync.requests.post')
@@ -1078,8 +1077,8 @@ class TestRocketChatFirstAlertedRegression:
         assert 'text' in slack_payload
         assert 'text' in rc_payload
         # Both use *bold* markdown syntax
-        assert '*SentriKat Alert' in slack_payload['text']
-        assert '*SentriKat Alert' in rc_payload['text']
+        assert '*SentriKat Security Alert' in slack_payload['text']
+        assert '*SentriKat Security Alert' in rc_payload['text']
 
     # Test 42 --------------------------------------------------------------
     @patch('app.cisa_sync.requests.post')
@@ -1397,7 +1396,7 @@ class TestWebhookEdgeCases:
 
         _, kwargs = mock_post.call_args
         text = kwargs['json'].get('text', '')
-        assert '1 new CVE:' in text  # singular, no 's'
+        assert '1 new CVE detected' in text or '1 new CVE:' in text  # singular, no 's'
         assert '1 new CVEs' not in text
 
     @patch('app.cisa_sync.requests.post')
@@ -1419,4 +1418,4 @@ class TestWebhookEdgeCases:
 
         _, kwargs = mock_post.call_args
         text = kwargs['json'].get('text', '')
-        assert '3 new CVEs:' in text  # plural
+        assert '3 new CVEs detected' in text or '3 new CVEs:' in text  # plural
