@@ -187,6 +187,7 @@ class ImportQueue(db.Model):
 
     def to_dict(self):
         """Convert to dictionary for JSON serialization."""
+        sd = self.get_source_data() or {}
         return {
             'id': self.id,
             'integration_id': self.integration_id,
@@ -205,7 +206,11 @@ class ImportQueue(db.Model):
             'organization_name': self.organization.display_name if self.organization else None,
             'criticality': self.criticality,
             'status': self.status,
-            'source_data': self.get_source_data(),
+            'source_data': sd,
+            'hostname': sd.get('hostname'),
+            'agent_name': sd.get('agent_name'),
+            'key_type': sd.get('key_type'),
+            'is_new': sd.get('is_new', True),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'processed_at': self.processed_at.isoformat() if self.processed_at else None,
             'product_id': self.product_id
