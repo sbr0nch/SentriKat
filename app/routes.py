@@ -4762,22 +4762,23 @@ def trigger_webhook_alerts():
     Permissions:
     - Super Admin only: Can manually trigger webhook notifications
     """
-    from app.cisa_sync import send_org_webhook
+    from app.cisa_sync import send_org_webhook, send_webhook_notification
+    from app.settings_api import get_setting
 
     try:
         results = []
         organizations = Organization.query.filter_by(active=True).all()
 
-        for org in organizations:
-            # Check if org has webhooks enabled
-            if not org.webhook_enabled or not org.webhook_url:
-                results.append({
-                    'organization': org.name,
-                    'status': 'skipped',
-                    'reason': 'Webhook not configured'
-                })
-                continue
+        # Check if global webhooks are configured (fallback for orgs without their own)
+        has_global_webhook = (
+            get_setting('slack_webhook_url') and get_setting('slack_enabled') == 'true'
+        ) or (
+            get_setting('teams_webhook_url') and get_setting('teams_enabled') == 'true'
+        ) or (
+            get_setting('generic_webhook_url') and get_setting('generic_webhook_enabled') == 'true'
+        )
 
+        for org in organizations:
             # Get unacknowledged matches for this org
             # Include products assigned via both legacy organization_id and multi-org table
             from app.models import product_organizations
@@ -4815,41 +4816,76 @@ def trigger_webhook_alerts():
             # Count critical
             critical_count = sum(1 for m in priority_matches if m.calculate_effective_priority() == 'critical')
 
-            # Send webhook (force=True bypasses first_alerted_at filter for manual triggers)
-            result = send_org_webhook(
-                org=org,
-                new_cves_count=len(priority_matches),
-                critical_count=critical_count,
-                matches_count=len(priority_matches),
-                matches=priority_matches,
-                force=True
-            )
+            # Try org-level webhook first
+            if org.webhook_enabled and org.webhook_url:
+                # Send via org-specific webhook (force=True bypasses first_alerted_at filter for manual triggers)
+                result = send_org_webhook(
+                    org=org,
+                    new_cves_count=len(priority_matches),
+                    critical_count=critical_count,
+                    matches_count=len(priority_matches),
+                    matches=priority_matches,
+                    force=True
+                )
 
-            if result:
-                if result.get('skipped'):
-                    results.append({
-                        'organization': org.name,
-                        'status': 'skipped',
-                        'reason': result.get('reason', 'No new CVEs to alert')
-                    })
-                elif result.get('success'):
-                    results.append({
-                        'organization': org.name,
-                        'status': 'success',
-                        'new_cves': result.get('new_cves', 0)
-                    })
+                if result:
+                    if result.get('skipped'):
+                        results.append({
+                            'organization': org.name,
+                            'status': 'skipped',
+                            'reason': result.get('reason', 'No new CVEs to alert')
+                        })
+                    elif result.get('success'):
+                        results.append({
+                            'organization': org.name,
+                            'status': 'success',
+                            'new_cves': result.get('new_cves', 0)
+                        })
+                    else:
+                        results.append({
+                            'organization': org.name,
+                            'status': 'error',
+                            'reason': result.get('error', 'Unknown error')
+                        })
                 else:
                     results.append({
                         'organization': org.name,
+                        'status': 'skipped',
+                        'reason': 'No webhook configured'
+                    })
+
+            elif has_global_webhook:
+                # Fall back to global notification webhooks (Slack/Teams/Generic)
+                new_cve_ids = list(dict.fromkeys([
+                    m.vulnerability.cve_id for m in priority_matches
+                    if m.vulnerability
+                ]))
+                try:
+                    send_webhook_notification(
+                        new_cves_count=len(priority_matches),
+                        critical_count=critical_count,
+                        total_matches=len(priority_matches),
+                        new_cve_ids=new_cve_ids
+                    )
+                    results.append({
+                        'organization': org.name,
+                        'status': 'success',
+                        'new_cves': len(new_cve_ids),
+                        'via': 'global_webhook'
+                    })
+                except Exception as e:
+                    results.append({
+                        'organization': org.name,
                         'status': 'error',
-                        'reason': result.get('error', 'Unknown error')
+                        'reason': str(e)
                     })
             else:
                 results.append({
                     'organization': org.name,
                     'status': 'skipped',
-                    'reason': 'No webhook configured'
+                    'reason': 'Webhook not configured'
                 })
+                continue
 
         # Count successes
         sent_count = sum(1 for r in results if r['status'] == 'success')

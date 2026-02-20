@@ -1202,6 +1202,74 @@ def _is_ssrf_safe_url(url):
     return is_ssrf_safe_url(url)
 
 
+@settings_bp.route('/test-webhook', methods=['POST'])
+@admin_required
+def test_org_webhook():
+    """Test an organization webhook by sending a test message.
+
+    Called by the org webhook configuration UI to verify connectivity.
+    Accepts the webhook URL directly (not from DB) so it can test before saving.
+    """
+    import requests as req_lib
+
+    data = request.get_json()
+    webhook_url = (data.get('url') or '').strip()
+    webhook_format = data.get('webhook_format', 'slack')
+    webhook_name = data.get('webhook_name', 'Organization Webhook')
+    webhook_token = data.get('webhook_token')
+
+    if not webhook_url:
+        return jsonify({'success': False, 'error': 'Webhook URL is required'})
+
+    if not webhook_url.startswith(('http://', 'https://')):
+        return jsonify({'success': False, 'error': 'Webhook URL must start with http:// or https://'})
+
+    if not _is_ssrf_safe_url(webhook_url):
+        return jsonify({'success': False, 'error': 'URL targets a private/internal network address'})
+
+    verify_ssl = get_setting('verify_ssl', 'true') == 'true'
+    http_proxy = get_setting('http_proxy', '')
+    https_proxy = get_setting('https_proxy', '')
+    proxies = {}
+    if http_proxy:
+        proxies['http'] = http_proxy
+    if https_proxy:
+        proxies['https'] = https_proxy
+
+    headers = {'Content-Type': 'application/json'}
+    if webhook_token:
+        headers['Authorization'] = f'Bearer {webhook_token}'
+
+    try:
+        if webhook_format in ('slack', 'rocketchat'):
+            payload = {"text": f"*SentriKat Test* - {webhook_name} is working correctly!"}
+        elif webhook_format == 'discord':
+            payload = {"content": f"**SentriKat Test** - {webhook_name} is working correctly!"}
+        elif webhook_format == 'teams':
+            payload = {"text": f"**SentriKat Test** - {webhook_name} is working correctly!"}
+        else:
+            payload = {
+                "source": "SentriKat",
+                "type": "test",
+                "message": f"{webhook_name} is working correctly!"
+            }
+
+        resp = req_lib.post(webhook_url, json=payload, headers=headers,
+                            timeout=15, proxies=proxies, verify=verify_ssl)
+
+        if resp.status_code < 300:
+            return jsonify({'success': True, 'message': 'Test message sent successfully'})
+        else:
+            return jsonify({'success': False, 'error': f'Webhook returned HTTP {resp.status_code}: {resp.text[:200]}'})
+
+    except req_lib.exceptions.Timeout:
+        return jsonify({'success': False, 'error': 'Connection timed out'})
+    except req_lib.exceptions.ConnectionError as e:
+        return jsonify({'success': False, 'error': f'Connection failed: {str(e)[:200]}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)[:200]})
+
+
 @settings_bp.route('/notifications/test', methods=['POST'])
 @admin_required
 @requires_professional('Email Alerts')
