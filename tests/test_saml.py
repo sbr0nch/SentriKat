@@ -23,17 +23,17 @@ from unittest.mock import patch, MagicMock, PropertyMock
 
 def _enable_saml_settings(db_session):
     """Insert the minimum SAML settings into the database so routes treat SAML as configured."""
-    from app.models import SystemSetting
+    from app.models import SystemSettings
     settings = [
-        SystemSetting(key='saml_enabled', value='true', category='saml'),
-        SystemSetting(key='saml_idp_metadata', value='<xml>fake</xml>', category='saml'),
-        SystemSetting(key='saml_sp_entity_id', value='sentrikat:test', category='saml'),
-        SystemSetting(key='saml_sp_acs_url', value='http://localhost:5000/saml/acs', category='saml'),
-        SystemSetting(key='saml_sp_sls_url', value='http://localhost:5000/saml/sls', category='saml'),
-        SystemSetting(key='saml_default_org_id', value='', category='saml'),
-        SystemSetting(key='saml_user_mapping', value='{}', category='saml'),
-        SystemSetting(key='saml_auto_provision', value='true', category='saml'),
-        SystemSetting(key='saml_update_user_info', value='true', category='saml'),
+        SystemSettings(key='saml_enabled', value='true', category='saml'),
+        SystemSettings(key='saml_idp_metadata', value='<xml>fake</xml>', category='saml'),
+        SystemSettings(key='saml_sp_entity_id', value='sentrikat:test', category='saml'),
+        SystemSettings(key='saml_sp_acs_url', value='http://localhost:5000/saml/acs', category='saml'),
+        SystemSettings(key='saml_sp_sls_url', value='http://localhost:5000/saml/sls', category='saml'),
+        SystemSettings(key='saml_default_org_id', value='', category='saml'),
+        SystemSettings(key='saml_user_mapping', value='{}', category='saml'),
+        SystemSettings(key='saml_auto_provision', value='true', category='saml'),
+        SystemSettings(key='saml_update_user_info', value='true', category='saml'),
     ]
     for s in settings:
         db_session.add(s)
@@ -115,9 +115,9 @@ class TestGetSamlSettings:
     def test_returns_empty_when_saml_disabled(self, app, db_session):
         """When saml_enabled is false the function should return {}."""
         from app.saml_manager import get_saml_settings
-        from app.models import SystemSetting
+        from app.models import SystemSettings
 
-        db_session.add(SystemSetting(key='saml_enabled', value='false', category='saml'))
+        db_session.add(SystemSettings(key='saml_enabled', value='false', category='saml'))
         db_session.commit()
         assert get_saml_settings() == {}
 
@@ -125,9 +125,9 @@ class TestGetSamlSettings:
     def test_returns_empty_when_no_idp_metadata(self, app, db_session):
         """When saml_enabled is true but idp_metadata is empty, return {}."""
         from app.saml_manager import get_saml_settings
-        from app.models import SystemSetting
+        from app.models import SystemSettings
 
-        db_session.add(SystemSetting(key='saml_enabled', value='true', category='saml'))
+        db_session.add(SystemSettings(key='saml_enabled', value='true', category='saml'))
         db_session.commit()
         assert get_saml_settings() == {}
 
@@ -156,16 +156,16 @@ class TestGetSamlSettings:
     def test_parses_url_metadata(self, mock_parser, app, db_session):
         """Should call parse_remote() when metadata starts with http."""
         from app.saml_manager import get_saml_settings
-        from app.models import SystemSetting
+        from app.models import SystemSettings
 
         mock_parser.parse_remote.return_value = {
             'idp': {'entityId': 'https://idp.example.com'}
         }
 
-        db_session.add(SystemSetting(key='saml_enabled', value='true', category='saml'))
-        db_session.add(SystemSetting(key='saml_idp_metadata', value='https://idp.example.com/metadata', category='saml'))
-        db_session.add(SystemSetting(key='saml_sp_entity_id', value='sentrikat:test', category='saml'))
-        db_session.add(SystemSetting(key='saml_sp_acs_url', value='http://localhost/saml/acs', category='saml'))
+        db_session.add(SystemSettings(key='saml_enabled', value='true', category='saml'))
+        db_session.add(SystemSettings(key='saml_idp_metadata', value='https://idp.example.com/metadata', category='saml'))
+        db_session.add(SystemSettings(key='saml_sp_entity_id', value='sentrikat:test', category='saml'))
+        db_session.add(SystemSettings(key='saml_sp_acs_url', value='http://localhost/saml/acs', category='saml'))
         db_session.commit()
 
         get_saml_settings()
@@ -1023,8 +1023,8 @@ class TestSamlStatusRoute:
 
     @patch('app.saml_api.is_saml_available', return_value=True)
     def test_disabled_when_setting_is_false(self, mock_avail, app, client, db_session, setup_complete):
-        from app.models import SystemSetting
-        db_session.add(SystemSetting(key='saml_enabled', value='false', category='saml'))
+        from app.models import SystemSettings
+        db_session.add(SystemSettings(key='saml_enabled', value='false', category='saml'))
         db_session.commit()
 
         resp = client.get('/api/saml/status')
@@ -1102,14 +1102,14 @@ class TestSamlUserProvisioning:
     def test_specific_default_org_id(self, app, db_session):
         """When saml_default_org_id is set, new users should be assigned to that org."""
         from app.saml_manager import get_or_create_saml_user
-        from app.models import Organization, SystemSetting
+        from app.models import Organization, SystemSettings
 
         org_a = Organization(name='OrgA', display_name='Org A', active=True)
         org_b = Organization(name='OrgB', display_name='Org B', active=True)
         db_session.add_all([org_a, org_b])
         db_session.flush()
 
-        db_session.add(SystemSetting(
+        db_session.add(SystemSettings(
             key='saml_default_org_id', value=str(org_b.id), category='saml'
         ))
         db_session.commit()

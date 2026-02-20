@@ -112,6 +112,16 @@ def provision_tenant(
     if not admin_password or len(admin_password) < 8:
         raise ProvisioningError("Admin password must be at least 8 characters")
 
+    # Check for duplicates first (before license limits, so users get
+    # the more specific "already exists" error instead of "limit reached")
+    if Organization.query.filter_by(name=org_name).first():
+        raise ProvisioningError(f"Organization '{org_name}' already exists")
+
+    if User.query.filter(
+        db.or_(User.username == admin_username, User.email == admin_email)
+    ).first():
+        raise ProvisioningError(f"Username or email already exists")
+
     # Check license limits
     try:
         from app.licensing import check_org_limit, check_user_limit, check_agent_api_key_limit
@@ -129,15 +139,6 @@ def provision_tenant(
             raise ProvisioningError(f"API key limit reached: {key_msg}")
     except ImportError:
         pass  # Licensing module not available (dev/test)
-
-    # Check for duplicates
-    if Organization.query.filter_by(name=org_name).first():
-        raise ProvisioningError(f"Organization '{org_name}' already exists")
-
-    if User.query.filter(
-        db.or_(User.username == admin_username, User.email == admin_email)
-    ).first():
-        raise ProvisioningError(f"Username or email already exists")
 
     try:
         # Step 1: Create organization
@@ -246,12 +247,12 @@ def provision_tenant(
         # Step 5: Send welcome email (optional, non-blocking)
         if send_welcome_email:
             try:
-                _send_welcome_email(admin, org, raw_key)
+                sent = _send_welcome_email(admin, org, raw_key)
             except Exception as e:
                 logger.warning(f"Provisioning: Welcome email failed for {admin_email}: {e}")
                 result['welcome_email_sent'] = False
             else:
-                result['welcome_email_sent'] = True
+                result['welcome_email_sent'] = bool(sent)
 
         return result
 
@@ -295,6 +296,9 @@ def deprovision_tenant(org_id, confirm_name=None):
 
     org_name = org.name
     try:
+        # Explicitly delete agent API keys first to avoid NOT NULL constraint
+        # violations on organization_id when the ORM tries to nullify the FK
+        AgentApiKey.query.filter_by(organization_id=org_id).delete()
         db.session.delete(org)
         db.session.commit()
         logger.info(f"Deprovisioning: Removed organization '{org_name}' (id={org_id})")
@@ -312,7 +316,7 @@ def _send_welcome_email(user, org, api_key):
     smtp_host = get_setting('smtp_host')
     if not smtp_host:
         logger.info("Provisioning: No SMTP configured, skipping welcome email")
-        return
+        return False
 
     sentrikat_url = os.environ.get('SENTRIKAT_URL', 'https://your-sentrikat-instance.com')
 
@@ -390,6 +394,7 @@ def _send_welcome_email(user, org, api_key):
     server.quit()
 
     logger.info(f"Provisioning: Welcome email sent to {user.email}")
+    return True
 
 
 # Required import for _send_welcome_email
