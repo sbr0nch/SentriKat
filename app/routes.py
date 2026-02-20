@@ -174,9 +174,16 @@ def get_health_checks():
         if setting:
             notify_email = setting.value or ''
 
+        # Get webhook notification setting
+        notify_webhook = False
+        webhook_setting = SystemSettings.query.filter_by(key='health_check_notify_webhook').first()
+        if webhook_setting:
+            notify_webhook = webhook_setting.value == 'true'
+
         return jsonify({
             'enabled': globally_enabled,
             'notify_email': notify_email,
+            'notify_webhook': notify_webhook,
             'checks': config
         })
     except Exception as e:
@@ -237,6 +244,19 @@ def update_health_check_settings():
                     key='health_check_notify_email',
                     value=data['notify_email'],
                     category='health'
+                ))
+
+        # Update webhook notification toggle
+        if 'notify_webhook' in data:
+            setting = SystemSettings.query.filter_by(key='health_check_notify_webhook').first()
+            if setting:
+                setting.value = 'true' if data['notify_webhook'] else 'false'
+            else:
+                db.session.add(SystemSettings(
+                    key='health_check_notify_webhook',
+                    value='true' if data['notify_webhook'] else 'false',
+                    category='health',
+                    description='Send health check alerts via webhooks'
                 ))
 
         db.session.commit()

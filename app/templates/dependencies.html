@@ -16,11 +16,23 @@
     .stat-card .number { font-size: 2rem; font-weight: 700; line-height: 1; }
     .stat-card .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
     .stat-card.danger .number { color: var(--danger-color); }
+    .stat-card.critical .number { color: var(--danger-color); }
+    .stat-card.high .number { color: #fd7e14; }
 
     .ecosystem-badge { font-size: 0.7rem; padding: 0.25em 0.6em; font-weight: 600; }
+    .severity-badge { font-size: 0.65rem; padding: 0.2em 0.5em; font-weight: 600; text-transform: uppercase; }
 
     .detail-panel { display: none; }
     .detail-panel.active { display: block; }
+
+    .detail-tabs .nav-link { font-size: 0.85rem; padding: 0.5rem 1rem; }
+    .detail-tabs .nav-link.active { font-weight: 600; }
+
+    .vuln-row td { font-size: 0.85rem; }
+    .epss-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--gray-200); width: 50px; vertical-align: middle; }
+    .epss-bar .fill { height: 100%; border-radius: 3px; }
+
+    .severity-mini { font-size: 0.6rem; padding: 0.15em 0.35em; font-weight: 700; }
 
     [data-theme="dark"] .stat-card { background: var(--surface-color); border-color: var(--border-color); }
     [data-theme="dark"] .dep-card { background: var(--surface-color); border-color: var(--border-color); }
@@ -34,10 +46,10 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <h4 class="mb-0">Dependencies</h4>
-        <small class="text-muted">Code libraries and extensions reported by push agents</small>
+        <small class="text-muted">Code libraries, extensions, and their vulnerability status</small>
     </div>
-    <div class="d-flex gap-2">
-        <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search dependencies..." style="width: 200px;" oninput="loadDeps()">
+    <div class="d-flex gap-2 flex-wrap">
+        <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search dependencies..." style="width: 200px;" oninput="debouncedLoad()">
         <select id="sourceTypeFilter" class="form-select form-select-sm" style="width: 150px;" onchange="loadDeps()">
             <option value="">All types</option>
             <option value="code_library">Code Libraries</option>
@@ -45,6 +57,13 @@
         </select>
         <select id="ecosystemFilter" class="form-select form-select-sm" style="width: 140px;" onchange="loadDeps()">
             <option value="">All ecosystems</option>
+        </select>
+        <select id="vulnFilter" class="form-select form-select-sm" style="width: 160px;" onchange="loadDeps()">
+            <option value="">All statuses</option>
+            <option value="vulnerable">With vulnerabilities</option>
+            <option value="clean">No vulnerabilities</option>
+            <option value="critical">Critical CVEs</option>
+            <option value="high">High+ CVEs</option>
         </select>
     </div>
 </div>
@@ -61,7 +80,7 @@
 <div id="depList"></div>
 
 <!-- Detail Panel -->
-<div id="detailPanel" class="detail-panel">
+<div id="detailPanel" class="detail-panel mt-3">
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h6 class="mb-0" id="detailTitle">Dependency Details</h6>
@@ -69,16 +88,51 @@
         </div>
         <div class="card-body p-0">
             <div class="p-3 bg-light border-bottom" id="detailMeta"></div>
-            <div class="table-responsive">
-                <table class="table table-sm table-hover mb-0">
-                    <thead><tr>
-                        <th>Endpoint</th>
-                        <th>Version</th>
-                        <th>Project Path</th>
-                        <th style="width:80px">Direct</th>
-                    </tr></thead>
-                    <tbody id="installTableBody"></tbody>
-                </table>
+            <!-- Tabs for Vulnerabilities and Installations -->
+            <ul class="nav nav-tabs detail-tabs px-3 pt-2" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="vulnsTab" data-bs-toggle="tab" data-bs-target="#vulnsPane" type="button" role="tab">
+                        <i class="bi bi-shield-exclamation me-1"></i>Vulnerabilities <span class="badge bg-danger ms-1" id="vulnTabCount" style="font-size:0.65rem">0</span>
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="installsTab" data-bs-toggle="tab" data-bs-target="#installsPane" type="button" role="tab">
+                        <i class="bi bi-pc-display me-1"></i>Installations <span class="badge bg-secondary ms-1" id="installTabCount" style="font-size:0.65rem">0</span>
+                    </button>
+                </li>
+            </ul>
+            <div class="tab-content">
+                <!-- Vulnerabilities Tab -->
+                <div class="tab-pane fade show active" id="vulnsPane" role="tabpanel">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead><tr>
+                                <th style="width:70px">Severity</th>
+                                <th style="width:140px">CVE</th>
+                                <th>Description</th>
+                                <th style="width:60px">CVSS</th>
+                                <th style="width:80px">EPSS</th>
+                                <th style="width:50px" title="CISA KEV / Active Exploitation">KEV</th>
+                                <th style="width:80px">Status</th>
+                            </tr></thead>
+                            <tbody id="vulnTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- Installations Tab -->
+                <div class="tab-pane fade" id="installsPane" role="tabpanel">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead><tr>
+                                <th>Endpoint</th>
+                                <th>Version</th>
+                                <th>Project Path</th>
+                                <th style="width:80px">Direct</th>
+                            </tr></thead>
+                            <tbody id="installTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -94,10 +148,17 @@
 
 {% block extra_js %}
 <script>
+let debounceTimer;
+function debouncedLoad() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(loadDeps, 300);
+}
+
 async function loadDeps() {
     const search = document.getElementById('searchInput').value;
     const sourceType = document.getElementById('sourceTypeFilter').value;
     const ecosystem = document.getElementById('ecosystemFilter').value;
+    const vulnFilter = document.getElementById('vulnFilter').value;
 
     let url = '/api/dependencies?';
     if (search) url += `search=${encodeURIComponent(search)}&`;
@@ -109,8 +170,19 @@ async function loadDeps() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
-        const deps = data.dependencies || [];
+        let deps = data.dependencies || [];
         const stats = data.stats || {};
+
+        // Client-side vulnerability filter
+        if (vulnFilter === 'vulnerable') {
+            deps = deps.filter(d => d.vuln_match_count > 0);
+        } else if (vulnFilter === 'clean') {
+            deps = deps.filter(d => d.vuln_match_count === 0);
+        } else if (vulnFilter === 'critical') {
+            deps = deps.filter(d => d.severity_counts && d.severity_counts.critical > 0);
+        } else if (vulnFilter === 'high') {
+            deps = deps.filter(d => d.severity_counts && (d.severity_counts.critical > 0 || d.severity_counts.high > 0));
+        }
 
         document.getElementById('totalDeps').textContent = stats.total_code_libraries || 0;
         document.getElementById('totalExtensions').textContent = stats.total_extensions || 0;
@@ -147,7 +219,8 @@ function renderDeps(deps) {
 
     container.innerHTML = deps.map(dep => {
         const hasVulns = dep.vuln_match_count > 0;
-        const borderClass = hasVulns ? 'vuln-border' : '';
+        const sev = dep.severity_counts || {};
+        const borderClass = sev.critical > 0 ? 'vuln-border' : (hasVulns ? 'vuln-border' : '');
         const ecoColors = {
             'npm': 'bg-danger', 'pypi': 'bg-primary', 'maven': 'bg-warning text-dark',
             'nuget': 'bg-info', 'cargo': 'bg-secondary', 'go': 'bg-info',
@@ -159,6 +232,15 @@ function renderDeps(deps) {
         const typeIcon = dep.source_type === 'extension' ? 'bi-puzzle' : 'bi-book';
         const typeLabel = dep.source_type === 'extension' ? 'Extension' : 'Library';
 
+        // Severity badges
+        let sevBadges = '';
+        if (hasVulns) {
+            if (sev.critical) sevBadges += `<span class="badge bg-danger severity-mini">${sev.critical} CRIT</span> `;
+            if (sev.high) sevBadges += `<span class="badge severity-mini" style="background:#fd7e14">${sev.high} HIGH</span> `;
+            if (sev.medium) sevBadges += `<span class="badge bg-warning text-dark severity-mini">${sev.medium} MED</span> `;
+            if (sev.low) sevBadges += `<span class="badge bg-info severity-mini">${sev.low} LOW</span> `;
+        }
+
         return `<div class="card dep-card mb-2 ${borderClass}" onclick="showDetail(${dep.id})">
             <div class="card-body py-2 px-3">
                 <div class="d-flex justify-content-between align-items-center">
@@ -168,11 +250,9 @@ function renderDeps(deps) {
                         ${dep.ecosystem ? `<span class="badge ${ecoBadgeClass} ecosystem-badge ms-2">${escHtml(dep.ecosystem)}</span>` : ''}
                         <span class="badge bg-secondary-subtle text-secondary ecosystem-badge ms-1"><i class="bi ${typeIcon} me-1"></i>${typeLabel}</span>
                     </div>
-                    <div class="d-flex align-items-center gap-3">
-                        <div class="text-end">
-                            <span class="badge bg-secondary" title="Installed on endpoints"><i class="bi bi-pc-display me-1"></i>${dep.endpoint_count || 0}</span>
-                            ${hasVulns ? `<span class="badge bg-danger ms-1" title="Vulnerability matches"><i class="bi bi-shield-exclamation me-1"></i>${dep.vuln_match_count}</span>` : ''}
-                        </div>
+                    <div class="d-flex align-items-center gap-2">
+                        ${sevBadges ? `<div class="d-flex gap-1">${sevBadges}</div>` : ''}
+                        <span class="badge bg-secondary" title="Installed on endpoints"><i class="bi bi-pc-display me-1"></i>${dep.endpoint_count || 0}</span>
                     </div>
                 </div>
             </div>
@@ -187,23 +267,93 @@ async function showDetail(depId) {
         const data = await res.json();
         const dep = data.dependency;
         const installations = data.installations || [];
+        const vulns = data.vulnerabilities || [];
 
         document.getElementById('detailTitle').innerHTML =
             `<i class="bi bi-diagram-3 me-2"></i>${escHtml(dep.vendor ? dep.vendor + ' / ' : '')}${escHtml(dep.product_name)} ${dep.version ? `<code>${escHtml(dep.version)}</code>` : ''}`;
 
+        // Severity summary for metadata
+        const sev = dep.severity_counts || {};
+        let sevSummary = '';
+        if (dep.vuln_match_count > 0) {
+            const parts = [];
+            if (sev.critical) parts.push(`<span class="badge bg-danger severity-badge">${sev.critical} Critical</span>`);
+            if (sev.high) parts.push(`<span class="badge severity-badge" style="background:#fd7e14">${sev.high} High</span>`);
+            if (sev.medium) parts.push(`<span class="badge bg-warning text-dark severity-badge">${sev.medium} Medium</span>`);
+            if (sev.low) parts.push(`<span class="badge bg-info severity-badge">${sev.low} Low</span>`);
+            sevSummary = `<div>${parts.join(' ')}</div>`;
+        }
+
         document.getElementById('detailMeta').innerHTML = `
-            <div class="d-flex gap-4 flex-wrap" style="font-size:0.85rem">
+            <div class="d-flex gap-4 flex-wrap align-items-center" style="font-size:0.85rem">
                 ${dep.ecosystem ? `<div><strong>Ecosystem:</strong> ${escHtml(dep.ecosystem)}</div>` : ''}
                 <div><strong>Type:</strong> ${dep.source_type === 'extension' ? 'Extension' : 'Code Library'}</div>
                 <div><strong>Endpoints:</strong> ${installations.length}</div>
-                ${dep.vuln_match_count > 0 ? `<div><strong class="text-danger">Vulnerabilities:</strong> ${dep.vuln_match_count}</div>` : ''}
+                ${dep.cpe_vendor ? `<div><strong>CPE:</strong> <code>${escHtml(dep.cpe_vendor)}:${escHtml(dep.cpe_product)}</code></div>` : ''}
+                ${sevSummary}
             </div>`;
 
-        const tbody = document.getElementById('installTableBody');
-        if (!installations.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No installations found</td></tr>';
+        // Update tab counts
+        document.getElementById('vulnTabCount').textContent = vulns.length;
+        document.getElementById('installTabCount').textContent = installations.length;
+
+        // Render vulnerabilities table
+        const vulnTbody = document.getElementById('vulnTableBody');
+        if (!vulns.length) {
+            vulnTbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3"><i class="bi bi-shield-check me-1"></i>No known vulnerabilities</td></tr>';
         } else {
-            tbody.innerHTML = installations.map(inst => {
+            vulnTbody.innerHTML = vulns.map(v => {
+                const sevClass = {'CRITICAL':'bg-danger','HIGH':'bg-warning text-dark','MEDIUM':'bg-secondary','LOW':'bg-info'}[v.severity] || 'bg-secondary';
+
+                // EPSS bar
+                let epssHtml = '-';
+                if (v.epss_score != null) {
+                    const pct = (v.epss_score * 100).toFixed(1);
+                    const epssColor = v.epss_score >= 0.1 ? '#dc3545' : v.epss_score >= 0.01 ? '#fd7e14' : '#6c757d';
+                    epssHtml = `<div class="epss-bar"><div class="fill" style="width:${Math.max(2, v.epss_score * 100)}%;background:${epssColor}"></div></div> <small>${pct}%</small>`;
+                }
+
+                // KEV / Active exploitation
+                let kevHtml = '';
+                if (v.is_actively_exploited) {
+                    kevHtml = '<span class="badge bg-danger" title="CISA KEV - Actively Exploited"><i class="bi bi-exclamation-triangle-fill"></i></span>';
+                }
+                if (v.known_ransomware) {
+                    kevHtml += ' <span class="badge bg-dark" title="Known Ransomware"><i class="bi bi-bug-fill"></i></span>';
+                }
+
+                // Status
+                let statusHtml = '';
+                if (v.acknowledged) {
+                    statusHtml = '<span class="badge bg-success-subtle text-success" style="font-size:0.7rem">Ack\'d</span>';
+                } else if (v.snoozed_until) {
+                    statusHtml = '<span class="badge bg-warning-subtle text-warning" style="font-size:0.7rem">Snoozed</span>';
+                } else {
+                    statusHtml = '<span class="badge bg-danger-subtle text-danger" style="font-size:0.7rem">Open</span>';
+                }
+
+                // Description (truncated)
+                const desc = v.short_description || v.vulnerability_name || '';
+                const truncDesc = desc.length > 80 ? desc.substring(0, 80) + '...' : desc;
+
+                return `<tr class="vuln-row">
+                    <td><span class="badge ${sevClass} severity-badge">${escHtml(v.severity || '?')}</span></td>
+                    <td><a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(v.cve_id)}" target="_blank" rel="noopener" class="text-decoration-none">${escHtml(v.cve_id)}</a></td>
+                    <td><small title="${escHtml(desc)}">${escHtml(truncDesc)}</small></td>
+                    <td>${v.cvss_score ? `<strong>${v.cvss_score.toFixed(1)}</strong>` : '-'}</td>
+                    <td>${epssHtml}</td>
+                    <td>${kevHtml || '<span class="text-muted">-</span>'}</td>
+                    <td>${statusHtml}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // Render installations table
+        const instTbody = document.getElementById('installTableBody');
+        if (!installations.length) {
+            instTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No installations found</td></tr>';
+        } else {
+            instTbody.innerHTML = installations.map(inst => {
                 return `<tr>
                     <td><i class="bi bi-pc-display me-1"></i>${escHtml(inst.hostname || 'Unknown')}</td>
                     <td><code>${escHtml(inst.version || dep.version || '-')}</code></td>
@@ -211,6 +361,11 @@ async function showDetail(depId) {
                     <td>${inst.is_direct === true ? '<span class="badge bg-primary">Direct</span>' : inst.is_direct === false ? '<span class="badge bg-secondary">Transitive</span>' : '<span class="text-muted">-</span>'}</td>
                 </tr>`;
             }).join('');
+        }
+
+        // Show vulns tab by default if there are vulns, otherwise installations
+        if (vulns.length > 0) {
+            document.getElementById('vulnsTab').click();
         }
 
         document.getElementById('detailPanel').classList.add('active');

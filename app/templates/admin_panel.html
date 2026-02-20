@@ -3601,7 +3601,7 @@
                             </p>
 
                             <!-- Notification Email -->
-                            <div class="mb-4">
+                            <div class="mb-3">
                                 <label for="healthCheckNotifyEmail" class="form-label fw-semibold">Notification Email</label>
                                 <div class="input-group">
                                     <input type="email" class="form-control" id="healthCheckNotifyEmail" placeholder="admin@example.com">
@@ -3610,6 +3610,15 @@
                                     </button>
                                 </div>
                                 <small class="text-muted">Receive email alerts when health checks detect problems (leave empty to disable email notifications)</small>
+                            </div>
+
+                            <!-- Webhook Notifications -->
+                            <div class="mb-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="healthCheckWebhookToggle" onchange="saveHealthCheckSettings()">
+                                    <label class="form-check-label fw-semibold" for="healthCheckWebhookToggle">Send alerts via webhooks</label>
+                                </div>
+                                <small class="text-muted">Send health check alerts to all configured webhooks (Slack, Teams, etc.) when problems are detected</small>
                             </div>
 
                             <!-- Health Check Results -->
@@ -4935,6 +4944,10 @@ async function loadHealthChecks() {
         const emailInput = document.getElementById('healthCheckNotifyEmail');
         if (emailInput) emailInput.value = data.notify_email || '';
 
+        // Update webhook toggle
+        const webhookToggle = document.getElementById('healthCheckWebhookToggle');
+        if (webhookToggle) webhookToggle.checked = data.notify_webhook === true;
+
         const checks = data.checks || [];
         if (checks.length === 0) {
             container.innerHTML = '<p class="text-muted text-center">No health checks configured</p>';
@@ -5049,11 +5062,12 @@ async function toggleSingleHealthCheck(checkName, enabled) {
 
 async function saveHealthCheckSettings() {
     const email = document.getElementById('healthCheckNotifyEmail')?.value || '';
+    const webhookEnabled = document.getElementById('healthCheckWebhookToggle')?.checked || false;
     try {
         const resp = await fetch('/api/admin/health-checks/settings', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ notify_email: email })
+            body: JSON.stringify({ notify_email: email, notify_webhook: webhookEnabled })
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         if (typeof showToast === 'function') showToast('Health check settings saved', 'success');

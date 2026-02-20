@@ -24,10 +24,14 @@
     .stat-card .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
     .stat-card.critical .number { color: var(--danger-color); }
     .stat-card.high .number { color: #fd7e14; }
+    .stat-card.fixable .number { color: var(--success-color); }
 
     .vuln-row td { font-size: 0.875rem; }
     .severity-badge { font-size: 0.7rem; padding: 0.2em 0.5em; font-weight: 600; text-transform: uppercase; }
     .fix-badge { font-size: 0.7rem; }
+
+    .epss-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--gray-200); width: 50px; vertical-align: middle; }
+    .epss-bar .fill { height: 100%; border-radius: 3px; }
 
     .detail-panel { display: none; }
     .detail-panel.active { display: block; }
@@ -46,12 +50,18 @@
         <h4 class="mb-0">Container Security</h4>
         <small class="text-muted">Container image vulnerabilities from Trivy scans</small>
     </div>
-    <div class="d-flex gap-2">
-        <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search images..." style="width: 200px;" oninput="loadImages()">
+    <div class="d-flex gap-2 flex-wrap">
+        <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search images, tags, registries..." style="width: 220px;" oninput="debouncedLoad()">
         <select id="severityFilter" class="form-select form-select-sm" style="width: 140px;" onchange="loadImages()">
             <option value="">All severities</option>
             <option value="critical">Critical</option>
-            <option value="high">High</option>
+            <option value="high">High+</option>
+            <option value="medium">Medium+</option>
+        </select>
+        <select id="fixFilter" class="form-select form-select-sm" style="width: 140px;" onchange="loadImages()">
+            <option value="">All fix status</option>
+            <option value="fixable">Has fixes</option>
+            <option value="unfixable">No fixes</option>
         </select>
     </div>
 </div>
@@ -62,13 +72,14 @@
     <div class="stat-card critical flex-fill"><div class="number" id="totalCritical">-</div><div class="label">Critical</div></div>
     <div class="stat-card high flex-fill"><div class="number" id="totalHigh">-</div><div class="label">High</div></div>
     <div class="stat-card flex-fill"><div class="number" id="totalVulns">-</div><div class="label">Total Vulns</div></div>
+    <div class="stat-card fixable flex-fill"><div class="number" id="totalFixable">-</div><div class="label">Fixable</div></div>
 </div>
 
 <!-- Image List -->
 <div id="imageList"></div>
 
 <!-- Detail Panel (slides in when an image is selected) -->
-<div id="detailPanel" class="detail-panel">
+<div id="detailPanel" class="detail-panel mt-3">
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h6 class="mb-0" id="detailTitle">Image Details</h6>
@@ -85,6 +96,8 @@
                         <th style="width:100px">Installed</th>
                         <th style="width:100px">Fixed</th>
                         <th style="width:60px">CVSS</th>
+                        <th style="width:80px">EPSS</th>
+                        <th style="width:50px" title="CISA KEV / Active Exploitation">KEV</th>
                     </tr></thead>
                     <tbody id="vulnTableBody"></tbody>
                 </table>
@@ -104,13 +117,21 @@
 {% block extra_js %}
 <script>
 let allImages = [];
+let debounceTimer;
+
+function debouncedLoad() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(loadImages, 300);
+}
 
 async function loadImages() {
     const search = document.getElementById('searchInput').value;
     const severity = document.getElementById('severityFilter').value;
+    const fixStatus = document.getElementById('fixFilter').value;
     let url = '/api/containers?';
     if (search) url += `search=${encodeURIComponent(search)}&`;
     if (severity) url += `severity=${encodeURIComponent(severity)}&`;
+    if (fixStatus) url += `fix_status=${encodeURIComponent(fixStatus)}&`;
 
     try {
         const res = await fetch(url);
@@ -124,6 +145,7 @@ async function loadImages() {
         document.getElementById('totalCritical').textContent = stats.total_critical || 0;
         document.getElementById('totalHigh').textContent = stats.total_high || 0;
         document.getElementById('totalVulns').textContent = stats.total_vulnerabilities || 0;
+        document.getElementById('totalFixable').textContent = stats.total_fixable || 0;
 
         renderImages(allImages);
     } catch (e) {
@@ -155,6 +177,7 @@ function renderImages(images) {
         if (sev.low) barParts.push(`<div class="low" style="width:${(sev.low/total*100)}%"></div>`);
 
         const scanAge = img.last_scan_at ? timeAgo(new Date(img.last_scan_at)) : 'never';
+        const fixable = img.fixed_count || 0;
 
         return `<div class="card image-card mb-2 ${borderClass}" onclick="showDetail(${img.id})">
             <div class="card-body py-2 px-3">
@@ -163,16 +186,18 @@ function renderImages(images) {
                         <strong>${escHtml(img.full_name || img.image_name)}</strong>
                         ${img.os_family ? `<span class="badge bg-secondary ms-2" style="font-size:0.65rem">${escHtml(img.os_family)}</span>` : ''}
                         ${img.running ? '<span class="badge bg-success ms-1" style="font-size:0.65rem">Running</span>' : ''}
+                        ${img.registry && img.registry !== 'docker.io' ? `<span class="badge bg-light text-dark border ms-1" style="font-size:0.6rem">${escHtml(img.registry)}</span>` : ''}
                         ${img.asset_hostname ? `<br><small class="text-muted"><i class="bi bi-pc-display"></i> ${escHtml(img.asset_hostname)}</small>` : ''}
                     </div>
                     <div class="d-flex align-items-center gap-3">
-                        <div class="text-end" style="min-width:170px">
+                        <div class="text-end" style="min-width:200px">
                             <div class="d-flex gap-1 justify-content-end mb-1">
                                 ${sev.critical ? `<span class="badge bg-danger severity-badge">${sev.critical} CRIT</span>` : ''}
                                 ${sev.high ? `<span class="badge severity-badge" style="background:#fd7e14">${sev.high} HIGH</span>` : ''}
                                 ${sev.medium ? `<span class="badge bg-warning text-dark severity-badge">${sev.medium} MED</span>` : ''}
                                 ${sev.low ? `<span class="badge bg-info severity-badge">${sev.low} LOW</span>` : ''}
                                 ${total === 0 ? '<span class="badge bg-success severity-badge">Clean</span>' : ''}
+                                ${fixable > 0 ? `<span class="badge bg-success-subtle text-success severity-badge" title="${fixable} vulnerabilities with available fixes">${fixable} fix</span>` : ''}
                             </div>
                             ${total > 0 ? `<div class="severity-bar">${barParts.join('')}</div>` : ''}
                         </div>
@@ -199,13 +224,15 @@ async function showDetail(imageId) {
             <div class="d-flex gap-4 flex-wrap" style="font-size:0.85rem">
                 ${img.os_family ? `<div><strong>OS:</strong> ${escHtml(img.os_family)} ${escHtml(img.os_version||'')}</div>` : ''}
                 ${img.registry ? `<div><strong>Registry:</strong> ${escHtml(img.registry)}</div>` : ''}
+                ${img.architecture ? `<div><strong>Arch:</strong> ${escHtml(img.architecture)}</div>` : ''}
                 ${img.scanner_version ? `<div><strong>Scanner:</strong> ${escHtml(img.scanner_version)}</div>` : ''}
                 <div><strong>Total:</strong> ${img.total_vulnerabilities} vulns (${img.fixed_count||0} fixable)</div>
+                ${img.image_digest ? `<div><strong>Digest:</strong> <code style="font-size:0.75rem">${escHtml(img.image_digest.substring(0,19))}...</code></div>` : ''}
             </div>`;
 
         const tbody = document.getElementById('vulnTableBody');
         if (!vulns.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No vulnerabilities found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3"><i class="bi bi-shield-check me-1"></i>No vulnerabilities found</td></tr>';
         } else {
             tbody.innerHTML = vulns.map(v => {
                 const sevClass = {'CRITICAL':'bg-danger','HIGH':'bg-warning text-dark','MEDIUM':'bg-secondary','LOW':'bg-info'}[v.severity] || 'bg-secondary';
@@ -213,13 +240,35 @@ async function showDetail(imageId) {
                     ? `<span class="badge bg-success fix-badge">${escHtml(v.fixed_version)}</span>`
                     : '<span class="badge bg-secondary fix-badge">No fix</span>';
 
+                // EPSS data (from KEV cross-reference)
+                let epssHtml = '-';
+                if (v.epss_score != null) {
+                    const pct = (v.epss_score * 100).toFixed(1);
+                    const epssColor = v.epss_score >= 0.1 ? '#dc3545' : v.epss_score >= 0.01 ? '#fd7e14' : '#6c757d';
+                    epssHtml = `<div class="epss-bar"><div class="fill" style="width:${Math.max(2, v.epss_score * 100)}%;background:${epssColor}"></div></div> <small>${pct}%</small>`;
+                }
+
+                // KEV / Active exploitation
+                let kevHtml = '';
+                if (v.is_actively_exploited) {
+                    kevHtml = '<span class="badge bg-danger" title="CISA KEV - Actively Exploited"><i class="bi bi-exclamation-triangle-fill"></i></span>';
+                }
+                if (v.known_ransomware) {
+                    kevHtml += ' <span class="badge bg-dark" title="Known Ransomware"><i class="bi bi-bug-fill"></i></span>';
+                }
+                if (v.in_kev && !v.is_actively_exploited) {
+                    kevHtml = '<span class="badge bg-warning text-dark" title="In CISA KEV catalog"><i class="bi bi-exclamation-circle"></i></span>';
+                }
+
                 return `<tr class="vuln-row">
                     <td><span class="badge ${sevClass} severity-badge">${escHtml(v.severity||'?')}</span></td>
                     <td>${v.primary_url ? `<a href="${escHtml(v.primary_url)}" target="_blank" rel="noopener">${escHtml(v.vuln_id)}</a>` : escHtml(v.vuln_id)}</td>
                     <td><code>${escHtml(v.pkg_name)}</code> <small class="text-muted">${escHtml(v.pkg_type||'')}</small></td>
                     <td><code>${escHtml(v.pkg_version||'-')}</code></td>
                     <td>${fixBadge}</td>
-                    <td>${v.cvss_score ? v.cvss_score.toFixed(1) : '-'}</td>
+                    <td>${v.cvss_score ? `<strong>${v.cvss_score.toFixed(1)}</strong>` : '-'}</td>
+                    <td>${epssHtml}</td>
+                    <td>${kevHtml || '<span class="text-muted">-</span>'}</td>
                 </tr>`;
             }).join('');
         }
