@@ -952,8 +952,15 @@ class TestNotificationSettingsEndpoints:
             assert slack_setting.value == ''
 
     @patch('app.licensing.get_license')
-    def test_save_notification_settings_propagates_to_orgs(self, mock_license, admin_client, db_session, test_org, setup_complete):
-        """Test POST /api/settings/notifications propagates alert rules to orgs."""
+    def test_save_notification_settings_stores_global_defaults(self, mock_license, admin_client, db_session, test_org, setup_complete):
+        """Test POST /api/settings/notifications saves global defaults without propagating to orgs.
+
+        Global notification settings are stored in SystemSettings only.
+        Per-org alert rules are managed independently via /alerts/org/<id>/rules
+        to avoid silently destroying per-org overrides that admins configured.
+        """
+        from app.settings_api import get_setting
+
         mock_license_obj = Mock()
         mock_license_obj.is_professional.return_value = True
         mock_license.return_value = mock_license_obj
@@ -966,11 +973,14 @@ class TestNotificationSettingsEndpoints:
 
         assert response.status_code == 200
 
-        # Verify org was updated
+        # Verify global defaults were saved to SystemSettings
+        assert get_setting('notify_on_critical', 'false') == 'true'
+        assert get_setting('notify_on_high', 'false') == 'true'
+        assert get_setting('notify_on_ransomware', 'false') == 'true'
+
+        # Verify org was NOT modified (propagation was removed to protect per-org overrides)
         db_session.refresh(test_org)
-        assert test_org.alert_on_critical is True
-        assert test_org.alert_on_high is True
-        assert test_org.alert_on_ransomware is True
+        assert test_org.alert_on_high is False  # default unchanged
 
     def test_get_alert_org_overrides(self, admin_client, db_session, test_org, setup_complete):
         """Test GET /api/settings/alerts/org-overrides returns org alert settings."""
