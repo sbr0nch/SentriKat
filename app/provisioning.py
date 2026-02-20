@@ -300,6 +300,7 @@ def deprovision_tenant(org_id, confirm_name=None):
         # violations when the ORM tries to nullify foreign keys
         UserOrganization.query.filter_by(organization_id=org_id).delete()
         AgentApiKey.query.filter_by(organization_id=org_id).delete()
+        User.query.filter_by(organization_id=org_id).delete()
         db.session.delete(org)
         db.session.commit()
         logger.info(f"Deprovisioning: Removed organization '{org_name}' (id={org_id})")
