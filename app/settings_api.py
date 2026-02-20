@@ -1032,7 +1032,21 @@ def save_branding_settings():
 @requires_professional('Email Alerts')
 def get_notification_settings():
     """Get notification/webhook settings (Professional license required)"""
+    # Include SMTP status so alert management page can show correct state
+    global_smtp_host = get_setting('smtp_host', '')
+    # Also check if any org has its own SMTP configured
+    from app.models import Organization
+    org_smtp_count = Organization.query.filter(
+        Organization.smtp_host.isnot(None),
+        Organization.smtp_host != '',
+        Organization.active == True
+    ).count()
+
     settings = {
+        # SMTP status (read-only, for channel status display)
+        'smtp_host': global_smtp_host,
+        'smtp_configured': bool(global_smtp_host),
+        'org_smtp_count': org_smtp_count,
         'slack_webhook_url': get_setting('slack_webhook_url', ''),
         'slack_enabled': get_setting('slack_enabled', 'false') == 'true',
         'teams_webhook_url': get_setting('teams_webhook_url', ''),

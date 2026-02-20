@@ -4891,10 +4891,27 @@ def list_container_images():
         if severity == 'critical':
             query = query.filter(ContainerImage.critical_count > 0)
         elif severity == 'high':
-            query = query.filter(ContainerImage.high_count > 0)
+            query = query.filter(db.or_(ContainerImage.critical_count > 0, ContainerImage.high_count > 0))
+        elif severity == 'medium':
+            query = query.filter(db.or_(ContainerImage.critical_count > 0, ContainerImage.high_count > 0, ContainerImage.medium_count > 0))
+
+    # Fix status filter
+    fix_status = request.args.get('fix_status')
+    if fix_status == 'fixable':
+        query = query.filter(ContainerImage.fixed_count > 0)
+    elif fix_status == 'unfixable':
+        query = query.filter(ContainerImage.unfixed_count > 0, ContainerImage.fixed_count == 0)
+
+    # Clean filter (no vulns)
+    if request.args.get('clean') == 'true':
+        query = query.filter(ContainerImage.total_vulnerabilities == 0)
 
     if search:
-        query = query.filter(ContainerImage.image_name.ilike(f'%{search}%'))
+        query = query.filter(db.or_(
+            ContainerImage.image_name.ilike(f'%{search}%'),
+            ContainerImage.image_tag.ilike(f'%{search}%'),
+            ContainerImage.registry.ilike(f'%{search}%'),
+        ))
 
     images = query.order_by(
         ContainerImage.critical_count.desc(),
@@ -4906,7 +4923,9 @@ def list_container_images():
     total_images = len(images)
     total_critical = sum(i.critical_count or 0 for i in images)
     total_high = sum(i.high_count or 0 for i in images)
+    total_medium = sum(i.medium_count or 0 for i in images)
     total_vulns = sum(i.total_vulnerabilities or 0 for i in images)
+    total_fixable = sum(i.fixed_count or 0 for i in images)
 
     return jsonify({
         'images': [img.to_dict() for img in images],
@@ -4915,6 +4934,8 @@ def list_container_images():
             'total_vulnerabilities': total_vulns,
             'total_critical': total_critical,
             'total_high': total_high,
+            'total_medium': total_medium,
+            'total_fixable': total_fixable,
         }
     })
 
@@ -4950,9 +4971,41 @@ def get_container_image_detail(image_id):
         ContainerVulnerability.cvss_score.desc().nullslast()
     ).all()
 
+    # Cross-reference with CISA KEV / Vulnerability table for EPSS and exploitation data
+    vuln_ids = list(set(v.vuln_id for v in vulns if v.vuln_id))
+    kev_data = {}
+    if vuln_ids:
+        kev_vulns = Vulnerability.query.filter(Vulnerability.cve_id.in_(vuln_ids)).all()
+        for kv in kev_vulns:
+            kev_data[kv.cve_id] = {
+                'epss_score': kv.epss_score,
+                'epss_percentile': kv.epss_percentile,
+                'is_actively_exploited': bool(kv.is_actively_exploited),
+                'known_ransomware': bool(kv.known_ransomware),
+                'date_added': kv.date_added.isoformat() if kv.date_added else None,
+                'due_date': kv.due_date.isoformat() if kv.due_date else None,
+                'required_action': kv.required_action,
+                'source': kv.source,
+            }
+
+    # Enrich vulnerability dicts with KEV/EPSS data
+    vuln_list = []
+    for v in vulns:
+        vdict = v.to_dict()
+        kev = kev_data.get(v.vuln_id, {})
+        vdict['epss_score'] = kev.get('epss_score')
+        vdict['epss_percentile'] = kev.get('epss_percentile')
+        vdict['is_actively_exploited'] = kev.get('is_actively_exploited', False)
+        vdict['known_ransomware'] = kev.get('known_ransomware', False)
+        vdict['kev_date_added'] = kev.get('date_added')
+        vdict['kev_due_date'] = kev.get('due_date')
+        vdict['required_action'] = kev.get('required_action')
+        vdict['in_kev'] = bool(kev)
+        vuln_list.append(vdict)
+
     return jsonify({
         'image': image.to_dict(),
-        'vulnerabilities': [v.to_dict() for v in vulns],
+        'vulnerabilities': vuln_list,
         'vulnerability_count': len(vulns),
     })
 
@@ -5011,6 +5064,7 @@ def list_dependencies():
 
     vuln_counts = {}
     endpoint_counts = {}
+    severity_by_product = {}
     if product_ids:
         # Vuln match counts
         vuln_rows = db.session.query(
@@ -5021,6 +5075,22 @@ def list_dependencies():
         ).group_by(VulnerabilityMatch.product_id).all()
         vuln_counts = {row[0]: row[1] for row in vuln_rows}
 
+        # Severity breakdown per product (for badges)
+        sev_rows = db.session.query(
+            VulnerabilityMatch.product_id,
+            Vulnerability.severity,
+            db.func.count(VulnerabilityMatch.id)
+        ).join(
+            Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+        ).filter(
+            VulnerabilityMatch.product_id.in_(product_ids)
+        ).group_by(VulnerabilityMatch.product_id, Vulnerability.severity).all()
+        for pid, sev, cnt in sev_rows:
+            if pid not in severity_by_product:
+                severity_by_product[pid] = {}
+            severity_by_product[pid][(sev or '').lower()] = cnt
+
+        # Max EPSS per product (for sorting/display)
         # Endpoint counts (distinct assets per product)
         inst_rows = db.session.query(
             ProductInstallation.product_id,
@@ -5040,6 +5110,7 @@ def list_dependencies():
 
     deps = []
     for p in products:
+        sev = severity_by_product.get(p.id, {})
         deps.append({
             'id': p.id,
             'vendor': p.vendor,
@@ -5049,6 +5120,12 @@ def list_dependencies():
             'ecosystem': p.ecosystem,
             'vuln_match_count': vuln_counts.get(p.id, 0),
             'endpoint_count': endpoint_counts.get(p.id, 0),
+            'severity_counts': {
+                'critical': sev.get('critical', 0),
+                'high': sev.get('high', 0),
+                'medium': sev.get('medium', 0),
+                'low': sev.get('low', 0),
+            },
         })
 
     return jsonify({
@@ -5093,8 +5170,23 @@ def get_dependency_detail(product_id):
         ProductInstallation.product_id == product.id
     ).order_by(Asset.hostname.asc()).all()
 
-    # Count vuln matches
-    vuln_count = VulnerabilityMatch.query.filter_by(product_id=product.id).count()
+    # Get vulnerability matches with full CVE data
+    vuln_matches = db.session.query(
+        VulnerabilityMatch, Vulnerability
+    ).join(
+        Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id
+    ).filter(
+        VulnerabilityMatch.product_id == product.id
+    ).order_by(
+        db.case(
+            (Vulnerability.severity == 'CRITICAL', 0),
+            (Vulnerability.severity == 'HIGH', 1),
+            (Vulnerability.severity == 'MEDIUM', 2),
+            (Vulnerability.severity == 'LOW', 3),
+            else_=4
+        ),
+        Vulnerability.cvss_score.desc().nullslast()
+    ).all()
 
     inst_list = []
     for inst, asset in installations:
@@ -5108,6 +5200,36 @@ def get_dependency_detail(product_id):
             'last_seen_at': inst.last_seen_at.isoformat() if inst.last_seen_at else None,
         })
 
+    vuln_list = []
+    severity_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+    for match, vuln in vuln_matches:
+        sev = (vuln.severity or '').lower()
+        if sev in severity_counts:
+            severity_counts[sev] += 1
+        vuln_list.append({
+            'match_id': match.id,
+            'cve_id': vuln.cve_id,
+            'severity': vuln.severity,
+            'cvss_score': vuln.cvss_score,
+            'cvss_source': vuln.cvss_source,
+            'epss_score': vuln.epss_score,
+            'epss_percentile': vuln.epss_percentile,
+            'short_description': vuln.short_description,
+            'vulnerability_name': vuln.vulnerability_name,
+            'is_actively_exploited': bool(vuln.is_actively_exploited),
+            'known_ransomware': bool(vuln.known_ransomware),
+            'date_added': vuln.date_added.isoformat() if vuln.date_added else None,
+            'due_date': vuln.due_date.isoformat() if vuln.due_date else None,
+            'required_action': vuln.required_action,
+            'source': vuln.source or 'cisa_kev',
+            'fix_versions': vuln.get_fix_versions(),
+            'match_confidence': match.match_confidence or 'medium',
+            'match_method': match.match_method or 'keyword',
+            'acknowledged': match.acknowledged,
+            'acknowledged_at': match.acknowledged_at.isoformat() if match.acknowledged_at else None,
+            'snoozed_until': match.snoozed_until.isoformat() if match.snoozed_until else None,
+        })
+
     return jsonify({
         'dependency': {
             'id': product.id,
@@ -5116,7 +5238,11 @@ def get_dependency_detail(product_id):
             'version': product.version,
             'source_type': product.source_type,
             'ecosystem': product.ecosystem,
-            'vuln_match_count': vuln_count,
+            'cpe_vendor': product.cpe_vendor,
+            'cpe_product': product.cpe_product,
+            'vuln_match_count': len(vuln_matches),
+            'severity_counts': severity_counts,
         },
         'installations': inst_list,
+        'vulnerabilities': vuln_list,
     })

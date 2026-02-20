@@ -798,17 +798,12 @@ def run_all_health_checks():
 
 
 def _send_health_notifications(results):
-    """Send email notifications for critical/warning health checks."""
+    """Send email and webhook notifications for critical/warning health checks."""
     try:
         # Only notify if there are problems
         problems = {k: v for k, v in results.items() if v in ('warning', 'critical', 'error')}
         if not problems:
             return
-
-        # Check if health notification emails are configured
-        setting = SystemSettings.query.filter_by(key='health_check_notify_email').first()
-        if not setting or not setting.value:
-            return  # No notification emails configured
 
         # Rate limit: don't send more than once per hour
         last_notif = SystemSettings.query.filter_by(key='health_check_last_notification').first()
@@ -827,47 +822,172 @@ def _send_health_notifications(results):
         if not critical_checks and not warning_checks:
             return
 
-        # Send via email if SMTP is configured
-        try:
-            from app.email_alerts import EmailAlertManager
-            subject = f"SentriKat Health Alert: {len(critical_checks)} critical, {len(warning_checks)} warnings"
+        # Build shared message content
+        subject = f"SentriKat Health Alert: {len(critical_checks)} critical, {len(warning_checks)} warnings"
+        body_lines = ["SentriKat Health Check Results:\n"]
+        for check_name in critical_checks:
+            result = HealthCheckResult.query.filter_by(check_name=check_name).first()
+            label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
+            body_lines.append(f"  CRITICAL: {label} - {result.message if result else 'Unknown'}")
+        for check_name in warning_checks:
+            result = HealthCheckResult.query.filter_by(check_name=check_name).first()
+            label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
+            body_lines.append(f"  WARNING: {label} - {result.message if result else 'Unknown'}")
+        body = '\n'.join(body_lines)
 
-            body_lines = ["SentriKat Health Check Results:\n"]
-            for check_name in critical_checks:
-                result = HealthCheckResult.query.filter_by(check_name=check_name).first()
-                label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
-                body_lines.append(f"  CRITICAL: {label} - {result.message if result else 'Unknown'}")
-            for check_name in warning_checks:
-                result = HealthCheckResult.query.filter_by(check_name=check_name).first()
-                label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
-                body_lines.append(f"  WARNING: {label} - {result.message if result else 'Unknown'}")
+        notification_sent = False
 
-            body = '\n'.join(body_lines)
+        # Send via email if SMTP and notification emails are configured
+        setting = SystemSettings.query.filter_by(key='health_check_notify_email').first()
+        if setting and setting.value:
+            try:
+                from app.email_alerts import EmailAlertManager
+                recipients = [e.strip() for e in setting.value.split(',') if e.strip()]
+                if recipients:
+                    EmailAlertManager.send_generic_alert(
+                        recipients=recipients,
+                        subject=subject,
+                        body=body
+                    )
+                    logger.info(f"Health check notification sent via email to {len(recipients)} recipients")
+                    notification_sent = True
+            except Exception as e:
+                logger.warning(f"Could not send health notification email: {e}")
 
-            recipients = [e.strip() for e in setting.value.split(',') if e.strip()]
-            if recipients:
-                EmailAlertManager.send_generic_alert(
-                    recipients=recipients,
-                    subject=subject,
-                    body=body
-                )
-                logger.info(f"Health check notification sent to {len(recipients)} recipients")
+        # Send via webhooks if health_check_notify_webhook is enabled
+        webhook_setting = SystemSettings.query.filter_by(key='health_check_notify_webhook').first()
+        webhook_enabled = webhook_setting and webhook_setting.value == 'true'
+        if webhook_enabled:
+            try:
+                _send_health_webhook(critical_checks, warning_checks, body)
+                notification_sent = True
+            except Exception as e:
+                logger.warning(f"Could not send health notification webhook: {e}")
 
-                # Update last notification time
-                if last_notif:
-                    last_notif.value = datetime.utcnow().isoformat()
-                else:
-                    db.session.add(SystemSettings(
-                        key='health_check_last_notification',
-                        value=datetime.utcnow().isoformat(),
-                        category='health'
-                    ))
-                db.session.commit()
-        except Exception as e:
-            logger.warning(f"Could not send health notification email: {e}")
+        # Update last notification time if any notification was sent
+        if notification_sent:
+            if last_notif:
+                last_notif.value = datetime.utcnow().isoformat()
+            else:
+                db.session.add(SystemSettings(
+                    key='health_check_last_notification',
+                    value=datetime.utcnow().isoformat(),
+                    category='health'
+                ))
+            db.session.commit()
 
     except Exception as e:
         logger.error(f"Error in health notification: {e}")
+
+
+def _send_health_webhook(critical_checks, warning_checks, body_text):
+    """Send health check alerts via all configured webhooks (Slack, Teams, Generic)."""
+    import requests as req_lib
+    from app.settings_api import get_setting
+
+    emoji = '\U0001f6a8' if critical_checks else '\u26a0\ufe0f'  # siren or warning
+    title = f"SentriKat Health Alert"
+    summary = f"{len(critical_checks)} critical, {len(warning_checks)} warnings"
+
+    # Format check details for webhook messages
+    check_lines = []
+    for check_name in critical_checks:
+        result = HealthCheckResult.query.filter_by(check_name=check_name).first()
+        label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
+        check_lines.append(f"CRITICAL: {label} - {result.message if result else 'Unknown'}")
+    for check_name in warning_checks:
+        result = HealthCheckResult.query.filter_by(check_name=check_name).first()
+        label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
+        check_lines.append(f"WARNING: {label} - {result.message if result else 'Unknown'}")
+
+    # Slack webhook
+    slack_enabled = get_setting('slack_enabled') == 'true'
+    slack_url_raw = get_setting('slack_webhook_url')
+    if slack_enabled and slack_url_raw:
+        try:
+            from app.encryption import decrypt_value, is_encrypted
+            slack_url = decrypt_value(slack_url_raw) if is_encrypted(slack_url_raw) else slack_url_raw
+            text = f"{emoji} *{title}*\n*{summary}*\n"
+            for line in check_lines:
+                text += f"\n{'>' if 'CRITICAL' in line else ''} {line}"
+            req_lib.post(slack_url, json={"text": text}, timeout=10)
+            logger.info("Health check alert sent to Slack")
+        except Exception as e:
+            logger.warning(f"Slack health webhook failed: {e}")
+
+    # Teams webhook
+    teams_enabled = get_setting('teams_enabled') == 'true'
+    teams_url_raw = get_setting('teams_webhook_url')
+    if teams_enabled and teams_url_raw:
+        try:
+            from app.encryption import decrypt_value, is_encrypted
+            teams_url = decrypt_value(teams_url_raw) if is_encrypted(teams_url_raw) else teams_url_raw
+            facts = [{"name": "Status", "value": summary}]
+            for line in check_lines[:10]:
+                parts = line.split(': ', 1)
+                facts.append({"name": parts[0] if len(parts) > 1 else "Check", "value": parts[1] if len(parts) > 1 else line})
+            payload = {
+                "@type": "MessageCard",
+                "@context": "http://schema.org/extensions",
+                "themeColor": "dc2626" if critical_checks else "d97706",
+                "summary": f"{title}: {summary}",
+                "sections": [{"activityTitle": f"{emoji} {title}", "facts": facts, "markdown": True}]
+            }
+            req_lib.post(teams_url, json=payload, timeout=10)
+            logger.info("Health check alert sent to Teams")
+        except Exception as e:
+            logger.warning(f"Teams health webhook failed: {e}")
+
+    # Generic webhook
+    generic_enabled = get_setting('generic_webhook_enabled') == 'true'
+    generic_url_raw = get_setting('generic_webhook_url')
+    if generic_enabled and generic_url_raw:
+        try:
+            from app.encryption import decrypt_value, is_encrypted
+            generic_url = decrypt_value(generic_url_raw) if is_encrypted(generic_url_raw) else generic_url_raw
+            generic_format = get_setting('generic_webhook_format', 'slack')
+            generic_token = get_setting('generic_webhook_token', '')
+            if generic_token and is_encrypted(generic_token):
+                generic_token = decrypt_value(generic_token)
+
+            headers = {'Content-Type': 'application/json'}
+            if generic_token:
+                headers['Authorization'] = f'Bearer {generic_token}'
+
+            if generic_format in ('slack', 'rocketchat'):
+                text = f"{emoji} *{title}*\n*{summary}*\n"
+                for line in check_lines:
+                    text += f"\n{line}"
+                payload = {"text": text}
+            elif generic_format == 'discord':
+                content = f"{emoji} **{title}**\n**{summary}**\n"
+                for line in check_lines:
+                    content += f"\n{line}"
+                payload = {"content": content}
+            elif generic_format == 'teams':
+                facts = [{"name": "Status", "value": summary}]
+                for line in check_lines[:10]:
+                    parts = line.split(': ', 1)
+                    facts.append({"name": parts[0] if len(parts) > 1 else "Check", "value": parts[1] if len(parts) > 1 else line})
+                payload = {
+                    "@type": "MessageCard", "themeColor": "dc2626" if critical_checks else "d97706",
+                    "summary": f"{title}: {summary}",
+                    "sections": [{"activityTitle": f"{emoji} {title}", "facts": facts, "markdown": True}]
+                }
+            else:
+                payload = {
+                    "event": "health_check_alert",
+                    "title": title,
+                    "summary": summary,
+                    "critical_count": len(critical_checks),
+                    "warning_count": len(warning_checks),
+                    "checks": check_lines,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            req_lib.post(generic_url, json=payload, headers=headers, timeout=10)
+            logger.info(f"Health check alert sent to generic webhook ({generic_format})")
+        except Exception as e:
+            logger.warning(f"Generic health webhook failed: {e}")
 
 
 def get_health_check_config():

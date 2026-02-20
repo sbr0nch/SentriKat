@@ -85,7 +85,7 @@
 
 <!-- Delivery Channels Overview -->
 <div class="row g-3 mb-4">
-    <div class="col-md-4">
+    <div class="col-md-6">
         <div class="channel-card">
             <div class="d-flex justify-content-between align-items-start mb-2">
                 <div>
@@ -100,22 +100,7 @@
             <a href="/admin-panel#settings:email" class="small text-decoration-none d-block mt-2"><i class="bi bi-gear me-1"></i>Configure SMTP</a>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="channel-card">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-                <div>
-                    <i class="bi bi-slack text-primary me-1"></i>
-                    <strong class="small">Slack</strong>
-                </div>
-                <span class="channel-status" id="slackStatus">
-                    <span class="spinner-border spinner-border-sm" style="width:10px;height:10px;"></span>
-                </span>
-            </div>
-            <div class="small text-muted" id="slackDetail">Loading...</div>
-            <a href="/admin-panel#settings:notifications" class="small text-decoration-none d-block mt-2"><i class="bi bi-gear me-1"></i>Configure Slack</a>
-        </div>
-    </div>
-    <div class="col-md-4">
+    <div class="col-md-6">
         <div class="channel-card">
             <div class="d-flex justify-content-between align-items-start mb-2">
                 <div>
@@ -127,6 +112,7 @@
                 </span>
             </div>
             <div class="small text-muted" id="webhookDetail">Loading...</div>
+            <div class="mt-2" id="webhookBadges"></div>
             <a href="/admin-panel#settings:notifications" class="small text-decoration-none d-block mt-2"><i class="bi bi-gear me-1"></i>Configure Webhooks</a>
         </div>
     </div>
@@ -380,54 +366,67 @@ async function loadChannelStatus() {
     try {
         const settings = await apiFetch('/api/settings/notifications');
 
-        // SMTP status
+        // SMTP status - check both global and org-level SMTP
         const smtpHost = settings.smtp_host;
+        const smtpConfigured = settings.smtp_configured;
+        const orgSmtpCount = settings.org_smtp_count || 0;
         const smtpEl = document.getElementById('smtpStatus');
         const smtpDetail = document.getElementById('smtpDetail');
-        if (smtpHost) {
+        if (smtpConfigured) {
             smtpEl.className = 'channel-status active';
-            smtpEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Configured';
-            smtpDetail.textContent = `Global: ${smtpHost}`;
+            smtpEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
+            let detail = `Global: ${smtpHost}`;
+            if (orgSmtpCount > 0) detail += ` + ${orgSmtpCount} org SMTP`;
+            smtpDetail.textContent = detail;
+        } else if (orgSmtpCount > 0) {
+            smtpEl.className = 'channel-status active';
+            smtpEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
+            smtpDetail.textContent = `${orgSmtpCount} organization(s) with own SMTP`;
         } else {
             smtpEl.className = 'channel-status inactive';
             smtpEl.innerHTML = '<i class="bi bi-dash-circle"></i> Not configured';
-            smtpDetail.textContent = 'No global SMTP. Orgs can set their own.';
+            smtpDetail.textContent = 'No global or org-level SMTP configured';
         }
 
-        // Slack status
-        const slackEl = document.getElementById('slackStatus');
-        const slackDetail = document.getElementById('slackDetail');
-        if (settings.slack_enabled) {
-            slackEl.className = 'channel-status active';
-            slackEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
-            slackDetail.textContent = 'Slack webhook configured';
-        } else {
-            slackEl.className = 'channel-status inactive';
-            slackEl.innerHTML = '<i class="bi bi-dash-circle"></i> Inactive';
-            slackDetail.textContent = 'Not configured';
-        }
-
-        // Webhook status (Teams + Generic)
+        // Unified Webhook status (Slack + Teams + Generic + per-org)
         const webhookEl = document.getElementById('webhookStatus');
         const webhookDetailEl = document.getElementById('webhookDetail');
-        const parts = [];
-        if (settings.teams_enabled) parts.push('Teams');
-        if (settings.generic_webhook_enabled) parts.push(settings.generic_webhook_name || 'Generic');
-        if (parts.length > 0) {
+        const webhookBadgesEl = document.getElementById('webhookBadges');
+        const activeWebhooks = [];
+        let badgesHtml = '';
+
+        if (settings.slack_enabled) {
+            activeWebhooks.push('Slack');
+            badgesHtml += '<span class="badge bg-success me-1" style="font-size:0.7rem"><i class="bi bi-check-circle me-1"></i>Slack</span>';
+        }
+        if (settings.teams_enabled) {
+            activeWebhooks.push('Teams');
+            badgesHtml += '<span class="badge bg-success me-1" style="font-size:0.7rem"><i class="bi bi-check-circle me-1"></i>Teams</span>';
+        }
+        if (settings.generic_webhook_enabled) {
+            const name = settings.generic_webhook_name || 'Custom';
+            activeWebhooks.push(name);
+            badgesHtml += `<span class="badge bg-success me-1" style="font-size:0.7rem"><i class="bi bi-check-circle me-1"></i>${escapeHtml(name)}</span>`;
+        }
+
+        if (activeWebhooks.length > 0) {
             webhookEl.className = 'channel-status active';
-            webhookEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
-            webhookDetailEl.textContent = parts.join(', ') + ' configured';
+            webhookEl.innerHTML = `<i class="bi bi-check-circle-fill"></i> ${activeWebhooks.length} Active`;
+            webhookDetailEl.textContent = activeWebhooks.join(', ');
         } else {
             webhookEl.className = 'channel-status inactive';
             webhookEl.innerHTML = '<i class="bi bi-dash-circle"></i> Inactive';
-            webhookDetailEl.textContent = 'No Teams/generic webhooks';
+            webhookDetailEl.textContent = 'No webhooks configured';
         }
+        webhookBadgesEl.innerHTML = badgesHtml;
     } catch (err) {
         console.error('Failed to load channel status:', err);
-        ['smtpStatus', 'slackStatus', 'webhookStatus'].forEach(id => {
+        ['smtpStatus', 'webhookStatus'].forEach(id => {
             const el = document.getElementById(id);
-            el.className = 'channel-status inactive';
-            el.innerHTML = '<i class="bi bi-question-circle"></i>';
+            if (el) {
+                el.className = 'channel-status inactive';
+                el.innerHTML = '<i class="bi bi-question-circle"></i>';
+            }
         });
     }
 }

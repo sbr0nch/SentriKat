@@ -65,6 +65,8 @@ All responses are JSON. Errors include an `error` field with a description.
             {"name": "License", "description": "License management"},
             {"name": "Reports", "description": "Compliance and vulnerability reports"},
             {"name": "Integrations", "description": "Issue tracker and notification integrations"},
+            {"name": "Containers", "description": "Container image scanning and vulnerability management"},
+            {"name": "Dependencies", "description": "Code library and extension vulnerability tracking"},
             {"name": "Health Checks", "description": "System health monitoring and diagnostics"},
             {"name": "Notifications", "description": "In-app system notifications"},
             {"name": "Worker Pool", "description": "Background job processing pool status and management"},
@@ -1060,6 +1062,108 @@ def _get_api_paths():
                 },
                 "security": []
             }
+        },
+        # =====================================================================
+        # Container Security
+        # =====================================================================
+        "/api/containers": {
+            "get": {
+                "tags": ["Containers"],
+                "summary": "List container images",
+                "description": "Returns all scanned container images with vulnerability counts, severity breakdown, and aggregated stats. Supports filtering by severity, fix status, and search.",
+                "parameters": [
+                    {"name": "search", "in": "query", "schema": {"type": "string"}, "description": "Search by image name, tag, or registry"},
+                    {"name": "severity", "in": "query", "schema": {"type": "string", "enum": ["critical", "high", "medium"]}, "description": "Filter by minimum severity level"},
+                    {"name": "fix_status", "in": "query", "schema": {"type": "string", "enum": ["fixable", "unfixable"]}, "description": "Filter by fix availability"},
+                    {"name": "organization_id", "in": "query", "schema": {"type": "integer"}, "description": "Filter by organization"}
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Container images with stats",
+                        "content": {"application/json": {"schema": {"type": "object", "properties": {
+                            "images": {"type": "array", "items": {"$ref": "#/components/schemas/ContainerImage"}},
+                            "stats": {"type": "object", "properties": {
+                                "total_images": {"type": "integer"},
+                                "total_vulnerabilities": {"type": "integer"},
+                                "total_critical": {"type": "integer"},
+                                "total_high": {"type": "integer"},
+                                "total_medium": {"type": "integer"},
+                                "total_fixable": {"type": "integer"}
+                            }}
+                        }}}}
+                    }
+                }
+            }
+        },
+        "/api/containers/{image_id}": {
+            "get": {
+                "tags": ["Containers"],
+                "summary": "Get container image detail",
+                "description": "Returns detailed info for a container image including all vulnerabilities enriched with EPSS scores and CISA KEV exploitation data.",
+                "parameters": [
+                    {"name": "image_id", "in": "path", "required": True, "schema": {"type": "integer"}}
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Image detail with enriched vulnerabilities",
+                        "content": {"application/json": {"schema": {"type": "object", "properties": {
+                            "image": {"$ref": "#/components/schemas/ContainerImage"},
+                            "vulnerabilities": {"type": "array", "items": {"$ref": "#/components/schemas/ContainerVulnerability"}},
+                            "vulnerability_count": {"type": "integer"}
+                        }}}}
+                    }
+                }
+            }
+        },
+        # =====================================================================
+        # Dependencies & Extensions
+        # =====================================================================
+        "/api/dependencies": {
+            "get": {
+                "tags": ["Dependencies"],
+                "summary": "List code dependencies and extensions",
+                "description": "Returns all code libraries and browser/IDE extensions with vulnerability match counts, severity breakdown per dependency, and ecosystem statistics.",
+                "parameters": [
+                    {"name": "search", "in": "query", "schema": {"type": "string"}, "description": "Search by name, vendor, or ecosystem"},
+                    {"name": "source_type", "in": "query", "schema": {"type": "string", "enum": ["code_library", "extension"]}, "description": "Filter by type"},
+                    {"name": "ecosystem", "in": "query", "schema": {"type": "string"}, "description": "Filter by ecosystem (npm, pypi, cargo, go, gem, composer, vscode, chrome, etc.)"}
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Dependencies with stats and severity counts",
+                        "content": {"application/json": {"schema": {"type": "object", "properties": {
+                            "dependencies": {"type": "array", "items": {"$ref": "#/components/schemas/Dependency"}},
+                            "ecosystems": {"type": "array", "items": {"type": "string"}},
+                            "stats": {"type": "object", "properties": {
+                                "total_code_libraries": {"type": "integer"},
+                                "total_extensions": {"type": "integer"},
+                                "total_ecosystems": {"type": "integer"},
+                                "total_vulnerable": {"type": "integer"}
+                            }}
+                        }}}}
+                    }
+                }
+            }
+        },
+        "/api/dependencies/{product_id}": {
+            "get": {
+                "tags": ["Dependencies"],
+                "summary": "Get dependency detail with CVEs",
+                "description": "Returns full detail for a dependency including all CVE vulnerability matches (with CVSS, EPSS, CISA KEV, fix versions, acknowledgment status) and installation locations across endpoints.",
+                "parameters": [
+                    {"name": "product_id", "in": "path", "required": True, "schema": {"type": "integer"}}
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Dependency detail with vulnerabilities and installations",
+                        "content": {"application/json": {"schema": {"type": "object", "properties": {
+                            "dependency": {"$ref": "#/components/schemas/DependencyDetail"},
+                            "installations": {"type": "array", "items": {"$ref": "#/components/schemas/Installation"}},
+                            "vulnerabilities": {"type": "array", "items": {"$ref": "#/components/schemas/DependencyVulnerability"}}
+                        }}}}
+                    }
+                }
+            }
         }
     }
 
@@ -1276,6 +1380,129 @@ def _get_schemas():
                 "value": {"type": "string", "description": "Short display value (e.g. '42ms', '95%')"},
                 "details": {"type": "object", "description": "Additional structured data"},
                 "checked_at": {"type": "string", "format": "date-time"}
+            }
+        },
+        "ContainerImage": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "image_name": {"type": "string", "example": "nginx"},
+                "image_tag": {"type": "string", "example": "1.25-alpine"},
+                "full_name": {"type": "string", "example": "nginx:1.25-alpine"},
+                "image_id": {"type": "string", "description": "SHA256 digest (short)"},
+                "image_digest": {"type": "string", "description": "Registry digest"},
+                "registry": {"type": "string", "example": "docker.io"},
+                "os_family": {"type": "string", "example": "alpine"},
+                "os_version": {"type": "string"},
+                "architecture": {"type": "string", "enum": ["amd64", "arm64"]},
+                "total_vulnerabilities": {"type": "integer"},
+                "severity": {"type": "object", "properties": {
+                    "critical": {"type": "integer"},
+                    "high": {"type": "integer"},
+                    "medium": {"type": "integer"},
+                    "low": {"type": "integer"}
+                }},
+                "fixed_count": {"type": "integer", "description": "Vulnerabilities with known fixes"},
+                "unfixed_count": {"type": "integer"},
+                "scanner_version": {"type": "string", "example": "trivy 0.58.2"},
+                "last_scan_at": {"type": "string", "format": "date-time"},
+                "active": {"type": "boolean"},
+                "running": {"type": "boolean"},
+                "asset_hostname": {"type": "string"}
+            }
+        },
+        "ContainerVulnerability": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "vuln_id": {"type": "string", "example": "CVE-2024-1234"},
+                "severity": {"type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]},
+                "title": {"type": "string"},
+                "pkg_name": {"type": "string", "example": "libssl3"},
+                "pkg_version": {"type": "string", "description": "Installed version"},
+                "pkg_type": {"type": "string", "enum": ["os", "library"]},
+                "fixed_version": {"type": "string", "description": "Version that fixes this CVE (null if no fix)"},
+                "fix_status": {"type": "string", "enum": ["fixed", "not_fixed", "end_of_life", "unknown"]},
+                "cvss_score": {"type": "number", "format": "float", "description": "CVSS v3 score (0-10)"},
+                "data_source": {"type": "string", "example": "nvd"},
+                "primary_url": {"type": "string", "format": "uri"},
+                "epss_score": {"type": "number", "format": "float", "description": "EPSS exploit probability (0-1), enriched from CISA KEV cross-reference"},
+                "epss_percentile": {"type": "number", "format": "float"},
+                "is_actively_exploited": {"type": "boolean", "description": "In CISA KEV catalog"},
+                "known_ransomware": {"type": "boolean"},
+                "in_kev": {"type": "boolean", "description": "Whether this CVE exists in CISA KEV database"},
+                "acknowledged": {"type": "boolean"}
+            }
+        },
+        "Dependency": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "vendor": {"type": "string"},
+                "product_name": {"type": "string", "example": "express"},
+                "version": {"type": "string"},
+                "source_type": {"type": "string", "enum": ["code_library", "extension"]},
+                "ecosystem": {"type": "string", "enum": ["npm", "pypi", "maven", "nuget", "cargo", "go", "gem", "composer", "vscode", "chrome", "firefox", "edge", "jetbrains"]},
+                "vuln_match_count": {"type": "integer", "description": "Number of matched CVEs"},
+                "endpoint_count": {"type": "integer", "description": "Number of endpoints with this dependency"},
+                "severity_counts": {"type": "object", "properties": {
+                    "critical": {"type": "integer"},
+                    "high": {"type": "integer"},
+                    "medium": {"type": "integer"},
+                    "low": {"type": "integer"}
+                }}
+            }
+        },
+        "DependencyDetail": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "vendor": {"type": "string"},
+                "product_name": {"type": "string"},
+                "version": {"type": "string"},
+                "source_type": {"type": "string"},
+                "ecosystem": {"type": "string"},
+                "cpe_vendor": {"type": "string"},
+                "cpe_product": {"type": "string"},
+                "vuln_match_count": {"type": "integer"},
+                "severity_counts": {"type": "object"}
+            }
+        },
+        "DependencyVulnerability": {
+            "type": "object",
+            "description": "CVE vulnerability matched to a dependency, enriched with EPSS and CISA KEV data",
+            "properties": {
+                "match_id": {"type": "integer"},
+                "cve_id": {"type": "string", "example": "CVE-2024-5678"},
+                "severity": {"type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]},
+                "cvss_score": {"type": "number", "format": "float"},
+                "epss_score": {"type": "number", "format": "float", "description": "Exploit prediction probability (0-1)"},
+                "epss_percentile": {"type": "number", "format": "float"},
+                "short_description": {"type": "string"},
+                "is_actively_exploited": {"type": "boolean"},
+                "known_ransomware": {"type": "boolean"},
+                "date_added": {"type": "string", "format": "date"},
+                "due_date": {"type": "string", "format": "date"},
+                "required_action": {"type": "string"},
+                "source": {"type": "string", "enum": ["cisa_kev", "euvd", "nvd"]},
+                "fix_versions": {"type": "array", "items": {"type": "object"}},
+                "match_confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                "match_method": {"type": "string", "enum": ["cpe", "keyword", "vendor_product"]},
+                "acknowledged": {"type": "boolean"},
+                "acknowledged_at": {"type": "string", "format": "date-time"},
+                "snoozed_until": {"type": "string", "format": "date-time"}
+            }
+        },
+        "Installation": {
+            "type": "object",
+            "properties": {
+                "hostname": {"type": "string"},
+                "asset_id": {"type": "integer"},
+                "version": {"type": "string"},
+                "install_path": {"type": "string"},
+                "project_path": {"type": "string"},
+                "is_direct": {"type": "boolean", "description": "Direct vs transitive dependency"},
+                "last_seen_at": {"type": "string", "format": "date-time"}
             }
         }
     }
