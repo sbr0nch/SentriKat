@@ -4757,29 +4757,25 @@ def trigger_critical_cve_alerts():
 @admin_required
 def trigger_webhook_alerts():
     """
-    Manually trigger webhook alerts for all organizations
+    Manually trigger webhook alerts for all organizations.
+
+    Falls back to global webhook settings when an org doesn't have its own,
+    matching the behaviour of the automated CISA sync flow.
 
     Permissions:
     - Super Admin only: Can manually trigger webhook notifications
     """
-    from app.cisa_sync import send_org_webhook
+    from app.cisa_sync import send_org_webhook, send_webhook_notification
+    from app.settings_api import get_setting
 
     try:
         results = []
         organizations = Organization.query.filter_by(active=True).all()
+        orgs_with_own_webhook = set()
+        global_matches_pool = []  # Collect matches for orgs without own webhook
 
         for org in organizations:
-            # Check if org has webhooks enabled
-            if not org.webhook_enabled or not org.webhook_url:
-                results.append({
-                    'organization': org.name,
-                    'status': 'skipped',
-                    'reason': 'Webhook not configured'
-                })
-                continue
-
             # Get unacknowledged matches for this org
-            # Include products assigned via both legacy organization_id and multi-org table
             from app.models import product_organizations
             legacy_pids = db.session.query(Product.id).filter(
                 Product.organization_id == org.id
@@ -4812,44 +4808,90 @@ def trigger_webhook_alerts():
                 })
                 continue
 
-            # Count critical
             critical_count = sum(1 for m in priority_matches if m.calculate_effective_priority() == 'critical')
 
-            # Send webhook (force=True bypasses first_alerted_at filter for manual triggers)
-            result = send_org_webhook(
-                org=org,
-                new_cves_count=len(priority_matches),
-                critical_count=critical_count,
-                matches_count=len(priority_matches),
-                matches=priority_matches,
-                force=True
+            # Try org-specific webhook first
+            if org.webhook_enabled and org.webhook_url:
+                result = send_org_webhook(
+                    org=org,
+                    new_cves_count=len(priority_matches),
+                    critical_count=critical_count,
+                    matches_count=len(priority_matches),
+                    matches=priority_matches,
+                    force=True
+                )
+
+                if result:
+                    orgs_with_own_webhook.add(org.id)
+                    if result.get('skipped'):
+                        results.append({
+                            'organization': org.name,
+                            'status': 'skipped',
+                            'reason': result.get('reason', 'No new CVEs to alert')
+                        })
+                    elif result.get('success'):
+                        results.append({
+                            'organization': org.name,
+                            'status': 'success',
+                            'channel': 'org-webhook',
+                            'new_cves': result.get('new_cves', 0)
+                        })
+                    else:
+                        results.append({
+                            'organization': org.name,
+                            'status': 'error',
+                            'reason': result.get('error', 'Unknown error')
+                        })
+                    continue
+
+            # No org-specific webhook — collect for global fallback
+            global_matches_pool.extend(priority_matches)
+            results.append({
+                'organization': org.name,
+                'status': 'pending_global',
+                'critical': critical_count,
+                'total': len(priority_matches)
+            })
+
+        # --- Global webhook fallback for orgs without their own ---
+        pending_orgs = [r for r in results if r.get('status') == 'pending_global']
+        if pending_orgs:
+            has_global = (
+                (get_setting('slack_enabled') == 'true' and get_setting('slack_webhook_url'))
+                or (get_setting('teams_enabled') == 'true' and get_setting('teams_webhook_url'))
+                or (get_setting('generic_webhook_enabled') == 'true' and get_setting('generic_webhook_url'))
             )
 
-            if result:
-                if result.get('skipped'):
-                    results.append({
-                        'organization': org.name,
-                        'status': 'skipped',
-                        'reason': result.get('reason', 'No new CVEs to alert')
-                    })
-                elif result.get('success'):
-                    results.append({
-                        'organization': org.name,
-                        'status': 'success',
-                        'new_cves': result.get('new_cves', 0)
-                    })
-                else:
-                    results.append({
-                        'organization': org.name,
-                        'status': 'error',
-                        'reason': result.get('error', 'Unknown error')
-                    })
+            if has_global and global_matches_pool:
+                total_cves = len(global_matches_pool)
+                total_critical = sum(
+                    1 for m in global_matches_pool
+                    if m.calculate_effective_priority() == 'critical'
+                )
+                # Collect unique CVE IDs for the batched message
+                cve_ids = list(dict.fromkeys(
+                    m.vulnerability.cve_id for m in global_matches_pool
+                    if m.vulnerability
+                ))
+
+                global_results = send_webhook_notification(
+                    total_cves, total_critical, total_cves, new_cve_ids=cve_ids
+                )
+
+                global_sent = any(
+                    v for r in global_results for k, v in r.items() if k != 'error' and v is True
+                )
+
+                # Update pending entries
+                for entry in pending_orgs:
+                    entry['status'] = 'success' if global_sent else 'error'
+                    entry['channel'] = 'global-webhook'
+                    if not global_sent:
+                        entry['reason'] = 'Global webhook delivery failed'
             else:
-                results.append({
-                    'organization': org.name,
-                    'status': 'skipped',
-                    'reason': 'No webhook configured'
-                })
+                for entry in pending_orgs:
+                    entry['status'] = 'skipped'
+                    entry['reason'] = 'No webhook configured (neither org nor global)'
 
         # Count successes
         sent_count = sum(1 for r in results if r['status'] == 'success')
