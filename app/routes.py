@@ -541,10 +541,25 @@ def system_notifications():
         # 7. Health check warnings/criticals - admin only
         if is_admin:
             try:
-                from app.models import HealthCheckResult
-                health_issues = HealthCheckResult.query.filter(
-                    HealthCheckResult.status.in_(['critical', 'warning'])
+                from app.models import HealthCheckResult, SystemSettings
+
+                # Filter out disabled health checks so we don't show stale warnings
+                disabled_checks = set()
+                health_settings = SystemSettings.query.filter(
+                    SystemSettings.key.like('health_check_%_enabled'),
+                    SystemSettings.value == 'false'
                 ).all()
+                for s in health_settings:
+                    # Extract check name: "health_check_worker_thread_enabled" -> "worker_thread"
+                    name = s.key.replace('health_check_', '').replace('_enabled', '')
+                    disabled_checks.add(name)
+
+                health_issues = [
+                    h for h in HealthCheckResult.query.filter(
+                        HealthCheckResult.status.in_(['critical', 'warning'])
+                    ).all()
+                    if h.check_name not in disabled_checks
+                ]
 
                 critical_count = sum(1 for h in health_issues if h.status == 'critical')
                 warning_count = sum(1 for h in health_issues if h.status == 'warning')
@@ -3414,6 +3429,16 @@ def get_vulnerabilities_grouped():
                 for p in r['affected_products']
             )]
 
+        # Filter by match confidence (high, medium, low, or comma-separated combo)
+        confidence_filter = request.args.get('confidence', '').lower().strip()
+        if confidence_filter:
+            allowed_levels = set(c.strip() for c in confidence_filter.split(',') if c.strip())
+            # Keep CVE groups that have at least one affected product with matching confidence
+            results = [r for r in results if any(
+                (p.get('match_confidence', 'medium') or 'medium') in allowed_levels
+                for p in r['affected_products']
+            )]
+
         # Pagination
         page = max(int(request.args.get('page', 1)), 1)
         per_page = min(int(request.args.get('per_page', 25)), 100)
@@ -4794,6 +4819,15 @@ def trigger_webhook_alerts():
         orgs_with_own_webhook = set()
         global_matches_pool = []  # Collect matches for orgs without own webhook
 
+        # Check if global webhooks are configured (fallback for orgs without their own)
+        has_global_webhook = (
+            get_setting('slack_webhook_url') and get_setting('slack_enabled') == 'true'
+        ) or (
+            get_setting('teams_webhook_url') and get_setting('teams_enabled') == 'true'
+        ) or (
+            get_setting('generic_webhook_url') and get_setting('generic_webhook_enabled') == 'true'
+        )
+
         for org in organizations:
             # Get unacknowledged matches for this org
             from app.models import product_organizations
@@ -4832,6 +4866,7 @@ def trigger_webhook_alerts():
 
             # Try org-specific webhook first
             if org.webhook_enabled and org.webhook_url:
+                # Send via org-specific webhook (force=True bypasses first_alerted_at filter for manual triggers)
                 result = send_org_webhook(
                     org=org,
                     new_cves_count=len(priority_matches),
@@ -5010,7 +5045,40 @@ def search_catalog():
         ServiceCatalog.usage_frequency.desc()
     ).limit(limit)
 
-    return jsonify([s.to_dict() for s in results.all()])
+    services = results.all()
+
+    # Enrich with real observed versions from agent-reported ProductInstallation data.
+    # The static typical_versions in the catalog are generic placeholders (e.g., "8.0", "Latest").
+    # Real versions come from what agents have actually detected in the environment.
+    from app.version_utils import _version_sort_key
+    enriched = []
+    for s in services:
+        sdict = s.to_dict()
+        try:
+            real_versions = db.session.query(
+                ProductInstallation.version
+            ).join(
+                Product, ProductInstallation.product_id == Product.id
+            ).filter(
+                Product.vendor.ilike(s.vendor),
+                Product.product_name.ilike(s.product_name),
+                ProductInstallation.version.isnot(None),
+                ProductInstallation.version != '',
+                ProductInstallation.version != 'Unknown'
+            ).distinct().limit(20).all()
+            observed = list(set(v[0] for v in real_versions if v[0]))
+            if observed:
+                # Sort by version order (newest first) using proper version comparison
+                observed.sort(key=_version_sort_key, reverse=True)
+                sdict['typical_versions'] = observed
+                sdict['versions_source'] = 'observed'
+            else:
+                sdict['versions_source'] = 'catalog'
+        except Exception:
+            sdict['versions_source'] = 'catalog'
+        enriched.append(sdict)
+
+    return jsonify(enriched)
 
 @bp.route('/api/catalog/categories', methods=['GET'])
 @login_required

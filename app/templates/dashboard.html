@@ -209,44 +209,44 @@
             <!-- Priority Alert Cards (compact 2x2 grid) -->
             <div class="row g-2 mb-2" id="priorityAlerts">
                 <div class="col-6">
-                    <div class="alert-card alert-card-zeroday" data-priority="zeroday" onclick="filterByZeroDay()" title="Click to filter by Zero-Day (Pre-KEV)">
+                    <div class="alert-card alert-card-zeroday" data-priority="zeroday" onclick="filterByZeroDay()" title="Zero-day CVEs detected before CISA KEV. Big number = unique CVEs, (parentheses) = product-level matches.">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
                                 <div class="alert-card-label" style="color: #6d47a8;">0-Day</div>
-                                <div class="alert-card-value"><span id="zeroDayCves" style="color: #6d47a8;">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="zeroDayMatches">-</span>)</small></div>
+                                <div class="alert-card-value"><span id="zeroDayCves" style="color: #6d47a8;">-</span> <small class="text-muted fw-normal" style="font-size: 0.7rem;" title="Product-level matches">(<span id="zeroDayMatches">-</span> matches)</small></div>
                             </div>
                             <i class="bi bi-lightning-fill alert-icon" style="color: #6d47a8;"></i>
                         </div>
                     </div>
                 </div>
                 <div class="col-6">
-                    <div class="alert-card alert-card-critical" data-priority="critical" onclick="filterBySeverity('CRITICAL')" title="Click to filter by Critical">
+                    <div class="alert-card alert-card-critical" data-priority="critical" onclick="filterBySeverity('CRITICAL')" title="Critical severity CVEs. Big number = unique CVEs, (parentheses) = product-level matches.">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <div class="alert-card-label">Critical</div>
-                                <div class="alert-card-value"><span id="criticalCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="criticalCount">-</span>)</small></div>
+                                <div class="alert-card-label">Critical CVEs</div>
+                                <div class="alert-card-value"><span id="criticalCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.7rem;" title="Product-level matches across all tracked products">(<span id="criticalCount">-</span> matches)</small></div>
                             </div>
                             <i class="bi bi-exclamation-octagon-fill alert-icon"></i>
                         </div>
                     </div>
                 </div>
                 <div class="col-6">
-                    <div class="alert-card alert-card-high" data-priority="high" onclick="filterBySeverity('HIGH')" title="Click to filter by High">
+                    <div class="alert-card alert-card-high" data-priority="high" onclick="filterBySeverity('HIGH')" title="High severity CVEs. Big number = unique CVEs, (parentheses) = product-level matches.">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <div class="alert-card-label">High</div>
-                                <div class="alert-card-value"><span id="highCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="highCount">-</span>)</small></div>
+                                <div class="alert-card-label">High CVEs</div>
+                                <div class="alert-card-value"><span id="highCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.7rem;" title="Product-level matches across all tracked products">(<span id="highCount">-</span> matches)</small></div>
                             </div>
                             <i class="bi bi-exclamation-triangle-fill alert-icon"></i>
                         </div>
                     </div>
                 </div>
                 <div class="col-6">
-                    <div class="alert-card alert-card-medium" data-priority="medium" onclick="filterBySeverity('MEDIUM')" title="Click to filter by Medium">
+                    <div class="alert-card alert-card-medium" data-priority="medium" onclick="filterBySeverity('MEDIUM')" title="Medium severity CVEs. Big number = unique CVEs, (parentheses) = product-level matches.">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <div class="alert-card-label">Medium</div>
-                                <div class="alert-card-value"><span id="mediumCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.8rem;">(<span id="mediumCount">-</span>)</small></div>
+                                <div class="alert-card-label">Medium CVEs</div>
+                                <div class="alert-card-value"><span id="mediumCves">-</span> <small class="text-muted fw-normal" style="font-size: 0.7rem;" title="Product-level matches across all tracked products">(<span id="mediumCount">-</span> matches)</small></div>
                             </div>
                             <i class="bi bi-info-circle-fill alert-icon"></i>
                         </div>
@@ -441,7 +441,17 @@
                         <option value="container">Container</option>
                     </select>
                 </div>
-                <div class="col-md-6">
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Match Confidence</label>
+                    <select class="form-select" id="filterConfidence">
+                        <option value="">All</option>
+                        <option value="high">High (CPE verified)</option>
+                        <option value="medium">Medium (vendor+product)</option>
+                        <option value="low">Low (keyword only)</option>
+                        <option value="high,medium">High + Medium</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
                     <div class="d-flex gap-3 align-items-center h-100">
                         <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" id="filterRansomware">
@@ -1943,6 +1953,7 @@
         document.getElementById('filterVendor').value = '';
         document.getElementById('filterProduct').value = '';
         document.getElementById('filterPlatform').value = '';
+        document.getElementById('filterConfidence').value = '';
         document.getElementById('filterRansomware').checked = false;
         document.getElementById('filterUnack').checked = false;
         document.getElementById('filterEpss').value = '';
@@ -2471,6 +2482,11 @@
 
     // Load grouped vulnerabilities from API
     async function loadGroupedVulnerabilities() {
+        // Container filter uses a different data source
+        if (dashboardSourceFilter === 'containers') {
+            return loadContainerVulnerabilities();
+        }
+
         showLoading();
         const container = document.getElementById('vulnerabilitiesContainer');
         selectedVulns.clear();
@@ -2488,6 +2504,7 @@
             const vendor = document.getElementById('filterVendor').value;
             const product = document.getElementById('filterProduct').value;
             const platform = document.getElementById('filterPlatform').value;
+            const confidence = document.getElementById('filterConfidence').value;
 
             if (cve) params.append('search', cve);
             if (ransomware) params.append('ransomware_only', 'true');
@@ -2500,9 +2517,8 @@
             if (vendor) params.append('vendor', vendor);
             if (product) params.append('product', product);
             if (platform) params.append('platform', platform);
-            if (dashboardSourceFilter === 'containers') {
-                params.append('source_type', 'container');
-            } else if (dashboardSourceFilter === 'dependencies') {
+            if (confidence) params.append('confidence', confidence);
+            if (dashboardSourceFilter === 'dependencies') {
                 params.append('source_type', 'code_library');
                 params.append('include_extensions', 'true');
             } else if (dashboardSourceFilter) {
@@ -2532,6 +2548,89 @@
                     <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${escapeHtml(error.message)}
                 </div>
             `;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Load container vulnerabilities from the dedicated container API
+    async function loadContainerVulnerabilities() {
+        showLoading();
+        const container = document.getElementById('vulnerabilitiesContainer');
+        selectedVulns.clear();
+        updateBulkActions();
+
+        try {
+            const search = document.getElementById('filterCVE').value;
+            const severity = document.getElementById('filterSeverity').value;
+            const params = new URLSearchParams();
+            if (search) params.append('search', search);
+            if (severity) params.append('severity', severity);
+
+            const response = await fetchWithRetry(`/api/containers?${params}`, {}, 3, 1000);
+            if (!response.ok) throw new Error(`Server error: ${response.status}`);
+            const data = await response.json();
+            const images = data.images || [];
+
+            // Update count
+            const totalVulns = images.reduce((sum, img) => sum + (img.total_vulnerabilities || 0), 0);
+            document.getElementById('vulnCount').textContent = totalVulns;
+
+            if (images.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-5">
+                        <i class="bi bi-box text-muted" style="font-size: 4rem;"></i>
+                        <h4 class="mt-3">No Container Images</h4>
+                        <p class="text-muted">No container images found with vulnerabilities.</p>
+                    </div>`;
+                ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+                return;
+            }
+
+            container.innerHTML = images.map(img => {
+                const critBadge = img.critical_count ? `<span class="badge bg-danger me-1">${img.critical_count} Critical</span>` : '';
+                const highBadge = img.high_count ? `<span class="badge bg-warning text-dark me-1">${img.high_count} High</span>` : '';
+                const medBadge = img.medium_count ? `<span class="badge bg-info me-1">${img.medium_count} Medium</span>` : '';
+                const lowBadge = img.low_count ? `<span class="badge bg-secondary me-1">${img.low_count} Low</span>` : '';
+                const age = img.last_scanned ? SK.Time.relative(img.last_scanned) : 'never';
+
+                return `
+                    <div class="card mb-2 border-start border-4 border-${img.critical_count ? 'danger' : img.high_count ? 'warning' : 'info'}">
+                        <div class="card-body py-2 px-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0">
+                                        <i class="bi bi-box me-1 text-muted"></i>
+                                        <a href="/containers" class="text-decoration-none">${escapeHtml(img.image_name || 'Unknown')}</a>
+                                        <span class="text-muted fw-normal">:${escapeHtml(img.image_tag || 'latest')}</span>
+                                    </h6>
+                                    <div class="mt-1">
+                                        ${critBadge}${highBadge}${medBadge}${lowBadge}
+                                        <small class="text-muted ms-2">${img.total_vulnerabilities || 0} total vulns</small>
+                                    </div>
+                                </div>
+                                <div class="text-end">
+                                    <small class="text-muted">Scanned ${age}</small>
+                                    ${img.asset_hostname ? `<br><small class="text-muted"><i class="bi bi-pc-display me-1"></i>${escapeHtml(img.asset_hostname)}</small>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+
+            // Hide normal pagination for container view
+            ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+        } catch (error) {
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading containers: ${escapeHtml(error.message)}
+                </div>`;
         } finally {
             hideLoading();
         }

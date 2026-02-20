@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 # Check if python3-saml is available
 SAML_AVAILABLE = False
+OneLogin_Saml2_Auth = None
+OneLogin_Saml2_Settings = None
+OneLogin_Saml2_Utils = None
+OneLogin_Saml2_IdPMetadataParser = None
 try:
     from onelogin.saml2.auth import OneLogin_Saml2_Auth
     from onelogin.saml2.settings import OneLogin_Saml2_Settings

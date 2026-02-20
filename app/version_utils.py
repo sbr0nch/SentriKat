@@ -38,8 +38,10 @@ def _version_sort_key(version):
     }
 
     parts = []
-    # Split on common version delimiters
-    for part in re.split(r'[.\-_+]', str(version)):
+    # Split on common version delimiters (includes ':' to handle epoch prefixes
+    # like "2:1.0.3" — the epoch becomes a leading numeric segment, ensuring
+    # 2:1.0 sorts higher than 1:2.0 in the generic comparator)
+    for part in re.split(r'[.\-_+:]', str(version)):
         if not part:
             continue
         # Try to convert to int for numeric comparison

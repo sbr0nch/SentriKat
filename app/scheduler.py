@@ -171,6 +171,19 @@ def start_scheduler(app):
     )
     logger.info("Data retention cleanup scheduled at 03:00")
 
+    # Schedule daily stale match cleanup (at 1:30 AM — before 2 AM snapshot)
+    # Removes matches that no longer pass version-range checks after CPE data
+    # updates throughout the day (NVD every 2h, EUVD every 6h, vendor advisories daily).
+    # Without this, stale false-positive matches persist until the next full KEV sync.
+    scheduler.add_job(
+        func=lambda: _run_with_lock('stale_match_cleanup', stale_match_cleanup_job, app),
+        trigger=CronTrigger(hour=1, minute=30),
+        id='daily_stale_match_cleanup',
+        name='Daily Stale Match Cleanup',
+        replace_existing=True
+    )
+    logger.info("Daily stale match cleanup scheduled at 01:30")
+
     # Schedule daily vulnerability snapshot (at 2 AM)
     scheduler.add_job(
         func=lambda: _run_with_lock('vulnerability_snapshot', vulnerability_snapshot_job, app),
@@ -733,6 +746,30 @@ def critical_cve_reminder_job(app):
 
         except Exception as e:
             logger.error(f"Critical CVE reminder job failed: {str(e)}", exc_info=True)
+
+
+def stale_match_cleanup_job(app):
+    """
+    Daily job to remove stale vulnerability matches.
+
+    Throughout the day, CPE data is updated by NVD (2h), EUVD (6h), and
+    vendor advisory syncs. These updates may narrow affected version ranges,
+    making some existing matches invalid. This job runs cleanup_invalid_matches()
+    on the full match table to remove those stale false positives.
+
+    Runs at 01:30 AM — before the 2 AM snapshot so trend data is accurate.
+    """
+    with app.app_context():
+        try:
+            from app.filters import cleanup_invalid_matches
+
+            removed = cleanup_invalid_matches()
+            if removed > 0:
+                logger.info(f"Daily stale match cleanup: removed {removed} invalid matches")
+            else:
+                logger.debug("Daily stale match cleanup: no stale matches found")
+        except Exception as e:
+            logger.error(f"Daily stale match cleanup failed: {str(e)}", exc_info=True)
 
 
 def data_retention_cleanup_job(app):

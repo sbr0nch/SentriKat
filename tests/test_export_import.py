@@ -8,6 +8,7 @@ import io
 import json
 import csv
 import sys
+import pytest
 from types import ModuleType
 from unittest.mock import patch, MagicMock
 from datetime import datetime, date, timedelta
@@ -464,6 +465,14 @@ class TestAuditLogExport:
 # PDF Report Export Tests
 # ============================================================================
 
+_reportlab_available = True
+try:
+    import reportlab  # noqa: F401
+except ImportError:
+    _reportlab_available = False
+
+
+@pytest.mark.skipif(not _reportlab_available, reason="reportlab not installed")
 class TestPdfExport:
     """Tests for GET /api/reports/export (PDF)."""
 

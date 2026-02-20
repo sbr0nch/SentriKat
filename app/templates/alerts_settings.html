@@ -306,10 +306,19 @@ const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || 
 let orgsData = [];
 
 function showToast(msg, type) {
-    if (typeof showNotification === 'function') {
-        showNotification(msg, type);
+    if (window.SK && SK.Toast) {
+        SK.Toast.show(msg, type, 5000);
+    } else if (typeof window.showToast === 'function' && window.showToast !== showToast) {
+        window.showToast(msg, type);
     } else {
-        alert(msg);
+        // Styled fallback if core JS not loaded
+        const container = document.getElementById('toast-container') || document.body;
+        const div = document.createElement('div');
+        div.className = `alert alert-${type === 'danger' ? 'danger' : type === 'success' ? 'success' : 'info'} alert-dismissible fade show position-fixed`;
+        div.style.cssText = 'top:20px;right:20px;z-index:9999;min-width:300px;';
+        div.innerHTML = `${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        container.appendChild(div);
+        setTimeout(() => div.remove(), 5000);
     }
 }
 

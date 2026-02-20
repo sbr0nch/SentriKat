@@ -385,12 +385,13 @@
                                 <th style="cursor: pointer;" onclick="sortImportQueue('source')">
                                     Source <span id="importQueueSortSource"></span>
                                 </th>
+                                <th>Reported By</th>
                                 <th style="width: 120px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="importQueueTable">
                             <tr>
-                                <td colspan="7" class="text-center py-4 text-muted">
+                                <td colspan="8" class="text-center py-4 text-muted">
                                     <i class="bi bi-inbox text-primary" style="font-size: 2rem;"></i>
                                     <p class="mb-0 mt-2">Click to load import queue...</p>
                                 </td>
@@ -1864,12 +1865,22 @@
 
         tbody.innerHTML = catalog.map(service => {
             const isChecked = selectedCatalogItems.has(service.id);
+            // typical_versions may be an array (from enriched API) or JSON string (legacy)
             let versions = [];
             try {
-                versions = service.typical_versions ? JSON.parse(service.typical_versions) : [];
+                if (Array.isArray(service.typical_versions)) {
+                    versions = service.typical_versions;
+                } else if (service.typical_versions) {
+                    versions = JSON.parse(service.typical_versions);
+                }
             } catch (e) {
                 versions = [];
             }
+
+            // Show version source indicator
+            const versionSourceBadge = service.versions_source === 'observed'
+                ? '<span class="badge bg-success ms-1" style="font-size:0.6rem" title="Versions detected by agents in your environment">Live</span>'
+                : '';
 
             // Build version dropdown options
             const selectedVersion = selectedVersions[service.id] || (versions.length > 0 ? versions[0] : '');
@@ -1889,12 +1900,15 @@
                     <td class="fw-semibold">${escapeHtml(service.product_name)}</td>
                     <td>${escapeHtml(service.vendor)}</td>
                     <td onclick="event.stopPropagation();">
-                        <select class="form-select form-select-sm version-select"
-                                data-catalog-id="${service.id}"
-                                onchange="updateSelectedVersion(${service.id}, this.value)"
-                                style="min-width: 100px;">
-                            ${versionOptions}
-                        </select>
+                        <div class="d-flex align-items-center gap-1">
+                            <select class="form-select form-select-sm version-select"
+                                    data-catalog-id="${service.id}"
+                                    onchange="updateSelectedVersion(${service.id}, this.value)"
+                                    style="min-width: 100px;">
+                                ${versionOptions}
+                            </select>
+                            ${versionSourceBadge}
+                        </div>
                     </td>
                     <td><small class="text-muted">${escapeHtml(service.category || '')}</small></td>
                 </tr>
@@ -2001,7 +2015,11 @@
                     // Get selected version for this catalog item
                     let versions = [];
                     try {
-                        versions = service.typical_versions ? JSON.parse(service.typical_versions) : [];
+                        if (Array.isArray(service.typical_versions)) {
+                            versions = service.typical_versions;
+                        } else if (service.typical_versions) {
+                            versions = JSON.parse(service.typical_versions);
+                        }
                     } catch (e) {
                         versions = [];
                     }
@@ -4387,7 +4405,7 @@
         if (!tbody) return;
 
         const search = document.getElementById('exclusionSearch')?.value?.trim() || '';
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>';
 
         try {
             const params = new URLSearchParams();
@@ -4398,7 +4416,7 @@
             exclusionsData = data.exclusions || [];
             renderExclusions();
         } catch (error) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i><p class="mb-0 mt-2">Error: ${escapeHtml(error.message)}</p></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i><p class="mb-0 mt-2">Error: ${escapeHtml(error.message)}</p></td></tr>`;
         }
     }
 
@@ -4545,7 +4563,7 @@
         if (!tbody) return;
 
         if (importQueueData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="bi bi-inbox text-success" style="font-size: 2rem;"></i><p class="mb-0 mt-2">No items in queue</p></td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted"><i class="bi bi-inbox text-success" style="font-size: 2rem;"></i><p class="mb-0 mt-2">No items in queue</p></td></tr>';
             if (paginationContainer) paginationContainer.innerHTML = '';
             return;
         }
@@ -4590,6 +4608,12 @@
                     <td>${item.status === 'pending' ? `<select class="form-select form-select-sm" style="width: 140px;" onchange="updateQueueItemOrg(${item.id}, this.value)"><option value="">Select org...</option>${importQueueOrganizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}</select>` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}</td>
                     <td><span class="badge bg-${getCriticalityClass(item.criticality)}">${escapeHtml(item.criticality || 'medium')}</span></td>
                     <td><small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small></td>
+                    <td>
+                        ${item.hostname ? `<div class="small"><i class="bi bi-pc-display me-1"></i>${escapeHtml(item.hostname)}</div>` : ''}
+                        ${item.agent_name ? `<div class="small text-muted"><i class="bi bi-key me-1"></i>${escapeHtml(item.agent_name)}</div>` : ''}
+                        ${item.key_type ? `<span class="badge bg-secondary-subtle text-secondary" style="font-size: .65em;">${escapeHtml(item.key_type)}</span>` : ''}
+                        ${!item.hostname && !item.agent_name ? '<small class="text-muted">-</small>' : ''}
+                    </td>
                     <td>${item.status === 'pending' ? `<button class="btn btn-success btn-sm me-1" onclick="approveQueueItem(${item.id})" title="Approve"><i class="bi bi-check"></i></button><button class="btn btn-outline-danger btn-sm" onclick="rejectQueueItem(${item.id})" title="Reject"><i class="bi bi-x"></i></button>` : `<span class="badge bg-${item.status === 'approved' ? 'success' : 'secondary'}">${item.status}</span>`}</td>
                 </tr>`;
         }).join('');
@@ -4617,7 +4641,7 @@
         selectedQueueItems.clear();
         updateQueueBulkButtons();
 
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>';
 
         try {
             if (importQueueOrganizations.length === 0) await loadImportQueueOrgs();
@@ -4632,7 +4656,7 @@
             renderImportQueue();
             loadImportQueueCount();
         } catch (error) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i><p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i><p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p></td></tr>`;
         }
     }
 
