@@ -23,9 +23,10 @@ except ImportError:
     LDAPSyncEngine = None
 
 try:
-    from app.models import VulnerabilitySnapshot
+    from app.models import VulnerabilitySnapshot, SystemSettings
 except ImportError:
     VulnerabilitySnapshot = None
+    SystemSettings = None
 
 try:
     from app.vendor_advisories import sync_vendor_advisories
@@ -41,6 +42,34 @@ try:
     from app.health_checks import run_all_health_checks
 except ImportError:
     run_all_health_checks = None
+
+try:
+    from app.epss_sync import sync_epss_scores
+except ImportError:
+    sync_epss_scores = None
+
+try:
+    from app.cpe_dictionary import build_cpe_dictionary
+except ImportError:
+    build_cpe_dictionary = None
+
+try:
+    from app.cpe_mapping import batch_apply_cpe_mappings, cleanup_bad_auto_mappings
+except ImportError:
+    batch_apply_cpe_mappings = None
+    cleanup_bad_auto_mappings = None
+
+try:
+    from app.cisa_sync import enrich_with_euvd_exploited, sync_nvd_recent_cves, reenrich_fallback_cvss
+except ImportError:
+    enrich_with_euvd_exploited = None
+    sync_nvd_recent_cves = None
+    reenrich_fallback_cvss = None
+
+try:
+    from app.kb_sync import kb_sync
+except ImportError:
+    kb_sync = None
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +103,6 @@ _app = None
 def get_critical_email_settings(app):
     """Get critical email settings from database"""
     with app.app_context():
-        from app.models import SystemSettings
-
         enabled_setting = SystemSettings.query.filter_by(key='critical_email_enabled').first()
         time_setting = SystemSettings.query.filter_by(key='critical_email_time').first()
 
@@ -358,7 +385,6 @@ def cisa_sync_job(app):
 
             # Also sync EPSS scores after CISA KEV sync
             try:
-                from app.epss_sync import sync_epss_scores
                 logger.info("Syncing EPSS scores...")
                 updated, errors, message = sync_epss_scores(force=False)
                 logger.info(f"EPSS sync completed: {message}")
@@ -367,7 +393,6 @@ def cisa_sync_job(app):
 
             # Rebuild local CPE dictionary from updated vulnerability data
             try:
-                from app.cpe_dictionary import build_cpe_dictionary
                 logger.info("Rebuilding local CPE dictionary...")
                 dict_stats = build_cpe_dictionary()
                 logger.info(
@@ -379,7 +404,6 @@ def cisa_sync_job(app):
 
             # Auto-remap unmapped products after dictionary rebuild
             try:
-                from app.cpe_mapping import batch_apply_cpe_mappings
                 updated, total_unmapped = batch_apply_cpe_mappings(
                     commit=True, use_nvd=False, max_nvd_lookups=0
                 )
@@ -390,7 +414,6 @@ def cisa_sync_job(app):
 
             # Clean up any bad auto-learned CPE mappings
             try:
-                from app.cpe_mapping import cleanup_bad_auto_mappings
                 removed = cleanup_bad_auto_mappings()
                 if removed > 0:
                     logger.info(f"Cleaned {removed} bad auto_nvd CPE mappings")
@@ -501,7 +524,7 @@ def euvd_sync_job(app):
     """
     with app.app_context():
         try:
-            from app.cisa_sync import enrich_with_euvd_exploited, send_alerts_for_new_matches
+            from app.cisa_sync import send_alerts_for_new_matches
             from app.filters import rematch_all_products
 
             sync_start = datetime.utcnow()
@@ -544,7 +567,7 @@ def nvd_cve_sync_job(app):
     """
     with app.app_context():
         try:
-            from app.cisa_sync import sync_nvd_recent_cves, send_alerts_for_new_matches
+            from app.cisa_sync import send_alerts_for_new_matches
             from app.filters import rematch_all_products
 
             sync_start = datetime.utcnow()
@@ -587,8 +610,6 @@ def cvss_reenrich_job(app):
     """
     with app.app_context():
         try:
-            from app.cisa_sync import reenrich_fallback_cvss
-
             upgraded, checked = reenrich_fallback_cvss(limit=50)
             if checked > 0:
                 logger.info(
@@ -631,7 +652,7 @@ def critical_cve_reminder_job(app):
     """Job to send daily reminder emails for unacknowledged critical CVEs"""
     with app.app_context():
         try:
-            from app.models import Organization, VulnerabilityMatch, Product, SystemSettings
+            from app.models import Organization, VulnerabilityMatch, Product
             from app.email_alerts import EmailAlertManager
             from datetime import datetime, timedelta
 
@@ -718,7 +739,7 @@ def data_retention_cleanup_job(app):
     """Job to clean up old data based on retention settings"""
     with app.app_context():
         try:
-            from app.models import SystemSettings, SyncLog
+            from app.models import SyncLog
             from app.ldap_models import LDAPAuditLog, LDAPSyncLog
             from app import db
             from datetime import datetime, timedelta
@@ -1005,8 +1026,6 @@ def kb_sync_job(app):
     """Job to sync CPE mappings with the SentriKat Knowledge Base."""
     with app.app_context():
         try:
-            from app.kb_sync import kb_sync
-
             logger.info("Starting KB sync...")
             result = kb_sync()
             if result.get('success'):
@@ -1185,7 +1204,6 @@ def unmapped_cpe_retry_job(app):
     with app.app_context():
         try:
             from app.models import Product
-            from app.cpe_mapping import batch_apply_cpe_mappings
 
             unmapped_count = Product.query.filter(
                 Product.active == True,

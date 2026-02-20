@@ -2956,7 +2956,7 @@ class ContainerVulnerability(db.Model):
     __tablename__ = 'container_vulnerabilities'
 
     id = db.Column(db.Integer, primary_key=True)
-    container_image_id = db.Column(db.Integer, db.ForeignKey('container_images.id'), nullable=False, index=True)
+    container_image_id = db.Column(db.Integer, db.ForeignKey('container_images.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Vulnerability identification
     vuln_id = db.Column(db.String(50), nullable=False, index=True)  # CVE-2024-1234 or GHSA-xxx
