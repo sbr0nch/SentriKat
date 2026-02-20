@@ -2471,6 +2471,11 @@
 
     // Load grouped vulnerabilities from API
     async function loadGroupedVulnerabilities() {
+        // Container filter uses a different data source
+        if (dashboardSourceFilter === 'containers') {
+            return loadContainerVulnerabilities();
+        }
+
         showLoading();
         const container = document.getElementById('vulnerabilitiesContainer');
         selectedVulns.clear();
@@ -2500,9 +2505,7 @@
             if (vendor) params.append('vendor', vendor);
             if (product) params.append('product', product);
             if (platform) params.append('platform', platform);
-            if (dashboardSourceFilter === 'containers') {
-                params.append('source_type', 'container');
-            } else if (dashboardSourceFilter === 'dependencies') {
+            if (dashboardSourceFilter === 'dependencies') {
                 params.append('source_type', 'code_library');
                 params.append('include_extensions', 'true');
             } else if (dashboardSourceFilter) {
@@ -2532,6 +2535,89 @@
                     <i class="bi bi-exclamation-triangle me-2"></i>Error loading vulnerabilities: ${escapeHtml(error.message)}
                 </div>
             `;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Load container vulnerabilities from the dedicated container API
+    async function loadContainerVulnerabilities() {
+        showLoading();
+        const container = document.getElementById('vulnerabilitiesContainer');
+        selectedVulns.clear();
+        updateBulkActions();
+
+        try {
+            const search = document.getElementById('filterCVE').value;
+            const severity = document.getElementById('filterSeverity').value;
+            const params = new URLSearchParams();
+            if (search) params.append('search', search);
+            if (severity) params.append('severity', severity);
+
+            const response = await fetchWithRetry(`/api/containers?${params}`, {}, 3, 1000);
+            if (!response.ok) throw new Error(`Server error: ${response.status}`);
+            const data = await response.json();
+            const images = data.images || [];
+
+            // Update count
+            const totalVulns = images.reduce((sum, img) => sum + (img.total_vulnerabilities || 0), 0);
+            document.getElementById('vulnCount').textContent = totalVulns;
+
+            if (images.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-5">
+                        <i class="bi bi-box text-muted" style="font-size: 4rem;"></i>
+                        <h4 class="mt-3">No Container Images</h4>
+                        <p class="text-muted">No container images found with vulnerabilities.</p>
+                    </div>`;
+                ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+                return;
+            }
+
+            container.innerHTML = images.map(img => {
+                const critBadge = img.critical_count ? `<span class="badge bg-danger me-1">${img.critical_count} Critical</span>` : '';
+                const highBadge = img.high_count ? `<span class="badge bg-warning text-dark me-1">${img.high_count} High</span>` : '';
+                const medBadge = img.medium_count ? `<span class="badge bg-info me-1">${img.medium_count} Medium</span>` : '';
+                const lowBadge = img.low_count ? `<span class="badge bg-secondary me-1">${img.low_count} Low</span>` : '';
+                const age = img.last_scanned ? SK.Time.relative(img.last_scanned) : 'never';
+
+                return `
+                    <div class="card mb-2 border-start border-4 border-${img.critical_count ? 'danger' : img.high_count ? 'warning' : 'info'}">
+                        <div class="card-body py-2 px-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0">
+                                        <i class="bi bi-box me-1 text-muted"></i>
+                                        <a href="/containers" class="text-decoration-none">${escapeHtml(img.image_name || 'Unknown')}</a>
+                                        <span class="text-muted fw-normal">:${escapeHtml(img.image_tag || 'latest')}</span>
+                                    </h6>
+                                    <div class="mt-1">
+                                        ${critBadge}${highBadge}${medBadge}${lowBadge}
+                                        <small class="text-muted ms-2">${img.total_vulnerabilities || 0} total vulns</small>
+                                    </div>
+                                </div>
+                                <div class="text-end">
+                                    <small class="text-muted">Scanned ${age}</small>
+                                    ${img.asset_hostname ? `<br><small class="text-muted"><i class="bi bi-pc-display me-1"></i>${escapeHtml(img.asset_hostname)}</small>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+
+            // Hide normal pagination for container view
+            ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+        } catch (error) {
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading containers: ${escapeHtml(error.message)}
+                </div>`;
         } finally {
             hideLoading();
         }

@@ -493,7 +493,7 @@ def _ip_in_allowlist(ip_str, allowed_list):
         return False
 
 
-def _queue_to_import_queue(organization_id, vendor, product_name, version, hostname=None):
+def _queue_to_import_queue(organization_id, vendor, product_name, version, hostname=None, agent_name=None, key_type=None):
     """
     Queue a product to ImportQueue for review instead of directly adding to Products.
     Used when auto_approve is False on the API key.
@@ -549,7 +549,13 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
             detected_version=version,
             status='pending',
             criticality='medium',
-            source_data=json.dumps({'hostname': hostname, 'source': 'push_agent'})
+            source_data=json.dumps({
+                'hostname': hostname,
+                'source': 'push_agent',
+                'agent_name': agent_name,
+                'key_type': key_type,
+                'is_new': True,
+            })
         )
         db.session.add(queue_item)
         logger.info(f"Queued product for review: {vendor} {product_name}")
@@ -1360,7 +1366,12 @@ def process_inventory_job(job):
                     # Check auto_approve: if False, queue or auto-link instead of creating
                     if not auto_approve:
                         # Queue to import queue for the primary org
-                        result = _queue_to_import_queue(organization.id, vendor, product_name, version, asset.hostname)
+                        result = _queue_to_import_queue(
+                            organization.id, vendor, product_name, version,
+                            hostname=asset.hostname,
+                            agent_name=api_key.name if api_key else None,
+                            key_type=job_key_type,
+                        )
                         if result == 'queued':
                             products_queued += 1
                         elif result == 'auto_linked':

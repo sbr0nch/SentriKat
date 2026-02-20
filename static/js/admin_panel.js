@@ -5471,7 +5471,7 @@ async function loadAuditLogs(page = 1, search = '') {
             if (logs.length === 0) {
                 tableBody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center py-4 text-muted">
+                        <td colspan="8" class="text-center py-4 text-muted">
                             No audit logs found
                         </td>
                     </tr>
@@ -7618,7 +7618,7 @@ function renderImportQueue() {
     if (importQueueData.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="text-center py-4 text-muted">
+                <td colspan="8" class="text-center py-4 text-muted">
                     <i class="bi bi-inbox text-success" style="font-size: 2rem;"></i>
                     <p class="mb-0 mt-2">No items in queue</p>
                 </td>
@@ -7705,6 +7705,12 @@ function renderImportQueue() {
                 </td>
                 <td>
                     <small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small>
+                </td>
+                <td>
+                    ${item.hostname ? `<div class="small"><i class="bi bi-pc-display me-1"></i>${escapeHtml(item.hostname)}</div>` : ''}
+                    ${item.agent_name ? `<div class="small text-muted"><i class="bi bi-key me-1"></i>${escapeHtml(item.agent_name)}</div>` : ''}
+                    ${item.key_type ? `<span class="badge bg-secondary-subtle text-secondary" style="font-size: .65em;">${escapeHtml(item.key_type)}</span>` : ''}
+                    ${!item.hostname && !item.agent_name ? '<small class="text-muted">-</small>' : ''}
                 </td>
                 <td>
                     ${item.status === 'pending' ? `

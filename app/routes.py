@@ -521,10 +521,25 @@ def system_notifications():
         # 7. Health check warnings/criticals - admin only
         if is_admin:
             try:
-                from app.models import HealthCheckResult
-                health_issues = HealthCheckResult.query.filter(
-                    HealthCheckResult.status.in_(['critical', 'warning'])
+                from app.models import HealthCheckResult, SystemSettings
+
+                # Filter out disabled health checks so we don't show stale warnings
+                disabled_checks = set()
+                health_settings = SystemSettings.query.filter(
+                    SystemSettings.key.like('health_check_%_enabled'),
+                    SystemSettings.value == 'false'
                 ).all()
+                for s in health_settings:
+                    # Extract check name: "health_check_worker_thread_enabled" -> "worker_thread"
+                    name = s.key.replace('health_check_', '').replace('_enabled', '')
+                    disabled_checks.add(name)
+
+                health_issues = [
+                    h for h in HealthCheckResult.query.filter(
+                        HealthCheckResult.status.in_(['critical', 'warning'])
+                    ).all()
+                    if h.check_name not in disabled_checks
+                ]
 
                 critical_count = sum(1 for h in health_issues if h.status == 'critical')
                 warning_count = sum(1 for h in health_issues if h.status == 'warning')
