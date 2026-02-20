@@ -52,11 +52,16 @@ MAX_PATH_LENGTH = 500
 # Valid source types and ecosystems for inventory processing
 VALID_SOURCE_TYPES = frozenset({'os_package', 'extension', 'code_library', 'vscode_extension', 'browser_extension'})
 VALID_ECOSYSTEMS = frozenset({
-    'npm', 'pypi', 'maven', 'nuget', 'cargo', 'go', 'gem', 'composer',
+    'npm', 'pypi', 'python', 'maven', 'nuget', 'cargo', 'go', 'gem', 'composer',
     'vscode', 'chrome', 'firefox', 'edge', 'jetbrains',
     'apt', 'rpm', 'apk', 'pacman',
     'snap', 'flatpak', 'brew', 'port', 'chocolatey', 'winget',
 })
+
+# Normalize ecosystem aliases to canonical names
+ECOSYSTEM_ALIASES = {
+    'python': 'pypi',
+}
 
 
 def _safe_bool(value):
@@ -1333,6 +1338,8 @@ def process_inventory_job(job):
                     p_source_type = 'os_package'
                 if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
                     p_ecosystem = None  # Reject unknown ecosystems
+                if p_ecosystem and p_ecosystem in ECOSYSTEM_ALIASES:
+                    p_ecosystem = ECOSYSTEM_ALIASES[p_ecosystem]
 
                 # Normalize legacy source types to new unified 'extension'
                 if p_source_type in ('vscode_extension', 'browser_extension'):
@@ -1904,6 +1911,8 @@ def report_inventory():
                     p_source_type = 'os_package'
                 if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
                     p_ecosystem = None  # Reject unknown ecosystems
+                if p_ecosystem and p_ecosystem in ECOSYSTEM_ALIASES:
+                    p_ecosystem = ECOSYSTEM_ALIASES[p_ecosystem]
 
                 # Normalize legacy source types to new unified 'extension'
                 if p_source_type in ('vscode_extension', 'browser_extension'):
