@@ -1,52 +1,153 @@
 {% extends 'base.html' %}
 
-{% block title %}Alert Rules - SentriKat{% endblock %}
+{% block title %}Alert Management - SentriKat{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item active" aria-current="page"><i class="bi bi-bell me-1"></i>Alert Rules</li>
+<li class="breadcrumb-item active" aria-current="page"><i class="bi bi-bell me-1"></i>Alert Management</li>
 {% endblock %}
 
 {% block extra_css %}
 <style>
-    .org-override-row { font-size: 0.85rem; }
-    .org-override-row .badge { font-size: 0.7rem; }
-    .override-indicator {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        margin-right: 4px;
+    .org-alert-row { font-size: 0.85rem; }
+    .org-alert-row td { vertical-align: middle; }
+    .org-alert-row .form-check-input { cursor: pointer; }
+    .org-alert-row .form-check-input:disabled { cursor: not-allowed; }
+
+    .delivery-badges .badge {
+        font-size: 0.7rem;
+        font-weight: 500;
+        margin-right: 2px;
     }
-    .override-indicator.overridden { background: var(--warning-color); }
-    .override-indicator.inherited { background: var(--gray-300); }
+    .delivery-badges .badge i { font-size: 0.65rem; }
+
+    .channel-card {
+        border-radius: 8px;
+        padding: 16px;
+        border: 1px solid var(--gray-200);
+        background: var(--gray-50, #f9fafb);
+        transition: box-shadow 0.15s;
+    }
+    .channel-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    [data-theme="dark"] .channel-card {
+        background: var(--gray-800, #1f2937);
+        border-color: var(--gray-700, #374151);
+    }
+
+    .channel-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .channel-status.active { color: var(--success-color, #16a34a); }
+    .channel-status.inactive { color: var(--gray-400, #9ca3af); }
+
+    .org-actions-cell { white-space: nowrap; }
+    .org-actions-cell .btn { padding: 2px 6px; font-size: 0.75rem; }
+
+    .alert-mode-select {
+        font-size: 0.8rem;
+        padding: 2px 8px;
+        height: auto;
+        min-width: 120px;
+    }
+
+    /* Saving indicator */
+    .saving-indicator {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid transparent;
+        border-top-color: var(--primary-color, #1e40af);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        margin-left: 4px;
+        vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .save-success {
+        color: var(--success-color, #16a34a);
+        font-size: 0.8rem;
+        margin-left: 4px;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h2 class="h4 fw-bold mb-1"><i class="bi bi-bell me-2"></i>Alert Rules</h2>
-        <p class="text-muted mb-0 small">Configure which vulnerability events trigger alerts across all organizations</p>
+        <h2 class="h4 fw-bold mb-1"><i class="bi bi-bell me-2"></i>Alert Management</h2>
+        <p class="text-muted mb-0 small">Central hub for alert rules, delivery channels, and per-organization configuration</p>
     </div>
 </div>
 
-<!-- Alert Rules Card -->
+<!-- Delivery Channels Overview -->
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="channel-card">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <div>
+                    <i class="bi bi-envelope-fill text-primary me-1"></i>
+                    <strong class="small">Email (SMTP)</strong>
+                </div>
+                <span class="channel-status" id="smtpStatus">
+                    <span class="spinner-border spinner-border-sm" style="width:10px;height:10px;"></span>
+                </span>
+            </div>
+            <div class="small text-muted" id="smtpDetail">Loading...</div>
+            <a href="/admin-panel#settings:email" class="small text-decoration-none d-block mt-2"><i class="bi bi-gear me-1"></i>Configure SMTP</a>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="channel-card">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <div>
+                    <i class="bi bi-slack text-primary me-1"></i>
+                    <strong class="small">Slack</strong>
+                </div>
+                <span class="channel-status" id="slackStatus">
+                    <span class="spinner-border spinner-border-sm" style="width:10px;height:10px;"></span>
+                </span>
+            </div>
+            <div class="small text-muted" id="slackDetail">Loading...</div>
+            <a href="/admin-panel#settings:notifications" class="small text-decoration-none d-block mt-2"><i class="bi bi-gear me-1"></i>Configure Slack</a>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="channel-card">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <div>
+                    <i class="bi bi-broadcast text-primary me-1"></i>
+                    <strong class="small">Webhooks</strong>
+                </div>
+                <span class="channel-status" id="webhookStatus">
+                    <span class="spinner-border spinner-border-sm" style="width:10px;height:10px;"></span>
+                </span>
+            </div>
+            <div class="small text-muted" id="webhookDetail">Loading...</div>
+            <a href="/admin-panel#settings:notifications" class="small text-decoration-none d-block mt-2"><i class="bi bi-gear me-1"></i>Configure Webhooks</a>
+        </div>
+    </div>
+</div>
+
+<!-- Global Default Rules Card -->
 <div class="card mb-4">
-    <div class="card-header">
-        <i class="bi bi-funnel me-2"></i>Global Alert Rules
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-globe me-2"></i>Global Default Rules</span>
+        <span class="badge bg-secondary small">Defaults for new organizations</span>
     </div>
     <div class="card-body">
-        <div class="alert alert-info">
-            <i class="bi bi-info-circle me-2"></i>
-            These rules apply to <strong>all organizations</strong> by default. Per-organization overrides can be configured in
-            <a href="/admin-panel#organizations">Admin Panel &rarr; Organizations</a>.
-            Delivery channels (SMTP, Slack, Teams, webhooks) are configured in
-            <a href="/admin-panel#settings:email">Email &amp; Alerts settings</a>.
-        </div>
+        <p class="text-muted small mb-3">
+            These rules set the <strong>defaults for newly created organizations</strong>.
+            Existing organizations can be customized individually in the table below.
+            Active exploitation alerts (0-Day / CISA KEV) are always enabled and cannot be turned off.
+        </p>
 
         <div class="row g-3">
             <div class="col-md-6">
-                <div class="form-check mb-3">
+                <div class="form-check mb-2">
                     <input type="checkbox" class="form-check-input" id="ruleCritical" checked>
                     <label class="form-check-label" for="ruleCritical">
                         <strong><span class="badge bg-danger me-1" style="font-size: 0.65rem;">CRITICAL</span> Critical Severity CVEs</strong>
@@ -56,7 +157,7 @@
             </div>
 
             <div class="col-md-6">
-                <div class="form-check mb-3">
+                <div class="form-check mb-2">
                     <input type="checkbox" class="form-check-input" id="ruleHigh">
                     <label class="form-check-label" for="ruleHigh">
                         <strong><span class="badge me-1" style="font-size: 0.65rem; background: var(--high-color);">HIGH</span> High Severity CVEs</strong>
@@ -66,7 +167,7 @@
             </div>
 
             <div class="col-md-6">
-                <div class="form-check mb-3">
+                <div class="form-check mb-2">
                     <input type="checkbox" class="form-check-input" id="ruleNewCve" checked>
                     <label class="form-check-label" for="ruleNewCve">
                         <strong><i class="bi bi-plus-circle text-info me-1"></i> New CVE Discovered</strong>
@@ -76,17 +177,17 @@
             </div>
 
             <div class="col-md-6">
-                <div class="form-check mb-3">
+                <div class="form-check mb-2">
                     <input type="checkbox" class="form-check-input" id="ruleRansomware" checked>
                     <label class="form-check-label" for="ruleRansomware">
-                        <strong><i class="bi bi-shield-exclamation text-danger me-1"></i> Known Ransomware Exploitation</strong>
+                        <strong><i class="bi bi-shield-exclamation text-danger me-1"></i> Known Ransomware</strong>
                     </label>
                     <small class="form-text text-muted d-block">CVE flagged as used in ransomware campaigns</small>
                 </div>
             </div>
 
             <div class="col-md-6">
-                <div class="form-check mb-3">
+                <div class="form-check mb-2">
                     <input type="checkbox" class="form-check-input" checked disabled>
                     <label class="form-check-label text-muted" for="ruleExploited">
                         <strong><i class="bi bi-exclamation-triangle-fill text-danger me-1"></i> Active Exploitation (0-Day)</strong>
@@ -95,64 +196,118 @@
                 </div>
             </div>
 
-            <div class="col-12 mt-3">
-                <hr>
-                <h6 class="text-muted"><i class="bi bi-filter me-1"></i>Confidence Filtering</h6>
-            </div>
-
-            <div class="col-md-12">
-                <div class="form-check form-switch">
+            <div class="col-md-6">
+                <div class="form-check form-switch mb-2">
                     <input type="checkbox" class="form-check-input" id="ruleIncludeLowConfidence">
-                    <label class="form-check-label fw-semibold" for="ruleIncludeLowConfidence">Include low-confidence matches</label>
+                    <label class="form-check-label" for="ruleIncludeLowConfidence">
+                        <strong><i class="bi bi-filter me-1"></i> Include low-confidence matches</strong>
+                    </label>
+                    <small class="form-text text-muted d-block">Keyword-only detection, may produce false positives</small>
                 </div>
-                <small class="form-text text-muted">Low-confidence matches use keyword-only detection and may produce false positives. By default, only medium and high confidence matches (CPE or vendor+product) trigger alerts.</small>
             </div>
 
             <div class="col-md-12">
-                <hr>
-                <button type="button" class="btn btn-primary" onclick="saveAlertRules()">
-                    <i class="bi bi-check-circle me-1"></i>Save Alert Rules
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveGlobalDefaults()">
+                    <i class="bi bi-check-circle me-1"></i>Save Global Defaults
                 </button>
+                <span id="globalSaveStatus"></span>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Organization Overrides Card -->
+<!-- Per-Organization Alert Configuration -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-building me-2"></i>Organization Overrides</span>
-        <a href="/admin-panel#organizations" class="btn btn-outline-primary btn-sm">
-            <i class="bi bi-pencil me-1"></i>Manage
-        </a>
+        <span><i class="bi bi-building me-2"></i>Per-Organization Alert Configuration</span>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm me-1" onclick="collapseAllDelivery()" title="Collapse all">
+                <i class="bi bi-chevron-contract"></i>
+            </button>
+            <button class="btn btn-outline-primary btn-sm" onclick="loadOrgs()" title="Refresh">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
     </div>
-    <div class="card-body">
-        <p class="text-muted small mb-3">
-            Summary of per-organization alert settings.
-            <span class="override-indicator overridden"></span><strong>Yellow</strong> = custom override,
-            <span class="override-indicator inherited"></span><strong>gray</strong> = using global default.
-            Edit overrides in <a href="/admin-panel#organizations">Admin Panel &rarr; Organizations</a>.
-        </p>
-
+    <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover mb-0" id="orgOverridesTable">
+            <table class="table table-hover mb-0" id="orgAlertsTable">
                 <thead>
                     <tr>
-                        <th class="small fw-semibold">Organization</th>
-                        <th class="small fw-semibold text-center">Critical</th>
-                        <th class="small fw-semibold text-center">High</th>
-                        <th class="small fw-semibold text-center">New CVE</th>
-                        <th class="small fw-semibold text-center">Ransomware</th>
-                        <th class="small fw-semibold text-center">Alert Mode</th>
-                        <th class="small fw-semibold text-center">SMTP</th>
-                        <th class="small fw-semibold text-center">Webhook</th>
-                        <th class="small fw-semibold text-center">Recipients</th>
+                        <th class="small fw-semibold ps-3" style="min-width:180px;">Organization</th>
+                        <th class="small fw-semibold text-center" style="width:60px;" title="Alert on Critical severity CVEs (CVSS 9.0-10.0)">Critical</th>
+                        <th class="small fw-semibold text-center" style="width:60px;" title="Alert on High severity CVEs (CVSS 7.0-8.9)">High</th>
+                        <th class="small fw-semibold text-center" style="width:60px;" title="Alert on newly discovered CVEs">New CVE</th>
+                        <th class="small fw-semibold text-center" style="width:75px;" title="Alert on CVEs used in ransomware">Ransomware</th>
+                        <th class="small fw-semibold text-center" style="min-width:130px;">Alert Mode</th>
+                        <th class="small fw-semibold" style="min-width:180px;">Delivery</th>
+                        <th class="small fw-semibold text-center" style="width:100px;">Actions</th>
                     </tr>
                 </thead>
-                <tbody id="orgOverridesBody">
-                    <tr><td colspan="9" class="text-center text-muted py-4"><i class="bi bi-hourglass-split me-1"></i>Loading...</td></tr>
+                <tbody id="orgAlertsBody">
+                    <tr><td colspan="8" class="text-center text-muted py-4"><i class="bi bi-hourglass-split me-1"></i>Loading organizations...</td></tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Delivery Edit Modal -->
+<div class="modal fade" id="deliveryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-send me-2"></i>Edit Delivery Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="deliveryOrgId">
+                <h6 class="text-muted mb-3" id="deliveryOrgName"></h6>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Notification Email Recipients</label>
+                    <textarea class="form-control" id="deliveryEmails" rows="3" placeholder="email1@company.com&#10;email2@company.com"></textarea>
+                    <small class="form-text text-muted">One email per line, or comma-separated. These receive CVE alerts, ransomware warnings, and reports.</small>
+                </div>
+
+                <hr>
+                <h6 class="text-muted mb-3"><i class="bi bi-broadcast me-1"></i>Organization Webhook</h6>
+
+                <div class="form-check form-switch mb-3">
+                    <input type="checkbox" class="form-check-input" id="deliveryWebhookEnabled">
+                    <label class="form-check-label fw-semibold" for="deliveryWebhookEnabled">Enable Webhook</label>
+                </div>
+
+                <div id="webhookFields">
+                    <div class="mb-3">
+                        <label class="form-label">Webhook URL</label>
+                        <input type="url" class="form-control" id="deliveryWebhookUrl" placeholder="https://hooks.slack.com/services/...">
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Platform Format</label>
+                            <select class="form-select" id="deliveryWebhookFormat">
+                                <option value="slack">Slack</option>
+                                <option value="rocketchat">RocketChat</option>
+                                <option value="discord">Discord</option>
+                                <option value="teams">Microsoft Teams</option>
+                                <option value="custom">Custom JSON</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Webhook Name</label>
+                            <input type="text" class="form-control" id="deliveryWebhookName" placeholder="Org Alerts">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveDeliverySettings()">
+                    <i class="bi bi-check-circle me-1"></i>Save Delivery
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -162,6 +317,7 @@
 {% block extra_js %}
 <script>
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+let orgsData = [];
 
 function showToast(msg, type) {
     if (typeof showNotification === 'function') {
@@ -169,106 +325,6 @@ function showToast(msg, type) {
     } else {
         alert(msg);
     }
-}
-
-// ========================================================
-// Load settings
-// ========================================================
-async function loadSettings() {
-    try {
-        const [notifResp, orgsResp] = await Promise.all([
-            fetch('/api/settings/notifications', { headers: { 'X-CSRFToken': csrfToken } }),
-            fetch('/api/settings/alerts/org-overrides', { headers: { 'X-CSRFToken': csrfToken } })
-        ]);
-
-        if (notifResp.ok) {
-            const n = await notifResp.json();
-            document.getElementById('ruleCritical').checked = n.notify_on_critical !== false;
-            document.getElementById('ruleHigh').checked = n.notify_on_high === true;
-            document.getElementById('ruleNewCve').checked = n.notify_on_new_cve !== false;
-            document.getElementById('ruleRansomware').checked = n.notify_on_ransomware !== false;
-            document.getElementById('ruleIncludeLowConfidence').checked = n.notify_on_low_confidence === true;
-        }
-
-        if (orgsResp.ok) {
-            renderOrgOverrides(await orgsResp.json());
-        }
-    } catch (err) {
-        console.error('Failed to load alert settings:', err);
-        showToast('Failed to load settings', 'danger');
-    }
-}
-
-// ========================================================
-// Save alert rules
-// ========================================================
-async function saveAlertRules() {
-    try {
-        const payload = {
-            notify_on_critical: document.getElementById('ruleCritical').checked,
-            notify_on_high: document.getElementById('ruleHigh').checked,
-            notify_on_new_cve: document.getElementById('ruleNewCve').checked,
-            notify_on_ransomware: document.getElementById('ruleRansomware').checked,
-            notify_on_low_confidence: document.getElementById('ruleIncludeLowConfidence').checked
-        };
-
-        const resp = await fetch('/api/settings/notifications', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-            body: JSON.stringify(payload)
-        });
-
-        const result = await resp.json();
-        if (resp.ok && result.success) {
-            showToast('Alert rules saved', 'success');
-            loadSettings();
-        } else {
-            showToast(result.error || 'Failed to save', 'danger');
-        }
-    } catch (err) {
-        console.error('Save error:', err);
-        showToast('Failed to save alert rules', 'danger');
-    }
-}
-
-// ========================================================
-// Org overrides table
-// ========================================================
-function renderOrgOverrides(orgs) {
-    const tbody = document.getElementById('orgOverridesBody');
-    if (!orgs || orgs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No organizations found</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = orgs.map(org => {
-        const emailCount = org.notification_email_count || 0;
-        return `<tr class="org-override-row">
-            <td>
-                <strong>${escapeHtml(org.display_name || org.name)}</strong>
-                ${!org.active ? '<span class="badge bg-secondary ms-1">Inactive</span>' : ''}
-            </td>
-            <td class="text-center">${boolBadge(org.alert_on_critical, true)}</td>
-            <td class="text-center">${boolBadge(org.alert_on_high, false)}</td>
-            <td class="text-center">${boolBadge(org.alert_on_new_cve, true)}</td>
-            <td class="text-center">${boolBadge(org.alert_on_ransomware, true)}</td>
-            <td class="text-center">
-                ${org.alert_mode ? `<span class="override-indicator overridden"></span><span class="badge bg-warning text-dark">${escapeHtml(org.alert_mode)}</span>` : '<span class="override-indicator inherited"></span><span class="text-muted small">Global</span>'}
-            </td>
-            <td class="text-center">${org.has_smtp ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-dash text-muted"></i>'}</td>
-            <td class="text-center">${org.webhook_enabled ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-dash text-muted"></i>'}</td>
-            <td class="text-center"><span class="badge ${emailCount > 0 ? 'bg-primary' : 'bg-secondary'}">${emailCount}</span></td>
-        </tr>`;
-    }).join('');
-}
-
-function boolBadge(val, defaultVal) {
-    const isDefault = val === defaultVal || val === null || val === undefined;
-    const effective = val !== null && val !== undefined ? val : defaultVal;
-    const dot = isDefault ? '<span class="override-indicator inherited"></span>' : '<span class="override-indicator overridden"></span>';
-    return effective
-        ? dot + '<i class="bi bi-check-circle text-success"></i>'
-        : dot + '<i class="bi bi-x-circle text-muted"></i>';
 }
 
 function escapeHtml(str) {
@@ -279,8 +335,344 @@ function escapeHtml(str) {
 }
 
 // ========================================================
+// API helpers
+// ========================================================
+async function apiFetch(url, options = {}) {
+    const defaults = { headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken } };
+    const resp = await fetch(url, { ...defaults, ...options });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    return data;
+}
+
+// ========================================================
+// Load everything
+// ========================================================
+async function loadAll() {
+    await Promise.all([loadGlobalDefaults(), loadOrgs(), loadChannelStatus()]);
+}
+
+async function loadGlobalDefaults() {
+    try {
+        const n = await apiFetch('/api/settings/notifications');
+        document.getElementById('ruleCritical').checked = n.notify_on_critical !== false;
+        document.getElementById('ruleHigh').checked = n.notify_on_high === true;
+        document.getElementById('ruleNewCve').checked = n.notify_on_new_cve !== false;
+        document.getElementById('ruleRansomware').checked = n.notify_on_ransomware !== false;
+        document.getElementById('ruleIncludeLowConfidence').checked = n.notify_on_low_confidence === true;
+    } catch (err) {
+        console.error('Failed to load global defaults:', err);
+    }
+}
+
+async function loadOrgs() {
+    try {
+        orgsData = await apiFetch('/api/settings/alerts/org-overrides');
+        renderOrgsTable(orgsData);
+    } catch (err) {
+        console.error('Failed to load orgs:', err);
+        document.getElementById('orgAlertsBody').innerHTML =
+            '<tr><td colspan="8" class="text-center text-danger py-4"><i class="bi bi-exclamation-triangle me-1"></i>Failed to load organizations</td></tr>';
+    }
+}
+
+async function loadChannelStatus() {
+    try {
+        const settings = await apiFetch('/api/settings/notifications');
+
+        // SMTP status
+        const smtpHost = settings.smtp_host;
+        const smtpEl = document.getElementById('smtpStatus');
+        const smtpDetail = document.getElementById('smtpDetail');
+        if (smtpHost) {
+            smtpEl.className = 'channel-status active';
+            smtpEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Configured';
+            smtpDetail.textContent = `Global: ${smtpHost}`;
+        } else {
+            smtpEl.className = 'channel-status inactive';
+            smtpEl.innerHTML = '<i class="bi bi-dash-circle"></i> Not configured';
+            smtpDetail.textContent = 'No global SMTP. Orgs can set their own.';
+        }
+
+        // Slack status
+        const slackEl = document.getElementById('slackStatus');
+        const slackDetail = document.getElementById('slackDetail');
+        if (settings.slack_enabled) {
+            slackEl.className = 'channel-status active';
+            slackEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
+            slackDetail.textContent = 'Slack webhook configured';
+        } else {
+            slackEl.className = 'channel-status inactive';
+            slackEl.innerHTML = '<i class="bi bi-dash-circle"></i> Inactive';
+            slackDetail.textContent = 'Not configured';
+        }
+
+        // Webhook status (Teams + Generic)
+        const webhookEl = document.getElementById('webhookStatus');
+        const webhookDetailEl = document.getElementById('webhookDetail');
+        const parts = [];
+        if (settings.teams_enabled) parts.push('Teams');
+        if (settings.generic_webhook_enabled) parts.push(settings.generic_webhook_name || 'Generic');
+        if (parts.length > 0) {
+            webhookEl.className = 'channel-status active';
+            webhookEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
+            webhookDetailEl.textContent = parts.join(', ') + ' configured';
+        } else {
+            webhookEl.className = 'channel-status inactive';
+            webhookEl.innerHTML = '<i class="bi bi-dash-circle"></i> Inactive';
+            webhookDetailEl.textContent = 'No Teams/generic webhooks';
+        }
+    } catch (err) {
+        console.error('Failed to load channel status:', err);
+        ['smtpStatus', 'slackStatus', 'webhookStatus'].forEach(id => {
+            const el = document.getElementById(id);
+            el.className = 'channel-status inactive';
+            el.innerHTML = '<i class="bi bi-question-circle"></i>';
+        });
+    }
+}
+
+// ========================================================
+// Save global defaults
+// ========================================================
+async function saveGlobalDefaults() {
+    const statusEl = document.getElementById('globalSaveStatus');
+    statusEl.innerHTML = '<span class="saving-indicator"></span>';
+    try {
+        const payload = {
+            notify_on_critical: document.getElementById('ruleCritical').checked,
+            notify_on_high: document.getElementById('ruleHigh').checked,
+            notify_on_new_cve: document.getElementById('ruleNewCve').checked,
+            notify_on_ransomware: document.getElementById('ruleRansomware').checked,
+            notify_on_low_confidence: document.getElementById('ruleIncludeLowConfidence').checked
+        };
+        await apiFetch('/api/settings/notifications', { method: 'POST', body: JSON.stringify(payload) });
+        statusEl.innerHTML = '<span class="save-success"><i class="bi bi-check-circle me-1"></i>Saved</span>';
+        setTimeout(() => { statusEl.innerHTML = ''; }, 3000);
+    } catch (err) {
+        statusEl.innerHTML = '';
+        showToast('Failed to save global defaults: ' + err.message, 'danger');
+    }
+}
+
+// ========================================================
+// Org table rendering
+// ========================================================
+function renderOrgsTable(orgs) {
+    const tbody = document.getElementById('orgAlertsBody');
+    if (!orgs || orgs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No organizations found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = orgs.map(org => {
+        const emailCount = org.notification_email_count || 0;
+        const inactive = !org.active ? ' opacity-50' : '';
+
+        // Build delivery summary
+        let deliveryHtml = '<div class="delivery-badges">';
+        // Email
+        if (emailCount > 0) {
+            const emailTitle = (org.notification_emails || []).join(', ');
+            deliveryHtml += `<span class="badge bg-primary" title="${escapeHtml(emailTitle)}"><i class="bi bi-envelope me-1"></i>${emailCount} recipient${emailCount !== 1 ? 's' : ''}</span> `;
+        } else {
+            deliveryHtml += '<span class="badge bg-secondary" title="No email recipients configured"><i class="bi bi-envelope me-1"></i>No emails</span> ';
+        }
+        // SMTP source
+        if (org.smtp_source === 'org') {
+            deliveryHtml += '<span class="badge bg-info text-dark" title="Using organization-specific SMTP">Org SMTP</span> ';
+        } else if (org.smtp_source === 'global') {
+            deliveryHtml += '<span class="badge bg-light text-dark border" title="Using global SMTP settings">Global SMTP</span> ';
+        } else {
+            deliveryHtml += '<span class="badge bg-warning text-dark" title="No SMTP configured">No SMTP</span> ';
+        }
+        // Webhook
+        if (org.webhook_enabled) {
+            const fmt = (org.webhook_format || 'slack').charAt(0).toUpperCase() + (org.webhook_format || 'slack').slice(1);
+            deliveryHtml += `<span class="badge bg-success" title="Webhook: ${escapeHtml(fmt)}"><i class="bi bi-broadcast me-1"></i>${escapeHtml(fmt)}</span>`;
+        }
+        deliveryHtml += '</div>';
+
+        // Alert mode display
+        const modeLabels = { 'new_only': 'New Only', 'daily_reminder': 'Daily', 'escalation': 'Escalation' };
+        const modeValue = org.alert_mode || '';
+
+        return `<tr class="org-alert-row${inactive}" data-org-id="${org.id}">
+            <td class="ps-3">
+                <strong>${escapeHtml(org.display_name || org.name)}</strong>
+                ${!org.active ? '<br><span class="badge bg-secondary" style="font-size:0.6rem;">Inactive</span>' : ''}
+            </td>
+            <td class="text-center">
+                <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_critical"
+                    ${org.alert_on_critical ? 'checked' : ''} onchange="toggleOrgRule(this)" title="Critical CVEs">
+            </td>
+            <td class="text-center">
+                <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_high"
+                    ${org.alert_on_high ? 'checked' : ''} onchange="toggleOrgRule(this)" title="High CVEs">
+            </td>
+            <td class="text-center">
+                <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_new_cve"
+                    ${org.alert_on_new_cve ? 'checked' : ''} onchange="toggleOrgRule(this)" title="New CVEs">
+            </td>
+            <td class="text-center">
+                <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_ransomware"
+                    ${org.alert_on_ransomware ? 'checked' : ''} onchange="toggleOrgRule(this)" title="Ransomware">
+            </td>
+            <td class="text-center">
+                <select class="form-select alert-mode-select" data-org-id="${org.id}" onchange="changeOrgAlertMode(this)">
+                    <option value="" ${!modeValue ? 'selected' : ''}>Global Default</option>
+                    <option value="new_only" ${modeValue === 'new_only' ? 'selected' : ''}>New Only</option>
+                    <option value="daily_reminder" ${modeValue === 'daily_reminder' ? 'selected' : ''}>Daily</option>
+                    <option value="escalation" ${modeValue === 'escalation' ? 'selected' : ''}>Escalation</option>
+                </select>
+            </td>
+            <td>${deliveryHtml}</td>
+            <td class="text-center org-actions-cell">
+                <button class="btn btn-outline-primary btn-sm" onclick="openDeliveryModal(${org.id})" title="Edit delivery settings">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="resetOrgDefaults(${org.id})" title="Reset to global defaults">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+// ========================================================
+// Inline toggle: per-org rule checkbox
+// ========================================================
+async function toggleOrgRule(checkbox) {
+    const orgId = checkbox.dataset.orgId;
+    const field = checkbox.dataset.field;
+    const value = checkbox.checked;
+
+    checkbox.disabled = true;
+    try {
+        await apiFetch(`/api/settings/alerts/org/${orgId}/rules`, {
+            method: 'PATCH',
+            body: JSON.stringify({ [field]: value })
+        });
+        // Brief success flash
+        checkbox.parentElement.classList.add('bg-success-subtle');
+        setTimeout(() => checkbox.parentElement.classList.remove('bg-success-subtle'), 600);
+    } catch (err) {
+        // Revert on failure
+        checkbox.checked = !value;
+        showToast(`Failed to update: ${err.message}`, 'danger');
+    } finally {
+        checkbox.disabled = false;
+    }
+}
+
+// ========================================================
+// Inline: alert mode change
+// ========================================================
+async function changeOrgAlertMode(select) {
+    const orgId = select.dataset.orgId;
+    const value = select.value || null;
+
+    select.disabled = true;
+    try {
+        await apiFetch(`/api/settings/alerts/org/${orgId}/rules`, {
+            method: 'PATCH',
+            body: JSON.stringify({ alert_mode: value })
+        });
+        select.classList.add('border-success');
+        setTimeout(() => select.classList.remove('border-success'), 600);
+    } catch (err) {
+        showToast(`Failed to update alert mode: ${err.message}`, 'danger');
+        loadOrgs(); // Reload to get correct state
+    } finally {
+        select.disabled = false;
+    }
+}
+
+// ========================================================
+// Reset org to global defaults
+// ========================================================
+async function resetOrgDefaults(orgId) {
+    const org = orgsData.find(o => o.id === orgId);
+    const name = org ? (org.display_name || org.name) : `Org #${orgId}`;
+    if (!confirm(`Reset "${name}" alert rules to global defaults?\n\nThis will overwrite the current rule toggles and alert mode for this organization.`)) return;
+
+    try {
+        await apiFetch(`/api/settings/alerts/org/${orgId}/reset`, { method: 'POST' });
+        showToast(`"${name}" reset to global defaults`, 'success');
+        loadOrgs();
+    } catch (err) {
+        showToast(`Failed to reset: ${err.message}`, 'danger');
+    }
+}
+
+// ========================================================
+// Delivery modal
+// ========================================================
+function openDeliveryModal(orgId) {
+    const org = orgsData.find(o => o.id === orgId);
+    if (!org) return;
+
+    document.getElementById('deliveryOrgId').value = orgId;
+    document.getElementById('deliveryOrgName').textContent = org.display_name || org.name;
+    document.getElementById('deliveryEmails').value = (org.notification_emails || []).join('\n');
+    document.getElementById('deliveryWebhookEnabled').checked = org.webhook_enabled || false;
+    document.getElementById('deliveryWebhookUrl').value = '';  // Don't show encrypted URL
+    document.getElementById('deliveryWebhookFormat').value = org.webhook_format || 'slack';
+    document.getElementById('deliveryWebhookName').value = '';
+
+    toggleWebhookFields();
+    new bootstrap.Modal(document.getElementById('deliveryModal')).show();
+}
+
+function toggleWebhookFields() {
+    const enabled = document.getElementById('deliveryWebhookEnabled').checked;
+    document.getElementById('webhookFields').style.display = enabled ? 'block' : 'none';
+}
+document.addEventListener('change', (e) => {
+    if (e.target.id === 'deliveryWebhookEnabled') toggleWebhookFields();
+});
+
+async function saveDeliverySettings() {
+    const orgId = document.getElementById('deliveryOrgId').value;
+    const emailsText = document.getElementById('deliveryEmails').value;
+    const emails = emailsText.split(/[\n,]+/).map(e => e.trim()).filter(e => e);
+
+    const payload = {
+        notification_emails: emails,
+        webhook_enabled: document.getElementById('deliveryWebhookEnabled').checked,
+        webhook_format: document.getElementById('deliveryWebhookFormat').value,
+    };
+
+    // Only send webhook URL/name if user entered values (avoid clearing saved encrypted values)
+    const webhookUrl = document.getElementById('deliveryWebhookUrl').value.trim();
+    if (webhookUrl) payload.webhook_url = webhookUrl;
+    const webhookName = document.getElementById('deliveryWebhookName').value.trim();
+    if (webhookName) payload.webhook_name = webhookName;
+
+    try {
+        await apiFetch(`/api/settings/alerts/org/${orgId}/delivery`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+        });
+        bootstrap.Modal.getInstance(document.getElementById('deliveryModal')).hide();
+        showToast('Delivery settings saved', 'success');
+        loadOrgs();
+    } catch (err) {
+        showToast(`Failed to save delivery: ${err.message}`, 'danger');
+    }
+}
+
+// ========================================================
+// Utility
+// ========================================================
+function collapseAllDelivery() {
+    // Future: if we add expandable rows
+    loadOrgs();
+}
+
+// ========================================================
 // Init
 // ========================================================
-document.addEventListener('DOMContentLoaded', loadSettings);
+document.addEventListener('DOMContentLoaded', loadAll);
 </script>
 {% endblock %}

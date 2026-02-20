@@ -876,7 +876,7 @@ def dependencies():
 @bp.route('/alerts/settings')
 @admin_required
 def alerts_settings():
-    """Unified alert settings page - delivery channels, rules, scheduling, org overrides."""
+    """Alert Management hub - global defaults, per-org rules, delivery channels overview."""
     return render_template('alerts_settings.html')
 
 
