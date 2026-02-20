@@ -10,6 +10,38 @@ import logging
 import os
 import threading
 
+# Import job dependencies at module level so they are patchable by tests.
+# Each is guarded by try/except because some modules may be optional.
+try:
+    from app.cve_known_products import refresh_known_cve_products
+except ImportError:
+    refresh_known_cve_products = None
+
+try:
+    from app.ldap_sync import LDAPSyncEngine
+except ImportError:
+    LDAPSyncEngine = None
+
+try:
+    from app.models import VulnerabilitySnapshot
+except ImportError:
+    VulnerabilitySnapshot = None
+
+try:
+    from app.vendor_advisories import sync_vendor_advisories
+except ImportError:
+    sync_vendor_advisories = None
+
+try:
+    from app.licensing import license_heartbeat
+except ImportError:
+    license_heartbeat = None
+
+try:
+    from app.health_checks import run_all_health_checks
+except ImportError:
+    run_all_health_checks = None
+
 logger = logging.getLogger(__name__)
 
 _job_locks = {}
@@ -273,10 +305,10 @@ def start_scheduler(app):
 
     # Warm up the CVE known products cache on startup
     try:
-        from app.cve_known_products import refresh_known_cve_products
-        with app.app_context():
-            count = refresh_known_cve_products()
-            logger.info(f"CVE known products cache warmed up: {count} entries")
+        if refresh_known_cve_products is not None:
+            with app.app_context():
+                count = refresh_known_cve_products()
+                logger.info(f"CVE known products cache warmed up: {count} entries")
     except Exception as e:
         logger.warning(f"CVE known products cache warmup failed (will retry on first use): {e}")
 
@@ -573,8 +605,6 @@ def ldap_sync_job(app):
     """Job wrapper to run LDAP sync with app context"""
     with app.app_context():
         try:
-            from app.ldap_sync import LDAPSyncEngine
-
             logger.info("Starting scheduled LDAP synchronization...")
 
             # Run sync for all users
@@ -754,7 +784,7 @@ def vulnerability_snapshot_job(app):
     """Job to take daily vulnerability snapshots for trend analysis"""
     with app.app_context():
         try:
-            from app.models import VulnerabilitySnapshot, Organization
+            from app.models import Organization
 
             logger.info("Starting daily vulnerability snapshots...")
 
@@ -898,8 +928,6 @@ def vendor_advisory_sync_job(app):
     """Job to sync vendor advisories and auto-resolve false-positive CVE matches"""
     with app.app_context():
         try:
-            from app.vendor_advisories import sync_vendor_advisories
-
             logger.info("Starting vendor advisory sync (OSV.dev, Red Hat, MSRC, Debian)...")
             result = sync_vendor_advisories()
             logger.info(f"Vendor advisory sync completed: "
@@ -919,8 +947,6 @@ def license_heartbeat_job(app):
     """Job to send license heartbeat to the license server"""
     with app.app_context():
         try:
-            from app.licensing import license_heartbeat
-
             logger.info("Sending license heartbeat...")
             result = license_heartbeat()
             if result.get('success'):
@@ -1271,7 +1297,6 @@ def health_check_job(app):
     """
     with app.app_context():
         try:
-            from app.health_checks import run_all_health_checks
             results = run_all_health_checks()
             if results.get('skipped'):
                 logger.debug("Health checks skipped (disabled)")

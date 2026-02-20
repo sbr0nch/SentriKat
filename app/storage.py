@@ -32,6 +32,14 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
+# Optional S3 dependencies — imported at module level so tests can patch them.
+try:
+    import boto3
+    from botocore.config import Config as BotoConfig
+except ImportError:
+    boto3 = None
+    BotoConfig = None
+
 # Singleton instance
 _storage_backend = None
 
@@ -207,10 +215,7 @@ class S3StorageBackend(StorageBackend):
     """
 
     def __init__(self):
-        try:
-            import boto3
-            from botocore.config import Config as BotoConfig
-        except ImportError:
+        if boto3 is None:
             raise ImportError(
                 "S3 storage backend requires boto3. "
                 "Install it with: pip install boto3"

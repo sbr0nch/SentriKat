@@ -43,9 +43,10 @@ def mock_boto3():
         "S3_REGION": "us-east-1",
         "S3_PUBLIC_URL": "",
     }):
-        with patch("app.storage.boto3.client", return_value=mock_client) as boto_factory:
+        with patch("app.storage.boto3") as mock_boto:
+            mock_boto.client.return_value = mock_client
             with patch("app.storage.BotoConfig"):
-                yield mock_client, boto_factory
+                yield mock_client, mock_boto.client
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +68,9 @@ def _make_s3_backend(env_overrides=None):
 
     mock_client = MagicMock()
     with patch.dict(os.environ, env):
-        with patch("boto3.client", return_value=mock_client):
-            with patch("botocore.config.Config"):
+        with patch("app.storage.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_client
+            with patch("app.storage.BotoConfig"):
                 backend = S3StorageBackend()
     return backend, mock_client
 
@@ -367,15 +369,7 @@ class TestS3StorageBackendInitImportError:
 
     def test_init_raises_without_boto3(self):
         """S3StorageBackend raises ImportError when boto3 is not installed."""
-        import builtins
-        real_import = builtins.__import__
-
-        def _fake_import(name, *args, **kwargs):
-            if name == "boto3":
-                raise ImportError("No module named 'boto3'")
-            return real_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=_fake_import):
+        with patch("app.storage.boto3", None):
             with pytest.raises(ImportError, match="boto3"):
                 S3StorageBackend()
 
@@ -410,8 +404,9 @@ class TestGetStorageBackend:
             "S3_ACCESS_KEY": "k",
             "S3_SECRET_KEY": "s",
         }):
-            with patch("boto3.client", return_value=MagicMock()):
-                with patch("botocore.config.Config"):
+            with patch("app.storage.boto3") as m_boto3:
+                m_boto3.client.return_value = MagicMock()
+                with patch("app.storage.BotoConfig"):
                     backend = get_storage_backend()
                     assert isinstance(backend, S3StorageBackend)
 
