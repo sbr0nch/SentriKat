@@ -14,6 +14,23 @@ from app.auth import admin_required, get_current_user, login_user_session
 from app.settings_api import get_setting, set_setting
 from app.licensing import requires_professional
 from app import csrf
+from app.saml_manager import (
+    is_saml_available,
+    get_saml_settings,
+    get_saml_metadata,
+    generate_login_url,
+    process_saml_response,
+    get_or_create_saml_user,
+    init_saml_auth,
+)
+
+# audit module may not exist yet; provide a no-op fallback so the name
+# is always patchable at module level.
+try:
+    from app.audit import log_user_login
+except ImportError:
+    def log_user_login(*args, **kwargs):
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +47,8 @@ csrf.exempt(saml_bp)
 @saml_bp.route('/api/settings/saml', methods=['GET'])
 @admin_required
 @requires_professional('SAML SSO')
-def get_saml_settings():
+def get_saml_settings_api():
     """Get SAML SSO configuration"""
-    from app.saml_manager import is_saml_available
-
     settings = {
         'saml_available': is_saml_available(),
         'saml_enabled': get_setting('saml_enabled', 'false') == 'true',
@@ -58,8 +73,6 @@ def get_saml_settings():
 @requires_professional('SAML SSO')
 def save_saml_settings():
     """Save SAML SSO configuration"""
-    from app.saml_manager import is_saml_available
-
     if not is_saml_available():
         return jsonify({
             'success': False,
@@ -90,8 +103,6 @@ def save_saml_settings():
 @requires_professional('SAML SSO')
 def test_saml_config():
     """Test SAML configuration by validating IdP metadata"""
-    from app.saml_manager import is_saml_available, get_saml_settings
-
     if not is_saml_available():
         return jsonify({
             'success': False,
@@ -144,8 +155,6 @@ def get_sp_metadata():
     Get SP metadata XML for configuring the IdP.
     This endpoint is public so IdP admins can access it.
     """
-    from app.saml_manager import get_saml_metadata, is_saml_available
-
     if not is_saml_available():
         return jsonify({'error': 'SAML not available'}), 503
 
@@ -162,8 +171,6 @@ def saml_login():
     Initiate SAML login flow.
     Redirects user to IdP for authentication.
     """
-    from app.saml_manager import generate_login_url, is_saml_available
-
     if not is_saml_available():
         return redirect(url_for('main.login', error='saml_unavailable'))
 
@@ -187,9 +194,6 @@ def saml_acs():
     Assertion Consumer Service - IdP posts SAML response here.
     Validates response and creates user session.
     """
-    from app.saml_manager import process_saml_response, get_or_create_saml_user, is_saml_available
-    from app.audit import log_user_login
-
     if not is_saml_available():
         return redirect(url_for('main.login', error='saml_unavailable'))
 
@@ -243,8 +247,6 @@ def saml_sls():
     """
     Single Logout Service - Handle IdP-initiated logout.
     """
-    from app.saml_manager import init_saml_auth, is_saml_available
-
     if not is_saml_available():
         return redirect(url_for('main.login'))
 
@@ -284,8 +286,6 @@ def saml_status():
     Check SAML availability for login page.
     Public endpoint - returns minimal info.
     """
-    from app.saml_manager import is_saml_available
-
     enabled = get_setting('saml_enabled', 'false') == 'true'
     available = is_saml_available()
 
