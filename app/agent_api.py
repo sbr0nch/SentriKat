@@ -493,7 +493,8 @@ def _ip_in_allowlist(ip_str, allowed_list):
         return False
 
 
-def _queue_to_import_queue(organization_id, vendor, product_name, version, hostname=None):
+def _queue_to_import_queue(organization_id, vendor, product_name, version, hostname=None,
+                           source_type=None, ecosystem=None):
     """
     Queue a product to ImportQueue for review instead of directly adding to Products.
     Used when auto_approve is False on the API key.
@@ -542,6 +543,11 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
             return 'skipped'
 
         # Add to import queue
+        source_info = {'hostname': hostname, 'source': 'push_agent'}
+        if source_type:
+            source_info['source_type'] = source_type
+        if ecosystem:
+            source_info['ecosystem'] = ecosystem
         queue_item = ImportQueue(
             organization_id=organization_id,
             vendor=vendor,
@@ -549,7 +555,7 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
             detected_version=version,
             status='pending',
             criticality='medium',
-            source_data=json.dumps({'hostname': hostname, 'source': 'push_agent'})
+            source_data=json.dumps(source_info)
         )
         db.session.add(queue_item)
         logger.info(f"Queued product for review: {vendor} {product_name}")
@@ -1360,7 +1366,8 @@ def process_inventory_job(job):
                     # Check auto_approve: if False, queue or auto-link instead of creating
                     if not auto_approve:
                         # Queue to import queue for the primary org
-                        result = _queue_to_import_queue(organization.id, vendor, product_name, version, asset.hostname)
+                        result = _queue_to_import_queue(organization.id, vendor, product_name, version, asset.hostname,
+                                                        source_type=p_source_type, ecosystem=p_ecosystem)
                         if result == 'queued':
                             products_queued += 1
                         elif result == 'auto_linked':
@@ -1880,7 +1887,8 @@ def report_inventory():
             if not product:
                 # Check auto_approve: if False, queue or auto-link instead of creating
                 if not auto_approve:
-                    result = _queue_to_import_queue(organization.id, vendor, product_name, version, hostname)
+                    result = _queue_to_import_queue(organization.id, vendor, product_name, version, hostname,
+                                                    source_type=p_source_type, ecosystem=p_ecosystem)
                     if result == 'queued':
                         products_queued += 1
                     elif result == 'auto_linked':

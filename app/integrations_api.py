@@ -600,6 +600,11 @@ def get_cpe_versions(cpe_vendor, cpe_product):
 def create_product_from_queue(queue_item):
     """Create a Product from an ImportQueue item."""
     try:
+        # Extract source_type and ecosystem from source_data if available
+        source_data = queue_item.get_source_data() if hasattr(queue_item, 'get_source_data') else {}
+        source_type = source_data.get('source_type') if source_data else None
+        ecosystem = source_data.get('ecosystem') if source_data else None
+
         product = Product(
             vendor=queue_item.vendor,
             product_name=queue_item.product_name,
@@ -607,6 +612,9 @@ def create_product_from_queue(queue_item):
             organization_id=queue_item.organization_id,
             cpe_vendor=queue_item.cpe_vendor,
             cpe_product=queue_item.cpe_product,
+            source_type=source_type,
+            ecosystem=ecosystem,
+            source='agent' if source_data and source_data.get('source') == 'push_agent' else None,
             active=True
         )
         db.session.add(product)
