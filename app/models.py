@@ -2238,9 +2238,9 @@ class ProductVersionHistory(db.Model):
     detected_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     # Relationships
-    installation = db.relationship('ProductInstallation', backref=db.backref('version_history', lazy='dynamic'))
-    asset = db.relationship('Asset', backref=db.backref('product_changes', lazy='dynamic'))
-    product = db.relationship('Product', backref=db.backref('version_changes', lazy='dynamic'))
+    installation = db.relationship('ProductInstallation', backref=db.backref('version_history', lazy='dynamic', passive_deletes=True), passive_deletes=True)
+    asset = db.relationship('Asset', backref=db.backref('product_changes', lazy='dynamic', passive_deletes=True), passive_deletes=True)
+    product = db.relationship('Product', backref=db.backref('version_changes', lazy='dynamic', passive_deletes=True), passive_deletes=True)
 
     @staticmethod
     def _compare_versions(old_ver, new_ver):
