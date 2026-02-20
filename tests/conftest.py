@@ -13,13 +13,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # This ensures the Config class picks up SQLite instead of PostgreSQL
 os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
 os.environ['SECRET_KEY'] = 'test-secret-key-for-testing-only'
-os.environ['ENCRYPTION_KEY'] = 'dGVzdC1lbmNyeXB0aW9uLWtleS1mb3ItdGVzdGluZy1vbmx5LW11c3QtYmUtMzItYnl0ZXM='
+# Valid Fernet key for testing (generated with Fernet.generate_key())
+os.environ['ENCRYPTION_KEY'] = 'pCa0H5vlTAQ9eTmZt846gr-nePl__Fy0F157GpYofd0='
 
 
 class TestConfig:
     """Test configuration that uses SQLite in-memory database."""
     SECRET_KEY = 'test-secret-key-for-testing-only'
-    ENCRYPTION_KEY = 'dGVzdC1lbmNyeXB0aW9uLWtleS1mb3ItdGVzdGluZy1vbmx5LW11c3QtYmUtMzItYnl0ZXM='
+    # Valid Fernet key for testing (generated with Fernet.generate_key())
+    ENCRYPTION_KEY = 'pCa0H5vlTAQ9eTmZt846gr-nePl__Fy0F157GpYofd0='
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {}  # No PostgreSQL-specific options
