@@ -1140,14 +1140,10 @@ def save_notification_settings():
             if wh_key in data:
                 set_setting(wh_key, 'true' if data.get(wh_key) else 'false', 'notifications', wh_key.replace('_', ' ').title())
 
-        # Propagate alert rules to all organizations (global defaults apply to all orgs)
-        if org_updates:
-            from app.models import Organization
-            orgs = Organization.query.all()
-            for org in orgs:
-                for field, value in org_updates.items():
-                    setattr(org, field, value)
-            db.session.commit()
+        # Global defaults are stored in SystemSettings only.
+        # Per-org alert rules are managed independently via /alerts/org/<id>/rules.
+        # We no longer propagate global saves to all organizations, because that
+        # silently destroyed per-org overrides that admins had configured.
 
         return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
     except Exception as e:
@@ -1173,6 +1169,23 @@ def get_alert_org_overrides():
             except (json.JSONDecodeError, TypeError):
                 pass
 
+            # Parse actual email list for display
+            email_list = []
+            try:
+                parsed = json.loads(org.notification_emails or '[]')
+                if isinstance(parsed, str):
+                    parsed = json.loads(parsed)
+                email_list = [e.strip() for e in parsed if e and e.strip()]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            # Determine SMTP source
+            smtp_source = 'none'
+            if org.smtp_host and org.smtp_from_email:
+                smtp_source = 'org'
+            elif get_setting('smtp_host'):
+                smtp_source = 'global'
+
             result.append({
                 'id': org.id,
                 'name': org.name,
@@ -1182,16 +1195,133 @@ def get_alert_org_overrides():
                 'alert_on_high': org.alert_on_high,
                 'alert_on_new_cve': org.alert_on_new_cve,
                 'alert_on_ransomware': org.alert_on_ransomware,
+                'alert_on_low_confidence': org.alert_on_low_confidence,
                 'alert_mode': org.alert_mode,
-                'escalation_days': org.escalation_days,
+                'escalation_days': getattr(org, 'escalation_days', None),
                 'has_smtp': bool(org.smtp_host),
+                'smtp_source': smtp_source,
                 'webhook_enabled': org.webhook_enabled if hasattr(org, 'webhook_enabled') else False,
-                'notification_email_count': email_count,
+                'webhook_format': getattr(org, 'webhook_format', None),
+                'notification_email_count': len(email_list),
+                'notification_emails': email_list,
             })
         return jsonify(result)
     except Exception as e:
         logger.exception("Failed to get org alert overrides")
         return jsonify({'error': 'Failed to load organization data'}), 500
+
+
+@settings_bp.route('/alerts/org/<int:org_id>/rules', methods=['PATCH'])
+@admin_required
+def update_org_alert_rules(org_id):
+    """Update alert rules for a specific organization (inline editing from Alert Rules page)."""
+    from app.models import Organization
+    try:
+        org = Organization.query.get(org_id)
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
+
+        data = request.get_json()
+        allowed_fields = {
+            'alert_on_critical', 'alert_on_high', 'alert_on_new_cve',
+            'alert_on_ransomware', 'alert_on_low_confidence',
+            'alert_mode', 'escalation_days',
+        }
+        updated = []
+        for field in allowed_fields:
+            if field in data:
+                val = data[field]
+                if field in ('alert_on_critical', 'alert_on_high', 'alert_on_new_cve',
+                             'alert_on_ransomware', 'alert_on_low_confidence'):
+                    val = bool(val)
+                elif field == 'alert_mode':
+                    if val not in (None, '', 'new_only', 'daily_reminder', 'escalation'):
+                        continue
+                    val = val if val else None
+                elif field == 'escalation_days':
+                    val = int(val) if val else None
+                setattr(org, field, val)
+                updated.append(field)
+
+        db.session.commit()
+        return jsonify({'success': True, 'updated': updated})
+    except Exception as e:
+        logger.exception(f"Failed to update alert rules for org {org_id}")
+        return jsonify({'error': 'Failed to update organization alert rules'}), 500
+
+
+@settings_bp.route('/alerts/org/<int:org_id>/delivery', methods=['PATCH'])
+@admin_required
+def update_org_delivery(org_id):
+    """Update delivery settings (recipients, webhook) for a specific organization."""
+    from app.models import Organization
+    try:
+        org = Organization.query.get(org_id)
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
+
+        data = request.get_json()
+
+        # Update notification emails
+        if 'notification_emails' in data:
+            emails = data['notification_emails']
+            if isinstance(emails, str):
+                # Parse comma-separated string
+                emails = [e.strip() for e in emails.split(',') if e.strip()]
+            org.notification_emails = json.dumps(emails)
+
+        # Update webhook settings
+        if 'webhook_enabled' in data:
+            org.webhook_enabled = bool(data['webhook_enabled'])
+        if 'webhook_url' in data:
+            url = data['webhook_url']
+            if url:
+                from app.encryption_utils import encrypt_value
+                try:
+                    org.webhook_url = encrypt_value(url)
+                except Exception:
+                    org.webhook_url = url
+            else:
+                org.webhook_url = None
+        if 'webhook_format' in data:
+            org.webhook_format = data['webhook_format']
+        if 'webhook_name' in data:
+            org.webhook_name = data['webhook_name']
+
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.exception(f"Failed to update delivery for org {org_id}")
+        return jsonify({'error': 'Failed to update delivery settings'}), 500
+
+
+@settings_bp.route('/alerts/org/<int:org_id>/reset', methods=['POST'])
+@admin_required
+def reset_org_alert_rules(org_id):
+    """Reset an organization's alert rules to the current global defaults."""
+    from app.models import Organization
+    try:
+        org = Organization.query.get(org_id)
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
+
+        # Apply global defaults from SystemSettings
+        defaults = {
+            'alert_on_critical': get_setting('notify_on_critical', 'true') == 'true',
+            'alert_on_high': get_setting('notify_on_high', 'false') == 'true',
+            'alert_on_new_cve': get_setting('notify_on_new_cve', 'true') == 'true',
+            'alert_on_ransomware': get_setting('notify_on_ransomware', 'true') == 'true',
+            'alert_on_low_confidence': get_setting('notify_on_low_confidence', 'false') == 'true',
+        }
+        for field, value in defaults.items():
+            setattr(org, field, value)
+        org.alert_mode = None  # Reset to global default
+        db.session.commit()
+
+        return jsonify({'success': True, 'defaults_applied': defaults})
+    except Exception as e:
+        logger.exception(f"Failed to reset alert rules for org {org_id}")
+        return jsonify({'error': 'Failed to reset organization alert rules'}), 500
 
 
 def _is_ssrf_safe_url(url):
