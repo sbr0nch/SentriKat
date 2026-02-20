@@ -1903,6 +1903,11 @@ def report_inventory():
                 product_name=product_name
             ).first()
 
+            # Determine source_type and ecosystem from agent payload (needed for
+            # both auto_approve queue and direct product creation)
+            p_source_type = product_data.get('source_type', 'os_package')
+            p_ecosystem = product_data.get('ecosystem')
+
             if not product:
                 # Check auto_approve: if False, queue or auto-link instead of creating
                 if not auto_approve:
@@ -1913,10 +1918,6 @@ def report_inventory():
                     elif result == 'auto_linked':
                         products_updated += 1
                     continue
-
-                # Determine source_type and ecosystem from agent payload
-                p_source_type = product_data.get('source_type', 'os_package')
-                p_ecosystem = product_data.get('ecosystem')
 
                 # Validate source_type and ecosystem against allowed values
                 if p_source_type not in VALID_SOURCE_TYPES:

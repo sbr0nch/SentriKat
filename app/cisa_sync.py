@@ -883,6 +883,26 @@ def fetch_cpe_version_data(limit=30):
 
     db.session.commit()
     logger.info(f"Enriched {enriched_count} vulnerabilities with CPE version data")
+
+    # Re-match products for newly enriched CVEs. When CPE data arrives for a
+    # CVE that previously had none:
+    # - New high-confidence CPE matches may be created
+    # - Stale medium-confidence text matches may become invalid (CPE is now
+    #   authoritative, so text fallback is suppressed)
+    # Without this, matches stay stale until the next full daily sync.
+    if enriched_count > 0:
+        try:
+            from app.filters import rematch_all_products
+            enriched_vulns = [v for v in vulns_to_fetch if v.cpe_data and v.cpe_data != '[]']
+            if enriched_vulns:
+                removed, added = rematch_all_products(target_vulnerabilities=enriched_vulns)
+                logger.info(
+                    f"Re-matched after CPE enrichment: {added} new matches, "
+                    f"{removed} stale matches removed"
+                )
+        except Exception as e:
+            logger.warning(f"Re-match after CPE enrichment failed (non-critical): {e}")
+
     return enriched_count
 
 

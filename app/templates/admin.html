@@ -1865,12 +1865,22 @@
 
         tbody.innerHTML = catalog.map(service => {
             const isChecked = selectedCatalogItems.has(service.id);
+            // typical_versions may be an array (from enriched API) or JSON string (legacy)
             let versions = [];
             try {
-                versions = service.typical_versions ? JSON.parse(service.typical_versions) : [];
+                if (Array.isArray(service.typical_versions)) {
+                    versions = service.typical_versions;
+                } else if (service.typical_versions) {
+                    versions = JSON.parse(service.typical_versions);
+                }
             } catch (e) {
                 versions = [];
             }
+
+            // Show version source indicator
+            const versionSourceBadge = service.versions_source === 'observed'
+                ? '<span class="badge bg-success ms-1" style="font-size:0.6rem" title="Versions detected by agents in your environment">Live</span>'
+                : '';
 
             // Build version dropdown options
             const selectedVersion = selectedVersions[service.id] || (versions.length > 0 ? versions[0] : '');
@@ -1890,12 +1900,15 @@
                     <td class="fw-semibold">${escapeHtml(service.product_name)}</td>
                     <td>${escapeHtml(service.vendor)}</td>
                     <td onclick="event.stopPropagation();">
-                        <select class="form-select form-select-sm version-select"
-                                data-catalog-id="${service.id}"
-                                onchange="updateSelectedVersion(${service.id}, this.value)"
-                                style="min-width: 100px;">
-                            ${versionOptions}
-                        </select>
+                        <div class="d-flex align-items-center gap-1">
+                            <select class="form-select form-select-sm version-select"
+                                    data-catalog-id="${service.id}"
+                                    onchange="updateSelectedVersion(${service.id}, this.value)"
+                                    style="min-width: 100px;">
+                                ${versionOptions}
+                            </select>
+                            ${versionSourceBadge}
+                        </div>
                     </td>
                     <td><small class="text-muted">${escapeHtml(service.category || '')}</small></td>
                 </tr>
@@ -2002,7 +2015,11 @@
                     // Get selected version for this catalog item
                     let versions = [];
                     try {
-                        versions = service.typical_versions ? JSON.parse(service.typical_versions) : [];
+                        if (Array.isArray(service.typical_versions)) {
+                            versions = service.typical_versions;
+                        } else if (service.typical_versions) {
+                            versions = JSON.parse(service.typical_versions);
+                        }
                     } catch (e) {
                         versions = [];
                     }

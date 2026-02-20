@@ -3429,6 +3429,16 @@ def get_vulnerabilities_grouped():
                 for p in r['affected_products']
             )]
 
+        # Filter by match confidence (high, medium, low, or comma-separated combo)
+        confidence_filter = request.args.get('confidence', '').lower().strip()
+        if confidence_filter:
+            allowed_levels = set(c.strip() for c in confidence_filter.split(',') if c.strip())
+            # Keep CVE groups that have at least one affected product with matching confidence
+            results = [r for r in results if any(
+                (p.get('match_confidence', 'medium') or 'medium') in allowed_levels
+                for p in r['affected_products']
+            )]
+
         # Pagination
         page = max(int(request.args.get('page', 1)), 1)
         per_page = min(int(request.args.get('per_page', 25)), 100)
@@ -5035,7 +5045,40 @@ def search_catalog():
         ServiceCatalog.usage_frequency.desc()
     ).limit(limit)
 
-    return jsonify([s.to_dict() for s in results.all()])
+    services = results.all()
+
+    # Enrich with real observed versions from agent-reported ProductInstallation data.
+    # The static typical_versions in the catalog are generic placeholders (e.g., "8.0", "Latest").
+    # Real versions come from what agents have actually detected in the environment.
+    from app.version_utils import _version_sort_key
+    enriched = []
+    for s in services:
+        sdict = s.to_dict()
+        try:
+            real_versions = db.session.query(
+                ProductInstallation.version
+            ).join(
+                Product, ProductInstallation.product_id == Product.id
+            ).filter(
+                Product.vendor.ilike(s.vendor),
+                Product.product_name.ilike(s.product_name),
+                ProductInstallation.version.isnot(None),
+                ProductInstallation.version != '',
+                ProductInstallation.version != 'Unknown'
+            ).distinct().limit(20).all()
+            observed = list(set(v[0] for v in real_versions if v[0]))
+            if observed:
+                # Sort by version order (newest first) using proper version comparison
+                observed.sort(key=_version_sort_key, reverse=True)
+                sdict['typical_versions'] = observed
+                sdict['versions_source'] = 'observed'
+            else:
+                sdict['versions_source'] = 'catalog'
+        except Exception:
+            sdict['versions_source'] = 'catalog'
+        enriched.append(sdict)
+
+    return jsonify(enriched)
 
 @bp.route('/api/catalog/categories', methods=['GET'])
 @login_required
