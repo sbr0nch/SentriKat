@@ -2873,7 +2873,7 @@
     {% if license and not license.is_professional() %}
     <div class="demo-banner bg-warning text-dark text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
         <i class="bi bi-exclamation-triangle-fill me-2"></i>
-        <strong>DEMO VERSION</strong> - Limited to {{ license.get_effective_limits().max_users }} user, {{ license.get_effective_limits().max_products }} products, {{ license.get_effective_limits().max_agents }} agents.
+        <strong>DEMO VERSION</strong> - Limited to {{ license.get_effective_limits().max_users }} user, {{ license.get_effective_limits().max_products }} products.
         <a href="https://sentrikat.com/pricing" target="_blank" class="ms-2 text-dark fw-semibold text-decoration-underline">Upgrade to Professional</a>
         <button type="button" class="btn-close btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
     </div>
@@ -2882,6 +2882,9 @@
         .demo-banner ~ .top-navbar { margin-top: 40px !important; }
     </style>
     {% endif %}
+
+    <!-- Clean license-reload param from URL after page load -->
+    <script>if(new URLSearchParams(location.search).has('_lrc')){var u=new URL(location);u.searchParams.delete('_lrc');history.replaceState(null,'',u)}</script>
 
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">

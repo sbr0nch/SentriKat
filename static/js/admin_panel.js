@@ -6577,8 +6577,8 @@ async function activateLicense() {
             showToast(data.message, 'success');
             SK.DOM.setValue('licenseKeyInput', '');
             loadLicenseInfo();
-            // Reload page to apply license changes (like removing "Powered by")
-            setTimeout(() => window.location.reload(), 1500);
+            // Reload page with cache-bust param so all workers refresh license from DB
+            setTimeout(() => { window.location.href = window.location.pathname + '?_lrc=1'; }, 1500);
         } else {
             showToast(data.error || 'Failed to activate license', 'error');
         }
@@ -6623,7 +6623,8 @@ async function activateLicenseOnline() {
                 statusEl.innerHTML = '<div class="alert alert-success mb-0 py-2"><i class="bi bi-check-circle me-1"></i>' + escapeHtml(data.message) + '</div>';
             }
             loadLicenseInfo();
-            setTimeout(() => window.location.reload(), 1500);
+            // Reload page with cache-bust param so all workers refresh license from DB
+            setTimeout(() => { window.location.href = window.location.pathname + '?_lrc=1'; }, 1500);
         } else {
             const errorMsg = data.error || 'Online activation failed';
             showToast(errorMsg, 'error');
@@ -6658,8 +6659,8 @@ async function removeLicense() {
         if (response.ok && data.success) {
             showToast(data.message, 'success');
             loadLicenseInfo();
-            // Reload page to apply changes
-            setTimeout(() => window.location.reload(), 1500);
+            // Reload page with cache-bust param so all workers refresh license from DB
+            setTimeout(() => { window.location.href = window.location.pathname + '?_lrc=1'; }, 1500);
         } else {
             showToast(data.error || 'Failed to remove license', 'error');
         }
