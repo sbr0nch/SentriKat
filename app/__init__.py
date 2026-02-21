@@ -300,7 +300,7 @@ def create_app(config_class=Config):
     # Make current user and branding available in all templates
     @app.context_processor
     def inject_globals():
-        from flask import session
+        from flask import session, request
         from app.models import User, SystemSettings
         import os
 
@@ -348,9 +348,13 @@ def create_app(config_class=Config):
                 pass
 
         # Load license info
+        # When _lrc=1 query param is present (after license activation/removal),
+        # force-reload from DB to bypass the per-worker in-memory cache.
         license_info = None
         try:
-            from app.licensing import get_license
+            from app.licensing import get_license, reload_license
+            if request.args.get('_lrc'):
+                reload_license()
             license_info = get_license()
             # Update branding based on license
             if license_info and license_info.is_professional():
