@@ -4451,16 +4451,17 @@
                             <small class="text-muted">From LDAP - cannot be changed</small>
                         </div>
 
-                        <div class="col-md-6">
-                            <label for="ldapInviteOrganization" class="form-label fw-semibold">Organization *</label>
+                        <div class="col-md-6" id="ldapInviteOrgField">
+                            <label for="ldapInviteOrganization" class="form-label fw-semibold">Organization <span id="ldapOrgRequired">*</span></label>
                             <select class="form-select" id="ldapInviteOrganization" required>
                                 <option value="">Select organization...</option>
                             </select>
+                            <small class="text-muted" id="ldapOrgHelp"></small>
                         </div>
 
                         <div class="col-md-6">
                             <label for="ldapInviteRole" class="form-label fw-semibold">Role *</label>
-                            <select class="form-select" id="ldapInviteRole" required>
+                            <select class="form-select" id="ldapInviteRole" required onchange="updateLdapInviteOrgRequirement()">
                                 <option value="user">User - View-only access</option>
                                 <option value="manager">Manager - Can manage products</option>
                                 <option value="org_admin">Organization Admin - Full org access</option>

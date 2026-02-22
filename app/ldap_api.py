@@ -185,13 +185,17 @@ def invite_ldap_user():
     organization_id = data.get('organization_id')
     role = data.get('role', 'user')
 
-    if not all([username, email, organization_id]):
-        return jsonify({'error': 'Username, email, and organization_id are required'}), 400
+    if not all([username, email]):
+        return jsonify({'error': 'Username and email are required'}), 400
+
+    # Super admins don't require an organization
+    if not organization_id and role != 'super_admin':
+        return jsonify({'error': 'Organization is required for non-super-admin roles'}), 400
 
     # Permission check for organization assignment
     if not current_user.is_super_admin():
         # Non-super-admins can only invite to their own organization
-        if organization_id != current_user.organization_id:
+        if not organization_id or organization_id != current_user.organization_id:
             return jsonify({'error': 'You can only invite users to your own organization'}), 403
 
         # Only super admins can create super_admins and org_admins
