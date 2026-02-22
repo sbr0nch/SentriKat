@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app import db, csrf
 from app.integrations_models import Integration, ImportQueue, AgentRegistration
-from app.models import Product, Organization, User
+from app.models import Product, Organization, User, Asset, ProductInstallation
 from app.auth import admin_required, login_required, get_current_user
 from app.licensing import requires_professional
 from config import Config
@@ -598,12 +598,13 @@ def get_cpe_versions(cpe_vendor, cpe_product):
 
 
 def create_product_from_queue(queue_item):
-    """Create a Product from an ImportQueue item."""
+    """Create a Product from an ImportQueue item and link it to the originating asset."""
     try:
         # Extract source_type and ecosystem from source_data if available
         source_data = queue_item.get_source_data() if hasattr(queue_item, 'get_source_data') else {}
         source_type = source_data.get('source_type') if source_data else None
         ecosystem = source_data.get('ecosystem') if source_data else None
+        key_type = source_data.get('key_type') if source_data else None
 
         product = Product(
             vendor=queue_item.vendor,
@@ -615,6 +616,7 @@ def create_product_from_queue(queue_item):
             source_type=source_type,
             ecosystem=ecosystem,
             source='agent' if source_data and source_data.get('source') == 'push_agent' else None,
+            source_key_type=key_type,
             active=True
         )
         db.session.add(product)
@@ -625,6 +627,33 @@ def create_product_from_queue(queue_item):
             org = Organization.query.get(queue_item.organization_id)
             if org and org not in product.organizations:
                 product.organizations.append(org)
+
+        # Create ProductInstallation to link product to the originating asset
+        # This is critical for: endpoint detail view, platform display, affected VMs, etc.
+        hostname = source_data.get('hostname') if source_data else None
+        if hostname and queue_item.organization_id:
+            asset = Asset.query.filter_by(
+                hostname=hostname,
+                organization_id=queue_item.organization_id
+            ).first()
+            if asset:
+                # Determine the OS platform from the asset
+                detected_os = ProductInstallation.normalize_os_name(asset.os_name)
+
+                existing_install = ProductInstallation.query.filter_by(
+                    asset_id=asset.id,
+                    product_id=product.id
+                ).first()
+                if not existing_install:
+                    installation = ProductInstallation(
+                        asset_id=asset.id,
+                        product_id=product.id,
+                        version=queue_item.selected_version or queue_item.detected_version,
+                        detected_by='agent',
+                        detected_on_os=detected_os,
+                    )
+                    db.session.add(installation)
+                    logger.info(f"Created ProductInstallation for product {product.id} on asset {asset.hostname}")
 
         return product
     except IntegrityError as e:

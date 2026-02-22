@@ -527,7 +527,11 @@ def system_notifications():
 
         # 6. Pending import queue items - admin only
         if is_admin:
-            pending_imports = Product.query.filter_by(approval_status='pending').count()
+            try:
+                from app.integrations_models import ImportQueue
+                pending_imports = ImportQueue.query.filter_by(status='pending').count()
+            except Exception:
+                pending_imports = 0
             if pending_imports > 0:
                 notifications.append({
                     'id': 'pending_imports',

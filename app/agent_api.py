@@ -1390,36 +1390,52 @@ def process_inventory_job(job):
                         )
                         if result == 'queued':
                             products_queued += 1
+                            items_processed += 1
+                            continue
                         elif result == 'auto_linked':
-                            products_updated += 1
-                        items_processed += 1
-                        continue
+                            # Product exists globally and was linked to this org.
+                            # Re-fetch it so we can create ProductInstallation below
+                            # (for endpoint detail view, platform display, affected VMs).
+                            product = Product.query.filter_by(
+                                vendor=vendor,
+                                product_name=product_name
+                            ).first()
+                            if product:
+                                product.last_agent_report = datetime.utcnow()
+                                products_updated += 1
+                            else:
+                                items_processed += 1
+                                continue
+                        else:
+                            items_processed += 1
+                            continue
+                    else:
+                        # auto_approve=True: create product directly
+                        product = Product(
+                            vendor=vendor,
+                            product_name=product_name,
+                            version=version,
+                            active=True,
+                            criticality='medium',
+                            source='agent',  # Track that this was auto-added by agent
+                            source_type=p_source_type,
+                            ecosystem=p_ecosystem,
+                            source_key_type=job_key_type,
+                            last_agent_report=datetime.utcnow(),
+                            organization_id=organization.id
+                        )
+                        # Auto-apply CPE mapping for better vulnerability matching
+                        from app.cpe_mapping import apply_cpe_to_product
+                        apply_cpe_to_product(product)
 
-                    product = Product(
-                        vendor=vendor,
-                        product_name=product_name,
-                        version=version,
-                        active=True,
-                        criticality='medium',
-                        source='agent',  # Track that this was auto-added by agent
-                        source_type=p_source_type,
-                        ecosystem=p_ecosystem,
-                        source_key_type=job_key_type,
-                        last_agent_report=datetime.utcnow(),
-                        organization_id=organization.id
-                    )
-                    # Auto-apply CPE mapping for better vulnerability matching
-                    from app.cpe_mapping import apply_cpe_to_product
-                    apply_cpe_to_product(product)
+                        db.session.add(product)
+                        db.session.flush()
+                        products_created += 1
 
-                    db.session.add(product)
-                    db.session.flush()
-                    products_created += 1
-
-                    # Assign product to ALL target organizations (multi-org support)
-                    for target_org in all_target_orgs:
-                        if target_org not in product.organizations.all():
-                            product.organizations.append(target_org)
+                        # Assign product to ALL target organizations (multi-org support)
+                        for target_org in all_target_orgs:
+                            if target_org not in product.organizations.all():
+                                product.organizations.append(target_org)
                 else:
                     # Update last_agent_report timestamp
                     product.last_agent_report = datetime.utcnow()
@@ -1916,57 +1932,71 @@ def report_inventory():
                                                     source_type=p_source_type, ecosystem=p_ecosystem)
                     if result == 'queued':
                         products_queued += 1
+                        continue
                     elif result == 'auto_linked':
-                        products_updated += 1
-                    continue
+                        # Product exists globally and was linked to this org.
+                        # Re-fetch it so we can create ProductInstallation below
+                        # (for endpoint detail view, platform display, affected VMs).
+                        product = Product.query.filter_by(
+                            vendor=vendor,
+                            product_name=product_name
+                        ).first()
+                        if product:
+                            product.last_agent_report = datetime.utcnow()
+                            products_updated += 1
+                        else:
+                            continue
+                    else:
+                        continue
+                else:
+                    # auto_approve=True: create product directly
+                    # Validate source_type and ecosystem against allowed values
+                    if p_source_type not in VALID_SOURCE_TYPES:
+                        p_source_type = 'os_package'
+                    if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
+                        p_ecosystem = None  # Reject unknown ecosystems
+                    if p_ecosystem and p_ecosystem in ECOSYSTEM_ALIASES:
+                        p_ecosystem = ECOSYSTEM_ALIASES[p_ecosystem]
 
-                # Validate source_type and ecosystem against allowed values
-                if p_source_type not in VALID_SOURCE_TYPES:
-                    p_source_type = 'os_package'
-                if p_ecosystem and p_ecosystem not in VALID_ECOSYSTEMS:
-                    p_ecosystem = None  # Reject unknown ecosystems
-                if p_ecosystem and p_ecosystem in ECOSYSTEM_ALIASES:
-                    p_ecosystem = ECOSYSTEM_ALIASES[p_ecosystem]
+                    # Normalize legacy source types to new unified 'extension'
+                    if p_source_type in ('vscode_extension', 'browser_extension'):
+                        p_source_type = 'extension'
 
-                # Normalize legacy source types to new unified 'extension'
-                if p_source_type in ('vscode_extension', 'browser_extension'):
-                    p_source_type = 'extension'
+                    # Gate: reject extension/dependency data if API key doesn't have capability
+                    # Hard enforcement: block if key is missing OR capability is disabled
+                    if p_source_type == 'extension':
+                        if not agent_key or not getattr(agent_key, 'scan_extensions', False):
+                            continue  # Skip - not licensed for extension scanning
+                    if p_source_type == 'code_library':
+                        if not agent_key or not getattr(agent_key, 'scan_dependencies', False):
+                            continue  # Skip - not licensed for dependency scanning
 
-                # Gate: reject extension/dependency data if API key doesn't have capability
-                # Hard enforcement: block if key is missing OR capability is disabled
-                if p_source_type == 'extension':
-                    if not agent_key or not getattr(agent_key, 'scan_extensions', False):
-                        continue  # Skip - not licensed for extension scanning
-                if p_source_type == 'code_library':
-                    if not agent_key or not getattr(agent_key, 'scan_dependencies', False):
-                        continue  # Skip - not licensed for dependency scanning
+                    # Create product
+                    product = Product(
+                        vendor=vendor,
+                        product_name=product_name,
+                        version=version,  # Use first reported version as default
+                        active=True,
+                        criticality='medium',
+                        source='agent',  # Track that this was auto-added by agent
+                        source_type=p_source_type,
+                        ecosystem=p_ecosystem,
+                        source_key_type=agent_key.key_type if agent_key and hasattr(agent_key, 'key_type') else None,
+                        last_agent_report=datetime.utcnow(),
+                        organization_id=organization.id
+                    )
+                    # Auto-apply CPE mapping for better vulnerability matching
+                    from app.cpe_mapping import apply_cpe_to_product
+                    apply_cpe_to_product(product)
 
-                # Create product
-                product = Product(
-                    vendor=vendor,
-                    product_name=product_name,
-                    version=version,  # Use first reported version as default
-                    active=True,
-                    criticality='medium',
-                    source='agent',  # Track that this was auto-added by agent
-                    source_type=p_source_type,
-                    ecosystem=p_ecosystem,
-                    source_key_type=agent_key.key_type if agent_key and hasattr(agent_key, 'key_type') else None,
-                    last_agent_report=datetime.utcnow(),
-                    organization_id=organization.id
-                )
-                # Auto-apply CPE mapping for better vulnerability matching
-                from app.cpe_mapping import apply_cpe_to_product
-                apply_cpe_to_product(product)
+                    db.session.add(product)
+                    db.session.flush()
+                    products_created += 1
 
-                db.session.add(product)
-                db.session.flush()
-                products_created += 1
-
-                # Assign to ALL target organizations (multi-org support)
-                for target_org in all_target_orgs:
-                    if target_org not in product.organizations.all():
-                        product.organizations.append(target_org)
+                    # Assign to ALL target organizations (multi-org support)
+                    for target_org in all_target_orgs:
+                        if target_org not in product.organizations.all():
+                            product.organizations.append(target_org)
             else:
                 # Update last_agent_report timestamp
                 product.last_agent_report = datetime.utcnow()

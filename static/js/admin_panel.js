@@ -7004,6 +7004,7 @@ async function createAgentKey() {
 
         // Refresh the keys table to show the new key
         loadAgentKeys();
+        if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
 
         showToast('Agent API key created successfully', 'success');
     } catch (error) {

@@ -1549,6 +1549,7 @@
                     modal.hide();
                 }
                 loadProducts();
+                if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
             } else {
                 // Safely parse error response - handle non-JSON responses
                 let errorMessage = 'Unknown error occurred';
@@ -4705,6 +4706,7 @@
             if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'Failed'); }
             showToast('Product added successfully', 'success');
             loadImportQueue();
+            if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }
     }
 
@@ -4714,6 +4716,7 @@
             if (!response.ok) throw new Error('Failed to reject');
             showToast('Item rejected', 'success');
             loadImportQueue();
+            if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }
     }
 
@@ -4732,6 +4735,7 @@
             showToast(`Approved ${result.processed} items`, 'success');
             selectedQueueItems.clear();
             loadImportQueue();
+            if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }
     }
 
@@ -4745,6 +4749,7 @@
             showToast(`Rejected ${result.processed} items`, 'success');
             selectedQueueItems.clear();
             loadImportQueue();
+            if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }
     }
 
@@ -4770,6 +4775,7 @@
             const result = await response.json();
             showToast(`Approved ${result.processed} items${result.errors ? ` (${result.errors} errors)` : ''}`, 'success');
             loadImportQueue();
+            if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }
     }
 
@@ -4793,6 +4799,7 @@
             const result = await response.json();
             showToast(`Rejected ${result.processed} items`, 'success');
             loadImportQueue();
+            if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }
     }
 
