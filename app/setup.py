@@ -37,12 +37,29 @@ def is_setup_complete():
         # If database doesn't exist or has schema issues, setup is not complete
         return False
 
+def _is_setup_blocked():
+    """Check if setup API calls should be blocked.
+
+    Returns True if setup is complete AND the user is NOT in an active
+    setup wizard session.  Steps 4-6 (seed catalog, proxy, sync) run
+    after the org + user are created, so is_setup_complete() is already
+    True while the wizard is still in progress.  The session flag lets
+    those later steps through.
+    """
+    if not is_setup_complete():
+        return False
+    return not session.get('_setup_in_progress')
+
 @setup_bp.route('/setup', methods=['GET'])
 def setup_wizard():
     """Display setup wizard"""
-    # If setup is already complete, redirect to main page
-    if is_setup_complete():
+    # If setup is already complete and no active wizard session, redirect
+    if is_setup_complete() and not session.get('_setup_in_progress'):
         return redirect(url_for('main.index'))
+
+    # Mark session so later wizard steps (4-6) are allowed even after
+    # org + user are created (which makes is_setup_complete() return True).
+    session['_setup_in_progress'] = True
 
     # Check auth status - match auth.py: auth is ON by default
     auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
@@ -64,8 +81,8 @@ def setup_status():
 def create_initial_organization():
     """Create the default organization"""
     try:
-        # Block access after setup is complete
-        if is_setup_complete():
+        # Block access after setup is complete (unless wizard is still in progress)
+        if _is_setup_blocked():
             return jsonify({'error': 'Setup already completed. Use admin panel to manage organizations.'}), 403
 
         data = request.get_json()
@@ -145,8 +162,8 @@ def create_initial_organization():
 def create_admin_user():
     """Create the initial admin user"""
     try:
-        # Block access after setup is complete
-        if is_setup_complete():
+        # Block access after setup is complete (unless wizard is still in progress)
+        if _is_setup_blocked():
             return jsonify({'error': 'Setup already completed. Use admin panel to manage users.'}), 403
 
         data = request.get_json()
@@ -224,8 +241,8 @@ def create_admin_user():
 def save_proxy_settings():
     """Save proxy settings to system settings"""
     try:
-        # Block access after setup is complete
-        if is_setup_complete():
+        # Block access after setup is complete (unless wizard is still in progress)
+        if _is_setup_blocked():
             return jsonify({'error': 'Setup already completed. Use admin panel to manage proxy settings.'}), 403
 
         from app.models import SystemSettings
@@ -280,8 +297,8 @@ def save_proxy_settings():
 def seed_service_catalog():
     """Seed the service catalog with common enterprise services"""
     try:
-        # Block access after setup is complete
-        if is_setup_complete():
+        # Block access after setup is complete (unless wizard is still in progress)
+        if _is_setup_blocked():
             return jsonify({'error': 'Setup already completed.'}), 403
 
         # Check if services already exist
@@ -395,8 +412,8 @@ def seed_service_catalog():
 def run_initial_sync():
     """Run initial CISA KEV sync"""
     try:
-        # Block access after setup is complete
-        if is_setup_complete():
+        # Block access after setup is complete (unless wizard is still in progress)
+        if _is_setup_blocked():
             return jsonify({'error': 'Setup already completed. Use admin panel to trigger sync.'}), 403
 
         # Check if proxy is configured
@@ -442,6 +459,9 @@ def complete_setup():
                 'success': False,
                 'error': 'Setup is not complete. Please complete all steps.'
             }), 400
+
+        # Clear the wizard session flag so setup endpoints are locked
+        session.pop('_setup_in_progress', None)
 
         return jsonify({
             'success': True,
