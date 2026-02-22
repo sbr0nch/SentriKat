@@ -273,7 +273,7 @@ async function saveReport() {
         loadReports();
     } else {
         const err = await res.json();
-        alert(err.error || 'Failed to save');
+        showToast(err.error || 'Failed to save', 'danger');
     }
 }
 
@@ -286,7 +286,7 @@ async function sendNow(id) {
     if (!confirm('Send this report now?')) return;
     const res = await fetch(`/api/reports/scheduled/${id}/send-now`, { method: 'POST' });
     const data = await res.json();
-    alert(data.message || (res.ok ? 'Report sent!' : 'Failed'));
+    showToast(data.message || (res.ok ? 'Report sent!' : 'Failed'), res.ok ? 'success' : 'danger');
 }
 
 async function deleteReport(id) {

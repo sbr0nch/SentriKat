@@ -2194,6 +2194,23 @@ function updateOrgRequirement() {
     }
 }
 
+function updateLdapInviteOrgRequirement() {
+    const role = SK.DOM.getValue('ldapInviteRole');
+    const orgSelect = SK.DOM.get('ldapInviteOrganization');
+    const orgRequired = SK.DOM.get('ldapOrgRequired');
+    const orgHelp = SK.DOM.get('ldapOrgHelp');
+
+    if (role === 'super_admin') {
+        if (orgSelect) orgSelect.required = false;
+        if (orgRequired) orgRequired.style.display = 'none';
+        if (orgHelp) orgHelp.textContent = 'Optional for Super Admin. Leave empty for system-wide access.';
+    } else {
+        if (orgSelect) orgSelect.required = true;
+        if (orgRequired) orgRequired.style.display = 'inline';
+        if (orgHelp) orgHelp.textContent = '';
+    }
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -4473,10 +4490,11 @@ async function inviteLdapUser() {
     const email = SK.DOM.getValue('ldapInviteEmail');
     const fullName = SK.DOM.getValue('ldapInviteFullName');
     const dn = SK.DOM.getValue('ldapUserDN');
-    const organizationId = parseInt(SK.DOM.getValue('ldapInviteOrganization'));
+    const organizationId = parseInt(SK.DOM.getValue('ldapInviteOrganization')) || null;
     const role = SK.DOM.getValue('ldapInviteRole');
 
-    if (!organizationId) {
+    // Super admins don't require an organization
+    if (!organizationId && role !== 'super_admin') {
         showToast('Please select an organization', 'warning');
         return;
     }

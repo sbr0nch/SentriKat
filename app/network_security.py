@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 def _allow_private_urls():
     """Check if private/internal URLs are allowed (for dev/test environments)."""
-    return os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true'
+    return (os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true' or
+            os.environ.get('ALLOW_PRIVATE_JIRA_URL', '').lower() == 'true')
 
 
 def is_ssrf_safe_url(url):
