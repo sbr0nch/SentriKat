@@ -625,14 +625,20 @@
         const errorParam = urlParams.get('error');
         if (errorParam) {
             const errorMessages = {
-                'saml_auth_failed': 'SSO authentication failed. Please check your IdP configuration or try again.',
+                'saml_auth_failed': 'SSO authentication failed.',
                 'saml_user_not_found': 'Your SSO account was not found. Contact your administrator to provision access.',
                 'saml_user_create_failed': 'Failed to create your account. Contact your administrator.',
                 'saml_unavailable': 'SSO is not available. Please use password login.',
                 'saml_disabled': 'SSO has been disabled. Please use password login.',
                 'saml_config': 'SSO configuration error. Contact your administrator.'
             };
-            showError(errorMessages[errorParam] || 'Login failed. Please try again.');
+            let msg = errorMessages[errorParam] || 'Login failed. Please try again.';
+            // Append SAML detail if available
+            const detail = urlParams.get('detail');
+            if (detail && errorParam === 'saml_auth_failed') {
+                msg += ' Detail: ' + decodeURIComponent(detail);
+            }
+            showError(msg);
         }
 
         // Check SAML SSO availability
