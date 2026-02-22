@@ -107,7 +107,7 @@ LICENSE_TIERS = {
         'max_users': 1,
         'max_organizations': 1,
         'max_products': 50,
-        'max_agents': 0,  # Demo has no agent UI access
+        'max_agents': 5,  # Demo includes 5 agents
         'features': [],
         'powered_by_required': True,
         'is_demo': True
@@ -357,7 +357,7 @@ class LicenseInfo:
         self.max_organizations = 1
         self.max_products = 50
         # Agent limits (from signed license - tamper-proof)
-        self.max_agents = 0  # Demo has no agent UI access (PRO has 10+ with agent packs)
+        self.max_agents = 5  # Demo includes 5 agents (PRO has 10+ with agent packs)
         self.max_agent_api_keys = 0
         self.features = []
         self.is_valid = False
@@ -385,7 +385,7 @@ class LicenseInfo:
                 'max_users': LICENSE_TIERS['community']['max_users'],
                 'max_organizations': LICENSE_TIERS['community']['max_organizations'],
                 'max_products': LICENSE_TIERS['community']['max_products'],
-                'max_agents': LICENSE_TIERS['community']['max_agents'],  # Demo: no agents
+                'max_agents': LICENSE_TIERS['community']['max_agents'],  # Demo: 5 agents
                 'max_agent_api_keys': 5  # Demo: 5 API keys
             }
         return {

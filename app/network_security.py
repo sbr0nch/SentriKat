@@ -8,10 +8,16 @@ and integration connectors.
 
 import ipaddress
 import logging
+import os
 import socket
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def _allow_private_urls():
+    """Check if private/internal URLs are allowed (for dev/test environments)."""
+    return os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true'
 
 
 def is_ssrf_safe_url(url):
@@ -25,6 +31,12 @@ def is_ssrf_safe_url(url):
     - Reserved addresses
     - Cloud metadata endpoints (169.254.169.254, 169.254.170.2)
 
+    When the ALLOW_PRIVATE_URLS environment variable is set to 'true',
+    all private/internal network checks are bypassed. This is intended
+    for dev/test environments where services run on internal networks
+    (e.g. Docker containers using host.docker.internal). The variable
+    should never be set in production.
+
     Args:
         url: The URL to validate.
 
@@ -36,6 +48,10 @@ def is_ssrf_safe_url(url):
         hostname = parsed.hostname
         if not hostname or parsed.scheme not in ('http', 'https'):
             return False
+
+        # If private URLs are explicitly allowed (dev/test), skip network checks
+        if _allow_private_urls():
+            return True
 
         # Resolve hostname to IP and check against private ranges
         try:

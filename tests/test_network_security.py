@@ -383,3 +383,107 @@ class TestEdgeCases:
 
         mock_dns.return_value = [(socket.AF_INET6, socket.SOCK_STREAM, 0, '', ('::1', 0, 0, 0))]
         assert is_ssrf_safe_url('http://ipv6-loopback.attacker.com/exfil') is False
+
+
+class TestAllowPrivateURLs:
+    """Tests for ALLOW_PRIVATE_URLS environment variable bypass."""
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'true'})
+    def test_allows_private_10_range_when_enabled(self):
+        """With ALLOW_PRIVATE_URLS=true, 10.x.x.x URLs are allowed."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('http://10.0.0.1/admin') is True
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'true'})
+    def test_allows_172_16_range_when_enabled(self):
+        """With ALLOW_PRIVATE_URLS=true, 172.16.x.x URLs are allowed."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('http://172.16.0.1/internal') is True
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'true'})
+    def test_allows_192_168_range_when_enabled(self):
+        """With ALLOW_PRIVATE_URLS=true, 192.168.x.x URLs are allowed."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('https://192.168.1.100:8080/api') is True
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'true'})
+    def test_allows_localhost_when_enabled(self):
+        """With ALLOW_PRIVATE_URLS=true, 127.0.0.1 is allowed."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('http://127.0.0.1:8080/path') is True
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'true'})
+    @patch('app.network_security.socket.getaddrinfo')
+    def test_allows_docker_internal_hostname_when_enabled(self, mock_dns):
+        """With ALLOW_PRIVATE_URLS=true, host.docker.internal is allowed."""
+        from app.network_security import is_ssrf_safe_url
+
+        mock_dns.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 0, '', ('192.168.65.2', 0))]
+        assert is_ssrf_safe_url('http://host.docker.internal:8080/jira') is True
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'true'})
+    def test_still_blocks_invalid_scheme_when_enabled(self):
+        """ALLOW_PRIVATE_URLS does not bypass scheme validation."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('ftp://10.0.0.1/file') is False
+        assert is_ssrf_safe_url('file:///etc/passwd') is False
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'true'})
+    def test_still_blocks_empty_url_when_enabled(self):
+        """ALLOW_PRIVATE_URLS does not bypass basic URL validation."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('') is False
+        assert is_ssrf_safe_url(None) is False
+
+    @patch.dict('os.environ', {}, clear=False)
+    def test_blocks_private_when_env_not_set(self):
+        """Without ALLOW_PRIVATE_URLS, private IPs are still blocked (default)."""
+        import os
+        os.environ.pop('ALLOW_PRIVATE_URLS', None)
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('http://10.0.0.1/admin') is False
+        assert is_ssrf_safe_url('http://192.168.1.1/router') is False
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'false'})
+    def test_blocks_private_when_env_is_false(self):
+        """With ALLOW_PRIVATE_URLS=false, private IPs are still blocked."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('http://10.0.0.1/admin') is False
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': ''})
+    def test_blocks_private_when_env_is_empty(self):
+        """With ALLOW_PRIVATE_URLS='', private IPs are still blocked."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('http://10.0.0.1/admin') is False
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'TRUE'})
+    def test_case_insensitive_true(self):
+        """ALLOW_PRIVATE_URLS is case-insensitive."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('http://10.0.0.1/admin') is True
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'True'})
+    def test_allows_metadata_endpoint_when_enabled(self):
+        """With ALLOW_PRIVATE_URLS=true, even cloud metadata endpoints are allowed."""
+        from app.network_security import is_ssrf_safe_url
+
+        assert is_ssrf_safe_url('http://169.254.169.254/latest/meta-data/') is True
+
+    @patch.dict('os.environ', {'ALLOW_PRIVATE_URLS': 'true'})
+    def test_validate_url_for_request_allows_private_when_enabled(self):
+        """validate_url_for_request also respects ALLOW_PRIVATE_URLS."""
+        from app.network_security import validate_url_for_request
+
+        is_safe, error = validate_url_for_request('http://192.168.1.1/webhook', context='test')
+        assert is_safe is True
+        assert error is None
