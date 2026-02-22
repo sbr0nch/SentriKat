@@ -200,6 +200,12 @@ def process_saml_response(request) -> Tuple[bool, Optional[Dict], Optional[str]]
         if errors:
             error_reason = auth.get_last_error_reason()
             logger.error(f"SAML errors: {errors}, reason: {error_reason}")
+            # Log additional debug info to help diagnose common issues
+            settings = get_saml_settings()
+            configured_acs = settings.get('sp', {}).get('assertionConsumerService', {}).get('url', '')
+            logger.error(f"SAML debug - configured ACS URL: {configured_acs}, "
+                        f"request URL: {request.url}, request host: {request.host}, "
+                        f"request scheme: {request.scheme}")
             return False, None, f"SAML validation failed: {error_reason}"
 
         if not auth.is_authenticated():
@@ -283,19 +289,26 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
     user = User.query.filter_by(email=email).first()
 
     if user:
-        # Update user info if changed
-        if user_data.get('first_name'):
-            user.first_name = user_data['first_name']
-        if user_data.get('last_name'):
-            user.last_name = user_data['last_name']
-        if user_data.get('display_name'):
-            user.display_name = user_data['display_name']
-
-        user.auth_type = 'saml'
-        user.last_login = datetime.utcnow()
-        db.session.commit()
-
-        return user, False
+        # Only allow SAML login for users who are already SAML-type or local users
+        # Don't silently convert local/ldap users - they should keep their auth_type
+        if user.auth_type == 'saml':
+            # Update user info if changed
+            if user_data.get('first_name'):
+                user.first_name = user_data['first_name']
+            if user_data.get('last_name'):
+                user.last_name = user_data['last_name']
+            if user_data.get('display_name'):
+                user.display_name = user_data['display_name']
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            return user, False
+        else:
+            # Existing local/ldap user - allow SAML login but preserve their auth_type
+            # so password login keeps working
+            logger.info(f"SAML login for existing {user.auth_type} user: {user.email}")
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            return user, False
 
     # Create new user
     default_org_id = get_setting('saml_default_org_id', '')
