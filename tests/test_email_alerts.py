@@ -119,7 +119,11 @@ class TestShouldSendAlertNow:
         """With no alert_time_start/end, should always return True."""
         from app.email_alerts import EmailAlertManager
 
-        org = _make_org(db_session, alert_time_start=None, alert_time_end=None)
+        org = _make_org(db_session)
+        # Explicitly clear time restrictions on the in-memory object to avoid
+        # SQLAlchemy column defaults being applied through the commit cycle.
+        org.alert_time_start = None
+        org.alert_time_end = None
         assert EmailAlertManager.should_send_alert_now(org) is True
 
     @patch('app.email_alerts.datetime')
