@@ -28,7 +28,7 @@ from app import db, csrf, limiter
 from app.models import (
     Asset, ProductInstallation, Product, AgentApiKey, Organization, InventoryJob,
     AgentLicense, AgentUsageRecord, AgentEvent, ProductVersionHistory, StaleAssetNotification,
-    ContainerImage, ContainerVulnerability, VulnerabilityMatch,
+    ContainerImage, ContainerVulnerability, Vulnerability, VulnerabilityMatch,
     DependencyScan, DependencyScanResult
 )
 from app.licensing import requires_professional, get_license, check_agent_limit, check_agent_api_key_limit, get_agent_usage
