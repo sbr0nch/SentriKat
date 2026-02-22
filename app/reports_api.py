@@ -1756,7 +1756,7 @@ def update_syslog_settings():
         if setting:
             setting.value = value
         else:
-            setting = SystemSettings(key=key, value=value)
+            setting = SystemSettings(key=key, value=value, category='syslog')
             db.session.add(setting)
 
     db.session.commit()
