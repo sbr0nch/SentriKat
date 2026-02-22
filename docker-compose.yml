@@ -80,7 +80,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/sync/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -110,7 +110,7 @@ services:
       - sentrikat
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost/api/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
