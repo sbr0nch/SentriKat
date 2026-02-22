@@ -5,6 +5,7 @@ from app.cisa_sync import sync_cisa_kev
 from app import db
 from config import Config
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import json
 import logging
 import os
@@ -100,6 +101,19 @@ def _run_with_lock(job_name, func, *args, **kwargs):
 _scheduler = None
 _app = None
 
+def get_display_timezone(app):
+    """Get the configured display timezone from settings, defaulting to UTC."""
+    with app.app_context():
+        if SystemSettings is None:
+            return None
+        tz_setting = SystemSettings.query.filter_by(key='display_timezone').first()
+        tz_name = tz_setting.value if tz_setting and tz_setting.value else 'UTC'
+        try:
+            return ZoneInfo(tz_name)
+        except (KeyError, Exception):
+            logger.warning(f"Invalid timezone '{tz_name}', falling back to UTC")
+            return ZoneInfo('UTC')
+
 def get_critical_email_settings(app):
     """Get critical email settings from database"""
     with app.app_context():
@@ -124,10 +138,13 @@ def start_scheduler(app):
     scheduler = BackgroundScheduler()
     _scheduler = scheduler
 
+    # Get the user-configured display timezone for all cron-based jobs
+    tz = get_display_timezone(app)
+
     # Schedule daily CISA KEV sync at configured time
     scheduler.add_job(
         func=lambda: _run_with_lock('cisa_sync', cisa_sync_job, app),
-        trigger=CronTrigger(hour=Config.SYNC_HOUR, minute=Config.SYNC_MINUTE),
+        trigger=CronTrigger(hour=Config.SYNC_HOUR, minute=Config.SYNC_MINUTE, timezone=tz),
         id='daily_cisa_sync',
         name='Daily CISA KEV Sync',
         replace_existing=True
@@ -147,24 +164,24 @@ def start_scheduler(app):
         )
         logger.info(f"LDAP sync scheduled every {ldap_sync_interval} hours")
 
-    # Schedule daily critical CVE reminder emails (time from settings)
+    # Schedule daily critical CVE reminder emails (time from settings, in configured timezone)
     enabled, hour, minute = get_critical_email_settings(app)
     if enabled:
         scheduler.add_job(
             func=lambda: _run_with_lock('critical_cve_reminder', critical_cve_reminder_job, app),
-            trigger=CronTrigger(hour=hour, minute=minute),
+            trigger=CronTrigger(hour=hour, minute=minute, timezone=tz),
             id='daily_critical_cve_reminder',
             name='Daily Critical CVE Reminder Emails',
             replace_existing=True
         )
-        logger.info(f"Critical CVE reminder emails scheduled at {hour:02d}:{minute:02d}")
+        logger.info(f"Critical CVE reminder emails scheduled at {hour:02d}:{minute:02d} ({tz})")
     else:
         logger.info("Critical CVE reminder emails disabled")
 
-    # Schedule data retention cleanup (daily at 3 AM)
+    # Schedule data retention cleanup (daily at 3 AM in configured timezone)
     scheduler.add_job(
         func=lambda: _run_with_lock('data_retention_cleanup', data_retention_cleanup_job, app),
-        trigger=CronTrigger(hour=3, minute=0),
+        trigger=CronTrigger(hour=3, minute=0, timezone=tz),
         id='data_retention_cleanup',
         name='Data Retention Cleanup',
         replace_existing=True
@@ -177,17 +194,17 @@ def start_scheduler(app):
     # Without this, stale false-positive matches persist until the next full KEV sync.
     scheduler.add_job(
         func=lambda: _run_with_lock('stale_match_cleanup', stale_match_cleanup_job, app),
-        trigger=CronTrigger(hour=1, minute=30),
+        trigger=CronTrigger(hour=1, minute=30, timezone=tz),
         id='daily_stale_match_cleanup',
         name='Daily Stale Match Cleanup',
         replace_existing=True
     )
     logger.info("Daily stale match cleanup scheduled at 01:30")
 
-    # Schedule daily vulnerability snapshot (at 2 AM)
+    # Schedule daily vulnerability snapshot (at 2 AM in configured timezone)
     scheduler.add_job(
         func=lambda: _run_with_lock('vulnerability_snapshot', vulnerability_snapshot_job, app),
-        trigger=CronTrigger(hour=2, minute=0),
+        trigger=CronTrigger(hour=2, minute=0, timezone=tz),
         id='daily_vulnerability_snapshot',
         name='Daily Vulnerability Snapshot',
         replace_existing=True
@@ -208,7 +225,7 @@ def start_scheduler(app):
     vendor_sync_hour = (Config.SYNC_HOUR + 1) % 24
     scheduler.add_job(
         func=lambda: _run_with_lock('vendor_advisory_sync', vendor_advisory_sync_job, app),
-        trigger=CronTrigger(hour=vendor_sync_hour, minute=Config.SYNC_MINUTE),
+        trigger=CronTrigger(hour=vendor_sync_hour, minute=Config.SYNC_MINUTE, timezone=tz),
         id='vendor_advisory_sync',
         name='Vendor Advisory Sync (OSV, Red Hat, MSRC, Debian)',
         replace_existing=True
@@ -238,7 +255,7 @@ def start_scheduler(app):
     # Schedule NVD CPE dictionary sync (weekly, Sundays at 04:00)
     scheduler.add_job(
         func=lambda: _run_with_lock('nvd_cpe_dict_sync', nvd_cpe_dict_sync_job, app),
-        trigger=CronTrigger(day_of_week='sun', hour=4, minute=0),
+        trigger=CronTrigger(day_of_week='sun', hour=4, minute=0, timezone=tz),
         id='nvd_cpe_dict_sync',
         name='NVD CPE Dictionary Sync (weekly)',
         replace_existing=True
@@ -269,7 +286,7 @@ def start_scheduler(app):
     # Schedule asset type auto-detection (daily at 06:00)
     scheduler.add_job(
         func=lambda: _run_with_lock('auto_detect_asset_type', auto_detect_asset_type_job, app),
-        trigger=CronTrigger(hour=6, minute=0),
+        trigger=CronTrigger(hour=6, minute=0, timezone=tz),
         id='auto_detect_asset_type',
         name='Auto-Detect Asset Type (server/workstation/container)',
         replace_existing=True
@@ -290,7 +307,7 @@ def start_scheduler(app):
     # Schedule unmapped CPE retry (weekly, Mondays at 05:00 - after Sunday CPE dict sync)
     scheduler.add_job(
         func=lambda: _run_with_lock('unmapped_cpe_retry', unmapped_cpe_retry_job, app),
-        trigger=CronTrigger(day_of_week='mon', hour=5, minute=0),
+        trigger=CronTrigger(day_of_week='mon', hour=5, minute=0, timezone=tz),
         id='unmapped_cpe_retry',
         name='Retry CPE Mapping for Unmapped Products',
         replace_existing=True
@@ -363,6 +380,7 @@ def reschedule_critical_email():
         return
 
     enabled, hour, minute = get_critical_email_settings(_app)
+    tz = get_display_timezone(_app)
 
     # Remove existing job if any
     try:
@@ -373,12 +391,12 @@ def reschedule_critical_email():
     if enabled:
         _scheduler.add_job(
             func=lambda: _run_with_lock('critical_cve_reminder', critical_cve_reminder_job, _app),
-            trigger=CronTrigger(hour=hour, minute=minute),
+            trigger=CronTrigger(hour=hour, minute=minute, timezone=tz),
             id='daily_critical_cve_reminder',
             name='Daily Critical CVE Reminder Emails',
             replace_existing=True
         )
-        logger.info(f"Critical CVE reminder rescheduled to {hour:02d}:{minute:02d}")
+        logger.info(f"Critical CVE reminder rescheduled to {hour:02d}:{minute:02d} ({tz})")
     else:
         logger.info("Critical CVE reminder disabled")
 

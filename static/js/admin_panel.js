@@ -2820,6 +2820,10 @@ async function saveProxySettings() {
             window.appSettings = window.appSettings || {};
             window.appSettings.displayTimezone = settings.display_timezone;
             window.appSettings.dateFormat = settings.date_format;
+            // Update timezone labels across the page
+            document.querySelectorAll('.tz-label').forEach(el => {
+                el.textContent = settings.display_timezone;
+            });
         } else {
             const error = await response.json();
             showToast(`Error: ${error.error}`, 'danger');
@@ -3824,6 +3828,11 @@ async function loadAllSettings() {
                     window.appSettings = window.appSettings || {};
                     window.appSettings.displayTimezone = general.display_timezone || 'UTC';
                     window.appSettings.dateFormat = general.date_format || 'YYYY-MM-DD HH:mm';
+
+                    // Update all timezone labels across the page
+                    document.querySelectorAll('.tz-label').forEach(el => {
+                        el.textContent = window.appSettings.displayTimezone;
+                    });
 
                     // Proxy/Network settings
                     const verifySSL = SK.DOM.get('verifySSL');
