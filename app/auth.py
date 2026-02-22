@@ -286,6 +286,70 @@ def login():
 
     return render_template('login.html')
 
+
+@auth_bp.route('/api/auth/diag', methods=['GET'])
+def auth_diag():
+    """
+    Temporary diagnostic endpoint to debug login issues.
+    Returns non-sensitive auth state information.
+    Remove this endpoint after debugging is complete.
+    """
+    from app.settings_api import get_setting
+
+    diag = {
+        'auth_enabled': AUTH_ENABLED,
+        'total_users': User.query.count(),
+        'active_users': User.query.filter_by(is_active=True).count(),
+        'session_has_user_id': 'user_id' in session,
+    }
+
+    # Check all users and their auth state (no passwords/secrets)
+    users = User.query.all()
+    diag['users'] = []
+    for u in users:
+        diag['users'].append({
+            'id': u.id,
+            'username': u.username,
+            'auth_type': u.auth_type,
+            'is_active': u.is_active,
+            'role': u.role,
+            'is_admin': u.is_admin,
+            'is_locked': u.is_locked() if hasattr(u, 'is_locked') else 'N/A',
+            'failed_login_attempts': getattr(u, 'failed_login_attempts', 0),
+            'locked_until': str(u.locked_until) if getattr(u, 'locked_until', None) else None,
+            'has_password_hash': bool(getattr(u, 'password_hash', None)),
+        })
+
+    # SAML config state
+    diag['saml'] = {
+        'enabled': get_setting('saml_enabled', 'false'),
+        'sp_entity_id': get_setting('saml_sp_entity_id', ''),
+        'sp_acs_url': get_setting('saml_sp_acs_url', ''),
+        'has_idp_metadata': bool(get_setting('saml_idp_metadata', '')),
+        'auto_provision': get_setting('saml_auto_provision', 'true'),
+    }
+
+    # Check SAML library
+    try:
+        from onelogin.saml2.auth import OneLogin_Saml2_Auth
+        diag['saml']['library_installed'] = True
+    except ImportError:
+        diag['saml']['library_installed'] = False
+
+    # Request info (what Flask sees after ProxyFix)
+    diag['request_info'] = {
+        'host': request.host,
+        'scheme': request.scheme,
+        'url': request.url,
+        'remote_addr': request.remote_addr,
+    }
+
+    # SENTRIKAT_URL env
+    diag['sentrikat_url_env'] = os.environ.get('SENTRIKAT_URL', '(not set)')
+
+    return jsonify(diag)
+
+
 @auth_bp.route('/setup', methods=['GET'])
 def setup():
     """First-time setup wizard"""

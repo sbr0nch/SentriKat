@@ -205,7 +205,10 @@ def saml_acs():
 
     if not success:
         logger.error(f"SAML authentication failed: {error}")
-        return redirect(url_for('auth.login', error='saml_auth_failed'))
+        # Pass the detail so the login page can show what actually went wrong
+        from urllib.parse import quote
+        detail = quote(str(error or 'Unknown error'))
+        return redirect(url_for('auth.login', error='saml_auth_failed', detail=detail))
 
     # Get or create user
     auto_provision = get_setting('saml_auto_provision', 'true') == 'true'
