@@ -95,6 +95,13 @@ def get_saml_settings() -> Dict[str, Any]:
     sp_acs_url = get_setting('saml_sp_acs_url', '')
     sp_sls_url = get_setting('saml_sp_sls_url', '')
 
+    # Auto-construct ACS URL from SENTRIKAT_URL if not explicitly set
+    if not sp_acs_url:
+        import os
+        base_url = os.environ.get('SENTRIKAT_URL', 'http://localhost').rstrip('/')
+        sp_acs_url = f"{base_url}/saml/acs"
+        logger.info(f"SAML ACS URL not set, using: {sp_acs_url}")
+
     # Build settings dict
     settings = {
         'strict': True,
@@ -107,7 +114,20 @@ def get_saml_settings() -> Dict[str, Any]:
             },
             'NameIDFormat': 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress'
         },
-        'idp': idp_data.get('idp', {})
+        'idp': idp_data.get('idp', {}),
+        'security': {
+            # Don't require specific authentication context - Keycloak and many
+            # IdPs send different context classes than python3-saml's default
+            'requestedAuthnContext': False,
+            # Don't require encrypted assertions (most IdPs don't encrypt by default)
+            'wantNameIdEncrypted': False,
+            'wantAssertionsEncrypted': False,
+            # Allow some clock skew between Docker containers / IdP server
+            'rejectedTimes': 120,
+            # Accept both signed responses and signed assertions
+            'wantAssertionsSigned': False,
+            'wantMessagesSigned': False,
+        }
     }
 
     # Add SLS if configured
