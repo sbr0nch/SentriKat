@@ -433,8 +433,8 @@ class TestGetOrCreateSamlUser:
         })
         assert created is False
         assert user.id == existing.id
-        # auth_type should be updated to saml
-        assert user.auth_type == 'saml'
+        # auth_type is preserved so password login keeps working
+        assert user.auth_type == 'local'
 
     def test_unique_username_collision(self, app, db_session, test_org):
         """If the desired username already exists, a numeric suffix should be appended."""
@@ -1068,13 +1068,13 @@ class TestSamlUserProvisioning:
         assert user.role == 'viewer'
 
     def test_existing_user_info_updated_on_login(self, app, db_session, test_org):
-        """When an existing user logs in via SAML, their profile should be updated."""
+        """When an existing SAML user logs in via SAML, their profile should be updated."""
         from app.saml_manager import get_or_create_saml_user
         from app.models import User
 
         user = User(
             username='updateme', email='update@company.com',
-            auth_type='local', role='user', organization_id=test_org.id, is_active=True
+            auth_type='saml', role='user', organization_id=test_org.id, is_active=True
         )
         db_session.add(user)
         db_session.commit()
