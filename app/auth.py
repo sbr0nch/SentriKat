@@ -451,9 +451,13 @@ def api_login():
             logger.exception(f"LDAP authentication error for {username}")
             return jsonify({'error': 'Authentication service unavailable'}), 500
 
+    elif user.auth_type == 'saml':
+        logger.info(f"Login attempt for SAML user {username} via password form - directing to SSO")
+        return jsonify({'error': 'This account uses SSO authentication. Please use the "Sign in with SSO" button.'}), 401
+
     else:
         logger.error(f"Login failed: unknown auth_type '{user.auth_type}' for user {username}")
-        return jsonify({'error': 'Invalid authentication type'}), 500
+        return jsonify({'error': 'Invalid authentication type. Contact administrator.'}), 401
 
     # Check if 2FA is required BEFORE resetting failed attempts.
     # Failed attempt counters should only be reset after FULL authentication.
