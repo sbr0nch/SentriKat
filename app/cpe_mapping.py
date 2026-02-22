@@ -225,7 +225,9 @@ CPE_MAPPINGS = [
     # Pipe separators are normalized before matching, so these patterns
     # match the part after the pipe (e.g., "Dell | Command Update" → "command update")
     # -------------------------------------------------------------------------
+    ('regex', r'^intel\s*vpro\s*out\s*of\s*band', 'dell', 'command_intel_vpro_out_of_band'),
     ('regex', r'^command\s*update', 'dell', 'command_update'),
+    ('regex', r'^supportassist\s*os\s*recovery', 'dell', 'supportassist_os_recovery'),
     ('regex', r'^supportassist', 'dell', 'supportassist'),
     ('regex', r'^bios', 'dell', 'bios'),
     ('regex', r'^power\s*manager', 'dell', 'power_manager'),
@@ -239,6 +241,7 @@ CPE_MAPPINGS = [
     # -------------------------------------------------------------------------
     # HP / HPE Products (similar naming patterns)
     # -------------------------------------------------------------------------
+    ('regex', r'^hp\s*wolf\s*security', 'hp', 'wolf_security'),
     ('regex', r'^hp\s*support\s*assistant', 'hp', 'support_assistant'),
     ('regex', r'^hpe?\s*system\s*management\s*homepage', 'hp', 'system_management_homepage'),
     ('regex', r'^ilo\s*\d?', 'hp', 'integrated_lights-out'),
