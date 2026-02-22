@@ -3669,6 +3669,13 @@
         const DISPLAY_TIMEZONE = '{{ display_settings.timezone|default("UTC") }}';
         const DISPLAY_DATE_FORMAT = '{{ display_settings.date_format|default("YYYY-MM-DD HH:mm") }}';
 
+        // Update all timezone labels to show the configured timezone
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.tz-label').forEach(function(el) {
+                el.textContent = DISPLAY_TIMEZONE;
+            });
+        });
+
         function formatDate(dateString) {
             if (!dateString) return '-';
             const date = new Date(dateString);

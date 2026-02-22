@@ -2774,43 +2774,59 @@ class ScheduledReport(db.Model):
         }
 
     def calculate_next_run(self):
-        """Calculate the next run time based on frequency and schedule"""
-        from datetime import datetime, timedelta
+        """Calculate the next run time based on frequency and schedule.
 
-        now = datetime.utcnow()
+        The user-configured time_of_day is interpreted in the display timezone
+        (from settings), then converted back to UTC for storage so the
+        scheduler comparison (utcnow vs next_run) works correctly.
+        """
+        from datetime import datetime, timedelta, timezone
+        from zoneinfo import ZoneInfo
+
+        # Get configured display timezone
+        try:
+            tz_setting = db.session.execute(
+                db.text("SELECT value FROM system_settings WHERE key='display_timezone'")
+            ).scalar()
+            tz = ZoneInfo(tz_setting) if tz_setting else ZoneInfo('UTC')
+        except Exception:
+            tz = ZoneInfo('UTC')
+
+        # Current time in the configured timezone
+        now_utc = datetime.now(timezone.utc)
+        now_local = now_utc.astimezone(tz)
+
         hour, minute = map(int, self.time_of_day.split(':'))
 
         if self.frequency == 'daily':
-            # Next occurrence of the specified time
-            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if next_run <= now:
-                next_run += timedelta(days=1)
+            next_run_local = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if next_run_local <= now_local:
+                next_run_local += timedelta(days=1)
 
         elif self.frequency == 'weekly':
-            # Next occurrence of the specified day and time
-            days_ahead = self.day_of_week - now.weekday()
+            days_ahead = self.day_of_week - now_local.weekday()
             if days_ahead < 0:
                 days_ahead += 7
-            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=days_ahead)
-            if next_run <= now:
-                next_run += timedelta(days=7)
+            next_run_local = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=days_ahead)
+            if next_run_local <= now_local:
+                next_run_local += timedelta(days=7)
 
         elif self.frequency == 'monthly':
-            # Next occurrence of the specified day of month
-            day = min(self.day_of_month or 1, 28)  # Cap at 28 to avoid month-end issues
-            next_run = now.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
-            if next_run <= now:
-                # Move to next month
-                if now.month == 12:
-                    next_run = next_run.replace(year=now.year + 1, month=1)
+            day = min(self.day_of_month or 1, 28)
+            next_run_local = now_local.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+            if next_run_local <= now_local:
+                if now_local.month == 12:
+                    next_run_local = next_run_local.replace(year=now_local.year + 1, month=1)
                 else:
-                    next_run = next_run.replace(month=now.month + 1)
+                    next_run_local = next_run_local.replace(month=now_local.month + 1)
 
         else:
-            next_run = now + timedelta(days=1)
+            next_run_local = now_local + timedelta(days=1)
 
-        self.next_run = next_run
-        return next_run
+        # Convert back to naive UTC for storage (scheduler uses datetime.utcnow())
+        next_run_utc = next_run_local.astimezone(timezone.utc).replace(tzinfo=None)
+        self.next_run = next_run_utc
+        return next_run_utc
 
     def get_recipient_emails(self):
         """Get list of email addresses to send to"""

@@ -679,7 +679,7 @@ def save_sync_settings():
     try:
         set_setting('auto_sync_enabled', 'true' if data.get('auto_sync_enabled') else 'false', 'sync', 'Enable automatic sync')
         set_setting('sync_interval', data.get('sync_interval', 'daily'), 'sync', 'Sync interval')
-        set_setting('sync_time', data.get('sync_time', '02:00'), 'sync', 'Preferred sync time (UTC)')
+        set_setting('sync_time', data.get('sync_time', '02:00'), 'sync', 'Preferred sync time')
         set_setting('cisa_kev_url', data.get('cisa_kev_url', ''), 'sync', 'CISA KEV feed URL')
 
         # Handle NVD API key - validate before saving
@@ -1121,7 +1121,7 @@ def save_notification_settings():
             set_setting('generic_webhook_token', '', 'notifications', 'Webhook auth token')
 
         set_setting('critical_email_enabled', 'true' if data.get('critical_email_enabled') else 'false', 'notifications', 'Enable critical CVE reminder emails')
-        set_setting('critical_email_time', data.get('critical_email_time', '09:00'), 'notifications', 'Critical CVE email time (UTC)')
+        set_setting('critical_email_time', data.get('critical_email_time', '09:00'), 'notifications', 'Critical CVE email time')
         set_setting('critical_email_max_age_days', str(data.get('critical_email_max_age_days', 30)), 'notifications', 'Max age for CVEs in reminder (days)')
 
         # Alert mode defaults
