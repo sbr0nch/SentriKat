@@ -1,6 +1,6 @@
 from app import db
 from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride
-from app.version_utils import _version_sort_key, _version_in_range
+from app.version_utils import _version_sort_key, _version_in_range, detect_version_format
 import re
 import json
 
@@ -87,6 +87,15 @@ def check_cpe_match(vulnerability, product):
         # entry would match products whose version is OUTSIDE the affected range
         # (e.g., Chrome 145 being flagged for a CVE fixed in Chrome 72).
         version = (product.version or '').strip() or None
+
+        # Detect distro-native version format from product ecosystem/OS so that
+        # _version_in_range() uses dpkg/rpm/apk comparison instead of generic.
+        version_format = detect_version_format(
+            getattr(product, 'ecosystem', None) or '',
+            # ProductInstallation.detected_on_os isn't directly on Product,
+            # but ecosystem captures the same info (e.g. 'debian', 'rhel')
+        )
+
         ranged_entries = []
         exact_entries = []
         wildcard_entries = []
@@ -129,7 +138,8 @@ def check_cpe_match(vulnerability, product):
                                          entry.get('version_start'),
                                          entry.get('version_end'),
                                          entry.get('version_start_type'),
-                                         entry.get('version_end_type')):
+                                         entry.get('version_end_type'),
+                                         version_format=version_format):
                         range_str = f"{entry.get('version_start', '*')} - {entry.get('version_end', '*')}"
                         return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (version {version} in range {range_str})"], 'cpe', 'high'
                     # Version NOT in this range - continue checking other ranges
@@ -610,7 +620,7 @@ def cleanup_invalid_matches():
             continue
 
         # Re-check if this match is still valid with current logic
-        match_reasons, _, _ = check_match(vulnerability, product)
+        match_reasons, new_method, new_confidence = check_match(vulnerability, product)
 
         if not match_reasons:
             # Match no longer valid - remove it
@@ -623,6 +633,14 @@ def cleanup_invalid_matches():
                 )
             db.session.delete(match)
             removed_count += 1
+        else:
+            # Match still valid — update confidence/method if NVD data
+            # has matured (e.g., medium→high when NVD completes analysis)
+            if new_method and new_confidence:
+                if match.match_confidence != new_confidence or match.match_method != new_method:
+                    match.match_confidence = new_confidence
+                    match.match_method = new_method
+                    match.match_reason = '; '.join(match_reasons)
 
     db.session.commit()
     return removed_count

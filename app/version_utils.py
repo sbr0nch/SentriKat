@@ -71,7 +71,7 @@ def _version_sort_key(version):
     return tuple(parts)
 
 
-def _version_in_range(version, start, end, start_type, end_type):
+def _version_in_range(version, start, end, start_type, end_type, version_format='generic'):
     """
     Check if a version falls within a specified range.
 
@@ -79,6 +79,10 @@ def _version_in_range(version, start, end, start_type, end_type):
     - If no version range specified (no start AND no end): Returns True (all versions affected)
     - If version range exists but product has no version: Returns False (can't verify, be conservative)
     - Otherwise: Check if version is within the specified range
+
+    When version_format is 'dpkg', 'rpm', or 'apk', uses the distro-native
+    comparator instead of the generic _version_sort_key().  This correctly
+    handles Debian epochs/tildes, RPM release strings, and Alpine revisions.
 
     This prevents false positives by requiring version verification when CPE data has ranges.
     """
@@ -90,24 +94,26 @@ def _version_in_range(version, start, end, start_type, end_type):
     if not version:
         return False  # Changed from True - don't assume match without version proof
 
-    version_key = _version_sort_key(version)
+    # Use distro-native comparison when format is known, generic otherwise
+    def _cmp(a, b):
+        return distro_version_compare(a, b, version_format)
 
     if start:
-        start_key = _version_sort_key(start)
+        cmp_result = _cmp(version, start)
         if start_type == 'including':
-            if version_key < start_key:
+            if cmp_result < 0:
                 return False
         else:  # excluding
-            if version_key <= start_key:
+            if cmp_result <= 0:
                 return False
 
     if end:
-        end_key = _version_sort_key(end)
+        cmp_result = _cmp(version, end)
         if end_type == 'including':
-            if version_key > end_key:
+            if cmp_result > 0:
                 return False
         else:  # excluding
-            if version_key >= end_key:
+            if cmp_result >= 0:
                 return False
 
     return True
