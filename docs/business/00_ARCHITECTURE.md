@@ -4,7 +4,7 @@
 
 ---
 
-**Document Version:** 1.5.0
+**Document Version:** 1.6.0
 **Last Updated:** February 2026
 **Classification:** CONFIDENTIAL - NOT FOR PUBLIC DISTRIBUTION
 **Author:** SentriKat Development Team
@@ -81,12 +81,12 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 
 | Metric | Value |
 |--------|-------|
-| Total Python Code | 32,428 lines |
-| Database Models | 28 SQLAlchemy models |
-| API Endpoints | 250+ REST endpoints |
+| Total Python Code | 40,000+ lines |
+| Database Models | 37 SQLAlchemy models |
+| API Endpoints | 280+ REST endpoints |
 | Frontend Templates | 6 major pages (800+ KB HTML) |
-| External Integrations | 15+ (Jira, LDAP, SAML, etc.) |
-| Test Coverage | pytest suite included |
+| External Integrations | 20+ (Jira, LDAP, SAML, OIDC, PagerDuty, etc.) |
+| Test Coverage | 1,296 pytest tests |
 
 ---
 
@@ -109,16 +109,28 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 - **Asset Lifecycle**: Online/offline/stale/decommissioned status tracking
 - **Multi-Source Import**: PDQ, SCCM, Intune, Lansweeper, CSV, REST API
 
-### Enterprise Authentication
+### Enterprise Authentication & Identity
 - **Local Authentication**: Username/password with bcrypt hashing
 - **LDAP/Active Directory**: Full AD integration with group mapping
 - **SAML 2.0 SSO**: Okta, Azure AD, ADFS, Google Workspace support
+- **OAuth 2.0 / OpenID Connect**: Generic OIDC provider support via Authlib
+- **WebAuthn/FIDO2**: Hardware security key and biometric authentication
 - **Two-Factor Auth**: TOTP (Google Authenticator compatible)
+- **Session Management**: Concurrent session limits, device tracking, forced logout
+- **RBAC Permissions**: Fine-grained permission_required decorator system
 
 ### Alerting & Notifications
-- **Email Alerts**: Critical CVE notifications, daily digests, due date reminders
-- **Webhooks**: Slack, Microsoft Teams, Discord, custom HTTP
+- **Email Alerts**: Critical CVE notifications, due date reminders
+- **Digest Emails**: Configurable daily/weekly summary emails with vulnerability trends
+- **Webhooks**: Slack, Microsoft Teams, Discord, custom HTTP — with HMAC-SHA256 signing
+- **Incident Management**: PagerDuty and Opsgenie integration for critical alerts
 - **Escalation**: Re-alert if not acknowledged within N days
+
+### Audit & Compliance
+- **Audit Trail**: Full audit logging of all security-relevant events (AuditLog model)
+- **Audit API**: Query, filter, and export audit logs via REST API
+- **CISA BOD 22-01**: Compliance dashboard and reports
+- **EU NIS2**: ENISA EUVD integration for European compliance
 
 ### Issue Tracking Integration
 - **Multi-Tracker Support**: Enable multiple issue trackers simultaneously (comma-separated configuration)
@@ -147,13 +159,19 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 | NVD Search | ✓ | ✓ |
 | LDAP/AD | ✗ | ✓ |
 | SAML SSO | ✗ | ✓ |
+| OAuth/OIDC | ✗ | ✓ |
+| WebAuthn/FIDO2 | ✗ | ✓ |
 | Email Alerts | ✗ | ✓ |
-| Webhooks | ✗ | ✓ |
+| Digest Emails | ✗ | ✓ |
+| Webhooks (HMAC) | ✗ | ✓ |
+| PagerDuty/Opsgenie | ✗ | ✓ |
 | Jira Integration | ✗ | ✓ |
 | Scheduled Reports | ✗ | ✓ |
+| Audit Trail | ✗ | ✓ |
 | Backup/Restore | ✗ | ✓ |
 | White-Label | ✗ | ✓ |
 | API Access | ✗ | ✓ |
+| Prometheus Metrics | ✗ | ✓ |
 
 ---
 
@@ -190,8 +208,11 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 | flask-wtf | CSRF protection |
 | flask-limiter | Rate limiting |
 | python3-saml | SAML/SSO |
+| Authlib | OAuth 2.0 / OpenID Connect |
+| webauthn | WebAuthn/FIDO2 (hardware keys, biometrics) |
 | ldap3 | LDAP/AD integration |
 | pyotp | TOTP 2FA |
+| prometheus_client | Prometheus metrics export |
 
 ## 3.4 External APIs (Multi-Source Intelligence Architecture)
 
@@ -283,25 +304,35 @@ All HTTP calls respect proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`) and SSL veri
 
 ```
 SentriKat/
-├── app/                          # Flask application (32,428 LOC)
-│   ├── __init__.py               # App factory, blueprints
-│   ├── models.py                 # 24 SQLAlchemy models (2,488 LOC)
-│   ├── routes.py                 # Main API routes (4,439 LOC)
-│   ├── auth.py                   # Authentication (900+ LOC)
+├── app/                          # Flask application (40,000+ LOC)
+│   ├── __init__.py               # App factory, blueprints, metrics, RLS
+│   ├── models.py                 # 37 SQLAlchemy models (3,900+ LOC)
+│   ├── routes.py                 # Main API routes (4,500+ LOC)
+│   ├── auth.py                   # Authentication + OAuth/OIDC/WebAuthn (1,800+ LOC)
 │   ├── licensing.py              # License validation (975 LOC)
 │   ├── agent_api.py              # Agent endpoints (2,500+ LOC)
-│   ├── cisa_sync.py              # CISA KEV sync (500+ LOC)
+│   ├── cisa_sync.py              # CISA KEV sync + webhook dispatch (600+ LOC)
 │   ├── ldap_*.py                 # LDAP modules (1,500+ LOC)
 │   ├── saml_*.py                 # SAML modules (650+ LOC)
+│   ├── oauth_manager.py          # OAuth 2.0 / OpenID Connect (267 LOC)
+│   ├── webauthn_manager.py       # WebAuthn/FIDO2 hardware keys (117 LOC)
 │   ├── jira_integration.py       # Jira connector (400+ LOC)
 │   ├── issue_trackers.py          # Multi-tracker engine (Jira/GitHub/GitLab/YouTrack)
 │   ├── vendor_advisories.py      # Auto vendor patch detection (1000+ LOC)
 │   ├── version_utils.py          # dpkg/RPM/APK version comparison (444 LOC)
 │   ├── email_alerts.py           # Email system (626 LOC)
-│   ├── scheduler.py              # Background jobs (468 LOC)
-│   ├── encryption.py             # Fernet utils (141 LOC)
+│   ├── digest_emails.py          # Daily/weekly digest emails (687 LOC)
+│   ├── webhook.py                # Centralized webhook with retry + HMAC-SHA256 (131 LOC)
+│   ├── incident_integrations.py  # PagerDuty + Opsgenie integration (301 LOC)
+│   ├── audit.py                  # Audit trail helper (89 LOC)
+│   ├── audit_api.py              # Audit log API endpoints (168 LOC)
+│   ├── metrics.py                # Prometheus /metrics endpoint (162 LOC)
+│   ├── rls.py                    # PostgreSQL Row-Level Security (49 LOC)
+│   ├── scheduler.py              # Background jobs (629+ LOC)
+│   ├── encryption.py             # Fernet utils + production enforcement (163 LOC)
+│   ├── logging_config.py         # JSON structured logging + syslog (52 LOC)
 │   └── templates/                # Jinja2 templates
-│       ├── base.html             # Layout, dark mode, global CSS/JS
+│       ├── base.html             # Layout, dark mode, sidebar badges, global CSS/JS
 │       ├── dashboard.html        # Dashboard with charts, priority cards, CVE table
 │       ├── admin.html            # Inventory (Products, Endpoints, Software Overview)
 │       ├── admin_panel.html      # Admin (Users, Orgs, Integrations, Settings)
@@ -309,20 +340,46 @@ SentriKat/
 │
 ├── agents/                       # Agent scripts
 │   ├── sentrikat-agent-windows.ps1
-│   └── sentrikat-agent-linux.sh
+│   ├── sentrikat-agent-linux.sh
+│   └── sentrikat-agent-macos.sh
 │
 ├── static/                       # CSS, JS, images
 │   └── js/
 │       ├── admin_panel.js        # Admin panel logic (~9500 LOC)
 │       └── sentrikat-core.js     # Core utilities (DOM, Toast, escaping)
-├── tests/                        # pytest suite
+│
+├── tests/                        # 1,296 pytest tests
+│
+├── migrations/                   # Alembic database migrations
+│   ├── alembic.ini
+│   ├── env.py
+│   └── script.py.mako
+│
+├── helm/sentrikat/               # Helm chart for Kubernetes
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   └── templates/                # K8s resource templates
+│
+├── k8s/                          # Plain Kubernetes manifests
+│   ├── app-deployment.yaml
+│   ├── postgres-statefulset.yaml
+│   ├── ingress.yaml
+│   └── ...
+│
+├── scripts/                      # Operational scripts
+│   ├── backup_cron.sh            # Automated backup with retention
+│   ├── enable_rls.sql            # PostgreSQL RLS setup
+│   ├── backup_database.sh
+│   └── download_vendor_assets.sh
+│
 ├── nginx/                        # Reverse proxy config
 ├── docker-compose.yml            # Orchestration
 ├── Dockerfile                    # Container build
-├── requirements.txt              # Python deps (29 packages)
-└── .github/workflows/            # CI/CD
-    ├── ci.yml                    # Tests on push
-    └── release.yml               # Build & publish
+├── requirements.txt              # Python deps (35+ packages)
+├── .github/workflows/            # CI/CD
+│   ├── ci.yml                    # Tests + coverage + Trivy scanning
+│   └── release.yml               # Build & publish
+└── .github/dependabot.yml        # Automated dependency updates
 ```
 
 ## 4.2 Request Flow
@@ -350,12 +407,15 @@ SentriKat/
 | CISA KEV Sync | Daily 02:00 UTC | Fetch latest exploited vulnerabilities from CISA |
 | NVD Recent CVEs Sync | Every 2 hours | Import new HIGH/CRITICAL CVEs from NVD (zero-day coverage) |
 | Critical CVE Email | Daily 09:00 UTC | Send alert digests |
-| Data Retention Cleanup | Daily 03:00 UTC | Delete old logs |
+| **Digest Emails** | Daily/Weekly (configurable) | Send vulnerability summary digest emails |
+| Data Retention Cleanup | Daily 03:00 UTC | Delete old logs, audit records, expired sessions |
 | Vulnerability Snapshot | Daily 02:00 UTC | Historical tracking |
 | Scheduled Reports | Every 15 min | Process report queue |
 | LDAP Sync | Configurable | Sync users from AD |
 | **Vendor Advisory Sync** | Daily 03:00 UTC | Sync OSV.dev, Red Hat, MSRC, Debian feeds |
 | **Maintenance** | Daily 04:00 UTC | 7-step cleanup & auto-resolution |
+| **Session Cleanup** | Every 30 min | Expire stale sessions, enforce concurrent limits |
+| **Usage Snapshot** | Daily | Record per-org usage metrics for billing/capacity |
 
 ### 4.3.1 Maintenance Pipeline (7 Steps)
 
@@ -607,17 +667,19 @@ CREATE TABLE product_installation (
 );
 ```
 
-## 5.3 Total: 28 Tables
+## 5.3 Total: 37 Tables
 
 | Category | Tables |
 |----------|--------|
-| Auth/Users | User, Organization, UserOrganization, SystemSettings |
+| Auth/Users | User, Organization, UserOrganization, SystemSettings, Permission, WebAuthnCredential, UserSession |
 | Products | Product, ServiceCatalog, ProductExclusion, UserCpeMapping, CpeDictionaryEntry, ProductVersionHistory |
 | Vulnerabilities | Vulnerability, VulnerabilityMatch, VulnerabilitySnapshot, VendorFixOverride |
 | Agents | AgentApiKey, Asset, ProductInstallation, AgentEvent, InventoryJob, AgentLicense, AgentUsageRecord |
 | Containers | ContainerImage, ContainerVulnerability |
+| Dependencies | DependencyScan, DependencyScanResult |
 | Reporting | ScheduledReport, HealthCheckResult |
-| Logging | SyncLog, AlertLog, StaleAssetNotification |
+| Billing | SubscriptionPlan, Subscription, UsageRecord |
+| Logging | SyncLog, AlertLog, StaleAssetNotification, AuditLog |
 
 ---
 
@@ -631,6 +693,20 @@ POST   /api/auth/logout              # End session
 POST   /api/auth/2fa/setup           # Enable TOTP
 POST   /api/auth/2fa/verify          # Verify TOTP code
 GET    /api/auth/status              # Current user info
+
+# OAuth/OIDC
+GET    /api/auth/oidc/login          # Redirect to OIDC provider
+GET    /api/auth/oidc/callback       # OIDC callback handler
+
+# WebAuthn/FIDO2
+POST   /api/auth/webauthn/register/begin     # Start key registration
+POST   /api/auth/webauthn/register/complete   # Complete key registration
+POST   /api/auth/webauthn/login/begin        # Start key authentication
+POST   /api/auth/webauthn/login/complete      # Complete key authentication
+
+# Session Management
+GET    /api/auth/sessions            # List active sessions for current user
+DELETE /api/auth/sessions/<id>       # Terminate a specific session
 ```
 
 ## 6.2 Product Management
@@ -911,7 +987,15 @@ GET    /api/import/queue             # Pending imports
 POST   /api/import/queue/<id>/approve  # Approve import
 ```
 
-## 6.6 Settings & License
+## 6.6 Audit & Monitoring
+
+```
+GET    /api/audit/logs               # Query audit trail (paginated, filterable)
+GET    /api/audit/logs/export        # Export audit logs as CSV
+GET    /metrics                      # Prometheus metrics endpoint
+```
+
+## 6.7 Settings & License
 
 ```
 GET    /api/settings/ldap            # LDAP config
@@ -945,7 +1029,7 @@ version is available. It returns:
 - Gracefully handles offline scenarios (returns `update_available: false` with error message)
 - 5-second timeout to avoid blocking the UI
 
-**Total: 80+ REST endpoints with proper HTTP methods**
+**Total: 100+ REST endpoints with proper HTTP methods**
 
 ---
 
@@ -958,7 +1042,26 @@ version is available. It returns:
 | Local | bcrypt password hashing, configurable policy |
 | LDAP | ldap3 library, bind authentication, injection prevention |
 | SAML | python3-saml (OneLogin), RSA signature validation |
+| OAuth/OIDC | Authlib library, generic OIDC provider support (Google, Azure AD, Okta, Keycloak, etc.) |
+| WebAuthn/FIDO2 | webauthn library, hardware security keys (YubiKey), biometric auth (Touch ID, Windows Hello) |
 | 2FA | pyotp TOTP, 30-second codes, QR setup |
+
+### OAuth/OIDC Configuration
+
+```
+OIDC_CLIENT_ID=<client-id>
+OIDC_CLIENT_SECRET=<client-secret>
+OIDC_DISCOVERY_URL=https://accounts.google.com/.well-known/openid-configuration
+```
+
+Supports auto-discovery of provider endpoints (authorization, token, userinfo) via `.well-known/openid-configuration`.
+
+### WebAuthn/FIDO2
+
+- Registration: `POST /api/auth/webauthn/register/begin` + `POST /api/auth/webauthn/register/complete`
+- Authentication: `POST /api/auth/webauthn/login/begin` + `POST /api/auth/webauthn/login/complete`
+- Credential storage: `WebAuthnCredential` model with `credential_id`, `public_key`, `sign_count`
+- Supports platform authenticators (Touch ID, Windows Hello) and roaming authenticators (YubiKey, SoloKeys)
 
 ## 7.2 Encryption
 
@@ -972,9 +1075,11 @@ from cryptography.fernet import Fernet
 - Webhook URLs/tokens
 - Integration API keys
 - SAML IdP metadata (optional)
+- PagerDuty/Opsgenie routing keys
 
 # Format: gAAAAA... (base64-encoded)
 # Key: 32-byte random, environment variable
+# Production enforcement: ENCRYPTION_KEY must be explicitly set (no auto-generation)
 ```
 
 ## 7.3 Session Security
@@ -985,6 +1090,14 @@ SESSION_COOKIE_SECURE = True     # HTTPS only
 SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
 PERMANENT_SESSION_LIFETIME = 4 hours
 ```
+
+### Session Management (Enterprise)
+
+- **UserSession model**: Tracks all active sessions per user (device, IP, browser, last activity)
+- **Concurrent session limits**: Configurable max sessions per user (oldest evicted on overflow)
+- **Forced logout**: Admins can terminate any user's session
+- **Automatic cleanup**: Expired sessions purged every 30 minutes by scheduler
+- **Device tracking**: User-Agent, IP address, and last-active timestamp per session
 
 ## 7.4 Rate Limiting
 
@@ -1013,14 +1126,69 @@ DEFAULT: 1000/day, 200/hour per IP
 
 ## 7.6 Audit Logging
 
-All security events logged:
+### Audit Trail System (Enterprise)
+
+All security events are stored in the `AuditLog` model with full context:
+
+```
+AuditLog:
+  - user_id, username    # Who performed the action
+  - action               # What was done (login, settings_change, user_create, etc.)
+  - resource_type        # Target type (user, organization, setting, etc.)
+  - resource_id          # Target ID
+  - details              # JSON with before/after values
+  - ip_address           # Client IP
+  - user_agent           # Browser/client info
+  - created_at           # Timestamp
+```
+
+**Audit API** (`/api/audit/logs`):
+- Paginated query with filtering by action, user, resource, date range
+- Export support for compliance reporting
+- Admin-only access with organization isolation
+
+**Events logged:**
 - Login attempts (success/failure)
 - Password changes
 - 2FA setup/disable
 - License activation
-- Settings changes
-- User management
-- API key operations
+- Settings changes (with before/after diff)
+- User management (create, update, delete, role changes)
+- API key operations (create, revoke)
+- Organization changes
+- Webhook configuration changes
+- Integration configuration changes
+
+### Syslog Forwarding
+
+Structured JSON logs can be forwarded to external SIEM/syslog collectors:
+
+```
+SYSLOG_HOST=siem.example.com
+SYSLOG_PORT=514
+SYSLOG_PROTOCOL=udp    # udp or tcp
+```
+
+## 7.7 Row-Level Security (PostgreSQL)
+
+PostgreSQL Row-Level Security policies enforce tenant isolation at the database level:
+
+```sql
+-- Example RLS policy (generated by scripts/enable_rls.sql)
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON products
+  USING (organization_id = current_setting('app.current_org_id')::integer);
+```
+
+Applied to all tenant-scoped tables (products, assets, vulnerabilities, etc.) as an additional defense layer beyond application-level filtering.
+
+## 7.8 SSRF Protection
+
+All outbound webhook requests pass through `validate_url_for_request()` which blocks:
+- Private/internal IP ranges (10.x, 172.16-31.x, 192.168.x, 127.x, ::1)
+- Link-local addresses (169.254.x)
+- Non-HTTP(S) schemes
+- DNS rebinding attacks (resolved IP validated before request)
 
 ---
 
@@ -1044,10 +1212,14 @@ All security events logged:
 |----------|----------|
 | Active Directory | LDAP v3 |
 | OpenLDAP | LDAP v3 |
-| Okta | SAML 2.0 |
-| Azure AD | SAML 2.0 |
+| Okta | SAML 2.0 / OIDC |
+| Azure AD | SAML 2.0 / OIDC |
 | ADFS | SAML 2.0 |
-| Google Workspace | SAML 2.0 |
+| Google Workspace | SAML 2.0 / OIDC |
+| Keycloak | OIDC |
+| Any OIDC Provider | OAuth 2.0 / OpenID Connect |
+| YubiKey / SoloKeys | WebAuthn/FIDO2 |
+| Touch ID / Windows Hello | WebAuthn/FIDO2 (platform) |
 
 ## 8.3 Inventory Sources
 
@@ -1066,10 +1238,29 @@ All security events logged:
 | Channel | Format |
 |---------|--------|
 | Email | HTML templates via SMTP |
-| Slack | Block Kit JSON |
-| Microsoft Teams | Adaptive Cards |
-| Discord | Embed JSON |
-| Custom Webhook | Configurable JSON |
+| Digest Email | Daily/weekly HTML summary with vulnerability trends |
+| Slack | Block Kit JSON (HMAC-SHA256 signed) |
+| Microsoft Teams | Adaptive Cards (HMAC-SHA256 signed) |
+| Discord | Embed JSON (HMAC-SHA256 signed) |
+| Custom Webhook | Configurable JSON (HMAC-SHA256 signed) |
+| PagerDuty | Events API v2 (trigger/resolve incidents) |
+| Opsgenie | Alert API v2 (create/close alerts) |
+
+### Webhook Delivery System (`app/webhook.py`)
+
+Centralized webhook delivery with enterprise reliability:
+- **Retry logic**: Exponential backoff (2s, 4s, 8s) — up to 3 retries
+- **HMAC-SHA256 signing**: `X-Webhook-Signature` and `X-Webhook-Timestamp` headers
+- **SSRF protection**: All URLs validated before delivery
+- **4xx short-circuit**: Client errors (400-499) do not trigger retries
+- **Proxy support**: Respects `HTTP_PROXY`/`HTTPS_PROXY` settings
+
+### Incident Management (`app/incident_integrations.py`)
+
+- **PagerDuty**: Auto-creates incidents for CRITICAL/HIGH CVEs, auto-resolves when acknowledged
+- **Opsgenie**: Auto-creates alerts with priority mapping, auto-closes when resolved
+- **Deduplication**: Uses CVE ID as dedup key to prevent duplicate incidents
+- **Severity mapping**: CVSS score mapped to PD/OG priority levels
 
 ---
 
@@ -1369,9 +1560,96 @@ services:
     # Internal network only
 ```
 
-## 12.3 CI/CD Pipeline
+## 12.3 Kubernetes Deployment
+
+### Plain Manifests (`k8s/`)
+
+```
+k8s/
+├── namespace.yaml          # sentrikat namespace
+├── secret.yaml             # Database credentials, encryption key
+├── configmap.yaml          # App configuration
+├── app-deployment.yaml     # SentriKat app (3 replicas, rolling update)
+├── app-service.yaml        # ClusterIP service
+├── postgres-statefulset.yaml  # PostgreSQL with persistent volume
+├── postgres-service.yaml   # PostgreSQL headless service
+├── ingress.yaml            # Ingress with TLS
+└── pdb.yaml                # PodDisruptionBudget (minAvailable: 1)
+```
+
+### Helm Chart (`helm/sentrikat/`)
 
 ```yaml
+# helm install sentrikat helm/sentrikat/ -f values.yaml
+replicaCount: 3
+image:
+  repository: ghcr.io/sbr0nch/sentrikat
+  tag: latest
+
+resources:
+  requests: { cpu: 250m, memory: 512Mi }
+  limits: { cpu: "1", memory: 1Gi }
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilization: 70
+
+ingress:
+  enabled: true
+  tls: true
+
+postgresql:
+  persistence:
+    size: 50Gi
+```
+
+Features: HPA auto-scaling, PodDisruptionBudget, Ingress with TLS, configurable resource limits, PostgreSQL StatefulSet with persistent volumes.
+
+## 12.4 Database Migrations (Alembic)
+
+```
+migrations/
+├── alembic.ini
+├── env.py            # SQLAlchemy model auto-detection
+└── script.py.mako    # Migration template
+```
+
+Schema changes managed via Alembic: `flask db upgrade` applies pending migrations on startup.
+
+## 12.5 Monitoring & Observability
+
+### Prometheus Metrics (`/metrics`)
+
+```
+# Application metrics exposed at /metrics endpoint
+sentrikat_http_requests_total{method, endpoint, status}
+sentrikat_http_request_duration_seconds{method, endpoint}
+sentrikat_active_users_total
+sentrikat_vulnerabilities_total{severity}
+sentrikat_agents_total{status}
+sentrikat_sync_duration_seconds{source}
+sentrikat_webhook_deliveries_total{format, status}
+```
+
+### Automated Backups (`scripts/backup_cron.sh`)
+
+- PostgreSQL `pg_dump` with configurable retention (7/30/90 days)
+- Cron-ready script with rotation and compression
+- Supports local and remote (S3-compatible) backup targets
+
+## 12.6 CI/CD Pipeline
+
+```yaml
+# .github/workflows/ci.yml
+on: [push, pull_request]
+
+jobs:
+  test:        # Run pytest with 70% coverage minimum
+  security:    # Trivy container image scanning
+  lint:        # Code quality checks
+
 # .github/workflows/release.yml
 on:
   push:
@@ -1384,6 +1662,10 @@ jobs:
   release:     # Create GitHub Release
   notify:      # Update portal
 ```
+
+### Dependabot (`.github/dependabot.yml`)
+
+Automated dependency update PRs for Python (pip) and GitHub Actions.
 
 ---
 
@@ -1508,6 +1790,20 @@ FLASK_ENV=production                 # production or development
 VERIFY_SSL=true                      # Set to false only for dev/self-signed certs
 HTTP_PROXY=http://proxy:3128         # Corporate proxy support
 
+# ── OAUTH/OIDC ───────────────────────────────────────
+OIDC_CLIENT_ID=                      # OIDC provider client ID
+OIDC_CLIENT_SECRET=                  # OIDC provider client secret
+OIDC_DISCOVERY_URL=                  # OIDC .well-known/openid-configuration URL
+
+# ── INCIDENT MANAGEMENT ──────────────────────────────
+PAGERDUTY_ROUTING_KEY=               # PagerDuty Events API v2 routing key
+OPSGENIE_API_KEY=                    # Opsgenie Alert API key
+
+# ── OBSERVABILITY ────────────────────────────────────
+SYSLOG_HOST=                         # Syslog/SIEM server (e.g., siem.example.com)
+SYSLOG_PORT=514                      # Syslog port (default: 514)
+SYSLOG_PROTOCOL=udp                  # udp or tcp
+
 # ── PERFORMANCE ──────────────────────────────────────
 GUNICORN_WORKERS=                    # Auto: min(CPU*2+1, 8). Set explicitly if needed.
 GUNICORN_THREADS=4                   # Threads per worker (default: 4)
@@ -1558,6 +1854,7 @@ DB_PASSWORD=change-me-to-a-secure-password
 | 1.3.0 | Feb 2026 | Development Team | Added: Online license activation (activation code exchange via portal.sentrikat.com with rate limiting and security hardening), fixed agent product organization assignment, fixed Software Overview N+1 query performance |
 | 1.4.0 | Feb 2026 | Development Team | Added: Configurable dashboard chart widgets (6 types with saved defaults), on-premise asset bundling, gthread Gunicorn workers with auto-scaling, connection pooling, EPSS filter, network requirements audit. Fixed: duplicate sortBy ID bug, VulnerabilitySnapshot multi-tenant mismatch |
 | 1.5.0 | Feb 2026 | Development Team | Added: Immediate orphan cleanup on endpoint deletion (prevents "0 endpoints" ghost products after re-registration), endpoint deletion cascade documentation (§4.3.2), agent re-registration lifecycle (§4.3.3). Enhanced: Zero-day pipeline documentation with three-phase NVD sync, CNA CVSS source tracking, API outage protection, EUVD exploited vulnerability flow, re-enrichment cycle (§6.3.4). Fixed: maintenance cleanup_orphaned_products now handles org-assigned orphans (products with 0 installations but still assigned to organizations) |
+| 1.6.0 | Feb 2026 | Development Team | **Enterprise Sprint (23 features)**: Added OAuth/OIDC via Authlib (§7.1), WebAuthn/FIDO2 hardware key auth (§7.1), session management with concurrent limits (§7.3), audit trail system with AuditLog model and REST API (§7.6), syslog forwarding (§7.6), PostgreSQL Row-Level Security (§7.7), SSRF protection for webhooks (§7.8), centralized webhook delivery with HMAC-SHA256 signing and retry logic (§8.4), PagerDuty and Opsgenie incident integration (§8.4), daily/weekly digest emails (§8.4), Prometheus /metrics endpoint (§12.5), Kubernetes manifests and Helm chart (§12.3), Alembic database migrations (§12.4), automated backup scripts (§12.5), Dependabot configuration, CI pipeline with 70% coverage gate and Trivy scanning (§12.6), RBAC permission_required decorator, production ENCRYPTION_KEY enforcement. New models: Permission, WebAuthnCredential, UserSession, AuditLog, DependencyScan, DependencyScanResult, SubscriptionPlan, Subscription, UsageRecord. Total: 37 models, 1,296 tests passing |
 
 ---
 

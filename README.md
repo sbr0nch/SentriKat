@@ -83,23 +83,24 @@ SentriKat is a **self-hosted vulnerability management platform** that discovers 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Web Framework** | Python 3.11, Flask 3.x | REST API + server-rendered UI |
-| **Database** | PostgreSQL 15 (prod) / SQLite (dev) | 30 SQLAlchemy models, org-isolated data |
-| **Background Jobs** | APScheduler | CISA sync, maintenance, alerts, vendor advisories |
+| **Database** | PostgreSQL 15 (prod) / SQLite (dev) | 37 SQLAlchemy models, org-isolated data + RLS |
+| **Background Jobs** | APScheduler | CISA sync, maintenance, alerts, digests, session cleanup |
 | **Web Server** | nginx + Gunicorn (gthread) | Reverse proxy, SSL termination, multi-worker |
 | **Frontend** | Jinja2, Bootstrap 5, Chart.js | Server-rendered templates, interactive dashboards |
-| **Security** | Fernet encryption, bcrypt, CSRF, CSP | OWASP-compliant security stack |
-| **Containerization** | Docker, Docker Compose | 3-service deployment (app + db + nginx) |
-| **Authentication** | Local + LDAP/AD + SAML 2.0 + TOTP 2FA | Enterprise SSO support |
+| **Security** | Fernet encryption, bcrypt, CSRF, CSP, HMAC | OWASP-compliant enterprise security stack |
+| **Containerization** | Docker, Docker Compose, Kubernetes, Helm | 3-service deployment + K8s manifests + Helm chart |
+| **Authentication** | Local + LDAP/AD + SAML 2.0 + OIDC + WebAuthn + TOTP | Enterprise SSO + passwordless auth |
+| **Monitoring** | Prometheus, structured logging, syslog | /metrics endpoint + SIEM integration |
 | **Licensing** | RSA-4096 signed, hardware-locked | Online/offline activation via portal |
 
 ### Codebase Structure
 
 ```
 SentriKat/
-├── app/                          # Core application (47 Python modules)
-│   ├── __init__.py               # Flask app factory + schema migrations
-│   ├── models.py                 # 30 SQLAlchemy models (~2,900 lines)
-│   ├── routes.py                 # Main web UI + API routes (~4,400 lines)
+├── app/                          # Core application (57+ Python modules)
+│   ├── __init__.py               # Flask app factory + blueprints + metrics + RLS
+│   ├── models.py                 # 37 SQLAlchemy models (~3,900 lines)
+│   ├── routes.py                 # Main web UI + API routes (~4,500 lines)
 │   ├── agent_api.py              # Agent inventory endpoints + 3-phase filtering
 │   ├── filters.py                # Vulnerability matching engine (CPE + keyword)
 │   ├── cpe_mapping.py            # 224 regex CPE patterns + auto-mapping
@@ -108,17 +109,26 @@ SentriKat/
 │   ├── cisa_sync.py              # CISA KEV sync + multi-source CVSS enrichment
 │   ├── vendor_advisories.py      # OSV.dev, Red Hat, MSRC, Debian feeds
 │   ├── cve_known_products.py     # CVE history lookup for filtering guard
-│   ├── scheduler.py              # 15+ background jobs (APScheduler)
+│   ├── scheduler.py              # 18+ background jobs (APScheduler)
 │   ├── maintenance.py            # Stale asset cleanup, auto-acknowledgment
-│   ├── auth.py                   # Login/session/2FA management
+│   ├── auth.py                   # Auth + OAuth/OIDC + WebAuthn + sessions
+│   ├── oauth_manager.py          # OAuth 2.0 / OpenID Connect via Authlib
+│   ├── webauthn_manager.py       # WebAuthn/FIDO2 (hardware keys, biometrics)
 │   ├── ldap_manager.py           # LDAP authentication provider
 │   ├── ldap_sync.py              # Automated LDAP group sync engine
 │   ├── saml_manager.py           # SAML 2.0 SSO processing
 │   ├── licensing.py              # RSA-4096 license validation + enforcement
 │   ├── email_alerts.py           # SMTP alert management
+│   ├── digest_emails.py          # Daily/weekly vulnerability digest emails
+│   ├── webhook.py                # Centralized webhook with retry + HMAC-SHA256
+│   ├── incident_integrations.py  # PagerDuty + Opsgenie integration
+│   ├── audit.py                  # Audit trail helper
+│   ├── audit_api.py              # Audit log REST API endpoints
+│   ├── metrics.py                # Prometheus /metrics endpoint
+│   ├── rls.py                    # PostgreSQL Row-Level Security
 │   ├── issue_trackers.py         # Jira, GitHub, GitLab, YouTrack, Webhook
 │   ├── integration_connectors.py # PDQ, SCCM, Lansweeper connectors
-│   ├── encryption.py             # Fernet encryption for sensitive config
+│   ├── encryption.py             # Fernet encryption (production enforcement)
 │   ├── version_utils.py          # dpkg/RPM/APK version comparison
 │   ├── nvd_api.py                # NVD CVSS data retrieval
 │   ├── nvd_cpe_api.py            # NVD CPE search + caching
@@ -137,7 +147,7 @@ SentriKat/
 │   ├── saml_api.py               # SAML SSO endpoints
 │   ├── api_docs.py               # OpenAPI/Swagger spec generation
 │   ├── setup.py                  # First-run setup wizard
-│   ├── logging_config.py         # JSON structured logging
+│   ├── logging_config.py         # JSON structured logging + syslog forwarding
 │   ├── performance_middleware.py  # Request performance monitoring
 │   └── error_utils.py            # Consistent error handling
 │
@@ -160,21 +170,31 @@ SentriKat/
 │   ├── js/                       # Client-side JavaScript
 │   └── vendor/                   # Bootstrap 5, Chart.js, jQuery
 │
-├── tests/                        # Test suite (214 tests)
+├── tests/                        # Test suite (1,296 tests)
 │   ├── test_api_endpoints.py     # API endpoint tests
 │   ├── test_auth.py              # Authentication tests
 │   ├── test_licensing.py         # License validation tests
 │   ├── test_multi_tenant.py      # Organization isolation tests
 │   ├── test_rate_limiting.py     # Rate limit enforcement tests
 │   ├── test_version_utils.py     # Version comparison tests
-│   └── test_vulnerability_filtering.py  # Vulnerability matching tests
+│   ├── test_vulnerability_filtering.py  # Vulnerability matching tests
+│   └── test_webhooks.py          # Webhook delivery + HMAC tests
 │
 ├── docs/                         # Documentation
 │   ├── API.md                    # API endpoint reference
-│   └── business/                 # Business planning docs (16 documents)
+│   ├── DISASTER_RECOVERY.md      # DR procedures
+│   └── business/                 # Business planning docs (17 documents)
+│
+├── migrations/                   # Alembic database migrations
+│
+├── helm/sentrikat/               # Helm chart for Kubernetes
+│
+├── k8s/                          # Plain Kubernetes manifests
 │
 ├── scripts/                      # Deployment utilities
 │   ├── backup_database.sh        # PostgreSQL backup
+│   ├── backup_cron.sh            # Automated backup with retention
+│   ├── enable_rls.sql            # PostgreSQL Row-Level Security setup
 │   ├── update.sh                 # Production update (Linux)
 │   ├── update.ps1                # Production update (Windows)
 │   └── download_vendor_assets.sh # Offline CDN fallback
@@ -189,33 +209,37 @@ SentriKat/
 ├── Dockerfile                    # Multi-stage Python 3.11-slim build
 ├── gunicorn.conf.py              # Worker config (auto-scaling, thread pool)
 ├── config.py                     # Flask configuration
-├── requirements.txt              # 27 Python dependencies
-└── .env.example                  # Environment template (164 lines, commented)
+├── requirements.txt              # 35+ Python dependencies
+└── .env.example                  # Environment template (190+ lines, commented)
 ```
 
-### Database Schema (30 Models)
+### Database Schema (37 Models)
 
 ```
-AUTHENTICATION                 PRODUCTS & INVENTORY           VULNERABILITIES
-──────────────                 ────────────────────           ───────────────
+AUTHENTICATION & IDENTITY      PRODUCTS & INVENTORY           VULNERABILITIES
+─────────────────────          ────────────────────           ───────────────
 User                           Product                        Vulnerability
 Organization                   ProductInstallation            VulnerabilityMatch
 UserOrganization               ProductExclusion               VulnerabilitySnapshot
 SystemSettings                 ProductVersionHistory          VendorFixOverride
-                               ServiceCatalog
-AGENTS                         UserCpeMapping                 INTEGRATIONS
-──────                         CpeDictionaryEntry             ────────────
-Asset                                                         Integration
-AgentApiKey                    REPORTING & ALERTS             ImportQueue
-AgentLicense                   ──────────────────             AgentRegistration
-AgentUsageRecord               AlertLog
-AgentEvent                     ScheduledReport                LDAP/SAML
-InventoryJob                   StaleAssetNotification         ─────────
-                               SharedView                     LDAPGroupMapping
-CONTAINERS                                                    LDAPSyncLog
-──────────                                                    LDAPAuditLog
-ContainerImage
-ContainerVulnerability
+Permission                     ServiceCatalog
+WebAuthnCredential             UserCpeMapping                 INTEGRATIONS
+UserSession                    CpeDictionaryEntry             ────────────
+                                                              Integration
+AGENTS                         REPORTING & ALERTS             ImportQueue
+──────                         ──────────────────             AgentRegistration
+Asset                          AlertLog
+AgentApiKey                    ScheduledReport                LDAP/SAML
+AgentLicense                   StaleAssetNotification         ─────────
+AgentUsageRecord               SharedView                     LDAPGroupMapping
+AgentEvent                     AuditLog                       LDAPSyncLog
+InventoryJob                                                  LDAPAuditLog
+
+CONTAINERS                     DEPENDENCIES                   BILLING
+──────────                     ────────────                   ───────
+ContainerImage                 DependencyScan                 SubscriptionPlan
+ContainerVulnerability         DependencyScanResult           Subscription
+                               HealthCheckResult              UsageRecord
 ```
 
 ### Background Jobs (APScheduler)
@@ -228,6 +252,7 @@ ContainerVulnerability
 | CVE Known Products Refresh | Every 12 hours | Refresh CVE history guard for filtering |
 | EPSS Score Sync | Daily | Exploit Prediction Scoring System update |
 | Critical Email Digest | Daily 09:00 UTC | Alert digest for unacknowledged critical CVEs |
+| Digest Emails | Daily/Weekly (configurable) | Vulnerability summary digest emails |
 | Maintenance | Daily 04:00 UTC | 7-step cleanup (stale assets, orphans, auto-resolve) |
 | Stuck Job Recovery | Every 10 minutes | Reset stuck inventory jobs to pending |
 | Asset Type Auto-Detection | Daily 06:00 | Infer server/workstation from OS version |
@@ -235,6 +260,8 @@ ContainerVulnerability
 | KB Sync | Every 12 hours | Push/pull community CPE mappings to licensing server |
 | License Heartbeat | Every 12 hours | License validation + telemetry |
 | Vulnerability Snapshots | Daily 02:00 UTC | Historical vulnerability state for trending |
+| Session Cleanup | Every 30 min | Expire stale sessions, enforce concurrent limits |
+| Data Retention | Daily 03:00 UTC | Purge old audit logs, sync logs, expired sessions |
 
 ---
 
@@ -685,7 +712,7 @@ Includes: CISA KEV sync, NVD search, vulnerability matching, basic dashboard, CS
 | +100 agents | EUR 1,499 |
 | Unlimited agents | EUR 2,199 |
 
-**Additional features:** LDAP/AD, SAML SSO, email alerts, webhooks (Slack/Teams/Discord), syslog/CEF forwarding (SIEM), multi-organization, backup/restore, white-label branding, full API access, issue tracker integrations (Jira, GitHub, GitLab, YouTrack), scheduled reports, CSV/Excel export, executive summary PDF, NIS2 + BOD 22-01 compliance reports, audit log export, container scanning
+**Additional features:** LDAP/AD, SAML SSO, OAuth/OIDC (Okta, Azure AD, Google, Keycloak), WebAuthn/FIDO2 (YubiKey, Touch ID, Windows Hello), email alerts, digest emails (daily/weekly), webhooks with HMAC-SHA256 signing (Slack/Teams/Discord), PagerDuty + Opsgenie incident management, syslog/CEF forwarding (SIEM), Prometheus metrics (/metrics), session management with concurrent limits, audit trail with REST API, PostgreSQL Row-Level Security, multi-organization, backup/restore, white-label branding, full API access, issue tracker integrations (Jira, GitHub, GitLab, YouTrack), scheduled reports, CSV/Excel export, executive summary PDF, NIS2 + BOD 22-01 compliance reports, container scanning, Kubernetes/Helm deployment
 
 ### License Activation
 
@@ -710,26 +737,36 @@ Licenses are hardware-locked to your Installation ID (`SENTRIKAT_INSTALLATION_ID
 | XSS | Jinja2 autoescaping + Content Security Policy |
 | CSRF | Flask-WTF CSRF tokens on all forms |
 | Clickjacking | X-Frame-Options, CSP frame-ancestors |
-| Session Security | HttpOnly, SameSite=Lax, Secure flag, 4-hour timeout |
+| Session Security | HttpOnly, SameSite=Lax, Secure flag, 4-hour timeout, concurrent limits |
+| Session Management | UserSession model with device tracking, forced logout, auto-cleanup |
 | Password Hashing | Werkzeug/bcrypt |
 | Sensitive Data | Fernet encryption (LDAP passwords, SMTP creds, webhook tokens, API keys) |
+| Production Enforcement | ENCRYPTION_KEY must be explicitly set (no auto-generation in prod) |
 | Rate Limiting | 1000/day, 200/hour per IP; 5/min on login; account lockout after 5 failures |
 | Security Headers | HSTS, X-Content-Type-Options, Referrer-Policy via Flask-Talisman |
+| SSRF Protection | All webhook URLs validated against private/internal IP ranges |
+| Webhook Signing | HMAC-SHA256 signatures on all outbound webhook payloads |
+| Tenant Isolation | PostgreSQL Row-Level Security + application-level org filtering |
+| Audit Trail | AuditLog model tracking all security-relevant events with context |
 | Agent Auth | SHA256 hashed API keys, optional IP whitelisting |
 | License Validation | RSA-4096 signature verification, hardware locking |
 
 ### Production Checklist
 
-- [ ] Set strong `SECRET_KEY` and `ENCRYPTION_KEY` (refuse defaults)
+- [ ] Set strong `SECRET_KEY` and `ENCRYPTION_KEY` (required in production — no auto-generation)
 - [ ] Use unique `DB_PASSWORD`
 - [ ] Enable HTTPS with valid certificates
 - [ ] Set `FLASK_ENV=production`
 - [ ] Set `SESSION_COOKIE_SECURE=true`
 - [ ] Configure firewall (only expose 80/443)
-- [ ] Set up log rotation
-- [ ] Configure backup schedule
+- [ ] Set up log rotation and syslog forwarding (`SYSLOG_HOST`)
+- [ ] Configure automated backups (`scripts/backup_cron.sh`)
 - [ ] Enable NVD API key for faster product search
 - [ ] Configure email for alert notifications
+- [ ] Set up Prometheus scraping for `/metrics` endpoint
+- [ ] Enable PostgreSQL Row-Level Security (`scripts/enable_rls.sql`)
+- [ ] Configure concurrent session limits if needed
+- [ ] Set up PagerDuty/Opsgenie routing keys for incident management
 
 ---
 
@@ -758,17 +795,22 @@ Multiple trackers can be enabled simultaneously:
 
 ### Alert Channels
 
-- **Email** — HTML digests via SMTP, configurable time windows
-- **Slack** — Webhook integration for channel notifications
-- **Microsoft Teams** — Webhook integration
-- **Discord** — Webhook integration
-- **Custom Webhooks** — JSON payload to any endpoint
+- **Email** — HTML alerts via SMTP, configurable time windows
+- **Digest Emails** — Daily/weekly HTML summary with vulnerability trends and statistics
+- **Slack** — Webhook integration with HMAC-SHA256 signing
+- **Microsoft Teams** — Webhook integration with HMAC-SHA256 signing
+- **Discord** — Webhook integration with HMAC-SHA256 signing
+- **Custom Webhooks** — JSON payload to any endpoint with HMAC-SHA256 signing
+- **PagerDuty** — Events API v2 for auto-triggering/resolving incidents on critical CVEs
+- **Opsgenie** — Alert API v2 for auto-creating/closing alerts with priority mapping
 - **Syslog/CEF** — Forward events to SIEM (Splunk, ELK, ArcSight, QRadar) via UDP/TCP
+- **Prometheus** — Metrics export at `/metrics` for Grafana dashboards
 
 ### Compliance Frameworks
 
 - **CISA BOD 22-01** — Remediation tracking with due dates, compliance percentage, overdue reporting
 - **EU NIS2 (Directive 2022/2555)** — Article 21 mapping: vulnerability handling (2e), supply chain visibility (2d), cyber hygiene (2g)
+- **Audit Trail** — Full audit logging with REST API for query, filter, and export
 - **Executive Summary** — Board-ready one-pager with risk score, KPIs, severity breakdown, top priorities
 
 ### Authentication Providers
@@ -776,7 +818,15 @@ Multiple trackers can be enabled simultaneously:
 - **Local** — Built-in username/password with bcrypt hashing
 - **LDAP/Active Directory** — Group-to-organization mapping, automated sync
 - **SAML 2.0** — Okta, Azure AD, ADFS, Google Workspace
+- **OAuth 2.0 / OpenID Connect** — Okta, Azure AD, Google, Keycloak, any OIDC provider
+- **WebAuthn/FIDO2** — YubiKey, SoloKeys, Touch ID, Windows Hello (passwordless auth)
 - **TOTP 2FA** — Time-based One-Time Password (Google Authenticator, Authy)
+
+### Deployment Options
+
+- **Docker Compose** — Standard 3-service deployment (app + db + nginx)
+- **Kubernetes** — Plain manifests with PodDisruptionBudget, HPA, Ingress
+- **Helm Chart** — Fully configurable chart with auto-scaling, persistent volumes, TLS
 
 ---
 
