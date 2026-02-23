@@ -3035,6 +3035,7 @@
                         <a href="/admin#import-queue" class="sidebar-sublink" onclick="navigateInventoryTab('import-queue', event)" data-tooltip="Import Queue">
                             <i class="bi bi-inbox"></i>
                             Import Queue
+                            <span class="badge bg-primary ms-1" id="sidebarImportQueueCount" style="display: none; font-size: 0.65rem;">0</span>
                         </a>
                     </div>
                 </div>
@@ -3433,6 +3434,24 @@
             // Small delay to ensure database connections are ready
             setTimeout(checkCVEServiceStatusWithRetry, 500);
             setInterval(checkCVEServiceStatus, 300000); // 5 minutes
+
+            // Load import queue count for sidebar badge
+            function loadSidebarImportQueueCount() {
+                fetch('/api/import/queue/count')
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (!data) return;
+                        const count = data.pending || 0;
+                        const badge = document.getElementById('sidebarImportQueueCount');
+                        if (badge) {
+                            badge.textContent = count;
+                            badge.style.display = count > 0 ? 'inline-block' : 'none';
+                        }
+                    })
+                    .catch(() => {});
+            }
+            loadSidebarImportQueueCount();
+            setInterval(loadSidebarImportQueueCount, 60000); // refresh every minute
         });
 
         /**

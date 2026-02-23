@@ -3357,14 +3357,26 @@ def get_worker_status():
     # Queue statistics
     pending_jobs = InventoryJob.query.filter_by(status='pending').count()
     processing_jobs = InventoryJob.query.filter_by(status='processing').count()
-    completed_today = InventoryJob.query.filter(
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0)
+    completed_jobs_today = InventoryJob.query.filter(
         InventoryJob.status == 'completed',
-        InventoryJob.completed_at >= datetime.utcnow().replace(hour=0, minute=0, second=0)
+        InventoryJob.completed_at >= today_start
     ).count()
-    failed_today = InventoryJob.query.filter(
+    failed_jobs_today = InventoryJob.query.filter(
         InventoryJob.status == 'failed',
-        InventoryJob.completed_at >= datetime.utcnow().replace(hour=0, minute=0, second=0)
+        InventoryJob.completed_at >= today_start
     ).count()
+    # Also count sync inventory events (processed without job queue)
+    sync_completed_today = AgentEvent.query.filter(
+        AgentEvent.event_type.in_(['inventory_reported', 'registered', 'container_scan', 'dependency_scan']),
+        AgentEvent.created_at >= today_start
+    ).count()
+    sync_failed_today = AgentEvent.query.filter(
+        AgentEvent.event_type == 'auth_failed',
+        AgentEvent.created_at >= today_start
+    ).count()
+    completed_today = completed_jobs_today + sync_completed_today
+    failed_today = failed_jobs_today + sync_failed_today
 
     # Get most recent job
     latest_job = InventoryJob.query.order_by(InventoryJob.created_at.desc()).first()

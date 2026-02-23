@@ -2788,8 +2788,8 @@
             const assetsCount = prod.affected_assets_count || 0;
             const assetsList = (prod.affected_assets || []).map(a => {
                 const osIcon = getAssetOsIcon(a.type);
-                return `<span class="badge bg-secondary me-1 mb-1" title="${escapeHtml(a.ip || 'No IP')} (${escapeHtml(a.type || 'unknown')})">
-                    <i class="bi ${osIcon} me-1"></i>${escapeHtml(a.hostname)}</span>`;
+                return `<a href="/admin#endpointsPane?hostname=${encodeURIComponent(a.hostname)}" class="badge bg-secondary me-1 mb-1 text-decoration-none text-white" style="cursor: pointer;" title="${escapeHtml(a.ip || 'No IP')} (${escapeHtml(a.type || 'unknown')}) — Click to view endpoint" onclick="event.preventDefault(); event.stopPropagation(); window.location.href='/admin#endpointsPane?hostname=${encodeURIComponent(a.hostname)}';">
+                    <i class="bi ${osIcon} me-1"></i>${escapeHtml(a.hostname)}</a>`;
             }).join('');
             const moreAssets = assetsCount > 10 ? `<span class="badge bg-light text-dark">+${assetsCount - 10} more</span>` : '';
 
@@ -2804,7 +2804,7 @@
                             </div>
                         </div>
                         <div class="d-flex align-items-center gap-2">
-                            ${assetsCount > 0 ? `<span class="badge bg-info text-dark" title="Affected endpoints"><i class="bi bi-hdd-network me-1"></i>${assetsCount} endpoint${assetsCount > 1 ? 's' : ''}</span>` : ''}
+                            ${assetsCount > 0 ? `<a href="/admin#endpointsPane?product=${encodeURIComponent(prod.product_name)}" class="badge bg-info text-dark text-decoration-none" style="cursor: pointer;" title="View affected endpoints" onclick="event.preventDefault(); event.stopPropagation(); window.location.href='/admin#endpointsPane?product=${encodeURIComponent(prod.product_name)}';"><i class="bi bi-hdd-network me-1"></i>${assetsCount} endpoint${assetsCount > 1 ? 's' : ''}</a>` : ''}
                             ${prod.resolution_reason === 'vendor_fix' && prod.vendor_fix_confidence === 'medium' && !prod.acknowledged
                                 ? `<span class="badge" style="background-color: #d97706; color: white;" title="Vendor fix detected but needs manual verification"><i class="bi bi-shield-exclamation"></i> Verify Fix</span>
                                    <button class="btn btn-sm btn-success" onclick="acknowledgeMatch(${prod.match_id})" title="Confirm fix applied">
