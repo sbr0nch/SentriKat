@@ -522,8 +522,10 @@ class Vulnerability(db.Model):
         Calculate priority based on multiple factors:
         1. CVE Severity (from CVSS score) - PRIMARY FACTOR
         2. Ransomware involvement: Automatic CRITICAL
-        3. Due date proximity: Urgent if due soon
-        4. Age: Recent CVEs are higher priority
+        3. EPSS score: High exploit probability elevates priority
+        4. Actively exploited: Elevate by one level
+        5. Due date proximity: Urgent if due soon
+        6. Age: Recent CVEs are higher priority (fallback)
         Returns: critical, high, medium, low
         """
         priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
@@ -546,6 +548,12 @@ class Vulnerability(db.Model):
         # Known ransomware campaign = Always Critical (small set, always urgent)
         if self.known_ransomware:
             return 'critical'
+
+        # EPSS score: high exploit probability elevates priority by one level.
+        # A CVE with CVSS 7.5 (HIGH) but EPSS 0.85 (85% exploit probability)
+        # should rank as CRITICAL.  Threshold 0.5 = top ~5% of all CVEs.
+        if self.epss_score is not None and self.epss_score >= 0.5:
+            current_level = min(current_level + 1, priority_order['critical'])
 
         # Actively exploited (CISA KEV, EUVD exploited) = ELEVATE by one level.
         # Previously this forced everything to 'critical', which inflated the
@@ -714,8 +722,9 @@ class VulnerabilityMatch(db.Model):
     # Vendor fix confidence: 'high' = verified with distro comparison, 'medium' = needs manual verification
     vendor_fix_confidence = db.Column(db.String(20), nullable=True)  # high, medium (only set when resolution_reason='vendor_fix')
 
-    # Composite indexes for common query patterns
+    # Composite indexes and constraints
     __table_args__ = (
+        db.UniqueConstraint('product_id', 'vulnerability_id', name='uq_match_product_vuln'),
         db.Index('idx_match_product_ack', 'product_id', 'acknowledged'),
         db.Index('idx_match_vuln_ack', 'vulnerability_id', 'acknowledged'),
     )
