@@ -670,6 +670,7 @@ def match_cve_to_cpe(cve_id: str) -> List[Dict]:
 
                             affected_cpes.append({
                                 'cpe_uri': cpe_uri,
+                                'cpe_part': parsed.get('part'),  # 'o'=OS, 'a'=application, 'h'=hardware
                                 'vendor': parsed['vendor'],
                                 'product': parsed['product'],
                                 'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),
@@ -757,6 +758,7 @@ def match_cve_to_cpe_with_status(cve_id: str) -> Tuple[List[Dict], Optional[str]
                                         or match.get('versionEndIncluding') or match.get('versionEndExcluding'))
                             affected_cpes.append({
                                 'cpe_uri': cpe_uri,
+                                'cpe_part': parsed.get('part'),  # 'o'=OS, 'a'=application, 'h'=hardware
                                 'vendor': parsed['vendor'],
                                 'product': parsed['product'],
                                 'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),

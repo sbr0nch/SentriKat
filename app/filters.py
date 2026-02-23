@@ -67,6 +67,16 @@ def check_cpe_match(vulnerability, product):
     if not cpe_vendor or not cpe_product:
         return [], None, None
 
+    # Determine product's CPE part type from its URI for cross-type filtering.
+    # Installed software is almost always 'a' (application), never 'o' (OS).
+    # This prevents OS-level CVEs from matching unrelated application products
+    # (e.g., CVE-2008-0015 for Windows XP matching "Windows SDK EULA").
+    product_cpe_part = None
+    if cpe_uri and cpe_uri.startswith('cpe:2.3:'):
+        uri_parts = cpe_uri.split(':')
+        if len(uri_parts) > 2:
+            product_cpe_part = uri_parts[2]  # 'a', 'o', or 'h'
+
     # Try to get cached CPE data from vulnerability
     cpe_entries = vulnerability.get_cpe_entries()
 
@@ -87,6 +97,19 @@ def check_cpe_match(vulnerability, product):
 
             if entry_vendor != cpe_vendor.lower() or entry_product != cpe_product.lower():
                 continue
+
+            # Cross-type filter: skip OS-level CVE entries for application products.
+            # An application (cpe:2.3:a:) should not match OS vulnerabilities (cpe:2.3:o:).
+            if product_cpe_part == 'a':
+                entry_cpe_part = entry.get('cpe_part')
+                if not entry_cpe_part:
+                    entry_uri = entry.get('cpe_uri', '')
+                    if entry_uri.startswith('cpe:2.3:'):
+                        entry_uri_parts = entry_uri.split(':')
+                        if len(entry_uri_parts) > 2:
+                            entry_cpe_part = entry_uri_parts[2]
+                if entry_cpe_part == 'o':
+                    continue
 
             has_version_range = entry.get('version_start') or entry.get('version_end')
             exact_ver = entry.get('exact_version')
@@ -547,6 +570,23 @@ def cleanup_invalid_matches():
     import logging
     logger = logging.getLogger(__name__)
     from sqlalchemy.orm import selectinload
+
+    # Re-tag products that are now in the skip list but were mapped before
+    # the skip pattern was added. Without this, cleanup_invalid_matches
+    # can't catch false positives from newly-added skip patterns.
+    from app.agent_api import _should_skip_software
+    retagged = 0
+    for product in Product.query.filter(
+        Product.cpe_vendor.isnot(None),
+        Product.cpe_vendor != '_skip'
+    ).all():
+        if _should_skip_software(product.vendor, product.product_name):
+            product.cpe_vendor = '_skip'
+            product.cpe_product = '_not_security_relevant'
+            retagged += 1
+    if retagged:
+        db.session.flush()
+        logger.info(f"Re-tagged {retagged} products as not-security-relevant (updated skip list)")
 
     # Eager-load product and vulnerability to avoid N+1 queries
     all_matches = VulnerabilityMatch.query.options(

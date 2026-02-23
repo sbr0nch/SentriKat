@@ -247,6 +247,14 @@ NOISE_PATTERNS = [
     # Windows runtime redistributables (noise in inventory, not real products)
     r'^microsoft visual c\+\+.*redistributable',
     r'^microsoft \.net.*(targeting|sdk|host)',
+    # EULA / license agreement entries (legal text, not software)
+    r'\beula\b',
+    r'^.+license (terms|agreement)',
+    # Windows PC health/integrity check tools (OS compatibility checkers)
+    r'(pc.*(health|integrity|integrit.t)|integrit.tspr.fung)',
+    # Windows deployment/provisioning tools (not the OS itself)
+    r'^windows autopilot',
+    r'^windows sdk add',
     # macOS built-in system components (Apple handles updates via OS updates)
     r'^com\.apple\.',
 ]
@@ -263,6 +271,7 @@ NOISE_EXACT_WINDOWS = {
     'microsoft update health tools',
     # Windows SDK components (dev tools, not deployed software)
     'windows sdk addendum',
+    'windows sdk addon',
     'windows sdk arm desktop libs',
     'windows sdk desktop headers',
     'windows sdk desktop libs',
@@ -293,6 +302,14 @@ NOISE_EXACT_WINDOWS = {
     # Language/localization (no executable code)
     'windows language pack',
     'microsoft language experience pack',
+    # EULA / license / legal metadata (not software)
+    'windows sdk eula',
+    'microsoft eula license terms',
+    # PC health/integrity check tools (not attack surface)
+    'windows pc health check',
+    'windows-pc-integritätsprüfung',
+    # Deployment/provisioning tools (not OS itself)
+    'windows autopilot update tool',
 }
 
 # Phase 3: Exact-match noise products (Linux) - build/doc tools, never had CVEs.
