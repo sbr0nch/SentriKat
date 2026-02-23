@@ -342,6 +342,12 @@
                         <i class="bi bi-x"></i>
                     </button>
                 </div>
+                <select class="form-select form-select-sm d-inline-block w-auto" id="queueFilterSourceType" onchange="loadImportQueue()" style="max-width: 180px;">
+                    <option value="">All Categories</option>
+                    <option value="os_package">OS Packages</option>
+                    <option value="extension">Extensions</option>
+                    <option value="code_library">Code Libraries</option>
+                </select>
                 <select class="form-select form-select-sm d-inline-block w-auto" id="queueFilterVendor" onchange="loadImportQueue()" style="max-width: 200px;">
                     <option value="">All Vendors</option>
                 </select>
@@ -379,6 +385,9 @@
                                 <th style="cursor: pointer;" onclick="sortImportQueue('organization')">
                                     Organization <span id="importQueueSortOrganization"></span>
                                 </th>
+                                <th style="cursor: pointer;" onclick="sortImportQueue('source_type')">
+                                    Category <span id="importQueueSortSourceType"></span>
+                                </th>
                                 <th style="cursor: pointer;" onclick="sortImportQueue('criticality')">
                                     Criticality <span id="importQueueSortCriticality"></span>
                                 </th>
@@ -391,7 +400,7 @@
                         </thead>
                         <tbody id="importQueueTable">
                             <tr>
-                                <td colspan="8" class="text-center py-4 text-muted">
+                                <td colspan="9" class="text-center py-4 text-muted">
                                     <i class="bi bi-inbox text-primary" style="font-size: 2rem;"></i>
                                     <p class="mb-0 mt-2">Click to load import queue...</p>
                                 </td>
@@ -4558,13 +4567,30 @@
         return map[(c||'').toLowerCase()] || 'secondary';
     }
 
+    function getSourceTypeBadge(sourceType, ecosystem) {
+        const st = (sourceType || 'os_package').toLowerCase();
+        let icon, label, badgeClass;
+        switch (st) {
+            case 'extension':
+                icon = 'bi-puzzle'; label = 'Extension'; badgeClass = 'bg-primary-subtle text-primary';
+                break;
+            case 'code_library':
+                icon = 'bi-braces'; label = 'Library'; badgeClass = 'bg-info-subtle text-info';
+                break;
+            default:
+                icon = 'bi-box-seam'; label = 'OS Package'; badgeClass = 'bg-secondary-subtle text-secondary';
+        }
+        const ecoLabel = ecosystem ? `<div class="small text-muted" style="font-size:.7em;">${escapeHtml(ecosystem)}</div>` : '';
+        return `<span class="badge ${badgeClass}" style="font-size:.75em;"><i class="bi ${icon} me-1"></i>${label}</span>${ecoLabel}`;
+    }
+
     function renderImportQueue() {
         const tbody = document.getElementById('importQueueTable');
         const paginationContainer = document.getElementById('importQueuePagination');
         if (!tbody) return;
 
         if (importQueueData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted"><i class="bi bi-inbox text-success" style="font-size: 2rem;"></i><p class="mb-0 mt-2">No items in queue</p></td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted"><i class="bi bi-inbox text-success" style="font-size: 2rem;"></i><p class="mb-0 mt-2">No items in queue</p></td></tr>';
             if (paginationContainer) paginationContainer.innerHTML = '';
             return;
         }
@@ -4576,6 +4602,7 @@
                 case 'version': aVal = (a.detected_version || '').toLowerCase(); bVal = (b.detected_version || '').toLowerCase(); break;
                 case 'organization': aVal = (a.organization_name || '').toLowerCase(); bVal = (b.organization_name || '').toLowerCase(); break;
                 case 'criticality': { const co = {'critical':4,'high':3,'medium':2,'low':1}; aVal = co[(a.criticality||'').toLowerCase()] || 0; bVal = co[(b.criticality||'').toLowerCase()] || 0; break; }
+                case 'source_type': aVal = (a.source_type || 'os_package').toLowerCase(); bVal = (b.source_type || 'os_package').toLowerCase(); break;
                 case 'source': aVal = (a.integration_name || 'zzz').toLowerCase(); bVal = (b.integration_name || 'zzz').toLowerCase(); break;
                 default: aVal = ''; bVal = '';
             }
@@ -4607,6 +4634,7 @@
                     </td>
                     <td>${item.status === 'pending' ? `<select class="form-select form-select-sm" style="width: 120px;" onchange="updateQueueItemVersion(${item.id}, this.value)"><option value="">Any version</option>${versionOptions}</select>` : `<span class="text-muted">${escapeHtml(item.selected_version || item.detected_version || 'Any')}</span>`}</td>
                     <td>${item.status === 'pending' ? `<select class="form-select form-select-sm" style="width: 140px;" onchange="updateQueueItemOrg(${item.id}, this.value)"><option value="">Select org...</option>${importQueueOrganizations.map(o => `<option value="${o.id}" ${o.id === item.organization_id ? 'selected' : ''}>${escapeHtml(o.display_name || o.name)}</option>`).join('')}</select>` : `<span class="text-muted">${escapeHtml(item.organization_name || '-')}</span>`}</td>
+                    <td>${getSourceTypeBadge(item.source_type, item.ecosystem)}</td>
                     <td><span class="badge bg-${getCriticalityClass(item.criticality)}">${escapeHtml(item.criticality || 'medium')}</span></td>
                     <td><small class="text-muted">${escapeHtml(item.integration_name || 'Manual')}</small></td>
                     <td>
@@ -4631,6 +4659,7 @@
         const perPage = parseInt(document.getElementById('queuePerPage')?.value) || 25;
         const search = document.getElementById('queueSearch')?.value?.trim() || '';
         const vendorFilter = document.getElementById('queueFilterVendor')?.value || '';
+        const sourceTypeFilter = document.getElementById('queueFilterSourceType')?.value || '';
         const tbody = document.getElementById('importQueueTable');
         if (!tbody) return;
 
@@ -4642,7 +4671,7 @@
         selectedQueueItems.clear();
         updateQueueBulkButtons();
 
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>';
 
         try {
             if (importQueueOrganizations.length === 0) await loadImportQueueOrgs();
@@ -4650,6 +4679,7 @@
             if (status) params.append('status', status);
             if (search) params.append('search', search);
             if (vendorFilter) params.append('vendor', vendorFilter);
+            if (sourceTypeFilter) params.append('source_type', sourceTypeFilter);
             const response = await fetch(`/api/import/queue?${params.toString()}`);
             if (!response.ok) throw new Error('Failed to load queue');
             const data = await response.json();
@@ -4657,7 +4687,7 @@
             renderImportQueue();
             loadImportQueueCount();
         } catch (error) {
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i><p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i><p class="mb-0 mt-2">Error loading queue: ${escapeHtml(error.message)}</p></td></tr>`;
         }
     }
 
@@ -4755,9 +4785,11 @@
 
     async function approveAllPending() {
         const vendorFilter = document.getElementById('queueFilterVendor')?.value || '';
+        const sourceTypeFilter = document.getElementById('queueFilterSourceType')?.value || '';
         const vendorLabel = vendorFilter ? ` from "${vendorFilter}"` : '';
+        const categoryLabel = sourceTypeFilter ? ` (${sourceTypeFilter === 'os_package' ? 'OS Packages' : sourceTypeFilter === 'extension' ? 'Extensions' : 'Code Libraries'})` : '';
         const pendingCount = importQueueData.filter(i => i.status === 'pending').length;
-        const totalLabel = vendorFilter ? `all pending items${vendorLabel}` : `ALL ${pendingCount}+ pending items`;
+        const totalLabel = (vendorFilter || sourceTypeFilter) ? `all pending items${vendorLabel}${categoryLabel}` : `ALL ${pendingCount}+ pending items`;
         const confirmed = await showConfirm(
             `Approve ${totalLabel}? Products will be added to inventory and matched against vulnerabilities.`,
             'Approve All Pending', 'Approve All', 'btn-success'
@@ -4766,6 +4798,7 @@
         try {
             const body = {};
             if (vendorFilter) body.vendor = vendorFilter;
+            if (sourceTypeFilter) body.source_type = sourceTypeFilter;
             const response = await fetch('/api/import/queue/approve-all', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -4781,15 +4814,18 @@
 
     async function rejectAllPending() {
         const vendorFilter = document.getElementById('queueFilterVendor')?.value || '';
+        const sourceTypeFilter = document.getElementById('queueFilterSourceType')?.value || '';
         const vendorLabel = vendorFilter ? ` from "${vendorFilter}"` : '';
+        const categoryLabel = sourceTypeFilter ? ` (${sourceTypeFilter === 'os_package' ? 'OS Packages' : sourceTypeFilter === 'extension' ? 'Extensions' : 'Code Libraries'})` : '';
         const confirmed = await showConfirm(
-            `Reject all pending items${vendorLabel}? This cannot be undone.`,
+            `Reject all pending items${vendorLabel}${categoryLabel}? This cannot be undone.`,
             'Reject All Pending', 'Reject All', 'btn-danger'
         );
         if (!confirmed) return;
         try {
             const body = {};
             if (vendorFilter) body.vendor = vendorFilter;
+            if (sourceTypeFilter) body.source_type = sourceTypeFilter;
             const response = await fetch('/api/import/queue/reject-all', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

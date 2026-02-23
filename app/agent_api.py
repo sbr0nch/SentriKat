@@ -582,6 +582,8 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
             vendor=vendor,
             product_name=product_name,
             detected_version=version,
+            source_type=source_type or 'os_package',
+            ecosystem=ecosystem,
             status='pending',
             criticality='medium',
             source_data=json.dumps(source_info)
