@@ -1,0 +1,212 @@
+# -- Number of SentriKat application replicas
+replicaCount: 2
+
+image:
+  # -- Container image repository
+  repository: sentrikat
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag (defaults to Chart appVersion)
+  tag: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Override the release name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Specifies whether a service account should be created
+  create: false
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account to use
+  name: ""
+
+# -- Additional pod annotations
+podAnnotations: {}
+
+# -- Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# -- Container security context
+securityContext: {}
+
+service:
+  # -- Service type
+  type: ClusterIP
+  # -- Service port
+  port: 5000
+
+ingress:
+  # -- Enable ingress resource
+  enabled: true
+  # -- Ingress class name
+  className: "nginx"
+  # -- Additional ingress annotations
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+  hosts:
+    # -- Ingress hostname
+    - host: sentrikat.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- TLS configuration
+  tls:
+    - secretName: sentrikat-tls
+      hosts:
+        - sentrikat.example.com
+
+# -- Application resource requests and limits
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "250m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+autoscaling:
+  # -- Enable Horizontal Pod Autoscaler
+  enabled: false
+  # -- Minimum replicas
+  minReplicas: 2
+  # -- Maximum replicas
+  maxReplicas: 10
+  # -- Target CPU utilization percentage
+  targetCPUUtilizationPercentage: 75
+  # -- Target memory utilization percentage
+  targetMemoryUtilizationPercentage: 80
+
+# -- Node selector constraints
+nodeSelector: {}
+
+# -- Tolerations for pod scheduling
+tolerations: []
+
+# -- Affinity rules for pod scheduling
+affinity: {}
+
+# -- Pod disruption budget minimum available replicas
+podDisruptionBudget:
+  minAvailable: 1
+
+# Application persistence for /app/data (uploads, backups, logs)
+persistence:
+  # -- Enable persistent storage for application data
+  enabled: true
+  # -- Storage class (empty string uses cluster default)
+  storageClass: ""
+  # -- Access mode
+  accessMode: ReadWriteOnce
+  # -- Storage size
+  size: 5Gi
+
+# PostgreSQL configuration
+postgresql:
+  # -- Enable built-in PostgreSQL StatefulSet
+  enabled: true
+  image:
+    # -- PostgreSQL image repository
+    repository: postgres
+    # -- PostgreSQL image tag
+    tag: "15-alpine"
+  # -- PostgreSQL database name
+  database: sentrikat
+  # -- PostgreSQL username
+  username: sentrikat
+  # -- PostgreSQL resource requests and limits
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  persistence:
+    # -- Enable persistent storage for PostgreSQL
+    enabled: true
+    # -- Storage class (empty string uses cluster default)
+    storageClass: ""
+    # -- Access mode
+    accessMode: ReadWriteOnce
+    # -- Storage size
+    size: 10Gi
+  # -- PostgreSQL tuning parameters
+  tuning:
+    maxConnections: 300
+    sharedBuffers: "256MB"
+    effectiveCacheSize: "768MB"
+    workMem: "4MB"
+
+# Application environment variables
+env:
+  # -- Flask environment
+  FLASK_ENV: "production"
+  # -- Public URL of the SentriKat instance
+  SENTRIKAT_URL: "https://sentrikat.example.com"
+  # -- Force HTTPS redirects
+  FORCE_HTTPS: "false"
+  # -- Number of Gunicorn worker processes
+  GUNICORN_WORKERS: "4"
+  # -- Number of Gunicorn threads per worker
+  GUNICORN_THREADS: "4"
+  # -- Gunicorn request timeout in seconds
+  GUNICORN_TIMEOUT: "120"
+  # -- SQLAlchemy connection pool size per worker
+  DB_POOL_SIZE: "10"
+  # -- Maximum overflow connections beyond pool size
+  DB_POOL_MAX_OVERFLOW: "20"
+  # -- Pool connection acquisition timeout in seconds
+  DB_POOL_TIMEOUT: "30"
+  # -- Connection recycle time in seconds
+  DB_POOL_RECYCLE: "1800"
+  # -- PostgreSQL statement timeout in milliseconds
+  DB_STATEMENT_TIMEOUT: "60000"
+  # -- Background worker pool size for inventory jobs
+  WORKER_POOL_SIZE: "4"
+  # -- Allow internal/private URLs for integrations
+  ALLOW_PRIVATE_URLS: "false"
+
+# Secrets (provide actual values during install with --set or values file)
+secrets:
+  # -- Flask session secret key
+  secretKey: "change-me-in-production"
+  # -- Data encryption key
+  encryptionKey: "change-me-in-production"
+  # -- PostgreSQL password
+  dbPassword: "change-me-in-production"
+  # -- Full database connection URL (auto-generated if empty)
+  databaseUrl: ""
+
+# Liveness probe configuration
+livenessProbe:
+  # -- Path to check for liveness
+  path: /api/health
+  # -- Initial delay before first check
+  initialDelaySeconds: 60
+  # -- Period between checks
+  periodSeconds: 30
+  # -- Timeout for each check
+  timeoutSeconds: 10
+  # -- Number of failures before restart
+  failureThreshold: 3
+
+# Readiness probe configuration
+readinessProbe:
+  # -- Path to check for readiness
+  path: /api/health
+  # -- Initial delay before first check
+  initialDelaySeconds: 10
+  # -- Period between checks
+  periodSeconds: 10
+  # -- Timeout for each check
+  timeoutSeconds: 5
+  # -- Number of failures before marking unready
+  failureThreshold: 3

@@ -96,11 +96,32 @@ class Organization(db.Model):
     webhook_name = db.Column(db.String(100), default='Organization Webhook')
     webhook_format = db.Column(db.String(50), default='slack')  # slack, discord, teams, rocketchat, custom
     webhook_token = db.Column(db.String(500), nullable=True)  # Optional auth token
+    webhook_secret = db.Column(db.String(255), nullable=True)  # HMAC secret for webhook signing
 
     # Agent Product Settings
     agent_require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for agent-added products
     agent_stale_threshold_days = db.Column(db.Integer, default=30)  # Days before agent is considered stale
     product_stale_threshold_days = db.Column(db.Integer, default=90)  # Days before product auto-disables
+
+    # PagerDuty Integration
+    pagerduty_enabled = db.Column(db.Boolean, default=False)
+    pagerduty_routing_key = db.Column(db.String(255), nullable=True)
+
+    # Opsgenie Integration
+    opsgenie_enabled = db.Column(db.Boolean, default=False)
+    opsgenie_api_key = db.Column(db.String(255), nullable=True)
+
+    # Digest Email Settings
+    digest_enabled = db.Column(db.Boolean, default=False)
+    digest_frequency = db.Column(db.String(20), default='daily')  # 'daily' or 'weekly'
+    digest_day = db.Column(db.String(10), default='monday')  # For weekly digests
+    digest_time = db.Column(db.String(5), default='08:00')  # HH:MM format
+
+    # Organization Quotas (0 = unlimited)
+    quota_max_agents = db.Column(db.Integer, default=0)
+    quota_max_products = db.Column(db.Integer, default=0)
+    quota_max_users = db.Column(db.Integer, default=0)
+    quota_max_api_keys = db.Column(db.Integer, default=0)
 
     # Metadata
     active = db.Column(db.Boolean, default=True, index=True)
@@ -158,11 +179,50 @@ class Organization(db.Model):
             'webhook_format': self.webhook_format,
             'webhook_token': '********' if self.webhook_token else '',  # Mask token
             'webhook_configured': bool(self.webhook_enabled and self.webhook_url),
+            # PagerDuty settings
+            'pagerduty_enabled': self.pagerduty_enabled,
+            'pagerduty_routing_key': '********' if self.pagerduty_routing_key else '',  # Mask key
+            'pagerduty_configured': bool(self.pagerduty_enabled and self.pagerduty_routing_key),
+            # Opsgenie settings
+            'opsgenie_enabled': self.opsgenie_enabled,
+            'opsgenie_api_key': '********' if self.opsgenie_api_key else '',  # Mask key
+            'opsgenie_configured': bool(self.opsgenie_enabled and self.opsgenie_api_key),
+            # Digest email settings
+            'digest_enabled': self.digest_enabled,
+            'digest_frequency': self.digest_frequency,
+            'digest_day': self.digest_day,
+            'digest_time': self.digest_time,
             'user_count': user_count,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'is_default': self.name == 'default'  # Flag for UI to prevent deletion
+            'is_default': self.name == 'default',  # Flag for UI to prevent deletion
+            'quotas': {
+                'max_agents': self.quota_max_agents or 0,
+                'max_products': self.quota_max_products or 0,
+                'max_users': self.quota_max_users or 0,
+                'max_api_keys': self.quota_max_api_keys or 0,
+            }
         }
+
+    def check_quota(self, resource_type):
+        """Check if organization has reached its quota for a resource type.
+        Returns (allowed: bool, current: int, limit: int).
+        Limit of 0 means unlimited.
+        """
+        quota_map = {
+            'agents': ('quota_max_agents', lambda: Asset.query.filter_by(organization_id=self.id).count()),
+            'products': ('quota_max_products', lambda: Product.query.filter_by(organization_id=self.id, active=True).count()),
+            'users': ('quota_max_users', lambda: User.query.filter_by(organization_id=self.id, is_active=True).count()),
+            'api_keys': ('quota_max_api_keys', lambda: AgentApiKey.query.filter_by(organization_id=self.id).count()),
+        }
+        if resource_type not in quota_map:
+            return True, 0, 0
+        field, counter = quota_map[resource_type]
+        limit = getattr(self, field, 0) or 0
+        if limit == 0:
+            return True, 0, 0  # Unlimited
+        current = counter()
+        return current < limit, current, limit
 
     def _decrypt_webhook_url(self):
         """Decrypt webhook URL for display/editing"""
@@ -180,6 +240,7 @@ class Organization(db.Model):
         """Return webhook configuration dictionary with decrypted values"""
         webhook_url = self.webhook_url
         webhook_token = self.webhook_token
+        webhook_secret = self.webhook_secret
 
         # Decrypt values if encrypted
         try:
@@ -188,6 +249,8 @@ class Organization(db.Model):
                 webhook_url = decrypt_value(webhook_url)
             if webhook_token and is_encrypted(webhook_token):
                 webhook_token = decrypt_value(webhook_token)
+            if webhook_secret and is_encrypted(webhook_secret):
+                webhook_secret = decrypt_value(webhook_secret)
         except Exception:
             pass
 
@@ -196,7 +259,8 @@ class Organization(db.Model):
             'url': webhook_url,
             'name': self.webhook_name,
             'format': self.webhook_format,
-            'token': webhook_token
+            'token': webhook_token,
+            'secret': webhook_secret
         }
 
     def get_smtp_config(self):
@@ -1293,6 +1357,101 @@ class User(db.Model):
             return True
         return False
 
+    # =========================================================================
+    # Fine-Grained Permissions
+    # =========================================================================
+
+    def has_permission(self, permission, org_id=None):
+        """
+        Check if user has a specific fine-grained permission.
+
+        Checks custom permission overrides first (from Permission table),
+        then falls back to DEFAULT_PERMISSIONS for the user's role.
+
+        Args:
+            permission: Permission string, e.g. 'view_vulnerabilities'
+            org_id: Optional organization ID for org-scoped permission checks
+
+        Returns:
+            bool: True if the user has the permission
+        """
+        # Super admins always have all permissions
+        if self.role == 'super_admin' or self.is_admin:
+            return True
+
+        # Check custom permission overrides in the database
+        try:
+            # Check org-specific override first (if org_id provided)
+            if org_id is not None:
+                custom = Permission.query.filter_by(
+                    role=self.role,
+                    permission=permission,
+                    organization_id=org_id
+                ).first()
+                if custom is not None:
+                    return custom.granted
+
+            # Check global override (organization_id IS NULL)
+            custom = Permission.query.filter_by(
+                role=self.role,
+                permission=permission,
+                organization_id=None
+            ).first()
+            if custom is not None:
+                return custom.granted
+        except Exception:
+            # Table may not exist yet (pre-migration) - fall through to defaults
+            pass
+
+        # Fall back to default permissions for the role
+        role_defaults = DEFAULT_PERMISSIONS.get(self.role, [])
+        if '*' in role_defaults:
+            return True
+        return permission in role_defaults
+
+    def get_effective_permissions(self, org_id=None):
+        """
+        Get the full list of effective permissions for this user.
+
+        Returns:
+            list: List of permission strings the user has
+        """
+        if self.role == 'super_admin' or self.is_admin:
+            return ['*']
+
+        # Start with default permissions for the role
+        role_defaults = set(DEFAULT_PERMISSIONS.get(self.role, []))
+        if '*' in role_defaults:
+            return ['*']
+
+        effective = set(role_defaults)
+
+        # Apply custom overrides from the database
+        try:
+            # Get all custom overrides for this role
+            overrides = Permission.query.filter_by(role=self.role)
+            if org_id is not None:
+                # Include both global overrides (org_id IS NULL) and org-specific ones
+                overrides = overrides.filter(
+                    db.or_(
+                        Permission.organization_id == None,
+                        Permission.organization_id == org_id
+                    )
+                )
+            else:
+                overrides = overrides.filter(Permission.organization_id == None)
+
+            for override in overrides.all():
+                if override.granted:
+                    effective.add(override.permission)
+                else:
+                    effective.discard(override.permission)
+        except Exception:
+            # Table may not exist yet - just return defaults
+            pass
+
+        return sorted(effective)
+
     def to_dict(self):
         # Get org memberships
         org_memberships = [m.to_dict() for m in self.org_memberships.all()]
@@ -1327,6 +1486,98 @@ class User(db.Model):
             'org_memberships': org_memberships,
             'all_organizations': self.get_all_organizations()
         }
+
+
+# =============================================================================
+# Fine-Grained Permissions
+# =============================================================================
+
+# Default permissions per role - used as fallback when no custom overrides exist
+DEFAULT_PERMISSIONS = {
+    'super_admin': ['*'],  # All permissions
+    'org_admin': [
+        'view_vulnerabilities', 'manage_products', 'manage_users',
+        'manage_agents', 'manage_settings', 'approve_imports',
+        'view_reports', 'export_data', 'manage_integrations'
+    ],
+    'manager': [
+        'view_vulnerabilities', 'manage_products', 'approve_imports',
+        'view_reports', 'export_data', 'manage_agents'
+    ],
+    'user': [
+        'view_vulnerabilities', 'view_reports'
+    ]
+}
+
+# All known permission strings (for validation and UI)
+ALL_PERMISSIONS = [
+    'view_vulnerabilities',
+    'manage_products',
+    'manage_users',
+    'manage_agents',
+    'manage_settings',
+    'approve_imports',
+    'view_reports',
+    'export_data',
+    'manage_integrations',
+]
+
+
+class Permission(db.Model):
+    """Fine-grained permissions for role customization.
+
+    Overrides the DEFAULT_PERMISSIONS for a specific role, optionally
+    scoped to a specific organization. When no override exists, the
+    defaults apply.
+    """
+    __tablename__ = 'permissions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    role = db.Column(db.String(20), nullable=False, index=True)  # super_admin, org_admin, manager, user
+    permission = db.Column(db.String(50), nullable=False)  # e.g., 'view_vulnerabilities', 'manage_products'
+    granted = db.Column(db.Boolean, default=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('role', 'permission', 'organization_id', name='unique_role_permission_org'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'role': self.role,
+            'permission': self.permission,
+            'granted': self.granted,
+            'organization_id': self.organization_id,
+        }
+
+
+class WebAuthnCredential(db.Model):
+    """FIDO2/WebAuthn credential for hardware security keys"""
+    __tablename__ = 'webauthn_credentials'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    credential_id = db.Column(db.LargeBinary, unique=True, nullable=False)
+    public_key = db.Column(db.LargeBinary, nullable=False)
+    sign_count = db.Column(db.Integer, default=0)
+    name = db.Column(db.String(100), default='Security Key')  # User-friendly name
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_used_at = db.Column(db.DateTime, nullable=True)
+
+    user = db.relationship('User', backref=db.backref('webauthn_credentials', lazy='dynamic', cascade='all, delete-orphan'))
+
+    def to_dict(self):
+        import base64
+        return {
+            'id': self.id,
+            'credential_id': base64.b64encode(self.credential_id).decode(),
+            'name': self.name,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
+            'sign_count': self.sign_count
+        }
+
 
 class SystemSettings(db.Model):
     """Global system settings"""
@@ -3603,4 +3854,110 @@ class UsageRecord(db.Model):
             'period_start': self.period_start.isoformat() if self.period_start else None,
             'period_end': self.period_end.isoformat() if self.period_end else None,
             'recorded_at': self.recorded_at.isoformat() if self.recorded_at else None,
+        }
+
+
+class UserSession(db.Model):
+    """
+    Tracks active user sessions for concurrent session management.
+    Allows users to see where they're logged in and revoke sessions.
+    """
+    __tablename__ = 'user_sessions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(255), unique=True, index=True)  # Flask session ID
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    ip_address = db.Column(db.String(50))
+    user_agent = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_activity = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime)
+    is_active = db.Column(db.Boolean, default=True, index=True)
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('sessions', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'session_id': self.session_id,
+            'user_id': self.user_id,
+            'ip_address': self.ip_address,
+            'user_agent': self.user_agent,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'last_activity': self.last_activity.isoformat() if self.last_activity else None,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'is_active': self.is_active,
+        }
+
+    @classmethod
+    def cleanup_expired(cls):
+        """Deactivate all expired sessions."""
+        now = datetime.utcnow()
+        expired = cls.query.filter(
+            cls.is_active == True,
+            cls.expires_at.isnot(None),
+            cls.expires_at < now
+        ).all()
+        count = 0
+        for s in expired:
+            s.is_active = False
+            count += 1
+        if count > 0:
+            db.session.commit()
+        return count
+
+    @classmethod
+    def enforce_limit(cls, user_id, max_sessions=5):
+        """Deactivate oldest sessions if user exceeds the max concurrent session limit."""
+        active_sessions = cls.query.filter_by(
+            user_id=user_id, is_active=True
+        ).order_by(cls.created_at.desc()).all()
+
+        if len(active_sessions) > max_sessions:
+            # Keep the newest max_sessions, deactivate the rest
+            for s in active_sessions[max_sessions:]:
+                s.is_active = False
+            db.session.commit()
+
+
+class AuditLog(db.Model):
+    __tablename__ = 'audit_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    username = db.Column(db.String(100))  # Denormalized for when user is deleted
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='SET NULL'), nullable=True)
+    ip_address = db.Column(db.String(50))
+    user_agent = db.Column(db.String(500))
+    action = db.Column(db.String(50), index=True)  # CREATE, UPDATE, DELETE, LOGIN, LOGOUT, APPROVE, REJECT, etc.
+    resource_type = db.Column(db.String(50), index=True)  # user, product, organization, setting, etc.
+    resource_id = db.Column(db.String(100), nullable=True)
+    resource_name = db.Column(db.String(255), nullable=True)
+    old_values = db.Column(db.Text, nullable=True)  # JSON
+    new_values = db.Column(db.Text, nullable=True)  # JSON
+    details = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.Index('idx_audit_log_action_resource', 'action', 'resource_type'),
+        db.Index('idx_audit_log_user_timestamp', 'user_id', 'timestamp'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'user_id': self.user_id,
+            'username': self.username,
+            'organization_id': self.organization_id,
+            'ip_address': self.ip_address,
+            'user_agent': self.user_agent,
+            'action': self.action,
+            'resource_type': self.resource_type,
+            'resource_id': self.resource_id,
+            'resource_name': self.resource_name,
+            'old_values': json.loads(self.old_values) if self.old_values else None,
+            'new_values': json.loads(self.new_values) if self.new_values else None,
+            'details': self.details,
         }

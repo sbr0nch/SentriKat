@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sentrikat
+  namespace: sentrikat
+  labels:
+    app.kubernetes.io/name: sentrikat
+    app.kubernetes.io/component: app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sentrikat
+      app.kubernetes.io/component: app

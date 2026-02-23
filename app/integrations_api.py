@@ -833,6 +833,16 @@ def approve_queue_item(item_id):
     except Exception as match_err:
         logger.warning(f"Vulnerability matching failed for product {product.id}: {match_err}")
 
+    # Audit trail
+    try:
+        from app.audit import log_audit
+        log_audit('APPROVE', 'import_queue', resource_id=item_id,
+                  resource_name=f"{item.vendor} {item.product_name}",
+                  details=f"Approved import queue item, created product {product.id}")
+        db.session.commit()
+    except Exception:
+        pass
+
     return jsonify({
         'success': True,
         'product_id': product.id,
@@ -860,6 +870,16 @@ def reject_queue_item(item_id):
         db.session.rollback()
         logger.error(f"Failed to reject queue item {item_id}: {e}")
         return jsonify({'error': 'Database error'}), 500
+
+    # Audit trail
+    try:
+        from app.audit import log_audit
+        log_audit('REJECT', 'import_queue', resource_id=item_id,
+                  resource_name=f"{item.vendor} {item.product_name}",
+                  details=f"Rejected import queue item")
+        db.session.commit()
+    except Exception:
+        pass
 
     return jsonify({'success': True, 'item': item.to_dict()})
 
@@ -935,6 +955,15 @@ def bulk_process_queue():
             match_vulnerabilities_to_products(products)
         except Exception as e:
             logger.warning(f"Vulnerability matching failed during bulk process: {e}")
+
+    # Audit trail for bulk action
+    try:
+        from app.audit import log_audit
+        log_audit(action.upper(), 'import_queue',
+                  details=f"Bulk {action}: {results['processed']} processed, {results['errors']} errors")
+        db.session.commit()
+    except Exception:
+        pass
 
     return jsonify(results)
 

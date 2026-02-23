@@ -60,7 +60,7 @@ jobs:
           DATABASE_URL: postgresql://sentrikat:testpass@localhost:5432/sentrikat_test
           FLASK_ENV: testing
         run: |
-          pytest tests/ -v --tb=short --cov=app --cov-report=term-missing --cov-fail-under=40
+          pytest tests/ -v --tb=short --cov=app --cov-report=term-missing --cov-fail-under=70
 
       - name: Dependency audit
         run: |
@@ -107,5 +107,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Docker image (test only)
+      - name: Build Docker image
         run: docker build -t sentrikat:test .
+
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'sentrikat:test'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true

@@ -5605,6 +5605,16 @@ def create_user():
     db.session.add(user)
     db.session.commit()
 
+    # Audit trail
+    try:
+        from app.audit import log_audit
+        log_audit('CREATE', 'user', resource_id=user.id, resource_name=user.username,
+                  new_values={'username': user.username, 'email': user.email, 'role': user.role},
+                  details=f"Created user {user.username} with role {user.role}")
+        db.session.commit()
+    except Exception:
+        pass
+
     return jsonify(user.to_dict()), 201
 
 @bp.route('/api/users/<int:user_id>', methods=['GET'])
@@ -5723,6 +5733,22 @@ def update_user(user_id):
 
     db.session.commit()
 
+    # Audit trail (database-backed)
+    try:
+        from app.audit import log_audit
+        changes = {}
+        if old_role != user.role:
+            changes['role'] = {'old': old_role, 'new': user.role}
+        if old_org_id != user.organization_id:
+            changes['organization_id'] = {'old': old_org_id, 'new': user.organization_id}
+        log_audit('UPDATE', 'user', resource_id=user.id, resource_name=user.username,
+                  old_values={'role': old_role, 'organization_id': old_org_id},
+                  new_values={'role': user.role, 'organization_id': user.organization_id},
+                  details=f"User updated by {current_user.username}")
+        db.session.commit()
+    except Exception:
+        pass
+
     # Log audit event if role changed
     if old_role != user.role:
         log_audit_event(
@@ -5800,6 +5826,15 @@ def delete_user(user_id):
             old_value={'username': deleted_username, 'email': deleted_email, 'role': deleted_role},
             details=f"Permanently deleted user {deleted_username}"
         )
+        # Database-backed audit trail
+        try:
+            from app.audit import log_audit
+            log_audit('DELETE', 'user', resource_id=user_id, resource_name=deleted_username,
+                      old_values={'username': deleted_username, 'email': deleted_email, 'role': deleted_role},
+                      details=f"Permanently deleted user {deleted_username}")
+            db.session.commit()
+        except Exception:
+            pass
 
         return jsonify({'success': True, 'message': f'User {deleted_username} permanently deleted'})
 
@@ -5847,6 +5882,16 @@ def toggle_user_active(user_id):
         new_value={'is_active': user.is_active},
         details=f"User {user.username} {action} by {current_user.username}"
     )
+    # Database-backed audit trail
+    try:
+        from app.audit import log_audit
+        log_audit('DEACTIVATE' if is_blocked else 'ACTIVATE', 'user',
+                  resource_id=user.id, resource_name=user.username,
+                  old_values={'is_active': old_status},
+                  new_values={'is_active': user.is_active},
+                  details=f"User {user.username} {action} by {current_user.username}")
+    except Exception:
+        pass
 
     db.session.commit()
 

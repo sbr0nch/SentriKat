@@ -23,6 +23,12 @@ psycopg2-binary==2.9.9
 # SAML SSO (optional - requires system packages: libxml2-dev libxmlsec1-dev)
 python3-saml==1.16.0
 
+# OAuth/OIDC SSO (optional)
+Authlib==1.4.1
+
+# WebAuthn/FIDO2 hardware security key support (optional)
+webauthn==2.7.1
+
 # Testing
 pytest==7.4.3
 pytest-cov==4.1.0

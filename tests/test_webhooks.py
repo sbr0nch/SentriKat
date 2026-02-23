@@ -158,7 +158,7 @@ class TestWebhookPayloadFormats:
 
         assert mock_post.called
         _, kwargs = mock_post.call_args
-        return kwargs['json']
+        return json.loads(kwargs['data'])
 
     # Test 1 ---------------------------------------------------------------
     @patch('app.cisa_sync.requests.post')
@@ -438,7 +438,7 @@ class TestSendOrgWebhook:
         send_org_webhook(org, 8, 0, 8, matches=matches)
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         text = payload.get('text', '')
         assert '+3 more' in text
 
@@ -458,7 +458,7 @@ class TestSendOrgWebhook:
         send_org_webhook(org, 1, 1, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         text = payload.get('text', '')
         assert 'ZERO-DAY' in text
 
@@ -478,7 +478,7 @@ class TestSendOrgWebhook:
         send_org_webhook(org, 1, 1, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         text = payload.get('text', '')
         assert 'ACTIVELY EXPLOITED' in text
 
@@ -497,7 +497,7 @@ class TestSendOrgWebhook:
         send_org_webhook(org, 1, 0, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         text = payload.get('text', '')
         assert 'likely resolved' in text or 'verify' in text.lower()
 
@@ -519,7 +519,7 @@ class TestSendOrgWebhook:
         send_org_webhook(org, 1, 1, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         # With actively exploited, themeColor should be red (dc2626) or purple for zero-day
         assert payload['themeColor'] in ('dc2626', '7c3aed')
 
@@ -560,7 +560,7 @@ class TestSendWebhookNotification:
 
         assert mock_post.called
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         assert payload['@type'] == 'MessageCard'
         assert any(r.get('teams') is True for r in results)
 
@@ -611,7 +611,7 @@ class TestSendWebhookNotification:
         send_webhook_notification(2, 1, 5, new_cve_ids=cve_ids)
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         # Batched format uses "text" key with CVE list
         assert 'text' in payload
         assert 'CVE-2025-0001' in payload['text']
@@ -630,7 +630,7 @@ class TestSendWebhookNotification:
         send_webhook_notification(3, 1, 10, new_cve_ids=None)
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         assert 'text' in payload
         assert '*SentriKat' in payload['text']
         assert 'New CVEs' in payload['text'] or 'new CVE' in payload['text']
@@ -650,7 +650,7 @@ class TestSendWebhookNotification:
         # With critical > 0
         send_webhook_notification(3, 2, 10)
         _, kwargs = mock_post.call_args
-        payload_critical = kwargs['json']
+        payload_critical = json.loads(kwargs['data'])
         assert payload_critical['themeColor'] == 'dc2626'
 
         mock_post.reset_mock()
@@ -658,7 +658,7 @@ class TestSendWebhookNotification:
         # With critical = 0
         send_webhook_notification(3, 0, 10)
         _, kwargs = mock_post.call_args
-        payload_normal = kwargs['json']
+        payload_normal = json.loads(kwargs['data'])
         assert payload_normal['themeColor'] == '1e40af'
 
 
@@ -746,7 +746,7 @@ class TestSendAlertsForNewMatches:
         # Only the new match should trigger alert
         if mock_post.called:
             _, kwargs = mock_post.call_args
-            payload_text = json.dumps(kwargs.get('json', {}))
+            payload_text = kwargs.get('data', b'{}').decode('utf-8') if isinstance(kwargs.get('data'), bytes) else json.dumps(kwargs.get('json', {}))
             assert 'CVE-2025-NEW1' in payload_text
             # Old match should not appear (created before since_time)
             # Note: it may still appear if it's in the same org product set
@@ -1065,13 +1065,13 @@ class TestRocketChatFirstAlertedRegression:
         mock_post.return_value = _mock_response(200)
 
         send_org_webhook(org_slack, 1, 0, 1, matches=[match_slack])
-        slack_payload = mock_post.call_args[1]['json']
+        slack_payload = json.loads(mock_post.call_args[1]['data'])
 
         mock_post.reset_mock()
         mock_post.return_value = _mock_response(200)
 
         send_org_webhook(org_rc, 1, 0, 1, matches=[match_rc])
-        rc_payload = mock_post.call_args[1]['json']
+        rc_payload = json.loads(mock_post.call_args[1]['data'])
 
         # Both should have 'text' key
         assert 'text' in slack_payload
@@ -1103,7 +1103,7 @@ class TestRocketChatFirstAlertedRegression:
 
         assert mock_post.called
         _, kwargs = mock_post.call_args
-        payload_text = kwargs['json'].get('text', '')
+        payload_text = json.loads(kwargs['data']).get('text', '')
         # Only the new CVE should appear
         assert 'CVE-2025-NEWR1' in payload_text
         assert 'CVE-2025-OLDR1' not in payload_text
@@ -1166,7 +1166,7 @@ class TestRocketChatFirstAlertedRegression:
 
         # Verify all 4 CVEs are in the payload
         _, kwargs = mock_post.call_args
-        payload_text = kwargs['json'].get('text', '')
+        payload_text = json.loads(kwargs['data']).get('text', '')
         # With 4 CVEs (<=5), all should be listed
         for i in range(4):
             assert f'CVE-2025-MF0{i}' in payload_text
@@ -1251,7 +1251,7 @@ class TestWebhookEdgeCases:
         send_org_webhook(org, 5, 0, 5, matches=matches)
 
         _, kwargs = mock_post.call_args
-        text = kwargs['json'].get('text', '')
+        text = json.loads(kwargs['data']).get('text', '')
         assert '+' not in text or 'more' not in text
         # All 5 should be listed
         for i in range(5):
@@ -1275,7 +1275,7 @@ class TestWebhookEdgeCases:
         send_org_webhook(org, 6, 0, 6, matches=matches)
 
         _, kwargs = mock_post.call_args
-        text = kwargs['json'].get('text', '')
+        text = json.loads(kwargs['data']).get('text', '')
         assert '+1 more' in text
 
     @patch('app.cisa_sync.requests.post')
@@ -1293,7 +1293,7 @@ class TestWebhookEdgeCases:
         send_org_webhook(org, 1, 1, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         # Zero-day should trigger purple theme
         assert payload['themeColor'] == '7c3aed'
 
@@ -1312,7 +1312,7 @@ class TestWebhookEdgeCases:
         send_org_webhook(org, 1, 0, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         assert payload['themeColor'] == '1e40af'
 
     @patch('app.cisa_sync.requests.post')
@@ -1330,7 +1330,7 @@ class TestWebhookEdgeCases:
         send_org_webhook(org, 1, 1, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        payload = kwargs['json']
+        payload = json.loads(kwargs['data'])
         assert 'CVE-2025-CZD1' in payload['zero_day_cve_ids']
         assert payload['zero_day_count'] == 1
 
@@ -1377,7 +1377,7 @@ class TestWebhookEdgeCases:
         send_org_webhook(org, 1, 1, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        content = kwargs['json']['content']
+        content = json.loads(kwargs['data'])['content']
         assert '**' in content  # Discord bold
         assert 'ZERO-DAY' in content
 
@@ -1395,7 +1395,7 @@ class TestWebhookEdgeCases:
         send_org_webhook(org, 1, 0, 1, matches=[match])
 
         _, kwargs = mock_post.call_args
-        text = kwargs['json'].get('text', '')
+        text = json.loads(kwargs['data']).get('text', '')
         assert '1 new CVE detected' in text or '1 new CVE:' in text  # singular, no 's'
         assert '1 new CVEs' not in text
 
@@ -1417,5 +1417,5 @@ class TestWebhookEdgeCases:
         send_org_webhook(org, 3, 0, 3, matches=matches)
 
         _, kwargs = mock_post.call_args
-        text = kwargs['json'].get('text', '')
+        text = json.loads(kwargs['data']).get('text', '')
         assert '3 new CVEs detected' in text or '3 new CVEs:' in text  # plural

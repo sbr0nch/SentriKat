@@ -16,6 +16,7 @@ import logging
 import logging.handlers
 import os
 import json
+import socket
 from datetime import datetime
 from functools import wraps
 import time
@@ -184,6 +185,57 @@ def setup_logging(app):
     console_handler.setLevel(logging.DEBUG if app.debug else logging.INFO)
     console_handler.setFormatter(detailed_formatter)
     root_logger.addHandler(console_handler)
+
+    # ========================================
+    # Syslog Forwarding (optional)
+    # ========================================
+    # Enable with SYSLOG_HOST env var. Supports UDP (default) and TCP.
+    # SYSLOG_HOST=syslog.example.com
+    # SYSLOG_PORT=514 (default)
+    # SYSLOG_PROTOCOL=udp (default) or tcp
+    # SYSLOG_FACILITY=local0 (default)
+    syslog_host = os.environ.get('SYSLOG_HOST')
+    if syslog_host:
+        syslog_port = int(os.environ.get('SYSLOG_PORT', '514'))
+        syslog_protocol = os.environ.get('SYSLOG_PROTOCOL', 'udp').lower()
+        syslog_facility_name = os.environ.get('SYSLOG_FACILITY', 'local0').upper()
+
+        # Map facility name to SysLogHandler constant
+        facility_map = {
+            'LOCAL0': logging.handlers.SysLogHandler.LOG_LOCAL0,
+            'LOCAL1': logging.handlers.SysLogHandler.LOG_LOCAL1,
+            'LOCAL2': logging.handlers.SysLogHandler.LOG_LOCAL2,
+            'LOCAL3': logging.handlers.SysLogHandler.LOG_LOCAL3,
+            'LOCAL4': logging.handlers.SysLogHandler.LOG_LOCAL4,
+            'LOCAL5': logging.handlers.SysLogHandler.LOG_LOCAL5,
+            'LOCAL6': logging.handlers.SysLogHandler.LOG_LOCAL6,
+            'LOCAL7': logging.handlers.SysLogHandler.LOG_LOCAL7,
+            'USER': logging.handlers.SysLogHandler.LOG_USER,
+            'DAEMON': logging.handlers.SysLogHandler.LOG_DAEMON,
+        }
+        facility = facility_map.get(syslog_facility_name, logging.handlers.SysLogHandler.LOG_LOCAL0)
+
+        socktype = socket.SOCK_DGRAM if syslog_protocol == 'udp' else socket.SOCK_STREAM
+        try:
+            syslog_handler = logging.handlers.SysLogHandler(
+                address=(syslog_host, syslog_port),
+                facility=facility,
+                socktype=socktype
+            )
+            syslog_handler.setLevel(logging.INFO)
+            syslog_formatter = logging.Formatter(
+                'sentrikat[%(process)d]: %(levelname)s %(name)s %(message)s'
+            )
+            syslog_handler.setFormatter(syslog_formatter)
+            root_logger.addHandler(syslog_handler)
+
+            # Also forward security and audit logs to syslog
+            security_logger.addHandler(syslog_handler)
+            audit_logger.addHandler(syslog_handler)
+
+            app.logger.info(f"Syslog forwarding enabled: {syslog_host}:{syslog_port} ({syslog_protocol})")
+        except Exception as e:
+            app.logger.error(f"Failed to configure syslog forwarding: {e}")
 
     # Log startup
     app.logger.info(f"Logging configured. Log directory: {log_dir}")

@@ -149,9 +149,6 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
     """
     from datetime import datetime
 
-    proxies = Config.get_proxies()
-    verify_ssl = Config.get_verify_ssl()
-
     # Check if org has its own webhook configured
     if org.webhook_enabled and org.webhook_url:
         try:
@@ -161,13 +158,10 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
             webhook_format = webhook_config['format'] or 'slack'
             webhook_token = webhook_config['token']
 
+            webhook_secret = webhook_config.get('secret')
+
             if not webhook_url or not webhook_url.startswith(('http://', 'https://')):
                 return {'org': org.name, 'success': False, 'error': 'Invalid webhook URL (may be corrupted or improperly decrypted)'}
-
-            headers = {'Content-Type': 'application/json'}
-            if webhook_token:
-                headers['Authorization'] = f'Bearer {webhook_token}'
-                headers['X-Auth-Token'] = webhook_token
 
             # Filter for NEW matches only (never alerted via webhook), unless forced
             new_matches = []
@@ -328,16 +322,26 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
                     "affected_products": product_names
                 }
 
-            response = requests.post(webhook_url, json=payload, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)
+            from app.webhook import send_webhook as deliver_webhook
+            success, status_code, error = deliver_webhook(
+                url=webhook_url,
+                payload=payload,
+                format=webhook_format,
+                token=webhook_token,
+                webhook_secret=webhook_secret,
+            )
 
-            if response.status_code in [200, 204]:
+            if success:
                 # Mark these matches as alerted (set first_alerted_at)
                 now = datetime.utcnow()
                 for match in new_matches:
                     match.first_alerted_at = now
                 db.session.commit()
 
-            return {'org': org.name, 'success': response.status_code in [200, 204], 'new_cves': new_cve_count}
+            result = {'org': org.name, 'success': success, 'new_cves': new_cve_count}
+            if not success and error:
+                result['error'] = error
+            return result
         except Exception as e:
             logger.error(f"Org webhook failed for {org.name}: {e}")
             return {'org': org.name, 'success': False, 'error': str(e)}
@@ -399,8 +403,11 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
                     text += f"*Product matches:* {total_matches}\n"
                     payload = {"text": text}
 
-                response = requests.post(webhook_url, json=payload, timeout=10)
-                results.append({'slack': response.status_code in [200, 204]})
+                from app.webhook import send_webhook as deliver_webhook
+                success, status_code, error = deliver_webhook(
+                    url=webhook_url, payload=payload, format='slack',
+                )
+                results.append({'slack': success})
             except Exception as e:
                 logger.error(f"Slack webhook failed: {e}")
                 results.append({'slack': False, 'error': str(e)})
@@ -433,8 +440,11 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
                     }]
                 }
 
-                response = requests.post(webhook_url, json=payload, timeout=10)
-                results.append({'teams': response.status_code in [200, 204]})
+                from app.webhook import send_webhook as deliver_webhook
+                success, status_code, error = deliver_webhook(
+                    url=webhook_url, payload=payload, format='teams',
+                )
+                results.append({'teams': success})
             except Exception as e:
                 logger.error(f"Teams webhook failed: {e}")
                 results.append({'teams': False, 'error': str(e)})
@@ -452,14 +462,6 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
                 generic_token = get_setting('generic_webhook_token', '')
                 if generic_token and is_encrypted(generic_token):
                     generic_token = decrypt_value(generic_token)
-
-                proxies = Config.get_proxies()
-                verify_ssl = Config.get_verify_ssl()
-
-                headers = {'Content-Type': 'application/json'}
-                if generic_token:
-                    headers['Authorization'] = f'Bearer {generic_token}'
-                    headers['X-Auth-Token'] = generic_token
 
                 if generic_format in ('slack', 'rocketchat'):
                     text = f"{'🚨' if critical_count > 0 else '🔒'} *SentriKat Security Alert*\n"
@@ -488,8 +490,12 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
                         "text": f"SentriKat Security Alert: {new_cves_count} new CVEs ({critical_count} critical), {total_matches} product matches"
                     }
 
-                response = requests.post(generic_url, json=payload, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)
-                results.append({'generic': response.status_code in [200, 204]})
+                from app.webhook import send_webhook as deliver_webhook
+                success, status_code, error = deliver_webhook(
+                    url=generic_url, payload=payload, format=generic_format,
+                    token=generic_token,
+                )
+                results.append({'generic': success})
             except Exception as e:
                 logger.error(f"Generic webhook failed: {e}")
                 results.append({'generic': False, 'error': str(e)})
@@ -612,6 +618,28 @@ def send_alerts_for_new_matches(since_time, source_label='sync'):
                 if org_webhook_result:
                     webhook_results.append(org_webhook_result)
                     orgs_with_own_webhook.add(org.id)
+
+                # Send incident management alerts (PagerDuty / Opsgenie) if configured
+                try:
+                    from app.incident_integrations import send_incident_alert
+                    if getattr(org, 'pagerduty_enabled', False) or getattr(org, 'opsgenie_enabled', False):
+                        cve_ids = list(set(
+                            m.vulnerability.cve_id for m in matches_to_alert
+                            if m.vulnerability
+                        ))
+                        if cve_ids:
+                            # Determine overall severity from matches
+                            if org_critical > 0:
+                                incident_severity = 'critical'
+                            else:
+                                incident_severity = 'high'
+                            incident_title = (
+                                f"SentriKat: {len(cve_ids)} vulnerabilit{'y' if len(cve_ids) == 1 else 'ies'} "
+                                f"detected for {org.display_name}"
+                            )
+                            send_incident_alert(org, incident_title, cve_ids, severity=incident_severity)
+                except Exception as incident_err:
+                    logger.warning(f"Incident alert dispatch failed for {org.name}: {incident_err}")
 
         except Exception as e:
             logger.error(f"Alert processing failed for {org.name} ({source_label}): {e}")

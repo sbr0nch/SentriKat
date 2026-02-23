@@ -1,0 +1,17 @@
+Alembic database migrations for SentriKat.
+
+Usage:
+  # Generate a new migration after model changes
+  flask db migrate -m "Add new_column to table"
+
+  # Apply pending migrations
+  flask db upgrade
+
+  # Rollback last migration
+  flask db downgrade
+
+  # Show current migration status
+  flask db current
+
+  # Show migration history
+  flask db history

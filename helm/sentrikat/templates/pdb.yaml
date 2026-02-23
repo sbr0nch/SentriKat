@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sentrikat.fullname" . }}
+  labels:
+    {{- include "sentrikat.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "sentrikat.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app

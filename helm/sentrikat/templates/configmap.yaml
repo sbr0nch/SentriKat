@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sentrikat.fullname" . }}-config
+  labels:
+    {{- include "sentrikat.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+data:
+  FLASK_APP: "run.py"
+  PYTHONUNBUFFERED: "1"
+  REQUESTS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt"
+  SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt"
+  {{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

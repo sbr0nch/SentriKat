@@ -24,10 +24,11 @@ except ImportError:
     LDAPSyncEngine = None
 
 try:
-    from app.models import VulnerabilitySnapshot, SystemSettings
+    from app.models import VulnerabilitySnapshot, SystemSettings, UserSession
 except ImportError:
     VulnerabilitySnapshot = None
     SystemSettings = None
+    UserSession = None
 
 try:
     from app.vendor_advisories import sync_vendor_advisories
@@ -71,6 +72,11 @@ try:
     from app.kb_sync import kb_sync
 except ImportError:
     kb_sync = None
+
+try:
+    from app.digest_emails import process_digests
+except ImportError:
+    process_digests = None
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +365,37 @@ def start_scheduler(app):
         replace_existing=True
     )
     logger.info("NVD CVE sync scheduled every 2 hours")
+
+    # Schedule expired session cleanup (every hour)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('session_cleanup', session_cleanup_job, app),
+        trigger=IntervalTrigger(hours=1),
+        id='session_cleanup',
+        name='Expired Session Cleanup',
+        replace_existing=True
+    )
+    logger.info("Expired session cleanup scheduled every hour")
+
+    # Schedule daily digest emails (at 08:00 in configured timezone)
+    if process_digests is not None:
+        scheduler.add_job(
+            func=lambda: _run_with_lock('daily_digest', daily_digest_job, app),
+            trigger=CronTrigger(hour=8, minute=0, timezone=tz),
+            id='daily_digest_emails',
+            name='Daily Vulnerability Digest Emails',
+            replace_existing=True
+        )
+        logger.info("Daily digest emails scheduled at 08:00")
+
+        # Schedule weekly digest emails (Mondays at 08:00 in configured timezone)
+        scheduler.add_job(
+            func=lambda: _run_with_lock('weekly_digest', weekly_digest_job, app),
+            trigger=CronTrigger(day_of_week='mon', hour=8, minute=0, timezone=tz),
+            id='weekly_digest_emails',
+            name='Weekly Vulnerability Digest Emails',
+            replace_existing=True
+        )
+        logger.info("Weekly digest emails scheduled on Mondays at 08:00")
 
     # Warm up the CVE known products cache on startup
     try:
@@ -831,9 +868,6 @@ def data_retention_cleanup_job(app):
                 db.session.rollback()
                 deleted_counts['ldap_sync_logs'] = 0
 
-            # Note: Application audit logs are file-based (audit.log), managed by log rotation.
-            # Only LDAP audit logs are stored in the database.
-
             # Clean up old LDAP audit logs
             try:
                 deleted = LDAPAuditLog.query.filter(LDAPAuditLog.timestamp < audit_cutoff).delete()
@@ -842,6 +876,63 @@ def data_retention_cleanup_job(app):
                 logger.error(f"Error cleaning LDAP audit logs: {e}")
                 db.session.rollback()
                 deleted_counts['ldap_audit_logs'] = 0
+
+            # Clean up old general audit logs (AuditLog model)
+            try:
+                from app.models import AuditLog
+                deleted = AuditLog.query.filter(AuditLog.timestamp < audit_cutoff).delete()
+                deleted_counts['audit_logs'] = deleted
+            except Exception as e:
+                logger.debug(f"AuditLog cleanup skipped: {e}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                deleted_counts['audit_logs'] = 0
+
+            # Clean up old health check results (keep 30 days)
+            try:
+                from app.models import HealthCheckResult
+                health_cutoff = datetime.utcnow() - timedelta(days=30)
+                deleted = HealthCheckResult.query.filter(HealthCheckResult.checked_at < health_cutoff).delete()
+                deleted_counts['health_check_results'] = deleted
+            except Exception as e:
+                logger.debug(f"HealthCheckResult cleanup skipped: {e}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                deleted_counts['health_check_results'] = 0
+
+            # Clean up old agent events (keep based on audit retention)
+            try:
+                from app.models import AgentEvent
+                deleted = AgentEvent.query.filter(AgentEvent.timestamp < audit_cutoff).delete()
+                deleted_counts['agent_events'] = deleted
+            except Exception as e:
+                logger.debug(f"AgentEvent cleanup skipped: {e}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                deleted_counts['agent_events'] = 0
+
+            # Clean up old user sessions (expired + inactive, keep 30 days)
+            try:
+                from app.models import UserSession
+                session_cutoff = datetime.utcnow() - timedelta(days=30)
+                deleted = UserSession.query.filter(
+                    UserSession.is_active == False,
+                    UserSession.last_activity < session_cutoff
+                ).delete()
+                deleted_counts['expired_sessions'] = deleted
+            except Exception as e:
+                logger.debug(f"UserSession cleanup skipped: {e}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                deleted_counts['expired_sessions'] = 0
 
             try:
                 db.session.commit()
@@ -1363,6 +1454,30 @@ def agent_offline_detection_job(app):
                 pass
 
 
+def session_cleanup_job(app):
+    """
+    Clean up expired user sessions.
+
+    Deactivates sessions that have passed their expires_at timestamp.
+    Runs every hour to keep the user_sessions table tidy.
+    """
+    with app.app_context():
+        try:
+            if UserSession is None:
+                return
+            count = UserSession.cleanup_expired()
+            if count > 0:
+                logger.info(f"Session cleanup: deactivated {count} expired sessions")
+            else:
+                logger.debug("Session cleanup: no expired sessions found")
+        except Exception as e:
+            logger.warning(f"Session cleanup job failed: {str(e)}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+
 def health_check_job(app):
     """
     Run all enabled background health checks.
@@ -1378,3 +1493,41 @@ def health_check_job(app):
             logger.info(f"Health checks completed: {len(results)} checks, {problems} issues")
         except Exception as e:
             logger.error(f"Health check job failed: {str(e)}", exc_info=True)
+
+
+def daily_digest_job(app):
+    """
+    Send daily vulnerability digest emails to organizations that have it enabled.
+
+    Only sends to organizations with digest_enabled=True and digest_frequency='daily'.
+    Runs at 08:00 daily (configurable per organization via digest_time).
+    """
+    with app.app_context():
+        try:
+            logger.info("Starting daily digest email processing...")
+            results = process_digests(period='daily')
+            logger.info(
+                f"Daily digest complete: {results['sent']} sent, "
+                f"{results['skipped']} skipped, {results['errors']} errors"
+            )
+        except Exception as e:
+            logger.error(f"Daily digest job failed: {str(e)}", exc_info=True)
+
+
+def weekly_digest_job(app):
+    """
+    Send weekly vulnerability digest emails to organizations that have it enabled.
+
+    Only sends to organizations with digest_enabled=True and digest_frequency='weekly'.
+    Runs on Mondays at 08:00 (day is configurable per organization via digest_day).
+    """
+    with app.app_context():
+        try:
+            logger.info("Starting weekly digest email processing...")
+            results = process_digests(period='weekly')
+            logger.info(
+                f"Weekly digest complete: {results['sent']} sent, "
+                f"{results['skipped']} skipped, {results['errors']} errors"
+            )
+        except Exception as e:
+            logger.error(f"Weekly digest job failed: {str(e)}", exc_info=True)

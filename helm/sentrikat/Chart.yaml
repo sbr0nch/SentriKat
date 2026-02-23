@@ -1,0 +1,12 @@
+apiVersion: v2
+name: sentrikat
+description: SentriKat - Security inventory and compliance management platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0-beta.1"
+keywords:
+  - security
+  - compliance
+  - inventory
+maintainers:
+  - name: SentriKat

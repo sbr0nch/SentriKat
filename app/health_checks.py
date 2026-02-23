@@ -882,7 +882,6 @@ def _send_health_notifications(results):
 
 def _send_health_webhook(critical_checks, warning_checks, body_text):
     """Send health check alerts via all configured webhooks (Slack, Teams, Generic)."""
-    import requests as req_lib
     from app.settings_api import get_setting
 
     emoji = '\U0001f6a8' if critical_checks else '\u26a0\ufe0f'  # siren or warning
@@ -900,6 +899,8 @@ def _send_health_webhook(critical_checks, warning_checks, body_text):
         label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
         check_lines.append(f"WARNING: {label} - {result.message if result else 'Unknown'}")
 
+    from app.webhook import send_webhook as deliver_webhook
+
     # Slack webhook
     slack_enabled = get_setting('slack_enabled') == 'true'
     slack_url_raw = get_setting('slack_webhook_url')
@@ -910,8 +911,13 @@ def _send_health_webhook(critical_checks, warning_checks, body_text):
             text = f"{emoji} *{title}*\n*{summary}*\n"
             for line in check_lines:
                 text += f"\n{'>' if 'CRITICAL' in line else ''} {line}"
-            req_lib.post(slack_url, json={"text": text}, timeout=10)
-            logger.info("Health check alert sent to Slack")
+            success, status_code, error = deliver_webhook(
+                url=slack_url, payload={"text": text}, format='slack',
+            )
+            if success:
+                logger.info("Health check alert sent to Slack")
+            else:
+                logger.warning(f"Slack health webhook failed: HTTP {status_code} — {error}")
         except Exception as e:
             logger.warning(f"Slack health webhook failed: {e}")
 
@@ -933,8 +939,13 @@ def _send_health_webhook(critical_checks, warning_checks, body_text):
                 "summary": f"{title}: {summary}",
                 "sections": [{"activityTitle": f"{emoji} {title}", "facts": facts, "markdown": True}]
             }
-            req_lib.post(teams_url, json=payload, timeout=10)
-            logger.info("Health check alert sent to Teams")
+            success, status_code, error = deliver_webhook(
+                url=teams_url, payload=payload, format='teams',
+            )
+            if success:
+                logger.info("Health check alert sent to Teams")
+            else:
+                logger.warning(f"Teams health webhook failed: HTTP {status_code} — {error}")
         except Exception as e:
             logger.warning(f"Teams health webhook failed: {e}")
 
@@ -949,10 +960,6 @@ def _send_health_webhook(critical_checks, warning_checks, body_text):
             generic_token = get_setting('generic_webhook_token', '')
             if generic_token and is_encrypted(generic_token):
                 generic_token = decrypt_value(generic_token)
-
-            headers = {'Content-Type': 'application/json'}
-            if generic_token:
-                headers['Authorization'] = f'Bearer {generic_token}'
 
             if generic_format in ('slack', 'rocketchat'):
                 text = f"{emoji} *{title}*\n*{summary}*\n"
@@ -984,8 +991,14 @@ def _send_health_webhook(critical_checks, warning_checks, body_text):
                     "checks": check_lines,
                     "timestamp": datetime.utcnow().isoformat()
                 }
-            req_lib.post(generic_url, json=payload, headers=headers, timeout=10)
-            logger.info(f"Health check alert sent to generic webhook ({generic_format})")
+            success, status_code, error = deliver_webhook(
+                url=generic_url, payload=payload, format=generic_format,
+                token=generic_token,
+            )
+            if success:
+                logger.info(f"Health check alert sent to generic webhook ({generic_format})")
+            else:
+                logger.warning(f"Generic health webhook failed: HTTP {status_code} — {error}")
         except Exception as e:
             logger.warning(f"Generic health webhook failed: {e}")
 

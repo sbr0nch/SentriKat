@@ -109,6 +109,24 @@ def _apply_schema_migrations(logger, db_uri):
         # Import queue category columns (source_type + ecosystem for filtering)
         ('import_queue', 'source_type', "VARCHAR(30) DEFAULT 'os_package'", "VARCHAR(30) DEFAULT 'os_package'"),
         ('import_queue', 'ecosystem', 'VARCHAR(30)', 'VARCHAR(30)'),
+        # Webhook HMAC signing secret per organization
+        ('organizations', 'webhook_secret', 'VARCHAR(255)', 'VARCHAR(255)'),
+        # PagerDuty integration
+        ('organizations', 'pagerduty_enabled', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('organizations', 'pagerduty_routing_key', 'VARCHAR(255)', 'VARCHAR(255)'),
+        # Opsgenie integration
+        ('organizations', 'opsgenie_enabled', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('organizations', 'opsgenie_api_key', 'VARCHAR(255)', 'VARCHAR(255)'),
+        # Digest email settings
+        ('organizations', 'digest_enabled', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('organizations', 'digest_frequency', "VARCHAR(20) DEFAULT 'daily'", "VARCHAR(20) DEFAULT 'daily'"),
+        ('organizations', 'digest_day', "VARCHAR(10) DEFAULT 'monday'", "VARCHAR(10) DEFAULT 'monday'"),
+        ('organizations', 'digest_time', "VARCHAR(5) DEFAULT '08:00'", "VARCHAR(5) DEFAULT '08:00'"),
+        # Organization quotas (0 = unlimited)
+        ('organizations', 'quota_max_agents', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
+        ('organizations', 'quota_max_products', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
+        ('organizations', 'quota_max_users', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
+        ('organizations', 'quota_max_api_keys', 'INTEGER DEFAULT 0', 'INTEGER DEFAULT 0'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
@@ -258,7 +276,12 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs
+    # Setup PostgreSQL Row-Level Security (optional, enable with RLS_ENABLED=true)
+    from app.rls import setup_rls
+    setup_rls(app, db)
+
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs, audit_api
+    from app.metrics import metrics_bp, setup_metrics_middleware
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
@@ -273,6 +296,9 @@ def create_app(config_class=Config):
     app.register_blueprint(saml_api.saml_bp)
     app.register_blueprint(reports_api.bp)
     app.register_blueprint(api_docs.api_docs_bp)
+    app.register_blueprint(audit_api.audit_bp)
+    app.register_blueprint(metrics_bp)
+    setup_metrics_middleware(app)
 
     # Error handlers: return JSON for API routes, HTML for browser routes
     @app.errorhandler(404)
@@ -456,6 +482,23 @@ def create_app(config_class=Config):
                     app.permanent_session_lifetime = timedelta(minutes=timeout_minutes)
         except Exception:
             pass  # Use default if DB unavailable
+
+        # Update session activity periodically (every 60 seconds to avoid DB thrashing)
+        try:
+            session_record_id = session.get('session_record_id')
+            if session_record_id:
+                from app.models import UserSession
+                from datetime import datetime
+                now = datetime.utcnow()
+                last_update = session.get('_last_activity_update')
+                if not last_update or (now - datetime.fromisoformat(last_update)).total_seconds() >= 60:
+                    user_session = UserSession.query.get(session_record_id)
+                    if user_session and user_session.is_active:
+                        user_session.last_activity = now
+                        db.session.commit()
+                        session['_last_activity_update'] = now.isoformat()
+        except Exception:
+            pass  # Don't break requests if session tracking fails
 
     # Add API version headers to all API responses
     @app.after_request

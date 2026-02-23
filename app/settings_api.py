@@ -204,6 +204,9 @@ ALLOWED_SETTING_KEYS = {
     'saml_enabled', 'saml_idp_metadata', 'saml_sp_entity_id', 'saml_sp_acs_url',
     'saml_sp_sls_url', 'saml_default_org_id', 'saml_user_mapping',
     'saml_auto_provision', 'saml_update_user_info',
+    # OIDC/OAuth SSO settings
+    'oidc_enabled', 'oidc_provider_name', 'oidc_client_id', 'oidc_client_secret',
+    'oidc_discovery_url', 'oidc_scopes', 'oidc_auto_provision', 'oidc_default_role',
 }
 
 
@@ -308,6 +311,14 @@ def save_batch_settings():
         db.session.commit()
         logger.info(f"Saved {saved_count} settings in category '{category}'")
 
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name=category,
+                      details=f'Batch saved {saved_count} settings in {category}')
+            db.session.commit()
+        except Exception:
+            pass
+
         return jsonify({
             'success': True,
             'message': f'Saved {saved_count} settings',
@@ -381,6 +392,14 @@ def save_ldap_settings():
         set_setting('ldap_use_tls', 'true' if data.get('ldap_use_tls') else 'false', 'ldap', 'Use TLS/STARTTLS')
         set_setting('ldap_sync_enabled', 'true' if data.get('ldap_sync_enabled') else 'false', 'ldap', 'Enable scheduled LDAP sync')
         set_setting('ldap_sync_interval_hours', str(data.get('ldap_sync_interval_hours', 24)), 'ldap', 'LDAP sync interval (hours)')
+
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='ldap',
+                      details='Updated LDAP settings')
+            db.session.commit()
+        except Exception:
+            pass
 
         return jsonify({'success': True, 'message': 'LDAP settings saved successfully'})
     except ValueError as e:
@@ -485,6 +504,14 @@ def save_smtp_settings():
         set_setting('smtp_from_name', data.get('smtp_from_name', 'SentriKat Alerts'), 'smtp', 'From name')
         set_setting('smtp_use_tls', 'true' if data.get('smtp_use_tls') else 'false', 'smtp', 'Use TLS/STARTTLS')
         set_setting('smtp_use_ssl', 'true' if data.get('smtp_use_ssl') else 'false', 'smtp', 'Use SSL/TLS')
+
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='smtp',
+                      details='Updated SMTP settings')
+            db.session.commit()
+        except Exception:
+            pass
 
         return jsonify({'success': True, 'message': 'SMTP settings saved successfully'})
     except ValueError as e:
@@ -700,6 +727,14 @@ def save_sync_settings():
                 # User explicitly cleared the API key (via Clear button)
                 set_setting('nvd_api_key', '', 'sync', 'NVD API key')
         # If 'nvd_api_key' not in data, don't change the existing key
+
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='sync',
+                      details='Updated sync settings')
+            db.session.commit()
+        except Exception:
+            pass
 
         return jsonify({'success': True, 'message': 'Sync settings saved successfully'})
     except ValueError as e:
@@ -926,6 +961,12 @@ def save_general_settings():
             'category': 'general',
             'fields': ['display_timezone', 'date_format', 'verify_ssl', 'http_proxy', 'https_proxy', 'no_proxy']
         })
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='general',
+                      details='Updated general settings: display_timezone, date_format, verify_ssl, proxy')
+        except Exception:
+            pass
         return jsonify({'success': True, 'message': 'General settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save general settings")
@@ -978,6 +1019,12 @@ def save_security_settings():
                        'password_min_length', 'password_require_uppercase',
                        'password_require_numbers', 'password_require_special', 'require_2fa']
         })
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='security',
+                      details='Updated security settings: session_timeout, lockout, password policy, 2FA')
+        except Exception:
+            pass
         return jsonify({'success': True, 'message': 'Security settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save security settings")
@@ -1016,6 +1063,14 @@ def save_branding_settings():
         set_setting('support_email', data.get('support_email', ''), 'branding', 'Support email address')
         set_setting('show_version', 'true' if data.get('show_version') else 'false', 'branding', 'Show version in footer')
         set_setting('report_branding_enabled', 'true' if data.get('report_branding_enabled', True) else 'false', 'branding', 'Show branding in compliance reports')
+
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='branding',
+                      details='Updated branding settings')
+            db.session.commit()
+        except Exception:
+            pass
 
         return jsonify({'success': True, 'message': 'Branding settings saved successfully'})
     except Exception as e:
@@ -1158,6 +1213,14 @@ def save_notification_settings():
         # Per-org alert rules are managed independently via /alerts/org/<id>/rules.
         # We no longer propagate global saves to all organizations, because that
         # silently destroyed per-org overrides that admins had configured.
+
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='notifications',
+                      details='Updated notification/webhook settings')
+            db.session.commit()
+        except Exception:
+            pass
 
         return jsonify({'success': True, 'message': 'Notification settings saved successfully'})
     except Exception as e:
@@ -1624,6 +1687,14 @@ def save_retention_settings():
         set_setting('session_log_retention_days', str(data.get('session_log_retention_days', 30)), 'retention', 'Session log retention (days)')
         set_setting('auto_acknowledge_removed_software', 'true' if data.get('auto_acknowledge_removed_software', True) else 'false', 'retention', 'Auto-acknowledge CVEs when software is removed')
 
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='retention',
+                      details='Updated data retention settings')
+            db.session.commit()
+        except Exception:
+            pass
+
         return jsonify({'success': True, 'message': 'Retention settings saved successfully'})
     except Exception as e:
         logger.exception("Failed to save retention settings")
@@ -1717,6 +1788,13 @@ def upload_logo():
             new_value={'logo_url': logo_url, 'filename': filename},
             details=f'Custom logo uploaded: {filename}'
         )
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='branding',
+                      new_values={'logo_url': logo_url},
+                      details=f'Custom logo uploaded: {filename}')
+        except Exception:
+            pass
 
         return jsonify({
             'success': True,
@@ -1783,6 +1861,13 @@ def delete_logo():
             old_value={'logo_url': logo_url} if logo_url else None,
             details='Custom logo removed, reverted to default'
         )
+        try:
+            from app.audit import log_audit
+            log_audit('SETTING_CHANGE', 'setting', resource_name='branding',
+                      old_values={'logo_url': logo_url} if logo_url else None,
+                      details='Custom logo removed, reverted to default')
+        except Exception:
+            pass
 
         return jsonify({'success': True, 'message': 'Logo removed, reverted to default'})
     except Exception as e:
@@ -2238,3 +2323,95 @@ def restore_full_backup():
         db.session.rollback()
         logger.exception("Full restore failed")
         return jsonify({'error': ERROR_MSGS['restore']}), 500
+
+
+# ============================================================================
+# OIDC/OAuth SSO Settings
+# ============================================================================
+
+@settings_bp.route('/oidc', methods=['GET'])
+@admin_required
+def get_oidc_settings():
+    """Get OIDC/OAuth configuration settings (admin only, no secrets)."""
+    client_secret = get_setting('oidc_client_secret', '')
+    secret_configured = bool(client_secret)
+
+    settings = {
+        'oidc_enabled': get_setting('oidc_enabled', 'false') == 'true',
+        'oidc_provider_name': get_setting('oidc_provider_name', 'OIDC Provider'),
+        'oidc_client_id': get_setting('oidc_client_id', ''),
+        'oidc_client_secret_configured': secret_configured,
+        'oidc_discovery_url': get_setting('oidc_discovery_url', ''),
+        'oidc_scopes': get_setting('oidc_scopes', 'openid email profile'),
+        'oidc_auto_provision': get_setting('oidc_auto_provision', 'true') == 'true',
+        'oidc_default_role': get_setting('oidc_default_role', 'user'),
+    }
+
+    # Check if authlib is available
+    try:
+        from app.oauth_manager import AUTHLIB_AVAILABLE
+        settings['authlib_available'] = AUTHLIB_AVAILABLE
+    except ImportError:
+        settings['authlib_available'] = False
+
+    return jsonify(settings)
+
+
+@settings_bp.route('/oidc', methods=['POST'])
+@admin_required
+def save_oidc_settings():
+    """Save OIDC/OAuth configuration settings."""
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    try:
+        set_setting('oidc_enabled',
+                     'true' if data.get('oidc_enabled') else 'false',
+                     'oidc', 'Enable OIDC/OAuth authentication')
+        set_setting('oidc_provider_name',
+                     data.get('oidc_provider_name', 'OIDC Provider'),
+                     'oidc', 'Display name for the OIDC provider')
+        set_setting('oidc_client_id',
+                     data.get('oidc_client_id', ''),
+                     'oidc', 'OIDC Client ID')
+        set_setting('oidc_discovery_url',
+                     data.get('oidc_discovery_url', ''),
+                     'oidc', 'OIDC Discovery URL (/.well-known/openid-configuration)')
+        set_setting('oidc_scopes',
+                     data.get('oidc_scopes', 'openid email profile'),
+                     'oidc', 'OIDC scopes to request')
+        set_setting('oidc_auto_provision',
+                     'true' if data.get('oidc_auto_provision', True) else 'false',
+                     'oidc', 'Auto-provision new users from OIDC')
+        set_setting('oidc_default_role',
+                     data.get('oidc_default_role', 'user'),
+                     'oidc', 'Default role for auto-provisioned OIDC users')
+
+        # Encrypt client secret
+        if data.get('oidc_client_secret'):
+            try:
+                set_setting('oidc_client_secret', data['oidc_client_secret'],
+                            'oidc', 'OIDC Client Secret', is_encrypted=True)
+            except Exception as enc_err:
+                logger.error(f"Failed to encrypt OIDC client secret: {type(enc_err).__name__}")
+                return jsonify({
+                    'error': 'Failed to encrypt client secret. Check ENCRYPTION_KEY is set.'
+                }), 500
+
+        # Audit
+        try:
+            log_audit_event('settings', 'OIDC settings updated')
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'message': 'OIDC settings saved successfully'})
+
+    except ValueError as e:
+        logger.warning(f"OIDC settings validation error: {e}")
+        return jsonify({'error': f'Invalid setting: {str(e)}'}), 400
+    except Exception as e:
+        logger.exception("Failed to save OIDC settings")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to save OIDC settings. Check server logs for details.'}), 500

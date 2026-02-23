@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentrikat-config
+  namespace: sentrikat
+  labels:
+    app.kubernetes.io/name: sentrikat
+    app.kubernetes.io/component: app
+data:
+  FLASK_ENV: "production"
+  SENTRIKAT_URL: "https://sentrikat.example.com"
+  FORCE_HTTPS: "false"
+  GUNICORN_WORKERS: "4"
+  GUNICORN_THREADS: "4"
+  GUNICORN_TIMEOUT: "120"
+  DB_POOL_SIZE: "10"
+  DB_POOL_MAX_OVERFLOW: "20"
+  DB_POOL_TIMEOUT: "30"
+  DB_POOL_RECYCLE: "1800"
+  DB_STATEMENT_TIMEOUT: "60000"
+  WORKER_POOL_SIZE: "4"
+  FLASK_APP: "run.py"
+  PYTHONUNBUFFERED: "1"
+  REQUESTS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt"
+  SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt"
+  ALLOW_PRIVATE_URLS: "false"
