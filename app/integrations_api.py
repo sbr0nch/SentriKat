@@ -600,10 +600,10 @@ def get_cpe_versions(cpe_vendor, cpe_product):
 def create_product_from_queue(queue_item):
     """Create a Product from an ImportQueue item and link it to the originating asset."""
     try:
-        # Extract source_type and ecosystem from source_data if available
+        # Prefer proper columns; fall back to source_data JSON for legacy items
         source_data = queue_item.get_source_data() if hasattr(queue_item, 'get_source_data') else {}
-        source_type = source_data.get('source_type') if source_data else None
-        ecosystem = source_data.get('ecosystem') if source_data else None
+        source_type = getattr(queue_item, 'source_type', None) or (source_data.get('source_type') if source_data else None)
+        ecosystem = getattr(queue_item, 'ecosystem', None) or (source_data.get('ecosystem') if source_data else None)
         key_type = source_data.get('key_type') if source_data else None
 
         product = Product(
@@ -679,6 +679,7 @@ def get_import_queue():
     integration_id = request.args.get('integration_id', type=int)
     org_id = request.args.get('organization_id', type=int)
     vendor = request.args.get('vendor', '').strip()
+    source_type = request.args.get('source_type', '').strip()
     search = request.args.get('search', '').strip()
     limit = request.args.get('limit', 100, type=int)
     offset = request.args.get('offset', 0, type=int)
@@ -693,6 +694,8 @@ def get_import_queue():
         query = query.filter_by(organization_id=org_id)
     if vendor:
         query = query.filter(ImportQueue.vendor == vendor)
+    if source_type:
+        query = query.filter(ImportQueue.source_type == source_type)
     if search:
         search_filter = f"%{search}%"
         query = query.filter(
@@ -940,16 +943,19 @@ def bulk_process_queue():
 @admin_required
 @requires_professional('Integrations')
 def approve_all_queue():
-    """Approve all pending import queue items, optionally filtered by vendor or organization."""
+    """Approve all pending import queue items, optionally filtered by vendor, organization, or source_type."""
     data = request.get_json() or {}
     vendor_filter = data.get('vendor')
     org_filter = data.get('organization_id')
+    source_type_filter = data.get('source_type')
 
     query = ImportQueue.query.filter_by(status='pending')
     if vendor_filter:
         query = query.filter(ImportQueue.vendor == vendor_filter)
     if org_filter:
         query = query.filter(ImportQueue.organization_id == org_filter)
+    if source_type_filter:
+        query = query.filter(ImportQueue.source_type == source_type_filter)
 
     items = query.all()
     if not items:
@@ -992,16 +998,19 @@ def approve_all_queue():
 @admin_required
 @requires_professional('Integrations')
 def reject_all_queue():
-    """Reject all pending import queue items, optionally filtered by vendor or organization."""
+    """Reject all pending import queue items, optionally filtered by vendor, organization, or source_type."""
     data = request.get_json() or {}
     vendor_filter = data.get('vendor')
     org_filter = data.get('organization_id')
+    source_type_filter = data.get('source_type')
 
     query = ImportQueue.query.filter_by(status='pending')
     if vendor_filter:
         query = query.filter(ImportQueue.vendor == vendor_filter)
     if org_filter:
         query = query.filter(ImportQueue.organization_id == org_filter)
+    if source_type_filter:
+        query = query.filter(ImportQueue.source_type == source_type_filter)
 
     count = query.count()
     if count == 0:

@@ -106,6 +106,9 @@ def _apply_schema_migrations(logger, db_uri):
         # Dependency tracking on installations
         ('product_installations', 'project_path', 'VARCHAR(500)', 'VARCHAR(500)'),
         ('product_installations', 'is_direct_dependency', 'BOOLEAN', 'BOOLEAN'),
+        # Import queue category columns (source_type + ecosystem for filtering)
+        ('import_queue', 'source_type', "VARCHAR(30) DEFAULT 'os_package'", "VARCHAR(30) DEFAULT 'os_package'"),
+        ('import_queue', 'ecosystem', 'VARCHAR(30)', 'VARCHAR(30)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')

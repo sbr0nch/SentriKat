@@ -134,6 +134,10 @@ class ImportQueue(db.Model):
     # Target organization
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True)
 
+    # Software classification (mirrors Product.source_type / Product.ecosystem)
+    source_type = db.Column(db.String(30), default='os_package')  # os_package, extension, code_library
+    ecosystem = db.Column(db.String(30), nullable=True)  # npm, pypi, maven, apt, rpm, vscode, chrome, etc.
+
     # Criticality assignment
     criticality = db.Column(db.String(20), default='medium')
 
@@ -204,6 +208,8 @@ class ImportQueue(db.Model):
             'cpe_match_confidence': self.cpe_match_confidence,
             'organization_id': self.organization_id,
             'organization_name': self.organization.display_name if self.organization else None,
+            'source_type': self.source_type or (sd.get('source_type', 'os_package') if sd else 'os_package'),
+            'ecosystem': self.ecosystem or (sd.get('ecosystem') if sd else None),
             'criticality': self.criticality,
             'status': self.status,
             'source_data': sd,
