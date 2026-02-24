@@ -43,14 +43,16 @@ class OSVVulnerability:
     )
 
     def __init__(self, data, queried_ecosystem=None):
-        self.id = data.get('id', '')
-        self.aliases = data.get('aliases', [])
-        self.summary = data.get('summary', '')
-        self.details = data.get('details', '')
+        if not isinstance(data, dict):
+            data = {}
+        self.id = str(data.get('id', ''))[:100]
+        self.aliases = data.get('aliases', []) if isinstance(data.get('aliases'), list) else []
+        self.summary = str(data.get('summary', ''))[:2000]
+        self.details = str(data.get('details', ''))[:10000]
         self.ecosystem = queried_ecosystem
         self.published = data.get('published')
         self.modified = data.get('modified')
-        self.database_specific = data.get('database_specific', {})
+        self.database_specific = data.get('database_specific', {}) if isinstance(data.get('database_specific'), dict) else {}
 
         # Extract severity/CVSS
         self.severity = None
@@ -65,11 +67,14 @@ class OSVVulnerability:
 
         # Extract references
         self.references = []
-        for ref in data.get('references', []):
-            self.references.append({
-                'type': ref.get('type', ''),
-                'url': ref.get('url', ''),
-            })
+        refs = data.get('references', [])
+        if isinstance(refs, list):
+            for ref in refs[:50]:  # Cap references to prevent memory issues
+                if isinstance(ref, dict):
+                    self.references.append({
+                        'type': str(ref.get('type', ''))[:50],
+                        'url': str(ref.get('url', ''))[:500],
+                    })
 
     def _parse_severity(self, data):
         """Extract severity info from OSV vulnerability data."""

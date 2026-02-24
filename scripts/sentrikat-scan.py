@@ -454,6 +454,11 @@ def send_scan(server_url, api_key, lockfiles, project_name, hostname, verbose=Fa
     """Send lockfiles to the SentriKat server for scanning."""
     url = f"{server_url.rstrip('/')}/api/agent/dependency-scan"
 
+    # Warn if sending lockfile data over unencrypted HTTP
+    if server_url.startswith("http://") and not server_url.startswith("http://localhost") and not server_url.startswith("http://127."):
+        warn("Sending data over unencrypted HTTP! Use https:// for production.")
+        warn("Lockfile contents may contain sensitive dependency information.")
+
     payload = {
         "hostname": hostname,
         "agent_id": f"scan-{uuid.uuid4().hex[:12]}",

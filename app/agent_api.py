@@ -4931,7 +4931,7 @@ MAX_LOCKFILE_CONTENT_SIZE = 10 * 1024 * 1024  # 10MB per lock file
 
 @agent_bp.route('/api/agent/dependency-scan', methods=['POST'])
 @agent_auth_required
-@limiter.limit("30/minute", key_func=lambda: request.headers.get('X-Agent-Key', 'anonymous'))
+@limiter.limit("30/minute", key_func=get_agent_key_for_limit)
 def report_dependency_scan():
     """
     Receive lock file contents from an agent, parse dependencies, and scan
@@ -5042,8 +5042,18 @@ def report_dependency_scan():
         if not filename or not content:
             continue
 
-        # Sanitize filename (path traversal prevention)
+        # Sanitize filename (path traversal prevention + whitelist)
         filename = filename.replace('\\', '/').split('/')[-1]
+
+        ALLOWED_LOCKFILES = {
+            'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+            'Pipfile.lock', 'poetry.lock', 'Cargo.lock',
+            'go.sum', 'go.mod', 'Gemfile.lock',
+            'composer.lock', 'packages.lock.json',
+        }
+        if filename not in ALLOWED_LOCKFILES:
+            logger.warning(f"Rejected unknown lockfile name: {filename[:100]}")
+            continue
 
         # Size check per file
         if len(content) > MAX_LOCKFILE_CONTENT_SIZE:
