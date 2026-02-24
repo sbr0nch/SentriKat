@@ -5506,17 +5506,94 @@ def list_dependencies():
         ).group_by(ProductInstallation.product_id).all()
         endpoint_counts = {row[0]: row[1] for row in inst_rows}
 
+    # Cross-reference with OSV-based DependencyScanResult for more accurate vuln data.
+    # OSV results are keyed by (ecosystem, pkg_name, version) — match to Products.
+    osv_vuln_counts = {}  # product_id -> osv vuln count
+    osv_severity_by_product = {}  # product_id -> {severity: count}
+    try:
+        from app.models import DependencyScan, DependencyScanResult
+        from sqlalchemy import func as sa_func
+
+        # Get latest scan per asset for this org
+        latest_scan_subq = db.session.query(
+            sa_func.max(DependencyScan.id).label('max_id')
+        ).filter(
+            DependencyScan.scan_status == 'completed'
+        )
+        if org_ids:
+            latest_scan_subq = latest_scan_subq.filter(
+                DependencyScan.organization_id.in_(org_ids)
+            )
+        latest_scan_subq = latest_scan_subq.group_by(
+            DependencyScan.asset_id
+        ).subquery()
+
+        # Build a lookup: (ecosystem_lower, pkg_name_lower, version) -> {severity counts, total}
+        osv_results = db.session.query(
+            DependencyScanResult.pkg_ecosystem,
+            DependencyScanResult.pkg_name,
+            DependencyScanResult.pkg_version,
+            DependencyScanResult.severity,
+            sa_func.count(DependencyScanResult.id).label('cnt')
+        ).join(
+            latest_scan_subq, DependencyScanResult.scan_id == latest_scan_subq.c.max_id
+        ).group_by(
+            DependencyScanResult.pkg_ecosystem,
+            DependencyScanResult.pkg_name,
+            DependencyScanResult.pkg_version,
+            DependencyScanResult.severity
+        ).all()
+
+        # Build lookup dict keyed by normalized (ecosystem, name, version)
+        osv_lookup = {}  # (eco_lower, name_lower, version) -> {severity: count}
+        for eco, name, ver, sev, cnt in osv_results:
+            key = ((eco or '').lower(), (name or '').lower(), ver or '')
+            if key not in osv_lookup:
+                osv_lookup[key] = {}
+            osv_lookup[key][(sev or 'UNKNOWN').lower()] = \
+                osv_lookup[key].get((sev or 'UNKNOWN').lower(), 0) + cnt
+
+        # Map OSV results to products
+        for p in products:
+            eco = (p.ecosystem or '').lower()
+            name = (p.product_name or '').lower()
+            ver = p.version or ''
+            key = (eco, name, ver)
+            if key in osv_lookup:
+                sev_data = osv_lookup[key]
+                total = sum(sev_data.values())
+                osv_vuln_counts[p.id] = total
+                osv_severity_by_product[p.id] = sev_data
+    except Exception:
+        pass  # DependencyScanResult table may not exist yet
+
     # Collect ecosystems for filter dropdown
     ecosystems = sorted(set(p.ecosystem for p in products if p.ecosystem))
 
-    # Stats
+    # Stats - use OSV counts when available (more reliable for code libraries)
     total_code_libraries = sum(1 for p in products if p.source_type == 'code_library')
     total_extensions = sum(1 for p in products if p.source_type == 'extension')
-    total_vulnerable = sum(1 for p in products if vuln_counts.get(p.id, 0) > 0)
+    total_vulnerable = sum(
+        1 for p in products
+        if vuln_counts.get(p.id, 0) > 0 or osv_vuln_counts.get(p.id, 0) > 0
+    )
 
     deps = []
     for p in products:
-        sev = severity_by_product.get(p.id, {})
+        # Prefer OSV severity data over CPE-based for code libraries
+        osv_sev = osv_severity_by_product.get(p.id, {})
+        cpe_sev = severity_by_product.get(p.id, {})
+        osv_total = osv_vuln_counts.get(p.id, 0)
+        cpe_total = vuln_counts.get(p.id, 0)
+
+        # Use OSV data if it found vulns (more reliable for code deps), otherwise CPE
+        if osv_total > 0:
+            sev = osv_sev
+            total = osv_total
+        else:
+            sev = cpe_sev
+            total = cpe_total
+
         deps.append({
             'id': p.id,
             'vendor': p.vendor,
@@ -5524,7 +5601,9 @@ def list_dependencies():
             'version': p.version,
             'source_type': p.source_type,
             'ecosystem': p.ecosystem,
-            'vuln_match_count': vuln_counts.get(p.id, 0),
+            'vuln_match_count': total,
+            'osv_vuln_count': osv_total,
+            'cpe_vuln_count': cpe_total,
             'endpoint_count': endpoint_counts.get(p.id, 0),
             'severity_counts': {
                 'critical': sev.get('critical', 0),
@@ -5608,10 +5687,14 @@ def get_dependency_detail(product_id):
 
     vuln_list = []
     severity_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+    seen_vuln_ids = set()
+
+    # CPE-based vulnerability matches
     for match, vuln in vuln_matches:
         sev = (vuln.severity or '').lower()
         if sev in severity_counts:
             severity_counts[sev] += 1
+        seen_vuln_ids.add(vuln.cve_id)
         vuln_list.append({
             'match_id': match.id,
             'cve_id': vuln.cve_id,
@@ -5636,6 +5719,82 @@ def get_dependency_detail(product_id):
             'snoozed_until': match.snoozed_until.isoformat() if match.snoozed_until else None,
         })
 
+    # OSV-based vulnerability results (from lockfile dependency scanning)
+    # These are more reliable for code libraries than CPE matching
+    try:
+        from app.models import DependencyScan, DependencyScanResult
+        from sqlalchemy import func as sa_func
+
+        # Get latest scan IDs per asset for the product's org
+        latest_scan_ids = db.session.query(
+            sa_func.max(DependencyScan.id)
+        ).filter(
+            DependencyScan.organization_id == product.organization_id,
+            DependencyScan.scan_status == 'completed'
+        ).group_by(DependencyScan.asset_id).all()
+        latest_ids = [row[0] for row in latest_scan_ids if row[0]]
+
+        if latest_ids:
+            osv_results = DependencyScanResult.query.filter(
+                DependencyScanResult.scan_id.in_(latest_ids),
+                db.func.lower(DependencyScanResult.pkg_name) == (product.product_name or '').lower(),
+                DependencyScanResult.pkg_version == (product.version or ''),
+                db.func.lower(DependencyScanResult.pkg_ecosystem) == (product.ecosystem or '').lower(),
+            ).order_by(
+                db.case(
+                    (DependencyScanResult.severity == 'CRITICAL', 0),
+                    (DependencyScanResult.severity == 'HIGH', 1),
+                    (DependencyScanResult.severity == 'MEDIUM', 2),
+                    (DependencyScanResult.severity == 'LOW', 3),
+                    else_=4
+                ),
+                DependencyScanResult.cvss_score.desc().nullslast()
+            ).all()
+
+            for osv_r in osv_results:
+                # Skip if we already have this CVE from CPE matching
+                vuln_key = osv_r.cve_id or osv_r.vuln_id
+                if vuln_key in seen_vuln_ids:
+                    continue
+                seen_vuln_ids.add(vuln_key)
+
+                sev = (osv_r.severity or '').lower()
+                if sev in severity_counts:
+                    severity_counts[sev] += 1
+
+                import json as _json
+                fix_vers = []
+                try:
+                    fix_vers = _json.loads(osv_r.fixed_versions) if osv_r.fixed_versions else []
+                except Exception:
+                    pass
+
+                vuln_list.append({
+                    'match_id': None,
+                    'cve_id': osv_r.cve_id or osv_r.vuln_id,
+                    'severity': osv_r.severity,
+                    'cvss_score': osv_r.cvss_score,
+                    'cvss_source': None,
+                    'epss_score': None,
+                    'epss_percentile': None,
+                    'short_description': osv_r.summary,
+                    'vulnerability_name': osv_r.vuln_id,
+                    'is_actively_exploited': False,
+                    'known_ransomware': False,
+                    'date_added': None,
+                    'due_date': None,
+                    'required_action': None,
+                    'source': 'osv',
+                    'fix_versions': fix_vers,
+                    'match_confidence': 'high',
+                    'match_method': 'osv_ecosystem',
+                    'acknowledged': osv_r.acknowledged,
+                    'acknowledged_at': osv_r.acknowledged_at.isoformat() if osv_r.acknowledged_at else None,
+                    'snoozed_until': None,
+                })
+    except Exception:
+        pass  # DependencyScanResult may not exist yet
+
     return jsonify({
         'dependency': {
             'id': product.id,
@@ -5646,7 +5805,7 @@ def get_dependency_detail(product_id):
             'ecosystem': product.ecosystem,
             'cpe_vendor': product.cpe_vendor,
             'cpe_product': product.cpe_product,
-            'vuln_match_count': len(vuln_matches),
+            'vuln_match_count': len(vuln_list),
             'severity_counts': severity_counts,
         },
         'installations': inst_list,
