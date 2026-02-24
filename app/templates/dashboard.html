@@ -1120,25 +1120,113 @@
 
             const stats = await response.json();
 
-            document.getElementById('totalVulns').textContent = formatNumber(stats.total_vulnerabilities);
-            document.getElementById('totalMatches').textContent = formatNumber(stats.total_matches);
-            document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
-            document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
+            // Helper to update stat card labels contextually
+            const statsContainer = document.getElementById('statsContainer');
+            const statLabels = statsContainer.querySelectorAll('.d-flex small.text-muted');
 
-            // EPSS risk indicator
-            if (stats.epss) {
-                const epssEl = document.getElementById('highEpss');
-                epssEl.textContent = formatNumber(stats.epss.high_epss);
-                epssEl.title = `${stats.epss.high_epss} CVEs with ≥10% exploit probability (avg: ${(stats.epss.avg_epss * 100).toFixed(1)}%)`;
+            if (dashboardSourceFilter === 'containers' && stats.container) {
+                // Container-specific stats: use deduplicated unique CVE counts
+                const c = stats.container;
+                document.getElementById('totalVulns').textContent = formatNumber(c.unique_cves || 0);
+                document.getElementById('totalMatches').textContent = formatNumber(c.total_container_vulns || 0);
+                document.getElementById('unacknowledged').textContent = formatNumber(c.unique_critical || 0);
+                document.getElementById('productsTracked').textContent = formatNumber(c.total_images || 0);
+                document.getElementById('highEpss').textContent = formatNumber(c.unique_high || 0);
+                document.getElementById('lowCves').textContent = formatNumber((c.unique_medium || 0) + (c.unique_low || 0));
+
+                // Update labels for container context
+                if (statLabels.length >= 6) {
+                    statLabels[0].innerHTML = '<i class="bi bi-shield-exclamation me-1"></i>Unique CVEs';
+                    statLabels[1].innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Total Findings';
+                    statLabels[2].innerHTML = '<i class="bi bi-x-circle me-1"></i>Critical CVEs';
+                    statLabels[3].innerHTML = '<i class="bi bi-box me-1"></i>Container Images';
+                    statLabels[4].innerHTML = '<i class="bi bi-exclamation-diamond me-1"></i>High CVEs';
+                    statLabels[5].innerHTML = '<i class="bi bi-info-circle me-1"></i>Medium + Low';
+                }
+
+                // Update priority cards with container severity counts
+                document.getElementById('zeroDayCves').textContent = '—';
+                document.getElementById('zeroDayMatches').textContent = '—';
+                document.getElementById('criticalCves').textContent = formatNumber(c.unique_critical || 0);
+                document.getElementById('criticalCount').textContent = formatNumber(c.container_critical || 0);
+                document.getElementById('highCves').textContent = formatNumber(c.unique_high || 0);
+                document.getElementById('highCount').textContent = formatNumber(c.container_high || 0);
+                document.getElementById('mediumCves').textContent = formatNumber(c.unique_medium || 0);
+                document.getElementById('mediumCount').textContent = formatNumber(c.container_medium || 0);
+            } else if (dashboardSourceFilter === 'dependencies' && stats.dependency_scans) {
+                // Dependency-specific stats: merge Product-based + OSV scan stats
+                const d = stats.dependency_scans;
+                const productMatches = stats.total_matches || 0;
+                const osvVulns = d.total_vulns || 0;
+
+                document.getElementById('totalVulns').textContent = formatNumber(osvVulns + productMatches);
+                document.getElementById('totalMatches').textContent = formatNumber(osvVulns || productMatches);
+                document.getElementById('unacknowledged').textContent = formatNumber(d.vulnerable_packages || (stats.unacknowledged_cves || 0));
+                document.getElementById('productsTracked').textContent = formatNumber(d.total_dependencies || stats.products_tracked || 0);
+                document.getElementById('highEpss').textContent = formatNumber(stats.epss ? stats.epss.high_epss : 0);
+                document.getElementById('lowCves').textContent = formatNumber(d.low || (stats.low_cves || 0));
+
+                // Update labels for dependency context
+                if (statLabels.length >= 6) {
+                    statLabels[0].innerHTML = '<i class="bi bi-database me-1"></i>Total Vulns (OSV)';
+                    statLabels[1].innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Vuln Findings';
+                    statLabels[2].innerHTML = '<i class="bi bi-bug me-1"></i>Vulnerable Packages';
+                    statLabels[3].innerHTML = '<i class="bi bi-puzzle me-1"></i>Dependencies Tracked';
+                    statLabels[4].innerHTML = '<i class="bi bi-lightning-charge me-1"></i>High EPSS Risk';
+                    statLabels[5].innerHTML = '<i class="bi bi-shield-check me-1"></i>Low Priority';
+                }
+
+                // Priority cards for dependencies: use OSV severity if available, fallback to product-based
+                document.getElementById('zeroDayCves').textContent = formatNumber(stats.zero_day_count || 0);
+                document.getElementById('zeroDayMatches').textContent = formatNumber(stats.zero_day_matches || 0);
+                document.getElementById('criticalCves').textContent = formatNumber(d.critical || (stats.critical_cves || 0));
+                document.getElementById('criticalCount').textContent = formatNumber(d.critical || (stats.critical_count || 0));
+                document.getElementById('highCves').textContent = formatNumber(d.high || (stats.high_cves || 0));
+                document.getElementById('highCount').textContent = formatNumber(d.high || (stats.high_count || 0));
+                document.getElementById('mediumCves').textContent = formatNumber(d.medium || (stats.medium_cves || 0));
+                document.getElementById('mediumCount').textContent = formatNumber(d.medium || (stats.medium_count || 0));
+            } else {
+                // Default product-based stats (All, Server, Client)
+                document.getElementById('totalVulns').textContent = formatNumber(stats.total_vulnerabilities);
+                document.getElementById('totalMatches').textContent = formatNumber(stats.total_matches);
+                document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
+                document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
+
+                // EPSS risk indicator
+                if (stats.epss) {
+                    const epssEl = document.getElementById('highEpss');
+                    epssEl.textContent = formatNumber(stats.epss.high_epss);
+                    epssEl.title = `${stats.epss.high_epss} CVEs with ≥10% exploit probability (avg: ${(stats.epss.avg_epss * 100).toFixed(1)}%)`;
+                }
+
+                // Low priority count
+                document.getElementById('lowCves').textContent = formatNumber(stats.low_cves || 0);
+
+                // Restore default labels
+                if (statLabels.length >= 6) {
+                    statLabels[0].innerHTML = '<i class="bi bi-database me-1"></i>KEV Catalog';
+                    statLabels[1].innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Affecting Products';
+                    statLabels[2].innerHTML = '<i class="bi bi-clock-history me-1"></i>Needs Review';
+                    statLabels[3].innerHTML = '<i class="bi bi-gear-fill me-1"></i>Products Tracked';
+                    statLabels[4].innerHTML = '<i class="bi bi-lightning-charge me-1"></i>High EPSS Risk';
+                    statLabels[5].innerHTML = '<i class="bi bi-shield-check me-1"></i>Low Priority';
+                }
+
+                // Update priority counts - CVE counts and match counts
+                document.getElementById('zeroDayCves').textContent = formatNumber(stats.zero_day_count || 0);
+                document.getElementById('zeroDayMatches').textContent = formatNumber(stats.zero_day_matches || 0);
+                document.getElementById('criticalCves').textContent = formatNumber(stats.critical_cves || 0);
+                document.getElementById('criticalCount').textContent = formatNumber(stats.critical_count || 0);
+                document.getElementById('highCves').textContent = formatNumber(stats.high_cves || 0);
+                document.getElementById('highCount').textContent = formatNumber(stats.high_count || 0);
+                document.getElementById('mediumCves').textContent = formatNumber(stats.medium_cves || 0);
+                document.getElementById('mediumCount').textContent = formatNumber(stats.medium_count || 0);
             }
-
-            // Low priority count (moved from quadrant to stats row)
-            document.getElementById('lowCves').textContent = formatNumber(stats.low_cves || 0);
 
             // Show/hide unmapped products warning (respects dismiss)
             const unmappedWarning = document.getElementById('unmappedWarning');
             const unmappedCount = document.getElementById('unmappedCount');
-            if (unmappedWarning && stats.products_unmapped > 0) {
+            if (unmappedWarning && stats.products_unmapped > 0 && dashboardSourceFilter !== 'containers') {
                 unmappedCount.textContent = stats.products_unmapped;
                 // Check if user dismissed this warning recently (4-hour cooldown)
                 const dismissedAt = localStorage.getItem('unmappedWarningDismissed');
@@ -1155,18 +1243,7 @@
                 }
             } else if (unmappedWarning) {
                 unmappedWarning.classList.add('d-none');
-                localStorage.removeItem('unmappedWarningDismissed');
             }
-
-            // Update priority counts - CVE counts and match counts
-            document.getElementById('zeroDayCves').textContent = formatNumber(stats.zero_day_count || 0);
-            document.getElementById('zeroDayMatches').textContent = formatNumber(stats.zero_day_matches || 0);
-            document.getElementById('criticalCves').textContent = formatNumber(stats.critical_cves || 0);
-            document.getElementById('criticalCount').textContent = formatNumber(stats.critical_count || 0);
-            document.getElementById('highCves').textContent = formatNumber(stats.high_cves || 0);
-            document.getElementById('highCount').textContent = formatNumber(stats.high_count || 0);
-            document.getElementById('mediumCves').textContent = formatNumber(stats.medium_cves || 0);
-            document.getElementById('mediumCount').textContent = formatNumber(stats.medium_count || 0);
 
             // Update configurable dashboard widgets with stats data
             lastStatsData = stats;
@@ -2486,6 +2563,10 @@
         if (dashboardSourceFilter === 'containers') {
             return loadContainerVulnerabilities();
         }
+        // Dependencies filter: show OSV-based results alongside CPE matches
+        if (dashboardSourceFilter === 'dependencies') {
+            return loadDependencyVulnerabilities();
+        }
 
         showLoading();
         const container = document.getElementById('vulnerabilitiesContainer');
@@ -2630,6 +2711,119 @@
             container.innerHTML = `
                 <div class="alert alert-danger">
                     <i class="bi bi-exclamation-triangle me-2"></i>Error loading containers: ${escapeHtml(error.message)}
+                </div>`;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Load dependency vulnerabilities from OSV scan results + CPE matches
+    async function loadDependencyVulnerabilities() {
+        showLoading();
+        const container = document.getElementById('vulnerabilitiesContainer');
+        selectedVulns.clear();
+        updateBulkActions();
+
+        try {
+            // Load OSV-based dependency scan results
+            const depResponse = await fetchWithRetry('/api/dependencies?', {}, 3, 1000);
+            if (!depResponse.ok) throw new Error(`Server error: ${depResponse.status}`);
+            const depData = await depResponse.json();
+            const deps = (depData.dependencies || []).filter(d => d.vuln_match_count > 0);
+
+            // Also load the grouped CVE matches for code_library (CPE-based)
+            const params = new URLSearchParams();
+            const cve = document.getElementById('filterCVE').value;
+            const severity = document.getElementById('filterSeverity').value;
+            if (cve) params.append('search', cve);
+            if (severity) params.append('severity', severity);
+            params.append('source_type', 'code_library');
+            params.append('include_extensions', 'true');
+            params.append('page', 1);
+            params.append('per_page', 100);
+
+            const cpeResponse = await fetchWithRetry(`/api/vulnerabilities/grouped?${params}`, {}, 3, 1000);
+            let cpeItems = [];
+            if (cpeResponse.ok) {
+                const cpeData = await cpeResponse.json();
+                cpeItems = cpeData.items || [];
+            }
+
+            // Count totals
+            const osvVulnCount = deps.reduce((sum, d) => sum + d.vuln_match_count, 0);
+            const totalVulns = osvVulnCount + cpeItems.length;
+            document.getElementById('vulnCount').textContent = totalVulns;
+
+            if (totalVulns === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-5">
+                        <i class="bi bi-puzzle text-muted" style="font-size: 4rem;"></i>
+                        <h4 class="mt-3">No Dependency Vulnerabilities</h4>
+                        <p class="text-muted">No vulnerable code dependencies found. Check the <a href="/dependencies">Dependencies page</a> for details.</p>
+                    </div>`;
+                ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+                return;
+            }
+
+            let html = '';
+
+            // Show OSV-based vulnerable dependencies (most reliable)
+            if (deps.length > 0) {
+                html += `<div class="mb-2"><small class="text-muted fw-bold"><i class="bi bi-shield-exclamation me-1"></i>OSV Ecosystem Matches (high confidence)</small></div>`;
+                html += deps.map(dep => {
+                    const sev = dep.severity_counts || {};
+                    const critBadge = sev.critical ? `<span class="badge bg-danger me-1">${sev.critical} Critical</span>` : '';
+                    const highBadge = sev.high ? `<span class="badge bg-warning text-dark me-1">${sev.high} High</span>` : '';
+                    const medBadge = sev.medium ? `<span class="badge bg-info me-1">${sev.medium} Medium</span>` : '';
+                    const lowBadge = sev.low ? `<span class="badge bg-secondary me-1">${sev.low} Low</span>` : '';
+                    const ecosystemBadge = dep.ecosystem ? `<span class="badge bg-primary me-1" style="font-size:0.65rem">${escapeHtml(dep.ecosystem)}</span>` : '';
+
+                    return `
+                        <div class="card mb-2 border-start border-4 border-${sev.critical ? 'danger' : sev.high ? 'warning' : 'info'}">
+                            <div class="card-body py-2 px-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-0">
+                                            <i class="bi bi-puzzle me-1 text-muted"></i>
+                                            <a href="/dependencies" class="text-decoration-none">${escapeHtml(dep.product_name || 'Unknown')}</a>
+                                            ${dep.version ? `<code class="ms-1">${escapeHtml(dep.version)}</code>` : ''}
+                                            ${ecosystemBadge}
+                                        </h6>
+                                        <div class="mt-1">
+                                            ${critBadge}${highBadge}${medBadge}${lowBadge}
+                                            <small class="text-muted ms-2">${dep.vuln_match_count} vuln${dep.vuln_match_count > 1 ? 's' : ''}</small>
+                                            ${dep.osv_vuln_count > 0 ? '<span class="badge bg-success-subtle text-success ms-1" style="font-size:0.6rem">OSV</span>' : ''}
+                                        </div>
+                                    </div>
+                                    <div class="text-end">
+                                        <small class="text-muted"><i class="bi bi-pc-display me-1"></i>${dep.endpoint_count || 0} endpoint${(dep.endpoint_count || 0) !== 1 ? 's' : ''}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+
+            // Show CPE-based matches below if any
+            if (cpeItems.length > 0) {
+                html += `<div class="mb-2 mt-3"><small class="text-muted fw-bold"><i class="bi bi-diagram-3 me-1"></i>CPE/NVD Matches</small></div>`;
+                html += cpeItems.map(group => createGroupedCVECard(group)).join('');
+            }
+
+            container.innerHTML = html;
+
+            // Hide normal pagination for dependency view
+            ['paginationControlsTop', 'paginationControlsBottom'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+        } catch (error) {
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Error loading dependencies: ${escapeHtml(error.message)}
                 </div>`;
         } finally {
             hideLoading();

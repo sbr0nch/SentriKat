@@ -3,7 +3,7 @@ from app import db, csrf, limiter
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 import os
-from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory, ContainerImage, ContainerVulnerability, SystemSettings
+from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory, ContainerImage, ContainerVulnerability, DependencyScan, SystemSettings
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
@@ -2578,21 +2578,12 @@ def get_vulnerability_stats():
                 Product.active == True
             )
         else:
-            # No products in org - return zeros
-            return jsonify({
-                'total_vulnerabilities': total_vulns,
-                'total_matches': 0,
-                'unacknowledged': 0,
-                'unacknowledged_cves': 0,
-                'ransomware_related': 0,
-                'products_tracked': 0,
-                'priority_breakdown': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0},
-                'cve_priority_breakdown': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0},
-                'critical_count': 0,
-                'high_count': 0,
-                'medium_count': 0,
-                'low_count': 0
-            })
+            # No product-based matches (could be container/dependency filter or genuinely empty org).
+            # Don't early-return — container stats and dependency scan stats are computed below.
+            total_matches_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.id < 0)  # Empty
+            unacknowledged_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.id < 0)  # Empty
+            ransomware_query = VulnerabilityMatch.query.filter(VulnerabilityMatch.id < 0)  # Empty
+            products_tracked_query = Product.query.filter(Product.id < 0)  # Empty
     else:
         # No org filter - show all
         total_matches_query = VulnerabilityMatch.query
@@ -2659,8 +2650,12 @@ def get_vulnerability_stats():
 
     total_cves = len(cve_priorities)  # Unique CVE count
 
-    # Container image stats
-    container_stats = {'total_images': 0, 'total_container_vulns': 0, 'container_critical': 0, 'container_high': 0}
+    # Container image stats (with deduplicated unique CVE counts)
+    container_stats = {
+        'total_images': 0, 'total_container_vulns': 0,
+        'container_critical': 0, 'container_high': 0, 'container_medium': 0, 'container_low': 0,
+        'unique_cves': 0, 'unique_critical': 0, 'unique_high': 0, 'unique_medium': 0, 'unique_low': 0,
+    }
     try:
         if org_id:
             container_images = ContainerImage.query.filter_by(organization_id=org_id, active=True)
@@ -2671,8 +2666,70 @@ def get_vulnerability_stats():
         container_stats['total_container_vulns'] = sum(i.total_vulnerabilities or 0 for i in container_list)
         container_stats['container_critical'] = sum(i.critical_count or 0 for i in container_list)
         container_stats['container_high'] = sum(i.high_count or 0 for i in container_list)
+        container_stats['container_medium'] = sum(i.medium_count or 0 for i in container_list)
+        container_stats['container_low'] = sum(i.low_count or 0 for i in container_list)
+
+        # Deduplicated unique CVE counts across all images
+        if container_list:
+            image_ids = [img.id for img in container_list]
+            unique_vuln_rows = db.session.query(
+                ContainerVulnerability.vuln_id,
+                db.func.max(ContainerVulnerability.severity).label('max_severity')
+            ).filter(
+                ContainerVulnerability.container_image_id.in_(image_ids)
+            ).group_by(ContainerVulnerability.vuln_id).all()
+
+            unique_sev = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            for _, sev in unique_vuln_rows:
+                sev_upper = (sev or 'UNKNOWN').upper()
+                if sev_upper in unique_sev:
+                    unique_sev[sev_upper] += 1
+
+            container_stats['unique_cves'] = len(unique_vuln_rows)
+            container_stats['unique_critical'] = unique_sev['CRITICAL']
+            container_stats['unique_high'] = unique_sev['HIGH']
+            container_stats['unique_medium'] = unique_sev['MEDIUM']
+            container_stats['unique_low'] = unique_sev['LOW']
     except Exception:
         pass  # Container tables may not exist yet
+
+    # Dependency scan stats (OSV-based lockfile scanning)
+    dep_scan_stats = {
+        'total_scans': 0, 'total_dependencies': 0, 'vulnerable_packages': 0,
+        'total_vulns': 0, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0,
+    }
+    try:
+        if org_id:
+            dep_scan_query = DependencyScan.query.filter_by(
+                organization_id=org_id, scan_status='completed'
+            )
+        else:
+            dep_scan_query = DependencyScan.query.filter_by(scan_status='completed')
+
+        # Get the latest scan per asset to avoid counting old scans
+        from sqlalchemy import func as sa_func
+        latest_scan_ids = db.session.query(
+            sa_func.max(DependencyScan.id)
+        ).filter(
+            DependencyScan.scan_status == 'completed'
+        )
+        if org_id:
+            latest_scan_ids = latest_scan_ids.filter(DependencyScan.organization_id == org_id)
+        latest_scan_ids = latest_scan_ids.group_by(DependencyScan.asset_id).all()
+        latest_ids = [row[0] for row in latest_scan_ids if row[0]]
+
+        if latest_ids:
+            latest_scans = DependencyScan.query.filter(DependencyScan.id.in_(latest_ids)).all()
+            dep_scan_stats['total_scans'] = len(latest_scans)
+            dep_scan_stats['total_dependencies'] = sum(s.total_dependencies or 0 for s in latest_scans)
+            dep_scan_stats['vulnerable_packages'] = sum(s.vulnerable_count or 0 for s in latest_scans)
+            dep_scan_stats['total_vulns'] = sum(s.total_vulnerabilities or 0 for s in latest_scans)
+            dep_scan_stats['critical'] = sum(s.critical_count or 0 for s in latest_scans)
+            dep_scan_stats['high'] = sum(s.high_count or 0 for s in latest_scans)
+            dep_scan_stats['medium'] = sum(s.medium_count or 0 for s in latest_scans)
+            dep_scan_stats['low'] = sum(s.low_count or 0 for s in latest_scans)
+    except Exception:
+        pass  # DependencyScan tables may not exist yet
 
     # EPSS exploitability stats for matched vulnerabilities
     epss_stats = {'high_epss': 0, 'with_epss': 0, 'avg_epss': 0}
@@ -2727,6 +2784,8 @@ def get_vulnerability_stats():
         'low_cves': cve_priority_counts['low'],
         # Container image scanning stats
         'container': container_stats,
+        # Dependency scan stats (OSV-based lockfile scanning)
+        'dependency_scans': dep_scan_stats,
         # EPSS exploitability risk
         'epss': epss_stats,
         # Zero-day detection (pre-KEV)
