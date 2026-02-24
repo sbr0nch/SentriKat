@@ -222,8 +222,10 @@ def _parse_package_lock_json(content):
     return deps
 
 
-def _parse_npm_v1_deps(deps_dict, result, is_direct=False):
+def _parse_npm_v1_deps(deps_dict, result, is_direct=False, _depth=0):
     """Recursively parse npm v1 lock file dependencies."""
+    if _depth > 50:  # Prevent stack overflow from crafted lockfiles
+        return
     for name, info in deps_dict.items():
         version = info.get('version', '')
         if version:
@@ -231,7 +233,7 @@ def _parse_npm_v1_deps(deps_dict, result, is_direct=False):
         # Recurse into sub-dependencies
         sub_deps = info.get('dependencies', {})
         if sub_deps:
-            _parse_npm_v1_deps(sub_deps, result, is_direct=False)
+            _parse_npm_v1_deps(sub_deps, result, is_direct=False, _depth=_depth + 1)
 
 
 # =============================================================================

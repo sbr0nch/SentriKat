@@ -4976,7 +4976,9 @@ def report_dependency_scan():
     if len(lockfiles) > MAX_LOCKFILES_PER_REQUEST:
         return jsonify({'error': f'Maximum {MAX_LOCKFILES_PER_REQUEST} lock files per request'}), 400
 
-    # Check request payload size (limit to 50MB to prevent memory exhaustion)
+    # Check request payload size — defense in depth alongside Flask MAX_CONTENT_LENGTH.
+    # Note: content_length reads the Content-Length header which can be spoofed,
+    # but Flask's MAX_CONTENT_LENGTH enforces the actual limit at read time.
     content_length = request.content_length or 0
     if content_length > 50 * 1024 * 1024:
         return jsonify({'error': 'Request too large (max 50MB)'}), 413
@@ -4998,9 +5000,22 @@ def report_dependency_scan():
     # This allows `sentrikat-scan` to work without a full agent deployment.
     project_name = (data.get('project_name') or '').strip()[:MAX_HOSTNAME_LENGTH]
     if not asset:
-        auto_hostname = project_name or hostname or f'ci-scan-{agent_id[:12]}' if agent_id else None
+        auto_hostname = project_name or hostname or (f'ci-scan-{agent_id[:12]}' if agent_id else None)
         if not auto_hostname:
             return jsonify({'error': 'hostname, agent_id, or project_name required'}), 400
+
+        # Rate-limit auto-creation: check max_assets on the API key and absolute org cap
+        MAX_REPO_ASSETS_PER_ORG = 500
+        org_asset_count = Asset.query.filter_by(
+            organization_id=organization.id,
+            asset_type='repository'
+        ).count()
+        key_max = getattr(agent_key, 'max_assets', None)
+        if key_max and org_asset_count >= key_max:
+            return jsonify({'error': f'Asset limit reached ({key_max}). Remove unused repository assets or increase the limit.'}), 429
+        if org_asset_count >= MAX_REPO_ASSETS_PER_ORG:
+            return jsonify({'error': f'Maximum repository assets reached ({MAX_REPO_ASSETS_PER_ORG})'}), 429
+
         asset = Asset(
             organization_id=organization.id,
             hostname=auto_hostname[:MAX_HOSTNAME_LENGTH],
@@ -5012,7 +5027,7 @@ def report_dependency_scan():
         )
         db.session.add(asset)
         db.session.flush()
-        logger.info(f"Auto-created repository asset '{auto_hostname}' for dependency scan")
+        logger.info(f"Auto-created repository asset '{auto_hostname}' for dependency scan (org total: {org_asset_count + 1})")
 
     # Verify asset belongs to the API key's organization (defense in depth)
     if asset.organization_id != organization.id:
