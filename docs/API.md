@@ -22,6 +22,7 @@
 14. [Licensing](#licensing)
 15. [Health Checks](#health-checks)
 16. [Agent API Keys (Multi-Org)](#agent-api-keys-multi-org)
+17. [Dependency Scanning (Code Dependencies)](#dependency-scanning-code-dependencies)
 
 ---
 
@@ -1231,3 +1232,198 @@ The `VulnerabilityMatch` object now includes vendor fix confidence information:
 - `vendor_fix_confidence`: `"high"` (verified, auto-resolved) or `"medium"` (needs verification, stays active)
 - `resolution_reason`: `"vendor_fix"` when a vendor advisory was matched
 - `acknowledged`: `false` for medium confidence (stays in alerts), `true` for high confidence
+
+---
+
+## Dependency Scanning (Code Dependencies)
+
+SentriKat scans lockfiles from your codebase against [OSV.dev](https://osv.dev) (Google's open-source vulnerability database) for precise, ecosystem-native vulnerability matching — no CPE guesswork.
+
+### Supported Lockfiles
+
+| Ecosystem | Lockfile(s) |
+|-----------|------------|
+| **Node.js** | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` |
+| **Python** | `Pipfile.lock`, `poetry.lock` |
+| **Rust** | `Cargo.lock` |
+| **Go** | `go.sum`, `go.mod` |
+| **Ruby** | `Gemfile.lock` |
+| **PHP** | `composer.lock` |
+| **.NET** | `packages.lock.json` |
+
+### Submit Dependency Scan
+
+Submits lockfile contents for vulnerability scanning. The server parses dependencies, queries OSV.dev, and returns results.
+
+```http
+POST /api/agent/dependency-scan
+X-Agent-Key: your-api-key
+Content-Type: application/json
+
+{
+  "hostname": "my-server",
+  "agent_id": "optional-unique-id",
+  "project_name": "my-web-app",
+  "lockfiles": [
+    {
+      "filename": "package-lock.json",
+      "project_path": "/home/user/myproject",
+      "content": "{ ... raw lockfile content ... }"
+    }
+  ]
+}
+```
+
+**Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `hostname` | Yes* | Server hostname or project identifier |
+| `agent_id` | Yes* | Unique agent/scanner ID |
+| `project_name` | No | Human-readable project name (used for auto-created assets) |
+| `lockfiles` | Yes | Array of lockfile objects |
+| `lockfiles[].filename` | Yes | Must be one of the supported lockfile names (see above) |
+| `lockfiles[].content` | Yes | Raw lockfile content as string (max 10 MB per file) |
+| `lockfiles[].project_path` | No | Path to the lockfile on disk |
+
+*At least one of `hostname` or `agent_id` is required.
+
+**Limits:**
+
+| Limit | Value |
+|-------|-------|
+| Max lockfiles per request | 50 |
+| Max lockfile size | 10 MB per file |
+| Max total payload | 50 MB |
+| Max dependencies per lockfile | 10,000 |
+| Rate limit | 30 requests/minute per API key |
+
+**API Key Requirements:**
+
+The API key must have `scan_dependencies` capability enabled. Enable this in **Administration > Agent API Keys > Edit Key > Dependency Scanning**.
+
+**Response** (200):
+```json
+{
+  "status": "success",
+  "scan_id": 42,
+  "summary": {
+    "lockfiles_parsed": 1,
+    "total_dependencies": 245,
+    "direct_dependencies": 32,
+    "transitive_dependencies": 213,
+    "vulnerable_packages": 3,
+    "total_vulnerabilities": 5,
+    "severity": {
+      "critical": 1,
+      "high": 2,
+      "medium": 2,
+      "low": 0
+    }
+  },
+  "vulnerable": [
+    {
+      "name": "express",
+      "version": "4.17.1",
+      "ecosystem": "npm",
+      "is_direct": true,
+      "purl": "pkg:npm/express@4.17.1",
+      "vulnerabilities": [
+        {
+          "id": "GHSA-rv95-896h-c2vc",
+          "cve_id": "CVE-2024-29041",
+          "severity": "MEDIUM",
+          "cvss_score": 6.1,
+          "summary": "Express.js Open Redirect vulnerability",
+          "fixed_versions": ["4.19.2"],
+          "primary_url": "https://osv.dev/vulnerability/GHSA-rv95-896h-c2vc"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Error Responses:**
+
+| Code | Reason |
+|------|--------|
+| 400 | Missing required fields, invalid hostname format, or bad payload |
+| 403 | API key does not have `scan_dependencies` enabled |
+| 413 | Payload exceeds 50 MB |
+| 429 | Rate limit exceeded (30/min) or asset creation limit reached |
+
+### List Dependency Scans
+
+```http
+GET /api/dependency-scans
+Authorization: Session (login required)
+```
+
+Returns the 100 most recent completed dependency scans for the user's organizations.
+
+**Response:**
+```json
+{
+  "scans": [
+    {
+      "id": 42,
+      "asset_id": 10,
+      "scan_status": "completed",
+      "lockfiles_submitted": 2,
+      "lockfiles_parsed": 2,
+      "total_dependencies": 500,
+      "vulnerable_count": 5,
+      "total_vulnerabilities": 8,
+      "critical_count": 1,
+      "high_count": 3,
+      "medium_count": 2,
+      "low_count": 2,
+      "created_at": "2026-02-24T10:00:00Z"
+    }
+  ],
+  "stats": {
+    "total_scans": 25,
+    "total_vulnerabilities": 45,
+    "total_critical": 3
+  }
+}
+```
+
+### Get Dependency Scan Details
+
+```http
+GET /api/dependency-scans/{scan_id}
+Authorization: Session (login required)
+```
+
+Returns detailed results for a specific scan, including all vulnerability findings.
+
+### Using the Lightweight Scanner (CI/CD)
+
+Install and run the standalone scanner — no full agent needed:
+
+```bash
+# Install
+pip install sentrikat-scan
+
+# Configure
+export SENTRIKAT_SERVER=https://your-sentrikat-instance
+export SENTRIKAT_API_KEY=sk_your_key_here
+
+# Scan (exits non-zero if vulnerabilities found above threshold)
+sentrikat-scan --fail-on high
+
+# CI/CD examples
+sentrikat-scan --json            # Machine-readable output
+sentrikat-scan --verbose         # Detailed output
+sentrikat-scan --test            # Test connectivity only
+```
+
+The scanner is a single Python file with zero dependencies (Python 3.7+). Download it directly if pip is not available:
+
+```bash
+curl -O https://your-sentrikat-server/downloads/sentrikat-scan.py
+chmod +x sentrikat-scan.py
+./sentrikat-scan.py --fail-on high
+```

@@ -273,6 +273,7 @@
                         <option value="auth_failed">Auth Failed</option>
                         <option value="status_changed">Status Changed</option>
                         <option value="container_scan">Container Scan</option>
+                        <option value="dependency_scan">Dependency Scan</option>
                         <option value="agent_updated">Agent Updated</option>
                         <option value="update_requested">Update Requested</option>
                     </select>
@@ -300,6 +301,7 @@
                             <option value="inventory_reported">Inventory</option>
                             <option value="status_changed">Status Changed</option>
                             <option value="container_scan">Container Scan</option>
+                            <option value="dependency_scan">Dependency Scan</option>
                             <option value="agent_updated">Agent Updated</option>
                             <option value="update_requested">Update Requested</option>
                             <option value="license_exceeded">License Exceeded</option>
@@ -528,6 +530,7 @@ function getEventIcon(eventType) {
         heartbeat: { icon: 'bi-heart-pulse-fill', iconClass: 'heartbeat' },
         status_changed: { icon: 'bi-arrow-left-right', iconClass: 'warning' },
         container_scan: { icon: 'bi-box-seam', iconClass: 'inventory' },
+        dependency_scan: { icon: 'bi-puzzle-fill', iconClass: 'inventory' },
         agent_updated: { icon: 'bi-cloud-check-fill', iconClass: 'registered' },
         update_requested: { icon: 'bi-cloud-arrow-up-fill', iconClass: 'warning' },
         scan_requested: { icon: 'bi-play-circle-fill', iconClass: 'inventory' },
@@ -567,7 +570,13 @@ function getEventDescription(event) {
         case 'container_scan':
             const imgs = details.images_processed || 0;
             const vulns = details.total_vulnerabilities || 0;
-            return `Container scan: ${imgs} images, ${vulns} vulnerabilities (${details.scanner || 'trivy'})`;
+            return `Container scan: ${imgs} image${imgs !== 1 ? 's' : ''}, ${vulns} vulnerabilit${vulns !== 1 ? 'ies' : 'y'}`;
+        case 'dependency_scan':
+            const depCount = details.total_dependencies || 0;
+            const depVulns = details.total_vulnerabilities || 0;
+            const vulnPkgs = details.vulnerable_packages || 0;
+            const lockfiles = details.lockfiles_parsed || 0;
+            return `Dependency scan: ${lockfiles} lockfile${lockfiles !== 1 ? 's' : ''}, ${depCount} dependencies, ${vulnPkgs} vulnerable (${depVulns} CVE${depVulns !== 1 ? 's' : ''})`;
         case 'agent_updated':
             return `Agent updated: v${event.old_value || '?'} → v${event.new_value || '?'}`;
         case 'update_requested':
@@ -724,6 +733,7 @@ function getLogTypeBadge(eventType) {
         heartbeat: '<span class="badge bg-secondary bg-opacity-50"><i class="bi bi-heart-pulse me-1"></i>Heartbeat</span>',
         status_changed: '<span class="badge bg-warning text-dark"><i class="bi bi-arrow-left-right me-1"></i>Status</span>',
         container_scan: '<span class="badge bg-info bg-opacity-75"><i class="bi bi-box-seam me-1"></i>Container</span>',
+        dependency_scan: '<span class="badge bg-primary bg-opacity-75"><i class="bi bi-puzzle me-1"></i>Dependencies</span>',
         agent_updated: '<span class="badge bg-success"><i class="bi bi-cloud-check me-1"></i>Updated</span>',
         update_requested: '<span class="badge bg-warning text-dark"><i class="bi bi-cloud-arrow-up me-1"></i>Update Push</span>',
         scan_requested: '<span class="badge bg-primary bg-opacity-75"><i class="bi bi-play-circle me-1"></i>Scan Push</span>',

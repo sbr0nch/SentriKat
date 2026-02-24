@@ -2210,6 +2210,10 @@ class AgentEvent(db.Model):
         return event
 
     def to_dict(self):
+        # Use asset's known IP as fallback when event has no source_ip
+        ip = self.source_ip
+        if not ip and self.asset:
+            ip = self.asset.ip_address
         return {
             'id': self.id,
             'organization_id': self.organization_id,
@@ -2220,7 +2224,7 @@ class AgentEvent(db.Model):
             'details': self.get_details(),
             'old_value': self.old_value,
             'new_value': self.new_value,
-            'source_ip': self.source_ip,
+            'source_ip': ip,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

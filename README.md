@@ -107,6 +107,8 @@ SentriKat/
 │   ├── cpe_mappings.py           # User-defined CPE mappings + NVD fallback
 │   ├── cisa_sync.py              # CISA KEV sync + multi-source CVSS enrichment
 │   ├── vendor_advisories.py      # OSV.dev, Red Hat, MSRC, Debian feeds
+│   ├── lockfile_parser.py        # Lockfile parsing (11 formats, 7 ecosystems)
+│   ├── osv_client.py             # OSV.dev vulnerability query client
 │   ├── cve_known_products.py     # CVE history lookup for filtering guard
 │   ├── scheduler.py              # 15+ background jobs (APScheduler)
 │   ├── maintenance.py            # Stale asset cleanup, auto-acknowledgment
@@ -173,7 +175,12 @@ SentriKat/
 │   ├── API.md                    # API endpoint reference
 │   └── business/                 # Business planning docs (16 documents)
 │
+├── sentrikat-scan/                # Lightweight dependency scanner (pip package)
+│   ├── pyproject.toml            # PyPI package metadata
+│   └── sentrikat_scan.py         # Scanner module (zero dependencies)
+│
 ├── scripts/                      # Deployment utilities
+│   ├── sentrikat-scan.py         # Standalone scanner script (same as pip pkg)
 │   ├── backup_database.sh        # PostgreSQL backup
 │   ├── update.sh                 # Production update (Linux)
 │   ├── update.ps1                # Production update (Windows)
@@ -519,6 +526,26 @@ chmod +x sentrikat-agent.sh
 
 Collects: pkgutil, Homebrew, system extensions
 
+### Code Dependency Scanning
+
+Scan your project's lockfiles for known vulnerabilities in open-source dependencies, powered by [OSV.dev](https://osv.dev):
+
+```bash
+# Install the lightweight scanner (zero dependencies, Python 3.7+)
+pip install sentrikat-scan
+
+# Configure and scan
+export SENTRIKAT_SERVER=https://your-sentrikat
+export SENTRIKAT_API_KEY=sk_your_key
+sentrikat-scan --fail-on high
+```
+
+**Supported ecosystems:** npm (package-lock.json, yarn.lock, pnpm-lock.yaml), Python (Pipfile.lock, poetry.lock), Rust (Cargo.lock), Go (go.sum, go.mod), Ruby (Gemfile.lock), PHP (composer.lock), .NET (packages.lock.json)
+
+**CI/CD ready:** Works in GitHub Actions, GitLab CI, Jenkins, and any environment with Python 3.7+. Use `--fail-on critical|high|medium|low` to gate builds on vulnerability severity.
+
+Results appear on the **Dependencies** dashboard alongside endpoint and container vulnerabilities.
+
 ### Container Scanning
 
 Agents automatically detect Docker/Podman and scan container images:
@@ -578,6 +605,7 @@ POST /api/products/rematch               # Re-run vulnerability matching
 POST /api/agent/inventory                # Report software inventory
 POST /api/agent/heartbeat                # Agent keepalive
 POST /api/agent/container-scan           # Report container scan results
+POST /api/agent/dependency-scan          # Scan lockfiles for vulnerable deps
 
 # CPE Management
 GET  /api/cpe/search?q=firefox           # Search NVD CPE database
@@ -639,7 +667,7 @@ SentriKat requires outbound HTTPS access to external vulnerability data sources:
 | `services.nvd.nist.gov` | NVD CPE/CVSS data (primary) | During product search + weekly sync |
 | `cveawg.mitre.org` | CVE.org + Vulnrichment CVSS (fallback) | On NVD miss |
 | `euvdservices.enisa.europa.eu` | ENISA EUVD CVSS + EU exploited vulns (fallback) | On NVD+CVE.org miss + daily sync |
-| `api.osv.dev` | OSV vendor backport detection | Daily (03:00 UTC) |
+| `api.osv.dev` | OSV vendor backport detection + dependency scanning | Daily (03:00 UTC) + on each scan |
 | `access.redhat.com` | Red Hat/CentOS/Rocky advisories | Daily (03:00 UTC) |
 | `api.msrc.microsoft.com` | Microsoft Patch Tuesday data | Daily (03:00 UTC) |
 | `security-tracker.debian.org` | Debian security tracker | Daily (03:00 UTC) |

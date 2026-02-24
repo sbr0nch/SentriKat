@@ -784,11 +784,17 @@ class TestDependencyScanEndpoint:
         assert response.status_code == 400
 
     @patch('app.agent_api.check_agent_limit', side_effect=_license_ok)
-    def test_scan_requires_known_asset(self, mock_license, client, dep_api_key, setup_complete):
+    def test_scan_auto_creates_asset_for_unknown_host(self, mock_license, client, dep_api_key, setup_complete):
+        """Unknown hostname should auto-create a repository asset (CI/CD support).
+        The request still fails because 'test' is not a valid lockfile name."""
         response = client.post(DEPSCAN_URL,
             headers=_auth_headers(),
             json={'hostname': 'unknown-host', 'lockfiles': [{'filename': 'test', 'content': '{}'}]})
-        assert response.status_code == 404
+        assert response.status_code == 200
+        data = response.get_json()
+        # The lockfile name 'test' is rejected by the whitelist, so 0 parsed
+        assert data['status'] == 'success'
+        assert data['summary']['lockfiles_parsed'] == 0
 
     @patch('app.osv_client.requests.post')
     @patch('app.agent_api.check_agent_limit', side_effect=_license_ok)
@@ -797,6 +803,7 @@ class TestDependencyScanEndpoint:
         # Mock OSV response: express 4.17.1 is vulnerable
         mock_osv_response = MagicMock()
         mock_osv_response.status_code = 200
+        mock_osv_response.content = b'{"results":[{"vulns":[]}]}'  # small, passes size check
         mock_osv_response.json.return_value = {
             'results': [{
                 'vulns': [{
@@ -859,6 +866,7 @@ class TestDependencyScanEndpoint:
         # Mock OSV response: no vulnerabilities
         mock_osv_response = MagicMock()
         mock_osv_response.status_code = 200
+        mock_osv_response.content = b'{"results":[{"vulns":[]}]}'
         mock_osv_response.json.return_value = {'results': [{'vulns': []}]}
         mock_osv_post.return_value = mock_osv_response
 

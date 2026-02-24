@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import logging
 from sqlalchemy import or_
 from app import db
-from app.models import Asset, ProductInstallation, Product, Organization
+from app.models import Asset, ProductInstallation, Product, Organization, AgentEvent
 
 logger = logging.getLogger(__name__)
 
@@ -130,14 +130,28 @@ def update_asset_status(stale_days=None, remove_days=None, dry_run=False):
     marked_stale = 0
     removed = 0
 
-    # Mark offline (no checkin for 1 hour)
-    offline_query = Asset.query.filter(
+    # Mark offline (no checkin for 1 hour) — log individual events with asset's known IP
+    offline_assets = Asset.query.filter(
         Asset.status == 'online',
         Asset.last_checkin < offline_threshold
-    )
-    if not dry_run:
-        offline_query.update({'status': 'offline'}, synchronize_session=False)
+    ).all()
+    if offline_assets and not dry_run:
+        for asset in offline_assets:
+            asset.status = 'offline'
+            try:
+                AgentEvent.log_event(
+                    organization_id=asset.organization_id,
+                    event_type='status_changed',
+                    asset_id=asset.id,
+                    old_value='online',
+                    new_value='offline',
+                    details='{"reason": "no_heartbeat"}',
+                    source_ip=asset.ip_address,
+                )
+            except Exception:
+                pass
         db.session.commit()
+        logger.info(f"Marked {len(offline_assets)} assets as offline (>1h no heartbeat)")
 
     # Mark stale (no checkin for X days, including assets with NULL last_checkin)
     stale_query = Asset.query.filter(

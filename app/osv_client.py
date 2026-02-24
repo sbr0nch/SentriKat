@@ -24,12 +24,17 @@ OSV_VULN_URL = f'{OSV_API_BASE}/vulns'
 # Maximum queries per batch (OSV limit is 1000, we use 100 for reliability)
 MAX_BATCH_SIZE = 100
 
-# Request timeout (seconds)
-REQUEST_TIMEOUT = 30
+# Request timeout: (connect_timeout, read_timeout) in seconds.
+# Separate connect timeout prevents worker stalls on DNS/TCP hangs.
+REQUEST_TIMEOUT = (5, 30)
 
 # Retry settings
 MAX_RETRIES = 3
 RETRY_BACKOFF_BASE = 2  # seconds
+
+# Maximum response size we'll accept (5 MB). Prevents OOM from oversized
+# upstream responses.
+MAX_RESPONSE_SIZE = 5 * 1024 * 1024
 
 
 class OSVVulnerability:
@@ -43,14 +48,16 @@ class OSVVulnerability:
     )
 
     def __init__(self, data, queried_ecosystem=None):
-        self.id = data.get('id', '')
-        self.aliases = data.get('aliases', [])
-        self.summary = data.get('summary', '')
-        self.details = data.get('details', '')
+        if not isinstance(data, dict):
+            data = {}
+        self.id = str(data.get('id', ''))[:100]
+        self.aliases = data.get('aliases', []) if isinstance(data.get('aliases'), list) else []
+        self.summary = str(data.get('summary', ''))[:2000]
+        self.details = str(data.get('details', ''))[:10000]
         self.ecosystem = queried_ecosystem
         self.published = data.get('published')
         self.modified = data.get('modified')
-        self.database_specific = data.get('database_specific', {})
+        self.database_specific = data.get('database_specific', {}) if isinstance(data.get('database_specific'), dict) else {}
 
         # Extract severity/CVSS
         self.severity = None
@@ -65,11 +72,14 @@ class OSVVulnerability:
 
         # Extract references
         self.references = []
-        for ref in data.get('references', []):
-            self.references.append({
-                'type': ref.get('type', ''),
-                'url': ref.get('url', ''),
-            })
+        refs = data.get('references', [])
+        if isinstance(refs, list):
+            for ref in refs[:50]:  # Cap references to prevent memory issues
+                if isinstance(ref, dict):
+                    self.references.append({
+                        'type': str(ref.get('type', ''))[:50],
+                        'url': str(ref.get('url', ''))[:500],
+                    })
 
     def _parse_severity(self, data):
         """Extract severity info from OSV vulnerability data."""
@@ -236,6 +246,9 @@ def query_osv(package_name, version, ecosystem):
             )
 
             if response.status_code == 200:
+                if len(response.content) > MAX_RESPONSE_SIZE:
+                    logger.warning(f"OSV response too large ({len(response.content)} bytes), skipping")
+                    return None
                 data = response.json()
                 vulns = data.get('vulns', [])
                 return [OSVVulnerability(v, ecosystem) for v in vulns]
@@ -311,11 +324,14 @@ def query_osv_batch(queries):
                 response = requests.post(
                     OSV_QUERYBATCH_URL,
                     json=payload,
-                    timeout=REQUEST_TIMEOUT * 2,  # Longer timeout for batch
+                    timeout=(REQUEST_TIMEOUT[0], REQUEST_TIMEOUT[1] * 2),  # Longer read timeout for batch
                     headers={'Content-Type': 'application/json'},
                 )
 
                 if response.status_code == 200:
+                    if len(response.content) > MAX_RESPONSE_SIZE:
+                        logger.warning(f"OSV batch response too large ({len(response.content)} bytes), skipping chunk")
+                        break
                     data = response.json()
                     batch_results = data.get('results', [])
 
