@@ -4959,13 +4959,21 @@ def report_dependency_scan():
     if not organization:
         return jsonify({'error': 'API key not associated with an organization'}), 400
 
+    # Check that this API key has dependency scanning enabled
+    if not getattr(agent_key, 'scan_dependencies', False):
+        return jsonify({'error': 'Dependency scanning is not enabled for this API key'}), 403
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
 
-    hostname = (data.get('hostname') or '').strip()
-    agent_id = (data.get('agent_id') or '').strip()
+    hostname = (data.get('hostname') or '').strip()[:MAX_HOSTNAME_LENGTH]
+    agent_id = (data.get('agent_id') or '').strip()[:MAX_HOSTNAME_LENGTH]
     lockfiles = data.get('lockfiles', [])
+
+    # Validate hostname format (same rules as inventory endpoint)
+    if hostname and not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._\-]*$', hostname):
+        return jsonify({'error': 'Invalid hostname format'}), 400
 
     if not hostname and not agent_id:
         return jsonify({'error': 'hostname or agent_id required'}), 400
@@ -4998,7 +5006,7 @@ def report_dependency_scan():
 
     # Auto-create a lightweight project asset for CI/CD or standalone scanner usage.
     # This allows `sentrikat-scan` to work without a full agent deployment.
-    project_name = (data.get('project_name') or '').strip()[:MAX_HOSTNAME_LENGTH]
+    project_name = re.sub(r'[^\w.\-]', '', (data.get('project_name') or '').strip())[:MAX_HOSTNAME_LENGTH]
     if not asset:
         auto_hostname = project_name or hostname or (f'ci-scan-{agent_id[:12]}' if agent_id else None)
         if not auto_hostname:

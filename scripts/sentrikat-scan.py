@@ -398,6 +398,11 @@ def find_lockfiles(root_path, max_depth=MAX_DEPTH, verbose=False):
             except ValueError:
                 continue
 
+            # Skip symlinks (prevent exfiltration of files outside project)
+            if path.is_symlink():
+                debug(f"Skipping {rel} (symlink)", verbose)
+                continue
+
             # Skip known non-project directories
             parts_str = str(rel)
             skip = False
