@@ -4981,7 +4981,7 @@ def report_dependency_scan():
     if content_length > 50 * 1024 * 1024:
         return jsonify({'error': 'Request too large (max 50MB)'}), 413
 
-    # Find the asset
+    # Find the asset — or auto-create for CI/CD pipeline scans
     asset = None
     if agent_id:
         asset = Asset.query.filter_by(
@@ -4994,12 +4994,29 @@ def report_dependency_scan():
             hostname=hostname[:MAX_HOSTNAME_LENGTH]
         ).first()
 
+    # Auto-create a lightweight project asset for CI/CD or standalone scanner usage.
+    # This allows `sentrikat-scan` to work without a full agent deployment.
+    project_name = (data.get('project_name') or '').strip()[:MAX_HOSTNAME_LENGTH]
     if not asset:
-        return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
+        auto_hostname = project_name or hostname or f'ci-scan-{agent_id[:12]}' if agent_id else None
+        if not auto_hostname:
+            return jsonify({'error': 'hostname, agent_id, or project_name required'}), 400
+        asset = Asset(
+            organization_id=organization.id,
+            hostname=auto_hostname[:MAX_HOSTNAME_LENGTH],
+            agent_id=agent_id or None,
+            asset_type='repository',
+            status='online',
+            last_checkin=datetime.utcnow(),
+            ip_address=request.remote_addr,
+        )
+        db.session.add(asset)
+        db.session.flush()
+        logger.info(f"Auto-created repository asset '{auto_hostname}' for dependency scan")
 
-    # Verify asset belongs to the API key's organization
+    # Verify asset belongs to the API key's organization (defense in depth)
     if asset.organization_id != organization.id:
-        return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
+        return jsonify({'error': 'Asset not found'}), 404
 
     # Validate and sanitize lock file entries
     clean_lockfiles = []
