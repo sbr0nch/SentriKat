@@ -4300,6 +4300,38 @@ def _version_compare(v1, v2):
 
 
 # ============================================================================
+# Scanner Download Endpoint (Public with rate limiting)
+# ============================================================================
+
+@agent_bp.route('/downloads/sentrikat-scan.py', methods=['GET'])
+@limiter.limit("10/minute")
+def download_scanner_script():
+    """
+    Download the sentrikat-scan standalone scanner script.
+
+    Public endpoint (no authentication required) — rate limited to 10/min.
+    Serves the script from scripts/sentrikat-scan.py for direct curl download.
+    """
+    scripts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scripts')
+    script_path = os.path.join(scripts_dir, 'sentrikat-scan.py')
+
+    if not os.path.exists(script_path):
+        return jsonify({'error': 'Scanner script not available'}), 404
+
+    with open(script_path, 'r') as f:
+        script_content = f.read()
+
+    return Response(
+        script_content,
+        mimetype='text/x-python',
+        headers={
+            'Content-Disposition': 'attachment; filename=sentrikat-scan.py',
+            'Cache-Control': 'public, max-age=3600',
+        }
+    )
+
+
+# ============================================================================
 # Admin Endpoints for Agent Control
 # ============================================================================
 
@@ -4963,6 +4995,13 @@ def report_dependency_scan():
     if not getattr(agent_key, 'scan_dependencies', False):
         return jsonify({'error': 'Dependency scanning is not enabled for this API key'}), 403
 
+    # Early payload size check — reject before Flask parses the body.
+    # Flask's MAX_CONTENT_LENGTH (16 MB) enforces the hard limit at read time,
+    # but this gives a clearer error for the dependency-scan-specific 50 MB cap.
+    content_length = request.content_length or 0
+    if content_length > 50 * 1024 * 1024:
+        return jsonify({'error': 'Request too large (max 50MB)'}), 413
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
@@ -4978,18 +5017,14 @@ def report_dependency_scan():
     if not hostname and not agent_id:
         return jsonify({'error': 'hostname or agent_id required'}), 400
 
+    if not isinstance(lockfiles, list):
+        return jsonify({'error': 'lockfiles must be an array'}), 400
+
     if not lockfiles:
         return jsonify({'status': 'ok', 'message': 'No lock files to process'}), 200
 
     if len(lockfiles) > MAX_LOCKFILES_PER_REQUEST:
         return jsonify({'error': f'Maximum {MAX_LOCKFILES_PER_REQUEST} lock files per request'}), 400
-
-    # Check request payload size — defense in depth alongside Flask MAX_CONTENT_LENGTH.
-    # Note: content_length reads the Content-Length header which can be spoofed,
-    # but Flask's MAX_CONTENT_LENGTH enforces the actual limit at read time.
-    content_length = request.content_length or 0
-    if content_length > 50 * 1024 * 1024:
-        return jsonify({'error': 'Request too large (max 50MB)'}), 413
 
     # Find the asset — or auto-create for CI/CD pipeline scans
     asset = None
@@ -5125,24 +5160,29 @@ def report_dependency_scan():
         low_count = 0
         total_vulns = 0
 
+        # Strip control characters from OSV-sourced strings before DB storage.
+        _ctrl_re = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+        def _clean(val, maxlen):
+            return _ctrl_re.sub('', str(val))[:maxlen] if val else ''
+
         for vuln_pkg in osv_result.get('vulnerable', []):
             for vuln in vuln_pkg.get('vulnerabilities', []):
                 severity = (vuln.get('severity') or 'UNKNOWN').upper()
 
                 result_record = DependencyScanResult(
                     scan_id=scan.id,
-                    pkg_name=vuln_pkg['name'][:300],
-                    pkg_version=vuln_pkg['version'][:100],
-                    pkg_ecosystem=vuln_pkg['ecosystem'][:30],
-                    purl=vuln_pkg.get('purl', '')[:500] or None,
+                    pkg_name=_clean(vuln_pkg['name'], 300),
+                    pkg_version=_clean(vuln_pkg['version'], 100),
+                    pkg_ecosystem=_clean(vuln_pkg['ecosystem'], 30),
+                    purl=_clean(vuln_pkg.get('purl', ''), 500) or None,
                     is_direct=vuln_pkg.get('is_direct', False),
-                    source_file=vuln_pkg.get('source_file', '')[:500] or None,
-                    vuln_id=vuln['id'][:100],
-                    cve_id=vuln.get('cve_id', '')[:50] or None,
+                    source_file=_clean(vuln_pkg.get('source_file', ''), 500) or None,
+                    vuln_id=_clean(vuln['id'], 100),
+                    cve_id=_clean(vuln.get('cve_id', ''), 50) or None,
                     severity=severity[:20],
                     cvss_score=vuln.get('cvss_score'),
-                    summary=(vuln.get('summary') or '')[:1000] or None,
-                    primary_url=(vuln.get('primary_url') or '')[:500] or None,
+                    summary=_clean(vuln.get('summary', ''), 1000) or None,
+                    primary_url=_clean(vuln.get('primary_url', ''), 500) or None,
                     fixed_versions=json.dumps(vuln.get('fixed_versions', [])),
                     aliases=json.dumps(vuln.get('aliases', [])),
                 )

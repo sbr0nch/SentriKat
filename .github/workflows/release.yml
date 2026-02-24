@@ -365,3 +365,36 @@ jobs:
               \"released_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
               \"release_notes\": \"Release ${VERSION}\"
             }" && echo "Portal notified" || echo "Portal notification failed (non-critical)"
+
+  # ── Step 4: Publish sentrikat-scan to PyPI ───────────────────
+  publish-scanner:
+    runs-on: ubuntu-latest
+    needs: test
+    if: ${{ !contains(github.ref_name, '-') }}  # Skip pre-releases (e.g., v1.0.0-beta.1)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Sync scanner version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Update version in pyproject.toml to match release tag
+          sed -i "s/^version = .*/version = \"${VERSION}\"/" sentrikat-scan/pyproject.toml
+          # Update version in the scanner module
+          sed -i "s/^VERSION = .*/VERSION = \"${VERSION}\"/" sentrikat-scan/sentrikat_scan.py
+
+      - name: Build package
+        run: python -m build sentrikat-scan/
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload sentrikat-scan/dist/*
