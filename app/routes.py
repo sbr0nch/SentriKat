@@ -1861,11 +1861,19 @@ def batch_delete_products():
     errors = 0
 
     try:
-        # Preload all products with their organizations to avoid N+1 queries
+        # Preload all products and their org associations to avoid N+1 queries
         products_by_id = {
-            p.id: p for p in Product.query.filter(Product.id.in_(product_ids))
-            .options(selectinload(Product.organizations)).all()
+            p.id: p for p in Product.query.filter(Product.id.in_(product_ids)).all()
         }
+        # Batch-query M2M org associations for all products at once
+        from app.models import product_organizations
+        org_rows = db.session.query(
+            product_organizations.c.product_id,
+            product_organizations.c.organization_id
+        ).filter(product_organizations.c.product_id.in_(product_ids)).all()
+        product_org_map = {}
+        for prod_id, org_id in org_rows:
+            product_org_map.setdefault(prod_id, []).append(org_id)
 
         for pid in product_ids:
             try:
@@ -1873,7 +1881,7 @@ def batch_delete_products():
                 if not product:
                     continue
 
-                product_org_ids = [org.id for org in product.organizations]
+                product_org_ids = product_org_map.get(pid, [])
                 if product.organization_id and product.organization_id not in product_org_ids:
                     product_org_ids.append(product.organization_id)
 
