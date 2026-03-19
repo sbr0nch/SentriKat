@@ -161,6 +161,62 @@
     .vuln-card-v2.mb-4 {
         margin-bottom: 0.75rem !important;
     }
+
+    /* Dashboard Responsive: Tablet */
+    @media (max-width: 991.98px) {
+        .alert-card-value {
+            font-size: 1.75rem;
+        }
+        .alert-card-label {
+            font-size: 0.75rem;
+        }
+        #sourceKeyTypeToggle {
+            flex-wrap: wrap;
+            gap: 0.25rem;
+        }
+        #sourceKeyTypeToggle .btn {
+            border-radius: 0.25rem !important;
+            font-size: 0.75rem;
+        }
+    }
+
+    /* Dashboard Responsive: Mobile */
+    @media (max-width: 767.98px) {
+        .alert-card-value {
+            font-size: 1.5rem;
+        }
+        .alert-card i.alert-icon {
+            font-size: 1.1rem;
+        }
+        .alert-card {
+            padding: 0.5rem 0.75rem;
+        }
+        #widgetChartContainer1,
+        #widgetChartContainer2 {
+            height: 180px !important;
+            max-height: none !important;
+        }
+    }
+
+    /* Dashboard Responsive: Extra small */
+    @media (max-width: 575.98px) {
+        .alert-card-value {
+            font-size: 1.25rem;
+        }
+        .alert-card-label {
+            font-size: 0.7rem;
+        }
+        .alert-card small {
+            font-size: 0.65rem;
+        }
+        .stat-value-sm {
+            font-size: 1.5rem;
+        }
+        #sourceKeyTypeToggle .btn {
+            padding: 0.2rem 0.4rem;
+            font-size: 0.7rem;
+        }
+    }
 </style>
 <div class="fade-in">
     <!-- Page Header -->
@@ -198,7 +254,7 @@
             <!-- Source Type Filter -->
             <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
                 <small class="text-muted"><i class="bi bi-funnel me-1"></i>Source:</small>
-                <div class="btn-group btn-group-sm" role="group" id="sourceKeyTypeToggle">
+                <div class="btn-group btn-group-sm flex-wrap" role="group" id="sourceKeyTypeToggle">
                     <button type="button" class="btn btn-outline-secondary active" data-source="" onclick="setDashboardSourceFilter('')" title="Show all">All</button>
                     <button type="button" class="btn btn-outline-secondary" data-source="server" onclick="setDashboardSourceFilter('server')" title="Server-reported only"><i class="bi bi-hdd-rack me-1"></i>Servers</button>
                     <button type="button" class="btn btn-outline-secondary" data-source="client" onclick="setDashboardSourceFilter('client')" title="Client-reported only"><i class="bi bi-laptop me-1"></i>Clients</button>
@@ -309,7 +365,7 @@
                         </div>
                         <div class="card-body py-2 d-flex flex-column align-items-center justify-content-center">
                             <p class="text-muted mb-1 small widget-subtitle" id="widgetSubtitle1" style="font-size: 0.7rem;">Unacknowledged matches by effective priority</p>
-                            <div id="widgetChartContainer1" style="position: relative; width: 100%; max-height: 200px;">
+                            <div id="widgetChartContainer1" style="position: relative; width: 100%; max-height: 220px;">
                                 <canvas id="widgetCanvas1"></canvas>
                             </div>
                             <div id="widgetNoData1" class="text-center text-muted py-3 d-none">
@@ -345,7 +401,7 @@
                         </div>
                         <div class="card-body py-2">
                             <p class="text-muted mb-1 small widget-subtitle" id="widgetSubtitle2" style="font-size: 0.7rem;">Top 10 vendors with unacknowledged vulnerabilities</p>
-                            <div id="widgetChartContainer2" style="position: relative; height: 190px;">
+                            <div id="widgetChartContainer2" style="position: relative; height: 210px;">
                                 <canvas id="widgetCanvas2"></canvas>
                             </div>
                             <div id="widgetNoData2" class="text-center text-muted py-3 d-none">
