@@ -1880,8 +1880,11 @@ function Uninstall-Agent {
     # Remove service wrapper script
     Remove-Item "$env:ProgramData\SentriKat\sentrikat-service.ps1" -Force -ErrorAction SilentlyContinue
 
-    # Remove config and logs (optional)
-    # Remove-Item "$env:ProgramData\SentriKat" -Recurse -Force -ErrorAction SilentlyContinue
+    # Remove config and logs
+    Remove-Item "$env:ProgramData\SentriKat\agent.conf" -Force -ErrorAction SilentlyContinue
+    Remove-Item "$env:ProgramData\SentriKat\agent.log*" -Force -ErrorAction SilentlyContinue
+    Remove-Item "$env:ProgramData\SentriKat\agent.lock" -Force -ErrorAction SilentlyContinue
+    Remove-Item "$env:ProgramData\SentriKat\sentrikat-agent.backup.*.ps1" -Force -ErrorAction SilentlyContinue
 
     Write-Log "Agent uninstalled"
     Write-Host "SentriKat Agent uninstalled (service and scheduled tasks removed)"
