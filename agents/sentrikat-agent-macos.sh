@@ -5,7 +5,7 @@
 # Silent daemon agent that collects software inventory from macOS endpoints
 # and reports to a SentriKat server. Designed to run as a LaunchDaemon.
 #
-# Version: 1.4.0
+# Version: 1.5.0
 # Requires: bash, curl
 #
 # Software sources:
@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.4.0"
+AGENT_VERSION="1.5.0"
 CONFIG_DIR="/Library/Application Support/SentriKat"
 CONFIG_FILE="${CONFIG_DIR}/agent.conf"
 LOG_FILE="/Library/Logs/sentrikat-agent.log"
@@ -61,9 +61,12 @@ log() {
 
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 
-    # Rotate log if > 10MB
+    # Rotate log if > 10MB (keep up to 3 rotated logs)
     if [[ -f "$LOG_FILE" ]] && [[ $(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null) -gt 10485760 ]]; then
-        mv "$LOG_FILE" "${LOG_FILE}.old" 2>/dev/null || true
+        rm -f "${LOG_FILE}.3" 2>/dev/null || true
+        [[ -f "${LOG_FILE}.2" ]] && mv "${LOG_FILE}.2" "${LOG_FILE}.3" 2>/dev/null || true
+        [[ -f "${LOG_FILE}.1" ]] && mv "${LOG_FILE}.1" "${LOG_FILE}.2" 2>/dev/null || true
+        mv "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || true
     fi
 
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
@@ -88,7 +91,23 @@ log_error() { log "ERROR" "$1"; }
 load_config() {
     if [[ -f "$CONFIG_FILE" ]]; then
         # shellcheck source=/dev/null
-        source "$CONFIG_FILE"
+        if ! (source "$CONFIG_FILE") 2>/dev/null; then
+            log_warn "Config file is corrupt, attempting recovery from backup"
+            if [[ -f "${CONFIG_FILE}.bak" ]]; then
+                # shellcheck source=/dev/null
+                if source "${CONFIG_FILE}.bak" 2>/dev/null; then
+                    log_warn "Recovered configuration from ${CONFIG_FILE}.bak"
+                    cp "${CONFIG_FILE}.bak" "$CONFIG_FILE" 2>/dev/null || true
+                else
+                    log_error "Backup config is also corrupt"
+                fi
+            else
+                log_error "No backup config available for recovery"
+            fi
+        else
+            # shellcheck source=/dev/null
+            source "$CONFIG_FILE"
+        fi
     fi
 
     [[ -n "${ARG_SERVER_URL:-}" ]] && SERVER_URL="$ARG_SERVER_URL"
@@ -107,6 +126,11 @@ load_config() {
 save_config() {
     mkdir -p "$CONFIG_DIR" 2>/dev/null || true
     chmod 700 "$CONFIG_DIR"
+
+    # Backup current config before overwriting
+    if [[ -f "$CONFIG_FILE" ]]; then
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null || true
+    fi
 
     cat > "$CONFIG_FILE" << EOF
 # SentriKat Agent Configuration
@@ -1029,14 +1053,93 @@ send_inventory() {
     return 1
 }
 
+check_agent_health() {
+    # Self-health check: verify daemons, config, disk space
+    HEALTH_STATUS="healthy"
+    HEALTH_REPAIRED="false"
+
+    # Check if launchd daemons are loaded, attempt repair if not
+    if ! launchctl list 2>/dev/null | grep -q com.sentrikat.agent; then
+        log_warn "LaunchDaemon com.sentrikat.agent not loaded, attempting repair"
+        if launchctl load "$LAUNCHDAEMON_PLIST" 2>/dev/null; then
+            log_warn "Repaired com.sentrikat.agent daemon"
+            HEALTH_REPAIRED="true"
+        else
+            log_error "Failed to reload com.sentrikat.agent daemon"
+            HEALTH_STATUS="error"
+        fi
+    fi
+
+    if ! launchctl list 2>/dev/null | grep -q com.sentrikat.heartbeat; then
+        log_warn "LaunchDaemon com.sentrikat.heartbeat not loaded, attempting repair"
+        if launchctl load "$HEARTBEAT_PLIST" 2>/dev/null; then
+            log_warn "Repaired com.sentrikat.heartbeat daemon"
+            HEALTH_REPAIRED="true"
+        else
+            log_error "Failed to reload com.sentrikat.heartbeat daemon"
+            HEALTH_STATUS="error"
+        fi
+    fi
+
+    # Check config file is parseable
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if ! (source "$CONFIG_FILE") 2>/dev/null; then
+            log_warn "Config file exists but is not parseable"
+            [[ "$HEALTH_STATUS" == "healthy" ]] && HEALTH_STATUS="degraded"
+        fi
+    else
+        log_warn "Config file does not exist"
+        [[ "$HEALTH_STATUS" == "healthy" ]] && HEALTH_STATUS="degraded"
+    fi
+
+    # Check disk space on / (warn if < 100MB free)
+    local free_kb
+    free_kb=$(df -k / 2>/dev/null | awk 'NR==2 {print $4}')
+    if [[ -n "$free_kb" && "$free_kb" -lt 102400 ]]; then
+        log_warn "Low disk space on /: ${free_kb}KB free (< 100MB)"
+        [[ "$HEALTH_STATUS" == "healthy" ]] && HEALTH_STATUS="degraded"
+    fi
+
+    if [[ "$HEALTH_REPAIRED" == "true" ]]; then
+        log_info "Health check completed with repairs (status: $HEALTH_STATUS)"
+    else
+        log_info "Health check completed (status: $HEALTH_STATUS)"
+    fi
+
+    [[ "$HEALTH_STATUS" == "healthy" ]] && return 0 || return 1
+}
+
 send_heartbeat() {
     local endpoint="${SERVER_URL}/api/agent/heartbeat"
+    local max_retries=3
+    local retry_delay=5
+    local attempt=1
+    local uptime_seconds
+    uptime_seconds=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || sysctl -n kern.boottime 2>/dev/null | awk '{print systime() - $4}' | tr -d ',')
 
-    curl -s -X POST "$endpoint" \
-        -H "X-Agent-Key: $API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\"}" \
-        --max-time 30 >/dev/null 2>&1
+    while [[ $attempt -le $max_retries ]]; do
+        local http_code
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
+            -H "X-Agent-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"${HEALTH_STATUS:-unknown}\", \"uptime_seconds\": ${uptime_seconds:-0}}" \
+            --max-time 30 2>/dev/null) || http_code="000"
+
+        if [[ "$http_code" =~ ^2 ]]; then
+            log_info "Heartbeat sent successfully (HTTP $http_code)"
+            return 0
+        fi
+
+        if [[ $attempt -lt $max_retries ]]; then
+            log_warn "Heartbeat failed (HTTP $http_code), retry $attempt/$max_retries in ${retry_delay}s"
+            sleep $retry_delay
+            retry_delay=$((retry_delay * 2))
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    log_error "Failed to send heartbeat after $max_retries attempts (last HTTP $http_code)"
+    return 1
 }
 
 check_commands() {
@@ -1147,11 +1250,32 @@ auto_update_agent() {
     if mv "$tmp_script" "$script_path" 2>/dev/null || sudo mv "$tmp_script" "$script_path" 2>/dev/null; then
         log_info "Agent updated successfully to ${target_version}"
 
-        # Restart the launchd services if installed
-        if launchctl list | grep -q com.sentrikat.heartbeat 2>/dev/null; then
-            log_info "Restarting agent heartbeat service..."
-            sudo launchctl unload /Library/LaunchDaemons/com.sentrikat.heartbeat.plist 2>/dev/null || true
-            sudo launchctl load /Library/LaunchDaemons/com.sentrikat.heartbeat.plist 2>/dev/null || true
+        # Verify LaunchDaemon plists point to the correct script path
+        local plists_updated="false"
+        for plist in "$LAUNCHDAEMON_PLIST" "$HEARTBEAT_PLIST"; do
+            if [[ -f "$plist" ]]; then
+                if ! grep -q "<string>${script_path}</string>" "$plist" 2>/dev/null; then
+                    log_warn "Plist $plist has incorrect ProgramArguments path, updating..."
+                    # Update ProgramArguments to point to correct script path
+                    if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
+                        /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 ${script_path}" "$plist" 2>/dev/null || true
+                    else
+                        sed -i.tmp "s|<string>/[^<]*sentrikat-agent[^<]*</string>|<string>${script_path}</string>|" "$plist" 2>/dev/null || true
+                        rm -f "${plist}.tmp" 2>/dev/null
+                    fi
+                    plists_updated="true"
+                    log_info "Updated plist $plist with correct script path"
+                fi
+            fi
+        done
+
+        # Restart the launchd services if installed (or if plists were updated)
+        if [[ "$plists_updated" == "true" ]] || launchctl list | grep -q com.sentrikat.heartbeat 2>/dev/null; then
+            log_info "Restarting agent launchd services..."
+            sudo launchctl unload "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+            sudo launchctl load "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+            sudo launchctl unload "$HEARTBEAT_PLIST" 2>/dev/null || true
+            sudo launchctl load "$HEARTBEAT_PLIST" 2>/dev/null || true
         fi
     else
         log_error "Failed to replace agent script (permission denied)"
@@ -1283,6 +1407,9 @@ heartbeat_mode() {
         log_error "SERVER_URL and API_KEY are required"
         exit 1
     fi
+
+    # Run self-health check before heartbeat
+    check_agent_health || log_warn "Health check reported non-healthy status: $HEALTH_STATUS"
 
     # Send heartbeat to keep agent online in dashboard
     send_heartbeat
