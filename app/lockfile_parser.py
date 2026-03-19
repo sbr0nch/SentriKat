@@ -331,7 +331,7 @@ def _parse_pnpm_lock(content):
 
             # Package entry: /name@version: or /@scope/name@version:
             # Also handles quoted format: '/@scope/name@version':
-            match = re.match(r"^\s+['\"]?/?(@?[^@'\"]+)@([^:'\"(]+)", stripped)
+            match = re.match(r"^\s+['\"]?/?(@?[^@'\"]{1,500})@([^:'\"(\s]{1,200})", stripped)
             if match:
                 name = match.group(1).rstrip('/')
                 version = match.group(2).strip()

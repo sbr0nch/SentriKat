@@ -5087,6 +5087,8 @@ def report_dependency_scan():
             'Pipfile.lock', 'poetry.lock', 'Cargo.lock',
             'go.sum', 'go.mod', 'Gemfile.lock',
             'composer.lock', 'packages.lock.json',
+            'requirements.txt', 'requirements-dev.txt', 'requirements-prod.txt',
+            'pyproject.toml', 'setup.cfg', 'uv.lock',
         }
         if filename not in ALLOWED_LOCKFILES:
             logger.warning(f"Rejected unknown lockfile name: {filename[:100]}")

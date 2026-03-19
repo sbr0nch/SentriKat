@@ -474,6 +474,9 @@
                     <button type="button" class="btn btn-setup" onclick="runInitialSync()" id="syncBtn">
                         Start Sync <i class="bi bi-cloud-download"></i>
                     </button>
+                    <button type="button" class="btn btn-outline-secondary ms-2" onclick="nextStep()" id="skipSyncBtn">
+                        Skip for now <i class="bi bi-arrow-right"></i>
+                    </button>
                 </div>
 
                 <div id="syncProgress" class="mt-4" style="display: none;">
@@ -497,7 +500,7 @@
                     <p class="lead">SentriKat is ready to use.</p>
 
                     <div class="mt-4">
-                        <a href="/login" class="btn btn-setup btn-lg">
+                        <a href="#" class="btn btn-setup btn-lg" onclick="completeSetup(); return false;">
                             Continue <i class="bi bi-arrow-right"></i>
                         </a>
                     </div>
@@ -791,6 +794,16 @@
                 btn.disabled = false;
                 btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
             }
+        }
+
+        // Complete setup and redirect to login
+        async function completeSetup() {
+            try {
+                await fetch('/api/setup/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+                // Even if this fails, redirect to login - the session will expire
+            }
+            window.location.href = '/login';
         }
 
         // Initialize
