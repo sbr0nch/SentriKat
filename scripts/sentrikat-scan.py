@@ -63,8 +63,9 @@ VERSION = "1.0.0"
 
 LOCKFILE_NAMES = [
     "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-    "Pipfile.lock", "poetry.lock", "Cargo.lock",
-    "go.sum", "go.mod", "Gemfile.lock",
+    "Pipfile.lock", "poetry.lock", "requirements.txt",
+    "pyproject.toml", "setup.cfg", "uv.lock",
+    "Cargo.lock", "go.sum", "go.mod", "Gemfile.lock",
     "composer.lock", "packages.lock.json",
 ]
 
@@ -248,6 +249,140 @@ def init_config(scan_path):
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Git hook integration
+# ────────────────────────────────────────────────────────────────────────────
+
+def install_hook(scan_path, hook_type="pre-commit"):
+    """Install a git hook that runs sentrikat-scan before commit/push."""
+    root = Path(scan_path).resolve()
+    git_dir = root / ".git"
+
+    if not git_dir.is_dir():
+        error("Not a git repository (no .git directory found)")
+        info("Run this command from your project root directory.")
+        sys.exit(1)
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+
+    hook_path = hooks_dir / hook_type
+    scanner_path = Path(__file__).resolve()
+
+    # Determine how to invoke the scanner
+    # If installed as pip package, use the entry point; otherwise use the script path
+    if "site-packages" in str(scanner_path):
+        scan_cmd = "sentrikat-scan"
+    else:
+        scan_cmd = f"python3 {scanner_path}"
+
+    hook_content = f"""#!/bin/sh
+# SentriKat dependency vulnerability scanner
+# Installed by: sentrikat-scan --install-hook
+# Hook type: {hook_type}
+# To remove: delete this file or run sentrikat-scan --uninstall-hook
+
+# Only scan if lockfiles have changed (for pre-commit)
+# This keeps the hook fast - no network call if deps haven't changed
+LOCKFILES="package-lock.json yarn.lock pnpm-lock.yaml Pipfile.lock poetry.lock requirements.txt pyproject.toml setup.cfg uv.lock Cargo.lock go.sum go.mod Gemfile.lock composer.lock packages.lock.json"
+
+if [ "{hook_type}" = "pre-commit" ]; then
+    CHANGED=0
+    for f in $LOCKFILES; do
+        if git diff --cached --name-only | grep -q "$f"; then
+            CHANGED=1
+            break
+        fi
+    done
+    if [ $CHANGED -eq 0 ]; then
+        exit 0  # No lockfiles changed, skip scan
+    fi
+fi
+
+echo ""
+echo "🔒 SentriKat: Scanning dependencies for vulnerabilities..."
+echo ""
+
+{scan_cmd} --path "{root}" --fail-on critical
+
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "❌ SentriKat found critical vulnerabilities in your dependencies."
+    echo "   Fix them before committing, or skip with: git commit --no-verify"
+    echo ""
+fi
+
+exit $EXIT_CODE
+"""
+
+    # Check for existing hook
+    if hook_path.exists():
+        existing = hook_path.read_text(encoding="utf-8", errors="replace")
+        if "sentrikat-scan" in existing:
+            print(f"\n{Color.BOLD}SentriKat git hook already installed{Color.RESET}")
+            print(f"  Hook: {hook_path}")
+            resp = input("  Reinstall? [y/N]: ").strip().lower()
+            if resp != "y":
+                print("  Aborted.")
+                return
+        else:
+            print(f"\n{Color.YELLOW}Warning: A {hook_type} hook already exists.{Color.RESET}")
+            print(f"  Path: {hook_path}")
+            resp = input("  Overwrite it? [y/N]: ").strip().lower()
+            if resp != "y":
+                print("  Aborted. You can manually add sentrikat-scan to your existing hook.")
+                return
+
+    try:
+        hook_path.write_text(hook_content, encoding="utf-8")
+        hook_path.chmod(0o755)
+    except OSError as e:
+        error(f"Cannot write hook: {e}")
+        sys.exit(1)
+
+    print(f"\n{Color.GREEN}{Color.BOLD}Git {hook_type} hook installed!{Color.RESET}")
+    print(f"  Hook: {hook_path}")
+    print()
+    print(f"  How it works:")
+    print(f"  - Runs {Color.BOLD}sentrikat-scan --fail-on critical{Color.RESET} before each commit")
+    print(f"  - Only triggers when lock files change (fast skip otherwise)")
+    print(f"  - Blocks commit if CRITICAL vulnerabilities are found")
+    print(f"  - Skip with: {Color.DIM}git commit --no-verify{Color.RESET}")
+    print()
+    print(f"  To change severity threshold, edit: {hook_path}")
+    print(f"  To remove: {Color.DIM}sentrikat-scan --uninstall-hook{Color.RESET}")
+    print()
+
+
+def uninstall_hook(scan_path, hook_type="pre-commit"):
+    """Remove the SentriKat git hook."""
+    root = Path(scan_path).resolve()
+    hook_path = root / ".git" / "hooks" / hook_type
+
+    if not hook_path.exists():
+        info(f"No {hook_type} hook found.")
+        return
+
+    try:
+        content = hook_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        content = ""
+
+    if "sentrikat-scan" not in content:
+        info(f"The {hook_type} hook was not installed by SentriKat.")
+        return
+
+    try:
+        hook_path.unlink()
+    except OSError as e:
+        error(f"Cannot remove hook: {e}")
+        sys.exit(1)
+
+    success(f"Git {hook_type} hook removed.")
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Connection testing
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -380,6 +515,20 @@ def _test_connection(server_url, api_key, verbose=False):
 # Lockfile discovery and reading
 # ────────────────────────────────────────────────────────────────────────────
 
+def _has_dependency_sections(path):
+    """Check if a pyproject.toml or setup.cfg has dependency-related content."""
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")[:8192]
+        name = path.name.lower()
+        if name == "pyproject.toml":
+            return ("dependencies" in content or "[tool.poetry" in content)
+        if name == "setup.cfg":
+            return "install_requires" in content
+        return True
+    except OSError:
+        return False
+
+
 def find_lockfiles(root_path, max_depth=MAX_DEPTH, verbose=False):
     """Find lockfiles recursively up to max_depth."""
     found = []
@@ -387,7 +536,10 @@ def find_lockfiles(root_path, max_depth=MAX_DEPTH, verbose=False):
 
     debug(f"Searching for lockfiles in {root} (max depth: {max_depth})", verbose)
 
-    for lockfile_name in LOCKFILE_NAMES:
+    # Also search for requirements-*.txt variants
+    search_names = list(LOCKFILE_NAMES) + ["requirements-dev.txt", "requirements-prod.txt"]
+
+    for lockfile_name in search_names:
         for path in root.rglob(lockfile_name):
             # Respect max depth
             try:
@@ -425,6 +577,12 @@ def find_lockfiles(root_path, max_depth=MAX_DEPTH, verbose=False):
                     continue
             except OSError:
                 continue
+
+            # Skip pyproject.toml/setup.cfg without dependency sections
+            if path.name.lower() in ("pyproject.toml", "setup.cfg"):
+                if not _has_dependency_sections(path):
+                    debug(f"Skipping {rel} (no dependency sections found)", verbose)
+                    continue
 
             found.append(path)
 
@@ -647,6 +805,13 @@ Examples:
   # CI/CD mode (exit non-zero on high/critical vulns)
   sentrikat-scan --fail-on high
 
+  # Install git hook (auto-scan before every commit)
+  sentrikat-scan --install-hook
+  sentrikat-scan --install-hook --hook-type pre-push
+
+  # Remove git hook
+  sentrikat-scan --uninstall-hook
+
   # Environment variables (for CI/CD secrets)
   export SENTRIKAT_SERVER=https://sentrikat.example.com
   export SENTRIKAT_API_KEY=sk_...
@@ -714,6 +879,22 @@ Examples:
         help="Show resolved configuration and exit",
     )
     parser.add_argument(
+        "--install-hook",
+        action="store_true",
+        help="Install git pre-commit hook for automatic dependency scanning",
+    )
+    parser.add_argument(
+        "--uninstall-hook",
+        action="store_true",
+        help="Remove the SentriKat git pre-commit hook",
+    )
+    parser.add_argument(
+        "--hook-type",
+        choices=["pre-commit", "pre-push"],
+        default="pre-commit",
+        help="Git hook type to install (default: pre-commit)",
+    )
+    parser.add_argument(
         "--no-color",
         action="store_true",
         help="Disable colored output",
@@ -733,6 +914,15 @@ Examples:
     # Handle --init early
     if args.init:
         init_config(args.path)
+        sys.exit(0)
+
+    # Handle --install-hook / --uninstall-hook early (no server/key needed)
+    if args.install_hook:
+        install_hook(args.path, hook_type=args.hook_type)
+        sys.exit(0)
+
+    if args.uninstall_hook:
+        uninstall_hook(args.path, hook_type=args.hook_type)
         sys.exit(0)
 
     # ── Resolve configuration (priority: CLI args > env vars > config file) ──
