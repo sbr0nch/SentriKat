@@ -70,7 +70,11 @@ log() {
         mv "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || true
     fi
 
-    echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
+    # Write to log, fallback to /tmp if permission denied
+    if ! echo "[$timestamp] [$level] $message" >> "$LOG_FILE" 2>/dev/null; then
+        local fallback_log="/tmp/sentrikat-agent.log"
+        echo "[$timestamp] [$level] $message" >> "$fallback_log" 2>/dev/null || true
+    fi
 
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         case "$level" in

@@ -72,21 +72,46 @@ function Write-Log {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logEntry = "[$timestamp] [$Level] $Message"
 
-    # Ensure log directory exists
-    $logDir = Split-Path $LogFile -Parent
-    if (!(Test-Path $logDir)) {
-        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    # Try primary log location, fallback to user temp if permission denied
+    $logTarget = $LogFile
+    try {
+        # Ensure log directory exists
+        $logDir = Split-Path $logTarget -Parent
+        if (!(Test-Path $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
+
+        # Test write access before proceeding
+        [System.IO.File]::OpenWrite($logTarget).Close()
+    }
+    catch {
+        # Fallback to user-writable temp location
+        $logTarget = "$env:TEMP\sentrikat-agent.log"
+        try {
+            $fallbackDir = Split-Path $logTarget -Parent
+            if (!(Test-Path $fallbackDir)) {
+                New-Item -ItemType Directory -Path $fallbackDir -Force | Out-Null
+            }
+        } catch {}
     }
 
-    # Write to log file (rotate if > 10MB, keep up to 3 rotated logs)
-    if ((Test-Path $LogFile) -and ((Get-Item $LogFile).Length -gt 10MB)) {
-        if (Test-Path "$LogFile.3") { Remove-Item "$LogFile.3" -Force -ErrorAction SilentlyContinue }
-        if (Test-Path "$LogFile.2") { Move-Item "$LogFile.2" "$LogFile.3" -Force }
-        if (Test-Path "$LogFile.1") { Move-Item "$LogFile.1" "$LogFile.2" -Force }
-        Move-Item $LogFile "$LogFile.1" -Force
-    }
+    try {
+        # Rotate if > 10MB, keep up to 3 rotated logs
+        if ((Test-Path $logTarget) -and ((Get-Item $logTarget -ErrorAction SilentlyContinue).Length -gt 10MB)) {
+            if (Test-Path "$logTarget.3") { Remove-Item "$logTarget.3" -Force -ErrorAction SilentlyContinue }
+            if (Test-Path "$logTarget.2") { Move-Item "$logTarget.2" "$logTarget.3" -Force -ErrorAction SilentlyContinue }
+            if (Test-Path "$logTarget.1") { Move-Item "$logTarget.1" "$logTarget.2" -Force -ErrorAction SilentlyContinue }
+            Move-Item $logTarget "$logTarget.1" -Force -ErrorAction SilentlyContinue
+        }
 
-    Add-Content -Path $LogFile -Value $logEntry
+        Add-Content -Path $logTarget -Value $logEntry -ErrorAction Stop
+    }
+    catch {
+        # Last resort: write to Event Log if available, otherwise silently continue
+        try {
+            Write-EventLog -LogName Application -Source "SentriKat" -EventId 1000 -EntryType Warning -Message $logEntry -ErrorAction SilentlyContinue
+        } catch {}
+    }
 
     if ($VerboseOutput) {
         switch ($Level) {
@@ -1764,6 +1789,14 @@ function Uninstall-Agent {
 # ============================================================================
 
 function Main {
+    # Check for admin privileges early - required for Install, InstallService, and ProgramData access
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin -and ($Install -or $InstallService -or $Uninstall)) {
+        Write-Host "ERROR: This operation requires Administrator privileges." -ForegroundColor Red
+        Write-Host "Please right-click PowerShell and select 'Run as Administrator', then try again." -ForegroundColor Yellow
+        exit 1
+    }
+
     Write-Log "SentriKat Agent v$AgentVersion starting..."
 
     # Load configuration
