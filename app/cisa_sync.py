@@ -2,7 +2,7 @@ import requests
 import json
 from datetime import datetime, timedelta
 from app import db
-from app.models import Vulnerability, SyncLog, Product, SystemSettings, Organization
+from app.models import Vulnerability, SyncLog, Product, SystemSettings, Organization, ContainerImage, ContainerVulnerability
 from app.nvd_api import fetch_cvss_data
 from config import Config
 import urllib3
@@ -345,6 +345,116 @@ def send_org_webhook(org, new_cves_count, critical_count, matches_count, matches
     return None  # No org-specific webhook, will use global
 
 
+def _send_container_webhook(org, container_vulns, critical_count):
+    """Send webhook notification for container vulnerabilities for a specific org."""
+    from datetime import datetime
+
+    proxies = Config.get_proxies()
+    verify_ssl = Config.get_verify_ssl()
+
+    if not org.webhook_enabled or not org.webhook_url:
+        return None
+
+    try:
+        webhook_config = org.get_webhook_config()
+        webhook_url = webhook_config['url']
+        webhook_format = webhook_config['format'] or 'slack'
+        webhook_token = webhook_config['token']
+
+        if not webhook_url or not webhook_url.startswith(('http://', 'https://')):
+            return None
+
+        headers = {'Content-Type': 'application/json'}
+        if webhook_token:
+            headers['Authorization'] = f'Bearer {webhook_token}'
+            headers['X-Auth-Token'] = webhook_token
+
+        # Only send for new (never-alerted) container vulns
+        new_vulns = [v for v in container_vulns if v.first_alerted_at is None]
+        if not new_vulns:
+            return None
+
+        # Deduplicate CVE IDs
+        cve_ids = list(dict.fromkeys([v.vuln_id for v in new_vulns]))
+        cve_count = len(cve_ids)
+        if cve_count <= 5:
+            cve_list_str = ", ".join(cve_ids)
+        else:
+            cve_list_str = ", ".join(cve_ids[:5]) + f" +{cve_count - 5} more"
+
+        # Collect affected image names
+        image_names = set()
+        for v in new_vulns:
+            img = ContainerImage.query.get(v.container_image_id)
+            if img:
+                image_names.add(img.full_name)
+        images_str = ", ".join(list(image_names)[:4])
+        if len(image_names) > 4:
+            images_str += f" +{len(image_names) - 4} more"
+
+        if webhook_format in ('slack', 'rocketchat'):
+            text = f"{'🚨' if critical_count > 0 else '🐳'} *SentriKat Container Security Alert*\n"
+            text += f"*Organization:* {org.display_name}\n"
+            text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += f"*{cve_count} new container CVE{'s' if cve_count != 1 else ''} detected*\n"
+            if critical_count > 0:
+                text += f"🔴 *{critical_count} Critical severity*\n"
+            text += f"\n*CVEs:* {cve_list_str}\n"
+            if images_str:
+                text += f"*Images:* {images_str}\n"
+            payload = {"text": text}
+        elif webhook_format == 'discord':
+            content = f"{'🚨' if critical_count > 0 else '🐳'} **SentriKat Container Security Alert**\n"
+            content += f"**Organization:** {org.display_name}\n"
+            content += f"**{cve_count} new container CVE{'s' if cve_count != 1 else ''} detected**\n"
+            if critical_count > 0:
+                content += f"🔴 **{critical_count} Critical severity**\n"
+            content += f"\n**CVEs:** {cve_list_str}\n"
+            if images_str:
+                content += f"**Images:** {images_str}\n"
+            payload = {"content": content}
+        elif webhook_format == 'teams':
+            facts = [
+                {"name": "Organization", "value": org.display_name},
+                {"name": "New Container CVEs", "value": str(cve_count)},
+                {"name": "CVE IDs", "value": cve_list_str},
+            ]
+            if critical_count > 0:
+                facts.append({"name": "Critical Severity", "value": str(critical_count)})
+            if images_str:
+                facts.append({"name": "Affected Images", "value": images_str})
+            payload = {
+                "@type": "MessageCard",
+                "themeColor": "dc2626" if critical_count > 0 else "0891b2",
+                "summary": f"SentriKat: {cve_count} new container CVEs for {org.display_name}",
+                "sections": [{"activityTitle": f"🐳 SentriKat Container Security Alert — {org.display_name}", "facts": facts, "markdown": True}]
+            }
+        else:
+            payload = {
+                "text": f"SentriKat Container Alert: {cve_count} new container CVEs for {org.display_name}: {cve_list_str}",
+                "organization": org.display_name,
+                "alert_type": "container",
+                "new_cve_count": cve_count,
+                "cve_ids": cve_ids,
+                "critical_count": critical_count,
+                "affected_images": list(image_names),
+            }
+
+        import requests
+        response = requests.post(webhook_url, json=payload, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)
+
+        if response.status_code in [200, 204]:
+            now = datetime.utcnow()
+            for v in new_vulns:
+                v.first_alerted_at = now
+            db.session.commit()
+
+        return {'org': org.name, 'type': 'container', 'success': response.status_code in [200, 204], 'new_cves': cve_count}
+    except Exception as e:
+        logger.error(f"Container webhook failed for {org.name}: {e}")
+        return {'org': org.name, 'type': 'container', 'success': False, 'error': str(e)}
+
+
 def send_webhook_notification(new_cves_count, critical_count, total_matches, new_cve_ids=None):
     """Send notifications to configured webhooks (Slack/Teams)
 
@@ -612,6 +722,41 @@ def send_alerts_for_new_matches(since_time, source_label='sync'):
                 if org_webhook_result:
                     webhook_results.append(org_webhook_result)
                     orgs_with_own_webhook.add(org.id)
+
+            # --- Container vulnerability alerts for this org ---
+            try:
+                container_images = ContainerImage.query.filter_by(
+                    organization_id=org.id, active=True
+                ).all()
+                if container_images:
+                    image_ids = [img.id for img in container_images]
+                    container_vulns = ContainerVulnerability.query.filter(
+                        ContainerVulnerability.container_image_id.in_(image_ids),
+                        ContainerVulnerability.acknowledged == False,
+                        ContainerVulnerability.created_at >= since_time
+                    ).all()
+
+                    if container_vulns:
+                        container_result = EmailAlertManager.send_container_vuln_alert(org, container_vulns)
+                        alert_results.append({
+                            'organization': org.name,
+                            'alert_type': 'container',
+                            'source': source_label,
+                            'result': container_result
+                        })
+
+                        # Send org webhook for container vulns
+                        container_critical = sum(
+                            1 for v in container_vulns
+                            if (v.severity or '').upper() == 'CRITICAL'
+                        )
+                        container_webhook = _send_container_webhook(
+                            org, container_vulns, container_critical
+                        )
+                        if container_webhook:
+                            webhook_results.append(container_webhook)
+            except Exception as ce:
+                logger.error(f"Container alert processing failed for {org.name}: {ce}")
 
         except Exception as e:
             logger.error(f"Alert processing failed for {org.name} ({source_label}): {e}")

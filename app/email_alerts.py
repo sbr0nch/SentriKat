@@ -11,7 +11,7 @@ import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date, time as dt_time
-from app.models import Organization, VulnerabilityMatch, AlertLog, Vulnerability
+from app.models import Organization, VulnerabilityMatch, AlertLog, Vulnerability, ContainerImage, ContainerVulnerability
 from app import db
 from config import Config
 
@@ -612,6 +612,279 @@ class EmailAlertManager:
 </html>
 """
 
+        return html
+
+    @staticmethod
+    def send_container_vuln_alert(organization, container_vulns):
+        """Send email alert for new container vulnerabilities.
+
+        Args:
+            organization: Organization object with SMTP settings
+            container_vulns: List of ContainerVulnerability objects that are new/unacknowledged
+
+        Returns:
+            dict: Status result
+        """
+        if not container_vulns:
+            return {'status': 'skipped', 'reason': 'No container vulnerabilities'}
+
+        # Get SMTP config
+        smtp_config = organization.get_smtp_config()
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            from app.settings_api import get_setting
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587') or '587'),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat Alerts')
+            }
+
+        if not smtp_config['host'] or not smtp_config['from_email']:
+            return {'status': 'error', 'reason': 'SMTP not configured'}
+
+        # Get recipients
+        recipients = []
+        if organization.notification_emails:
+            try:
+                import json as _json
+                parsed = _json.loads(organization.notification_emails)
+                if isinstance(parsed, str):
+                    parsed = _json.loads(parsed)
+                recipients = parsed if isinstance(parsed, list) else []
+            except Exception:
+                recipients = []
+
+        if not recipients:
+            return {'status': 'error', 'reason': 'No recipients configured'}
+
+        now = datetime.utcnow()
+
+        # Filter: skip snoozed vulns
+        filtered = [v for v in container_vulns if not v.snoozed_until or v.snoozed_until <= now]
+        if not filtered:
+            return {'status': 'skipped', 'reason': 'All container vulns snoozed'}
+
+        # Separate new vs already-alerted
+        new_vulns = [v for v in filtered if v.first_alerted_at is None]
+        total_count = len(filtered)
+        new_count = len(new_vulns)
+
+        # Apply org severity preferences
+        severity_filtered = []
+        for v in filtered:
+            sev = (v.severity or 'UNKNOWN').upper()
+            # Cross-reference with KEV for exploitation status
+            kev = Vulnerability.query.filter_by(cve_id=v.vuln_id).first() if v.vuln_id.startswith('CVE-') else None
+
+            should_alert = False
+            if kev and kev.is_actively_exploited:
+                should_alert = True
+            elif organization.alert_on_critical and sev == 'CRITICAL':
+                should_alert = True
+            elif organization.alert_on_high and sev == 'HIGH':
+                should_alert = True
+            elif organization.alert_on_ransomware and kev and kev.known_ransomware:
+                should_alert = True
+            elif organization.alert_on_new_cve and v.first_alerted_at is None:
+                should_alert = True
+
+            if should_alert:
+                severity_filtered.append(v)
+
+        if not severity_filtered:
+            return {'status': 'skipped', 'reason': 'No container vulns meet alert criteria'}
+
+        new_vulns = [v for v in severity_filtered if v.first_alerted_at is None]
+        new_count = len(new_vulns)
+
+        # Build subject
+        subject = f"🐳 SentriKat Alert: {new_count} New Container CVE{'s' if new_count != 1 else ''} ({len(severity_filtered)} total)"
+
+        # Build email body
+        body = EmailAlertManager._build_container_alert_html(organization, severity_filtered, new_count)
+
+        try:
+            EmailAlertManager._send_email(smtp_config, recipients, subject, body)
+
+            # Mark new vulns as alerted
+            now = datetime.utcnow()
+            for v in new_vulns:
+                v.first_alerted_at = now
+            db.session.commit()
+
+            EmailAlertManager._log_alert(organization.id, 'container_vuln', len(severity_filtered), len(recipients), 'success', None)
+            return {'status': 'success', 'sent_to': len(recipients), 'container_vulns_count': len(severity_filtered), 'new_count': new_count}
+
+        except Exception as e:
+            EmailAlertManager._log_alert(organization.id, 'container_vuln', len(severity_filtered), len(recipients), 'failed', str(e))
+            return {'status': 'error', 'reason': str(e)}
+
+    @staticmethod
+    def _build_container_alert_html(organization, vulns, new_count=0):
+        """Build HTML email for container vulnerability alerts."""
+        app_url = get_app_url()
+        total = len(vulns)
+
+        # Group by severity
+        sev_counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+        for v in vulns:
+            sev = (v.severity or 'UNKNOWN').upper()
+            if sev in sev_counts:
+                sev_counts[sev] += 1
+
+        # Group by image
+        by_image = {}
+        for v in vulns:
+            img = ContainerImage.query.get(v.container_image_id)
+            if img:
+                key = img.full_name
+                if key not in by_image:
+                    by_image[key] = {'image': img, 'vulns': []}
+                by_image[key]['vulns'].append(v)
+
+        # Build affected images table rows
+        images_html = ""
+        for img_name, data in sorted(by_image.items(), key=lambda x: len(x[1]['vulns']), reverse=True)[:5]:
+            count = len(data['vulns'])
+            images_html += f"""
+                <tr>
+                    <td style="padding: 8px 12px; border-bottom: 1px solid #f3f4f6;">
+                        <span style="color: #111827; font-weight: 500;">🐳 {img_name}</span>
+                    </td>
+                    <td style="padding: 8px 12px; border-bottom: 1px solid #f3f4f6; text-align: right;">
+                        <span style="background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{count} CVE{'s' if count > 1 else ''}</span>
+                    </td>
+                </tr>"""
+
+        # Build vulnerability cards (top 10)
+        vuln_cards = ""
+        priority_colors = {'CRITICAL': '#dc2626', 'HIGH': '#ea580c', 'MEDIUM': '#ca8a04', 'LOW': '#059669'}
+        for v in vulns[:10]:
+            sev = (v.severity or 'UNKNOWN').upper()
+            border_color = priority_colors.get(sev, '#6b7280')
+            img = ContainerImage.query.get(v.container_image_id)
+            img_name = img.full_name if img else 'Unknown'
+
+            vuln_cards += f"""
+                    <tr>
+                        <td style="padding: 0 32px 16px 32px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border: 1px solid #e5e7eb; border-radius: 6px; border-left: 3px solid {border_color};">
+                                <tr>
+                                    <td style="padding: 16px;">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                            <tr>
+                                                <td>
+                                                    <a href="{v.primary_url or f'https://nvd.nist.gov/vuln/detail/{v.vuln_id}'}" style="font-size: 15px; font-weight: 700; color: #1e40af; text-decoration: none;">{v.vuln_id}</a>
+                                                    <span style="background: {border_color}; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;">{sev}</span>
+                                                </td>
+                                                <td align="right">
+                                                    {f'<span style="font-size: 12px; color: #6b7280;">CVSS {v.cvss_score:.1f}</span>' if v.cvss_score else ''}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                        <div style="margin-top: 8px; font-size: 13px;">
+                                            <span style="color: #6b7280;">Image:</span> <span style="color: #111827; font-weight: 500;">🐳 {img_name}</span>
+                                        </div>
+                                        <div style="margin-top: 4px; font-size: 13px;">
+                                            <span style="color: #6b7280;">Package:</span> <code style="font-size: 12px;">{v.pkg_name} {v.pkg_version or ''}</code>
+                                            {f'<span style="color: #059669; font-size: 12px; margin-left: 8px;">Fix: {v.fixed_version}</span>' if v.fixed_version else '<span style="color: #dc2626; font-size: 12px; margin-left: 8px;">No fix available</span>'}
+                                        </div>
+                                        {f'<div style="margin-top: 6px; font-size: 13px; color: #4b5563;">{(v.title or "")[:150]}{"..." if len(v.title or "") > 150 else ""}</div>' if v.title else ''}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
+
+        more_html = ''
+        if len(vulns) > 10:
+            more_html = f"""
+                    <tr>
+                        <td style="padding: 0 32px 24px 32px;">
+                            <div style="background: #f3f4f6; border-radius: 6px; padding: 12px; text-align: center;">
+                                <span style="font-size: 13px; color: #374151;">+ {len(vulns) - 10} more container vulnerabilities - </span>
+                                <a href="{app_url}/containers" style="color: #1e40af; text-decoration: none; font-weight: 600; font-size: 13px;">View all in dashboard</a>
+                            </div>
+                        </td>
+                    </tr>"""
+
+        html = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.5;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc;">
+        <tr><td align="center" style="padding: 32px 16px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <!-- Header -->
+                <tr><td style="padding: 24px 32px; border-bottom: 1px solid #e5e7eb;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+                        <td><span style="font-size: 20px; font-weight: 700; color: #1e40af;">SentriKat</span>
+                            <span style="color: #9ca3af; margin-left: 8px;">|</span>
+                            <span style="color: #6b7280; margin-left: 8px; font-size: 14px;">🐳 Container Security Alert</span></td>
+                        <td align="right"><span style="font-size: 12px; color: #9ca3af;">{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</span></td>
+                    </tr></table>
+                </td></tr>
+                <!-- Summary -->
+                <tr><td style="padding: 32px;">
+                    <div style="margin-bottom: 16px;">
+                        <span style="display: inline-block; background: #1e40af; color: #ffffff; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; text-transform: uppercase;">{organization.display_name}</span>
+                        <span style="display: inline-block; background: #0891b2; color: #ffffff; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; margin-left: 6px;">CONTAINER SCAN</span>
+                    </div>
+                    <div style="background: {'#fef2f2' if sev_counts['CRITICAL'] > 0 else '#fff7ed'}; border: 1px solid {'#fecaca' if sev_counts['CRITICAL'] > 0 else '#fed7aa'}; border-radius: 6px; padding: 16px 20px; margin-bottom: 24px;">
+                        <span style="font-size: 18px; font-weight: 700; color: #991b1b;">
+                            {new_count} New Container CVE{'s' if new_count != 1 else ''} ({total} total unacknowledged)
+                        </span>
+                        <p style="margin: 4px 0 0 0; font-size: 14px; color: #7f1d1d;">
+                            Found in container images for <strong>{organization.display_name}</strong>
+                        </p>
+                    </div>
+                    <!-- Stats -->
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom: 24px;"><tr>
+                        <td width="25%" style="text-align: center; padding: 12px 8px;">
+                            <div style="font-size: 28px; font-weight: 700; color: #059669;">{new_count}</div>
+                            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">New</div></td>
+                        <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
+                            <div style="font-size: 28px; font-weight: 700; color: #dc2626;">{sev_counts['CRITICAL']}</div>
+                            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Critical</div></td>
+                        <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
+                            <div style="font-size: 28px; font-weight: 700; color: #ea580c;">{sev_counts['HIGH']}</div>
+                            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">High</div></td>
+                        <td width="25%" style="text-align: center; padding: 12px 8px; border-left: 1px solid #e5e7eb;">
+                            <div style="font-size: 28px; font-weight: 700; color: #374151;">{len(by_image)}</div>
+                            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Images</div></td>
+                    </tr></table>
+                    <!-- Affected Images -->
+                    <div style="margin-bottom: 24px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">Affected Container Images</div>
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
+                            {images_html}
+                            {f'<tr><td colspan="2" style="padding: 8px 12px; text-align: center;"><span style="color: #6b7280; font-size: 12px;">+ {len(by_image) - 5} more images</span></td></tr>' if len(by_image) > 5 else ''}
+                        </table>
+                    </div>
+                    <div style="text-align: center; margin-bottom: 8px;">
+                        <a href="{app_url}/containers" style="display: inline-block; background: #1e40af; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px;">View Container Security</a>
+                    </div>
+                </td></tr>
+                <tr><td style="padding: 0 32px;"><div style="height: 1px; background: #e5e7eb;"></div></td></tr>
+                <tr><td style="padding: 24px 32px 16px 32px;">
+                    <span style="font-size: 14px; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: 0.5px;">Container Vulnerability Details</span>
+                </td></tr>
+                {vuln_cards}
+                {more_html}
+                <!-- Footer -->
+                <tr><td style="padding: 24px 32px; border-top: 1px solid #e5e7eb; text-align: center;">
+                    <p style="margin: 0; font-size: 12px; color: #9ca3af;">Automated container scan alert from SentriKat - {organization.display_name}</p>
+                    <p style="margin: 8px 0 0 0; font-size: 11px; color: #d1d5db;">Do not reply to this email</p>
+                </td></tr>
+            </table>
+        </td></tr>
+    </table>
+</body></html>"""
         return html
 
     @staticmethod
