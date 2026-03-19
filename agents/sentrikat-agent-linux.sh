@@ -5,7 +5,7 @@
 # Silent daemon agent that collects software inventory from Linux endpoints
 # and reports to a SentriKat server. Designed to run as a systemd service.
 #
-# Version: 1.4.0
+# Version: 1.5.0
 # Requires: bash, curl, jq (optional for JSON parsing)
 #
 # Usage:
@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.4.0"
+AGENT_VERSION="1.5.0"
 CONFIG_DIR="/etc/sentrikat"
 CONFIG_FILE="${CONFIG_DIR}/agent.conf"
 LOG_FILE="/var/log/sentrikat-agent.log"
@@ -62,9 +62,12 @@ log() {
     # Ensure log directory exists
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 
-    # Rotate log if > 10MB
+    # Rotate log if > 10MB (keep up to 3 rotated logs)
     if [[ -f "$LOG_FILE" ]] && [[ $(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null) -gt 10485760 ]]; then
-        mv "$LOG_FILE" "${LOG_FILE}.old" 2>/dev/null || true
+        rm -f "${LOG_FILE}.3" 2>/dev/null || true
+        [[ -f "${LOG_FILE}.2" ]] && mv "${LOG_FILE}.2" "${LOG_FILE}.3" 2>/dev/null || true
+        [[ -f "${LOG_FILE}.1" ]] && mv "${LOG_FILE}.1" "${LOG_FILE}.2" 2>/dev/null || true
+        mv "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || true
     fi
 
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
@@ -89,7 +92,16 @@ log_error() { log "ERROR" "$1"; }
 load_config() {
     if [[ -f "$CONFIG_FILE" ]]; then
         # shellcheck source=/dev/null
-        source "$CONFIG_FILE"
+        if ! (source "$CONFIG_FILE") 2>/dev/null; then
+            log_warn "Config file $CONFIG_FILE is corrupt or unparseable"
+            if [[ -f "${CONFIG_FILE}.bak" ]]; then
+                log_warn "Recovering from backup config ${CONFIG_FILE}.bak"
+                # shellcheck source=/dev/null
+                source "${CONFIG_FILE}.bak"
+            fi
+        else
+            source "$CONFIG_FILE"
+        fi
     fi
 
     # Command line args override config file
@@ -113,6 +125,11 @@ load_config() {
 save_config() {
     mkdir -p "$CONFIG_DIR" 2>/dev/null || true
     chmod 700 "$CONFIG_DIR"
+
+    # Backup current config before overwriting
+    if [[ -f "$CONFIG_FILE" ]]; then
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null || true
+    fi
 
     cat > "$CONFIG_FILE" << EOF
 # SentriKat Agent Configuration
@@ -1136,14 +1153,88 @@ send_inventory() {
     return 1
 }
 
+HEALTH_STATUS="healthy"
+HEALTH_REPAIRED="false"
+
+check_agent_health() {
+    # Self-health check: verify timers, config, and disk space
+    HEALTH_STATUS="healthy"
+    HEALTH_REPAIRED="false"
+
+    # Check systemd timers
+    for timer in sentrikat-agent.timer sentrikat-heartbeat.timer; do
+        local timer_state
+        timer_state=$(systemctl is-active "$timer" 2>/dev/null || echo "unknown")
+        if [[ "$timer_state" != "active" ]]; then
+            HEALTH_STATUS="degraded"
+            log_warn "Timer $timer is $timer_state, attempting repair..."
+            if systemctl restart "$timer" 2>/dev/null; then
+                log_warn "Repaired $timer"
+                HEALTH_REPAIRED="true"
+            else
+                log_error "Failed to repair $timer"
+                HEALTH_STATUS="error"
+            fi
+        fi
+    done
+
+    # Check config file is parseable
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if ! (source "$CONFIG_FILE") 2>/dev/null; then
+            log_warn "Config file $CONFIG_FILE is not parseable"
+            HEALTH_STATUS="degraded"
+        fi
+    else
+        log_warn "Config file $CONFIG_FILE does not exist"
+        HEALTH_STATUS="degraded"
+    fi
+
+    # Check disk space on log partition (warn if < 100MB free)
+    local log_dir
+    log_dir=$(dirname "$LOG_FILE")
+    local avail_kb
+    avail_kb=$(df -k "$log_dir" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [[ -n "$avail_kb" ]] && [[ "$avail_kb" -lt 102400 ]]; then
+        log_warn "Low disk space on $log_dir: ${avail_kb}KB available (< 100MB)"
+        HEALTH_STATUS="degraded"
+    fi
+
+    if [[ "$HEALTH_STATUS" == "healthy" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 send_heartbeat() {
     local endpoint="${SERVER_URL}/api/agent/heartbeat"
+    local max_retries=3
+    local retry_delay=5
+    local uptime_seconds
+    uptime_seconds=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo "0")
 
-    curl -s -X POST "$endpoint" \
-        -H "X-Agent-Key: $API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\"}" \
-        --max-time 30 >/dev/null 2>&1
+    for ((attempt=1; attempt<=max_retries; attempt++)); do
+        local http_code
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
+            -H "X-Agent-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds}" \
+            --max-time 30 2>/dev/null) || http_code="000"
+
+        if [[ "$http_code" == "200" || "$http_code" == "202" ]]; then
+            log_info "Heartbeat sent successfully (HTTP $http_code)"
+            return 0
+        fi
+
+        if [[ $attempt -lt $max_retries ]]; then
+            log_warn "Heartbeat attempt $attempt failed (HTTP $http_code), retrying in ${retry_delay}s..."
+            sleep $retry_delay
+            retry_delay=$((retry_delay * 2))
+        fi
+    done
+
+    log_error "Heartbeat failed after $max_retries attempts (last HTTP $http_code)"
+    return 1
 }
 
 auto_update_agent() {
@@ -1194,6 +1285,19 @@ auto_update_agent() {
     chmod +x "$tmp_script"
     if mv "$tmp_script" "$script_path" 2>/dev/null; then
         log_info "Agent updated successfully to ${target_version}"
+
+        # Verify systemd service ExecStart paths point to the correct location
+        for svc_file in "$SYSTEMD_SERVICE" "$HEARTBEAT_SERVICE"; do
+            if [[ -f "$svc_file" ]]; then
+                local current_exec
+                current_exec=$(grep -o 'ExecStart=[^ ]*' "$svc_file" 2>/dev/null | cut -d= -f2)
+                if [[ -n "$current_exec" && "$current_exec" != "$script_path" ]]; then
+                    log_warn "Fixing ExecStart path in $svc_file: $current_exec -> $script_path"
+                    sed -i "s|ExecStart=.*|ExecStart=${script_path} $(grep -o 'ExecStart=.* --.*' "$svc_file" 2>/dev/null | sed "s|ExecStart=[^ ]* ||")|" "$svc_file" 2>/dev/null || true
+                    systemctl daemon-reload 2>/dev/null || true
+                fi
+            fi
+        done
 
         # Restart the systemd service if installed
         if systemctl is-active --quiet sentrikat-agent.timer 2>/dev/null; then
@@ -1453,6 +1557,9 @@ heartbeat_mode() {
         log_error "SERVER_URL and API_KEY are required"
         exit 1
     fi
+
+    # Run self-health check before heartbeat
+    check_agent_health || log_warn "Agent health check reports status: $HEALTH_STATUS"
 
     # Send heartbeat to keep agent online in dashboard
     send_heartbeat

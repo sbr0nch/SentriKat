@@ -8,7 +8,7 @@
     or Scheduled Task.
 
 .NOTES
-    Version: 1.4.0
+    Version: 1.5.0
     Author: SentriKat
     Requires: PowerShell 5.1+, Windows 10/Server 2016+
 
@@ -58,7 +58,7 @@ param(
 
 # Use Stop so unexpected errors are visible; individual cmdlets use -ErrorAction SilentlyContinue where intended
 $ErrorActionPreference = "Stop"
-$AgentVersion = "1.4.0"
+$AgentVersion = "1.5.0"
 $LogFile = "$env:ProgramData\SentriKat\agent.log"
 $HeartbeatIntervalMinutes = 5
 
@@ -78,9 +78,12 @@ function Write-Log {
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     }
 
-    # Write to log file (rotate if > 10MB)
+    # Write to log file (rotate if > 10MB, keep up to 3 rotated logs)
     if ((Test-Path $LogFile) -and ((Get-Item $LogFile).Length -gt 10MB)) {
-        Move-Item $LogFile "$LogFile.old" -Force
+        if (Test-Path "$LogFile.3") { Remove-Item "$LogFile.3" -Force -ErrorAction SilentlyContinue }
+        if (Test-Path "$LogFile.2") { Move-Item "$LogFile.2" "$LogFile.3" -Force }
+        if (Test-Path "$LogFile.1") { Move-Item "$LogFile.1" "$LogFile.2" -Force }
+        Move-Item $LogFile "$LogFile.1" -Force
     }
 
     Add-Content -Path $LogFile -Value $logEntry
@@ -120,6 +123,23 @@ function Get-AgentConfig {
             if ($null -ne $savedConfig.ScanDependencies) { $config.ScanDependencies = [bool]$savedConfig.ScanDependencies }
         } catch {
             Write-Log "Failed to load config file: $_" -Level "WARN"
+            # Try loading from backup config
+            $backupConfigFile = "$ConfigFile.bak"
+            if (Test-Path $backupConfigFile) {
+                try {
+                    Write-Log "Attempting to load config from backup file: $backupConfigFile" -Level "WARN"
+                    $savedConfig = Get-Content $backupConfigFile | ConvertFrom-Json
+                    if ($savedConfig.ServerUrl -and !$ServerUrl) { $config.ServerUrl = $savedConfig.ServerUrl }
+                    if ($savedConfig.ApiKey -and !$ApiKey) { $config.ApiKey = $savedConfig.ApiKey }
+                    if ($savedConfig.IntervalMinutes) { $config.IntervalMinutes = $savedConfig.IntervalMinutes }
+                    if ($savedConfig.AgentId) { $config.AgentId = $savedConfig.AgentId }
+                    if ($null -ne $savedConfig.ScanExtensions) { $config.ScanExtensions = [bool]$savedConfig.ScanExtensions }
+                    if ($null -ne $savedConfig.ScanDependencies) { $config.ScanDependencies = [bool]$savedConfig.ScanDependencies }
+                    Write-Log "Successfully loaded config from backup file"
+                } catch {
+                    Write-Log "Failed to load backup config file: $_" -Level "ERROR"
+                }
+            }
         }
     }
 
@@ -141,6 +161,15 @@ function Save-AgentConfig {
     $configDir = Split-Path $ConfigFile -Parent
     if (!(Test-Path $configDir)) {
         New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    }
+
+    # Backup current config before writing
+    if (Test-Path $ConfigFile) {
+        try {
+            Copy-Item $ConfigFile "$ConfigFile.bak" -Force
+        } catch {
+            Write-Log "Failed to backup config file: $_" -Level "WARN"
+        }
     }
 
     $Config | ConvertTo-Json | Set-Content $ConfigFile -Force
@@ -905,15 +934,110 @@ function Send-Inventory {
     return $false
 }
 
+function Test-AgentHealth {
+    $result = @{
+        TasksHealthy = $true
+        ConfigHealthy = $true
+        Repaired = $false
+    }
+
+    # Check scheduled tasks
+    $taskNames = @("SentriKat Agent", "SentriKat Agent Heartbeat")
+    foreach ($taskName in $taskNames) {
+        try {
+            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            if ($task.State -eq 'Disabled') {
+                Write-Log "Scheduled task '$taskName' is disabled - attempting repair" -Level "WARN"
+                $result.TasksHealthy = $false
+            }
+        } catch {
+            Write-Log "Scheduled task '$taskName' is missing - attempting repair" -Level "WARN"
+            $result.TasksHealthy = $false
+        }
+    }
+
+    # Attempt to re-register tasks if unhealthy
+    if (-not $result.TasksHealthy) {
+        try {
+            Write-Log "Re-registering scheduled tasks to repair agent" -Level "WARN"
+            $repairConfig = Get-AgentConfig
+            Install-ScheduledTask $repairConfig
+            $result.Repaired = $true
+            Write-Log "Scheduled tasks re-registered successfully"
+        } catch {
+            Write-Log "Failed to re-register scheduled tasks: $_" -Level "ERROR"
+            $result.Repaired = $false
+        }
+    }
+
+    # Check config file
+    if (Test-Path $ConfigFile) {
+        try {
+            $null = Get-Content $ConfigFile | ConvertFrom-Json
+        } catch {
+            Write-Log "Config file exists but is not readable or parseable: $_" -Level "ERROR"
+            $result.ConfigHealthy = $false
+        }
+    } else {
+        Write-Log "Config file does not exist: $ConfigFile" -Level "ERROR"
+        $result.ConfigHealthy = $false
+    }
+
+    return $result
+}
+
 function Send-Heartbeat {
-    param($Config, $SystemInfo)
+    param($Config, $SystemInfo, $HealthStatus = $null)
 
     $endpoint = "$($Config.ServerUrl)/api/agent/heartbeat"
+
+    # Determine health status string
+    $healthStatusStr = "healthy"
+    if ($HealthStatus) {
+        if (-not $HealthStatus.ConfigHealthy) {
+            $healthStatusStr = "error"
+        } elseif (-not $HealthStatus.TasksHealthy) {
+            $healthStatusStr = "degraded"
+        }
+    }
+
+    # Get last scan time from log file modification time
+    $lastScanTime = $null
+    if (Test-Path $LogFile) {
+        $lastScanTime = (Get-Item $LogFile).LastWriteTimeUtc.ToString("o")
+    }
+
+    # Get config version hash for drift detection
+    $configVersion = $null
+    if (Test-Path $ConfigFile) {
+        try {
+            $configContent = Get-Content $ConfigFile -Raw
+            $sha256 = [System.Security.Cryptography.SHA256]::Create()
+            $hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($configContent))
+            $configVersion = [BitConverter]::ToString($hashBytes).Replace("-", "").ToLower().Substring(0, 16)
+        } catch {}
+    }
+
+    # Get system uptime in seconds
+    $uptimeSeconds = $null
+    try {
+        $os = Get-WmiObject -Class Win32_OperatingSystem
+        $lastBoot = $os.ConvertToDateTime($os.LastBootUpTime)
+        $uptimeSeconds = [math]::Floor(((Get-Date) - $lastBoot).TotalSeconds)
+    } catch {}
 
     $payload = @{
         hostname = $SystemInfo.hostname
         agent_id = $SystemInfo.agent.id
         agent_version = $AgentVersion
+        health_status = $healthStatusStr
+        last_scan_time = $lastScanTime
+        config_version = $configVersion
+        uptime_seconds = $uptimeSeconds
+    }
+
+    if ($HealthStatus) {
+        $payload.health = $HealthStatus
     }
 
     $headers = @{
@@ -921,28 +1045,46 @@ function Send-Heartbeat {
         "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
     }
 
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json))
-        $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30
-        return $true
-    }
-    catch {
-        # Extract error body from response for better diagnostics
-        $errorDetail = $_.Exception.Message
-        if ($_.Exception.Response) {
-            try {
-                $stream = $_.Exception.Response.GetResponseStream()
-                $stream.Position = 0
-                $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
-                $errorBody = $reader.ReadToEnd()
-                $reader.Close()
-                if ($errorBody) { $errorDetail = "$errorDetail - $errorBody" }
-            } catch {}
+    # Retry with exponential backoff: 5s, 10s, 20s
+    $maxRetries = 3
+    $retryDelay = 5
+
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        try {
+            if ($attempt -gt 1) {
+                Write-Log "Heartbeat attempt $attempt of $maxRetries..." -Level "WARN"
+            }
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json))
+            $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30
+            return $true
         }
-        Write-Log "Heartbeat failed: $errorDetail" -Level "WARN"
-        return $false
+        catch {
+            # Extract error body from response for better diagnostics
+            $errorDetail = $_.Exception.Message
+            if ($_.Exception.Response) {
+                try {
+                    $stream = $_.Exception.Response.GetResponseStream()
+                    $stream.Position = 0
+                    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+                    $errorBody = $reader.ReadToEnd()
+                    $reader.Close()
+                    if ($errorBody) { $errorDetail = "$errorDetail - $errorBody" }
+                } catch {}
+            }
+
+            Write-Log "Heartbeat attempt $attempt failed: $errorDetail" -Level "WARN"
+
+            if ($attempt -lt $maxRetries) {
+                Write-Log "Retrying heartbeat in $retryDelay seconds..." -Level "WARN"
+                Start-Sleep -Seconds $retryDelay
+                $retryDelay *= 2
+            }
+        }
     }
+
+    Write-Log "Heartbeat failed after $maxRetries attempts" -Level "ERROR"
+    return $false
 }
 
 function Update-Agent {
@@ -984,6 +1126,34 @@ function Update-Agent {
         # Replace the script
         Move-Item $tmpFile $scriptPath -Force
         Write-Log "Agent updated successfully to $TargetVersion"
+
+        # Update scheduled tasks if their action path points to the old script location
+        # This fixes the root cause of version mismatch after update
+        $taskNames = @("SentriKat Agent", "SentriKat Agent Heartbeat")
+        foreach ($taskName in $taskNames) {
+            try {
+                $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+                if ($task) {
+                    $currentAction = $task.Actions | Select-Object -First 1
+                    $currentArgs = if ($currentAction.Arguments) { $currentAction.Arguments } else { "" }
+                    # Check if the task action references a different script path
+                    if ($currentArgs -notlike "*$scriptPath*") {
+                        Write-Log "Scheduled task '$taskName' references old path - re-registering with new path" -Level "WARN"
+                        # Build the updated arguments pointing to the new script location
+                        if ($taskName -eq "SentriKat Agent Heartbeat") {
+                            $newArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -Heartbeat"
+                        } else {
+                            $newArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -RunOnce"
+                        }
+                        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $newArgs
+                        Set-ScheduledTask -TaskName $taskName -Action $action -ErrorAction Stop | Out-Null
+                        Write-Log "Scheduled task '$taskName' updated to new script path"
+                    }
+                }
+            } catch {
+                Write-Log "Failed to update scheduled task '$taskName' after agent update: $_" -Level "ERROR"
+            }
+        }
     }
     catch {
         Write-Log "Agent update failed: $_" -Level "ERROR"
@@ -1667,8 +1837,11 @@ function Main {
         Write-Log "Running heartbeat check..."
         $systemInfo = Get-SystemInfo
 
-        # Send heartbeat to keep agent online in dashboard
-        Send-Heartbeat $config $systemInfo
+        # Run self-health check before sending heartbeat
+        $healthStatus = Test-AgentHealth
+
+        # Send heartbeat to keep agent online in dashboard (includes health status)
+        Send-Heartbeat $config $systemInfo $healthStatus
 
         # Check for pending commands (scan_now, update, etc.)
         $scanRequested = Check-Commands $config $systemInfo
