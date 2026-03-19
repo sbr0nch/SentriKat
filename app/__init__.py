@@ -463,6 +463,29 @@ def create_app(config_class=Config):
         except Exception:
             pass  # Use default if DB unavailable
 
+    # Invalidate sessions when password has been changed from another session
+    @app.before_request
+    def check_password_changed():
+        from flask import session, request, redirect, url_for, jsonify
+        if 'user_id' not in session or '_pw_changed_at' not in session:
+            return None
+        # Skip for auth/logout endpoints to avoid redirect loops
+        if request.path.startswith('/api/auth/') or request.path == '/login' or request.path == '/logout':
+            return None
+        try:
+            from app.models import User
+            user = User.query.get(session['user_id'])
+            if user and user.password_changed_at:
+                current_pw_ts = user.password_changed_at.isoformat()
+                session_pw_ts = session.get('_pw_changed_at', '')
+                if current_pw_ts != session_pw_ts:
+                    session.clear()
+                    if request.path.startswith('/api/'):
+                        return jsonify({'error': 'Session expired (password changed)', 'login_required': True}), 401
+                    return redirect(url_for('auth.login'))
+        except Exception:
+            pass
+
     # Add API version headers to all API responses
     @app.after_request
     def add_api_version_headers(response):

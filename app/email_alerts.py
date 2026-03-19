@@ -2066,3 +2066,141 @@ def send_scheduled_report(recipients, report_name, org_name, pdf_buffer):
 
 # Make the function accessible from the EmailAlertManager class
 EmailAlertManager.send_scheduled_report = staticmethod(send_scheduled_report)
+
+
+def send_password_reset_email(user, token, base_url):
+    """
+    Send password reset email to user.
+
+    Args:
+        user: User object requesting the reset
+        token: The password reset token
+        base_url: Base URL of the application (e.g. https://sentrikat.example.com)
+
+    Returns:
+        tuple: (success: bool, details: str) - success status and details message
+    """
+    from app.models import Organization
+    from app.settings_api import get_setting
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Try organization SMTP first, then fall back to global SMTP
+        smtp_config = None
+        smtp_source = "global"
+
+        if user.organization_id:
+            organization = Organization.query.get(user.organization_id)
+            if organization:
+                smtp_config = organization.get_smtp_config()
+                if smtp_config.get('host') and smtp_config.get('from_email'):
+                    smtp_source = "organization"
+
+        # Fall back to global SMTP if org SMTP not configured
+        if not smtp_config or not smtp_config.get('host') or not smtp_config.get('from_email'):
+            smtp_config = {
+                'host': get_setting('smtp_host'),
+                'port': int(get_setting('smtp_port', '587') or '587'),
+                'username': get_setting('smtp_username'),
+                'password': get_setting('smtp_password'),
+                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
+                'from_email': get_setting('smtp_from_email'),
+                'from_name': get_setting('smtp_from_name', 'SentriKat')
+            }
+
+        # Final check - SMTP must be configured
+        if not smtp_config.get('host') or not smtp_config.get('from_email'):
+            msg = "No SMTP configured (neither org nor global)"
+            logger.warning(f"{msg} - cannot send password reset email to {user.email}")
+            return False, msg
+
+        reset_link = f"{base_url.rstrip('/')}/reset-password?token={token}"
+
+        subject = "SentriKat - Password Reset Request"
+        html_body = _build_password_reset_email_html(user, reset_link)
+
+        EmailAlertManager._send_email(
+            smtp_config=smtp_config,
+            recipients=[user.email],
+            subject=subject,
+            html_body=html_body
+        )
+
+        msg = f"Password reset email sent via {smtp_source} SMTP to {user.email}"
+        logger.info(msg)
+        return True, msg
+
+    except Exception as e:
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"Failed to send password reset email to {user.email}: {error_detail}")
+        logger.error(traceback.format_exc())
+        return False, error_detail
+
+
+def _build_password_reset_email_html(user, reset_link):
+    """Build HTML email body for password reset"""
+    app_url = get_app_url()
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f3f4f6; margin: 0; padding: 0;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">Password Reset Request</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">SentriKat Security</p>
+        </div>
+
+        <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+            <p style="font-size: 16px; color: #374151; line-height: 1.6;">
+                Hello {user.full_name or user.username},
+            </p>
+
+            <p style="font-size: 16px; color: #374151; line-height: 1.6;">
+                We received a request to reset the password for your SentriKat account
+                (<strong>{user.email}</strong>).
+            </p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{reset_link}" style="display: inline-block; background: #1e40af; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                    Reset Your Password
+                </a>
+            </div>
+
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0; color: #92400e; font-size: 14px;">
+                    <strong>This link will expire in 30 minutes.</strong><br>
+                    If you did not request a password reset, you can safely ignore this email.
+                    Your password will remain unchanged.
+                </p>
+            </div>
+
+            <p style="color: #6b7280; font-size: 14px; line-height: 1.5;">
+                If the button above doesn't work, copy and paste this link into your browser:
+            </p>
+            <p style="color: #3b82f6; font-size: 13px; word-break: break-all;">
+                {reset_link}
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+
+            <p style="color: #9ca3af; font-size: 12px; line-height: 1.5;">
+                <strong>Security Notice:</strong> This password reset was requested from
+                SentriKat. If you did not make this request, no action is needed. However,
+                if you believe your account may be compromised, please contact your
+                administrator immediately.
+            </p>
+        </div>
+
+        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>This is an automated message from SentriKat</p>
+            <p>&copy; {datetime.utcnow().year} SentriKat - Enterprise Vulnerability Management</p>
+        </div>
+    </div>
+</body>
+</html>"""

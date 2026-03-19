@@ -956,6 +956,10 @@ class User(db.Model):
     password_changed_at = db.Column(db.DateTime, default=datetime.utcnow)
     must_change_password = db.Column(db.Boolean, default=False)
 
+    # Password Reset
+    password_reset_token = db.Column(db.String(100), nullable=True, index=True)
+    password_reset_expires = db.Column(db.DateTime, nullable=True)
+
     # Two-Factor Authentication
     totp_secret = db.Column(db.String(32), nullable=True)
     totp_enabled = db.Column(db.Boolean, default=False)
@@ -1123,6 +1127,33 @@ class User(db.Model):
         """Disable 2FA"""
         self.totp_secret = None
         self.totp_enabled = False
+
+    def generate_password_reset_token(self):
+        """Generate a secure password reset token, set expiry to 30 minutes, save to DB, return token"""
+        import secrets
+        from datetime import timedelta
+        token = secrets.token_urlsafe(48)
+        self.password_reset_token = token
+        self.password_reset_expires = datetime.utcnow() + timedelta(minutes=30)
+        db.session.commit()
+        return token
+
+    @classmethod
+    def verify_password_reset_token(cls, token):
+        """Find user by reset token and check expiry. Returns user or None."""
+        if not token:
+            return None
+        user = cls.query.filter_by(password_reset_token=token).first()
+        if not user:
+            return None
+        if not user.password_reset_expires or datetime.utcnow() > user.password_reset_expires:
+            return None
+        return user
+
+    def clear_password_reset_token(self):
+        """Clear the password reset token and expiry"""
+        self.password_reset_token = None
+        self.password_reset_expires = None
 
     @staticmethod
     def validate_password_policy(password):
