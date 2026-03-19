@@ -36,6 +36,7 @@ from app.auth import login_required, admin_required, org_admin_required
 from app.error_utils import ERROR_MSGS
 from sqlalchemy.exc import IntegrityError
 import json
+import hashlib
 
 # Threshold for async processing (queued instead of immediate).
 # Agent script sends chunks of 500 max, so 750 ensures agent chunks are
@@ -4082,13 +4083,16 @@ def get_agent_commands():
         # Check for admin-triggered update push
         if asset.pending_update:
             latest_version = _get_latest_agent_versions().get(platform, '1.0.0')
+            checksum = _get_agent_checksum(platform)
             commands.append({
                 'command': 'update_available',
                 'current_version': agent_version,
                 'latest_version': latest_version,
                 'download_url': f'/api/agent/download/{platform}',
+                'checksum': checksum,
                 'message': f'Update pushed by administrator',
-                'forced': True
+                'forced': True,
+                'critical': bool(getattr(asset, 'pending_update_critical', False))
             })
             # Clear the pending update flag
             asset.pending_update = False
@@ -4102,11 +4106,13 @@ def get_agent_commands():
     if _version_compare(agent_version, latest_version) < 0:
         # Only send if we didn't already send a forced update above
         if not any(c.get('command') == 'update_available' for c in commands):
+            checksum = _get_agent_checksum(platform)
             commands.append({
                 'command': 'update_available',
                 'current_version': agent_version,
                 'latest_version': latest_version,
                 'download_url': f'/api/agent/download/{platform}',
+                'checksum': checksum,
                 'message': f'Agent update available: {agent_version} → {latest_version}'
             })
 
@@ -4233,14 +4239,52 @@ def download_agent_script(platform):
     script_content = _inject_agent_version(script_content, latest_version, platform)
 
     content_type = 'application/octet-stream'
+    checksum = _compute_script_checksum(script_content)
     return Response(
         script_content,
         mimetype=content_type,
         headers={
             'Content-Disposition': f'attachment; filename={filename}',
-            'X-Agent-Version': latest_version
+            'X-Agent-Version': latest_version,
+            'X-Agent-Checksum': checksum
         }
     )
+
+
+def _compute_script_checksum(script_content):
+    """Compute SHA256 checksum of the agent script content."""
+    if isinstance(script_content, str):
+        script_content = script_content.encode('utf-8')
+    return hashlib.sha256(script_content).hexdigest()
+
+
+def _get_agent_checksum(platform):
+    """Get the SHA256 checksum for the latest agent script for a given platform.
+
+    Reads the script, injects the current version, and returns the checksum
+    that agents should verify after downloading.
+    """
+    script_map = {
+        'linux': 'sentrikat-agent-linux.sh',
+        'macos': 'sentrikat-agent-macos.sh',
+        'windows': 'sentrikat-agent-windows.ps1',
+    }
+    filename = script_map.get(platform)
+    if not filename:
+        return None
+
+    agents_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'agents')
+    script_path = os.path.join(agents_dir, filename)
+
+    if not os.path.exists(script_path):
+        return None
+
+    with open(script_path, 'r') as f:
+        script_content = f.read()
+
+    latest_version = _get_latest_agent_versions().get(platform, '0.0.0')
+    script_content = _inject_agent_version(script_content, latest_version, platform)
+    return _compute_script_checksum(script_content)
 
 
 def _inject_agent_version(script_content, version, platform):
@@ -4291,6 +4335,102 @@ def _version_compare(v1, v2):
         return 0
     except (ValueError, TypeError, IndexError, AttributeError):
         return 0
+
+
+# ============================================================================
+# Agent Update Status Reporting
+# ============================================================================
+
+@agent_bp.route('/api/agent/update-status', methods=['POST'])
+@limiter.limit("30/minute", key_func=get_agent_key_for_limit)
+@agent_auth_required
+def report_update_status():
+    """
+    Agent reports the result of an update attempt (success or failure).
+
+    This allows the server to track update deployment across the fleet
+    and trigger alerts when updates fail on specific endpoints.
+
+    Expected JSON body:
+    {
+        "agent_id": "...",
+        "hostname": "...",
+        "status": "success" | "failed" | "rolled_back",
+        "old_version": "1.4.0",
+        "new_version": "1.5.0",
+        "error": "optional error message"
+    }
+    """
+    organization = request.organization
+    data = request.get_json(silent=True) or {}
+
+    agent_id = data.get('agent_id')
+    hostname = data.get('hostname')
+    status = data.get('status', 'unknown')
+    old_version = data.get('old_version')
+    new_version = data.get('new_version')
+    error_msg = data.get('error', '')
+
+    if not agent_id and not hostname:
+        return jsonify({'error': 'agent_id or hostname required'}), 400
+
+    if status not in ('success', 'failed', 'rolled_back'):
+        return jsonify({'error': 'status must be: success, failed, or rolled_back'}), 400
+
+    # Find asset
+    asset = None
+    if agent_id:
+        asset = Asset.query.filter_by(agent_id=agent_id).first()
+    if not asset and hostname:
+        asset = Asset.query.filter_by(
+            organization_id=organization.id,
+            hostname=hostname
+        ).first()
+
+    if not asset:
+        return jsonify({'error': 'Asset not found'}), 404
+
+    # Map status to event type
+    if status == 'success':
+        event_type = 'agent_updated'
+        details = {
+            'message': f'Agent updated from v{old_version} to v{new_version}',
+            'update_method': 'auto_update'
+        }
+    elif status == 'rolled_back':
+        event_type = 'agent_update_rolled_back'
+        details = {
+            'message': f'Agent update to v{new_version} failed, rolled back to v{old_version}',
+            'error': error_msg[:500] if error_msg else None,
+            'update_method': 'auto_update'
+        }
+    else:
+        event_type = 'agent_update_failed'
+        details = {
+            'message': f'Agent update from v{old_version} to v{new_version} failed',
+            'error': error_msg[:500] if error_msg else None,
+            'update_method': 'auto_update'
+        }
+
+    try:
+        AgentEvent.log_event(
+            organization_id=asset.organization_id,
+            event_type=event_type,
+            asset_id=asset.id,
+            old_value=old_version,
+            new_value=new_version if status == 'success' else old_version,
+            details=json.dumps(details),
+            source_ip=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', '')[:500]
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    return jsonify({
+        'status': 'received',
+        'message': f'Update status ({status}) recorded for {asset.hostname}'
+    })
 
 
 # ============================================================================
@@ -5106,7 +5246,16 @@ def report_dependency_scan():
         })
 
     if not clean_lockfiles:
-        return jsonify({'status': 'ok', 'message': 'No valid lock files to process'}), 200
+        return jsonify({
+            'status': 'success',
+            'message': 'No valid lock files to process',
+            'summary': {
+                'lockfiles_parsed': 0,
+                'total_dependencies': 0,
+                'vulnerable_dependencies': 0,
+                'total_vulnerabilities': 0
+            }
+        }), 200
 
     try:
         # Create dependency scan record

@@ -1179,10 +1179,16 @@ check_commands() {
     fi
 
     if echo "$response" | grep -q '"command": "update_available"'; then
-        local latest_version
+        local latest_version checksum is_critical
         latest_version=$(echo "$response" | grep -o '"latest_version": "[^"]*"' | cut -d'"' -f4)
-        log_warn "Agent update available: ${AGENT_VERSION} -> ${latest_version}"
-        auto_update_agent "$latest_version"
+        checksum=$(echo "$response" | grep -o '"checksum": "[^"]*"' | cut -d'"' -f4)
+        is_critical=$(echo "$response" | grep -o '"critical": true' | head -1)
+        if [[ -n "$is_critical" ]]; then
+            log_warn "CRITICAL agent update: ${AGENT_VERSION} -> ${latest_version} (immediate)"
+        else
+            log_warn "Agent update available: ${AGENT_VERSION} -> ${latest_version}"
+        fi
+        auto_update_agent "$latest_version" "$checksum"
     fi
 
     # Update scan capabilities from server (license-gated features)
@@ -1205,34 +1211,89 @@ check_commands() {
     return 1
 }
 
+report_update_status() {
+    # Report update result back to server for fleet-wide visibility
+    local status="$1"    # success, failed, rolled_back
+    local old_ver="$2"
+    local new_ver="$3"
+    local error_msg="${4:-}"
+
+    local endpoint="${SERVER_URL}/api/agent/update-status"
+    local payload
+    payload=$(cat <<EOJSON
+{"agent_id":"${AGENT_ID}","hostname":"$(hostname)","status":"${status}","old_version":"${old_ver}","new_version":"${new_ver}","error":"${error_msg}"}
+EOJSON
+)
+    curl -s -X POST "$endpoint" \
+        -H "X-Agent-Key: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        --max-time 15 2>/dev/null || true
+}
+
+verify_agent_health() {
+    # After update, verify the new agent can successfully heartbeat
+    local endpoint="${SERVER_URL}/api/agent/commands?agent_id=${AGENT_ID}&hostname=$(hostname)&version=${1}&platform=macos"
+
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "X-Agent-Key: $API_KEY" \
+        --max-time 15 "$endpoint" 2>/dev/null)
+
+    [[ "$http_code" == "200" ]]
+}
+
 auto_update_agent() {
     # Auto-update the agent script from the server
-    # Flow: download -> verify -> backup -> replace -> restart launchd
+    # Flow: download -> verify checksum -> atomic replace -> health check -> rollback if needed
     local target_version="$1"
+    local expected_checksum="${2:-}"
     local download_url="${SERVER_URL}/api/agent/download/macos"
     local script_path="/usr/local/bin/sentrikat-agent"
     local backup_path="${script_path}.backup.${AGENT_VERSION}"
     local tmp_script
+    local old_version="${AGENT_VERSION}"
 
     log_info "Auto-updating agent: ${AGENT_VERSION} -> ${target_version}"
 
     # Download new script to temp file
-    tmp_script=$(mktemp)
-    local http_code
-    http_code=$(curl -s -w "%{http_code}" -o "$tmp_script" \
+    tmp_script=$(mktemp /tmp/sentrikat-update-XXXXXX)
+    local http_code header_file
+    header_file=$(mktemp /tmp/sentrikat-headers-XXXXXX)
+    http_code=$(curl -s -w "%{http_code}" -o "$tmp_script" -D "$header_file" \
         -H "X-Agent-Key: $API_KEY" \
         --max-time 60 "$download_url" 2>/dev/null)
 
     if [[ "$http_code" != "200" ]]; then
         log_error "Failed to download update (HTTP $http_code)"
-        rm -f "$tmp_script"
+        rm -f "$tmp_script" "$header_file"
+        report_update_status "failed" "$old_version" "$target_version" "Download failed: HTTP $http_code"
         return 1
     fi
+
+    # SHA256 checksum verification
+    local actual_checksum
+    actual_checksum=$(shasum -a 256 "$tmp_script" 2>/dev/null | awk '{print $1}')
+
+    # Try server-provided checksum from header if command didn't include one
+    if [[ -z "$expected_checksum" ]]; then
+        expected_checksum=$(grep -i '^X-Agent-Checksum:' "$header_file" 2>/dev/null | tr -d '\r' | awk '{print $2}')
+    fi
+    rm -f "$header_file"
+
+    if [[ -n "$expected_checksum" && "$actual_checksum" != "$expected_checksum" ]]; then
+        log_error "Checksum verification failed! Expected: ${expected_checksum}, Got: ${actual_checksum}"
+        rm -f "$tmp_script"
+        report_update_status "failed" "$old_version" "$target_version" "Checksum mismatch"
+        return 1
+    fi
+    log_info "Checksum verified: ${actual_checksum}"
 
     # Verify the downloaded script is valid bash
     if ! head -1 "$tmp_script" | grep -q '^#!/bin/bash'; then
         log_error "Downloaded file is not a valid bash script"
         rm -f "$tmp_script"
+        report_update_status "failed" "$old_version" "$target_version" "Invalid script format"
         return 1
     fi
 
@@ -1240,6 +1301,7 @@ auto_update_agent() {
     if ! grep -q "AGENT_VERSION=" "$tmp_script"; then
         log_error "Downloaded script missing AGENT_VERSION marker"
         rm -f "$tmp_script"
+        report_update_status "failed" "$old_version" "$target_version" "Missing version marker"
         return 1
     fi
 
@@ -1249,44 +1311,84 @@ auto_update_agent() {
         log_info "Backed up current agent to $backup_path"
     fi
 
-    # Replace the script
+    # Atomic replacement: stage on same filesystem, then mv
     chmod +x "$tmp_script"
-    if mv "$tmp_script" "$script_path" 2>/dev/null || sudo mv "$tmp_script" "$script_path" 2>/dev/null; then
-        log_info "Agent updated successfully to ${target_version}"
+    local replace_success=false
+    local staging_file="${script_path}.staging.$$"
 
-        # Verify LaunchDaemon plists point to the correct script path
-        local plists_updated="false"
-        for plist in "$LAUNCHDAEMON_PLIST" "$HEARTBEAT_PLIST"; do
-            if [[ -f "$plist" ]]; then
-                if ! grep -q "<string>${script_path}</string>" "$plist" 2>/dev/null; then
-                    log_warn "Plist $plist has incorrect ProgramArguments path, updating..."
-                    # Update ProgramArguments to point to correct script path
-                    if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
-                        /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 ${script_path}" "$plist" 2>/dev/null || true
-                    else
-                        sed -i.tmp "s|<string>/[^<]*sentrikat-agent[^<]*</string>|<string>${script_path}</string>|" "$plist" 2>/dev/null || true
-                        rm -f "${plist}.tmp" 2>/dev/null
-                    fi
-                    plists_updated="true"
-                    log_info "Updated plist $plist with correct script path"
-                fi
-            fi
-        done
-
-        # Restart the launchd services if installed (or if plists were updated)
-        if [[ "$plists_updated" == "true" ]] || launchctl list | grep -q com.sentrikat.heartbeat 2>/dev/null; then
-            log_info "Restarting agent launchd services..."
-            sudo launchctl unload "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
-            sudo launchctl load "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
-            sudo launchctl unload "$HEARTBEAT_PLIST" 2>/dev/null || true
-            sudo launchctl load "$HEARTBEAT_PLIST" 2>/dev/null || true
+    if cp "$tmp_script" "$staging_file" 2>/dev/null || sudo cp "$tmp_script" "$staging_file" 2>/dev/null; then
+        chmod +x "$staging_file" 2>/dev/null || sudo chmod +x "$staging_file" 2>/dev/null
+        if mv "$staging_file" "$script_path" 2>/dev/null || sudo mv "$staging_file" "$script_path" 2>/dev/null; then
+            replace_success=true
         fi
-    else
+        rm -f "$staging_file" 2>/dev/null
+    fi
+    rm -f "$tmp_script"
+
+    if [[ "$replace_success" != "true" ]]; then
         log_error "Failed to replace agent script (permission denied)"
-        rm -f "$tmp_script"
-        # Restore backup
-        [[ -f "$backup_path" ]] && mv "$backup_path" "$script_path" 2>/dev/null
+        if [[ -f "$backup_path" ]]; then
+            mv "$backup_path" "$script_path" 2>/dev/null || sudo mv "$backup_path" "$script_path" 2>/dev/null
+        fi
+        report_update_status "failed" "$old_version" "$target_version" "File replacement failed"
         return 1
+    fi
+
+    log_info "Agent script replaced successfully"
+
+    # Post-update health check: verify the new agent can reach the server
+    log_info "Running post-update health check..."
+    local health_ok=false
+    for attempt in 1 2 3; do
+        if verify_agent_health "$target_version"; then
+            health_ok=true
+            break
+        fi
+        sleep 2
+    done
+
+    if [[ "$health_ok" != "true" ]]; then
+        log_error "Post-update health check failed! Rolling back to v${old_version}..."
+        if [[ -f "$backup_path" ]]; then
+            mv "$backup_path" "$script_path" 2>/dev/null || sudo mv "$backup_path" "$script_path" 2>/dev/null
+            chmod +x "$script_path" 2>/dev/null || sudo chmod +x "$script_path" 2>/dev/null
+            log_warn "Rolled back to v${old_version}"
+            report_update_status "rolled_back" "$old_version" "$target_version" "Health check failed after update"
+        else
+            log_error "No backup available for rollback!"
+            report_update_status "failed" "$old_version" "$target_version" "Health check failed, no backup for rollback"
+        fi
+        return 1
+    fi
+
+    log_info "Agent updated successfully to ${target_version}"
+    report_update_status "success" "$old_version" "$target_version"
+
+    # Verify LaunchDaemon plists point to the correct script path
+    local plists_updated="false"
+    for plist in "$LAUNCHDAEMON_PLIST" "$HEARTBEAT_PLIST"; do
+        if [[ -f "$plist" ]]; then
+            if ! grep -q "<string>${script_path}</string>" "$plist" 2>/dev/null; then
+                log_warn "Plist $plist has incorrect ProgramArguments path, updating..."
+                if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
+                    /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 ${script_path}" "$plist" 2>/dev/null || true
+                else
+                    sed -i.tmp "s|<string>/[^<]*sentrikat-agent[^<]*</string>|<string>${script_path}</string>|" "$plist" 2>/dev/null || true
+                    rm -f "${plist}.tmp" 2>/dev/null
+                fi
+                plists_updated="true"
+                log_info "Updated plist $plist with correct script path"
+            fi
+        fi
+    done
+
+    # Restart the launchd services if installed (or if plists were updated)
+    if [[ "$plists_updated" == "true" ]] || launchctl list | grep -q com.sentrikat.heartbeat 2>/dev/null; then
+        log_info "Restarting agent launchd services..."
+        sudo launchctl unload "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+        sudo launchctl load "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+        sudo launchctl unload "$HEARTBEAT_PLIST" 2>/dev/null || true
+        sudo launchctl load "$HEARTBEAT_PLIST" 2>/dev/null || true
     fi
 }
 

@@ -1112,17 +1112,62 @@ function Send-Heartbeat {
     return $false
 }
 
+function Report-UpdateStatus {
+    param($Config, [string]$Status, [string]$OldVersion, [string]$NewVersion, [string]$ErrorMsg = "")
+
+    # Report update result back to server for fleet-wide visibility
+    $endpoint = "$($Config.ServerUrl)/api/agent/update-status"
+    $body = @{
+        agent_id = $Config.AgentId
+        hostname = $env:COMPUTERNAME
+        status = $Status
+        old_version = $OldVersion
+        new_version = $NewVersion
+        error = $ErrorMsg
+    } | ConvertTo-Json
+
+    try {
+        $headers = @{
+            "X-Agent-Key" = $Config.ApiKey
+            "Content-Type" = "application/json"
+        }
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $body -TimeoutSec 15 | Out-Null
+    } catch {
+        Write-Log "Failed to report update status: $_" -Level "WARN"
+    }
+}
+
+function Test-AgentHealth {
+    param($Config, [string]$Version)
+
+    # After update, verify the new agent can reach the server
+    $endpoint = "$($Config.ServerUrl)/api/agent/commands?agent_id=$($Config.AgentId)&hostname=$env:COMPUTERNAME&version=$Version&platform=windows"
+    try {
+        $headers = @{
+            "X-Agent-Key" = $Config.ApiKey
+        }
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $response = Invoke-RestMethod -Uri $endpoint -Method Get -Headers $headers -TimeoutSec 15
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Update-Agent {
-    param($Config, [string]$TargetVersion)
+    param($Config, [string]$TargetVersion, [string]$ExpectedChecksum = "")
 
     # Auto-update the agent script from the server
-    # Flow: download -> verify -> backup -> replace -> log
+    # Flow: download -> verify checksum -> atomic replace -> health check -> rollback if needed
     $downloadUrl = "$($Config.ServerUrl)/api/agent/download/windows"
     $scriptPath = "$env:ProgramData\SentriKat\sentrikat-agent.ps1"
     $backupPath = "$env:ProgramData\SentriKat\sentrikat-agent.backup.$AgentVersion.ps1"
+    $oldVersion = $AgentVersion
 
     Write-Log "Auto-updating agent: $AgentVersion -> $TargetVersion"
 
+    $tmpFile = $null
     try {
         $headers = @{
             "X-Agent-Key" = $Config.ApiKey
@@ -1132,13 +1177,32 @@ function Update-Agent {
         # Download new script to temp file
         $tmpFile = [System.IO.Path]::GetTempFileName() + ".ps1"
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $tmpFile -TimeoutSec 60
+        $response = Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $tmpFile -TimeoutSec 60 -PassThru
+
+        # SHA256 checksum verification
+        $actualChecksum = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
+
+        # Try server-provided checksum from header if command didn't include one
+        if (-not $ExpectedChecksum) {
+            $ExpectedChecksum = $response.Headers['X-Agent-Checksum']
+            if ($ExpectedChecksum -is [array]) { $ExpectedChecksum = $ExpectedChecksum[0] }
+        }
+
+        if ($ExpectedChecksum -and ($actualChecksum -ne $ExpectedChecksum.ToLower())) {
+            $errMsg = "Checksum mismatch! Expected: $ExpectedChecksum, Got: $actualChecksum"
+            Write-Log $errMsg -Level "ERROR"
+            Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+            Report-UpdateStatus -Config $Config -Status "failed" -OldVersion $oldVersion -NewVersion $TargetVersion -ErrorMsg "Checksum mismatch"
+            return
+        }
+        Write-Log "Checksum verified: $actualChecksum"
 
         # Verify downloaded script is valid PowerShell (contains expected marker)
         $content = Get-Content $tmpFile -Raw
         if ($content -notmatch 'AgentVersion') {
             Write-Log "Downloaded file missing AgentVersion marker - aborting update" -Level "ERROR"
             Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+            Report-UpdateStatus -Config $Config -Status "failed" -OldVersion $oldVersion -NewVersion $TargetVersion -ErrorMsg "Missing version marker"
             return
         }
 
@@ -1148,12 +1212,42 @@ function Update-Agent {
             Write-Log "Backed up current agent to $backupPath"
         }
 
-        # Replace the script
-        Move-Item $tmpFile $scriptPath -Force
+        # Atomic replacement: write to staging file on same volume, then Move-Item
+        $stagingPath = "$scriptPath.staging.$PID"
+        Copy-Item $tmpFile $stagingPath -Force
+        Move-Item $stagingPath $scriptPath -Force
+        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+        $tmpFile = $null
+        Write-Log "Agent script replaced successfully"
+
+        # Post-update health check: verify the new agent can reach the server
+        Write-Log "Running post-update health check..."
+        $healthOk = $false
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if (Test-AgentHealth -Config $Config -Version $TargetVersion) {
+                $healthOk = $true
+                break
+            }
+            Start-Sleep -Seconds 2
+        }
+
+        if (-not $healthOk) {
+            Write-Log "Post-update health check failed! Rolling back to v$oldVersion..." -Level "ERROR"
+            if (Test-Path $backupPath) {
+                Copy-Item $backupPath $scriptPath -Force
+                Write-Log "Rolled back to v$oldVersion" -Level "WARN"
+                Report-UpdateStatus -Config $Config -Status "rolled_back" -OldVersion $oldVersion -NewVersion $TargetVersion -ErrorMsg "Health check failed after update"
+            } else {
+                Write-Log "No backup available for rollback!" -Level "ERROR"
+                Report-UpdateStatus -Config $Config -Status "failed" -OldVersion $oldVersion -NewVersion $TargetVersion -ErrorMsg "Health check failed, no backup for rollback"
+            }
+            return
+        }
+
         Write-Log "Agent updated successfully to $TargetVersion"
+        Report-UpdateStatus -Config $Config -Status "success" -OldVersion $oldVersion -NewVersion $TargetVersion
 
         # Update scheduled tasks if their action path points to the old script location
-        # This fixes the root cause of version mismatch after update
         $taskNames = @("SentriKat Agent", "SentriKat Agent Heartbeat")
         foreach ($taskName in $taskNames) {
             try {
@@ -1161,10 +1255,8 @@ function Update-Agent {
                 if ($task) {
                     $currentAction = $task.Actions | Select-Object -First 1
                     $currentArgs = if ($currentAction.Arguments) { $currentAction.Arguments } else { "" }
-                    # Check if the task action references a different script path
                     if ($currentArgs -notlike "*$scriptPath*") {
                         Write-Log "Scheduled task '$taskName' references old path - re-registering with new path" -Level "WARN"
-                        # Build the updated arguments pointing to the new script location
                         if ($taskName -eq "SentriKat Agent Heartbeat") {
                             $newArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -Heartbeat"
                         } else {
@@ -1182,12 +1274,14 @@ function Update-Agent {
     }
     catch {
         Write-Log "Agent update failed: $_" -Level "ERROR"
-        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+        if ($tmpFile) { Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue }
+        Remove-Item "$scriptPath.staging.*" -Force -ErrorAction SilentlyContinue
         # Restore backup if available
         if (Test-Path $backupPath) {
             Copy-Item $backupPath $scriptPath -Force
-            Write-Log "Restored backup agent"
+            Write-Log "Restored backup agent" -Level "WARN"
         }
+        Report-UpdateStatus -Config $Config -Status "failed" -OldVersion $oldVersion -NewVersion $TargetVersion -ErrorMsg "$_"
     }
 }
 
@@ -1277,8 +1371,14 @@ function Check-Commands {
                     }
                 }
                 "update_available" {
-                    Write-Log "Agent update available: $($cmd.current_version) -> $($cmd.latest_version)" -Level "WARN"
-                    Update-Agent -Config $Config -TargetVersion $cmd.latest_version
+                    $checksum = if ($cmd.checksum) { $cmd.checksum } else { "" }
+                    $isCritical = if ($cmd.critical -eq $true) { $true } else { $false }
+                    if ($isCritical) {
+                        Write-Log "CRITICAL agent update: $($cmd.current_version) -> $($cmd.latest_version) (immediate)" -Level "WARN"
+                    } else {
+                        Write-Log "Agent update available: $($cmd.current_version) -> $($cmd.latest_version)" -Level "WARN"
+                    }
+                    Update-Agent -Config $Config -TargetVersion $cmd.latest_version -ExpectedChecksum $checksum
                 }
             }
         }
