@@ -3020,6 +3020,12 @@ class ContainerVulnerability(db.Model):
     acknowledged_at = db.Column(db.DateTime, nullable=True)
     acknowledged_by = db.Column(db.String(100), nullable=True)
 
+    # Snooze feature - temporarily suppress alerts until this datetime
+    snoozed_until = db.Column(db.DateTime, nullable=True, index=True)
+
+    # Alert tracking - when first alert was sent for this vuln
+    first_alerted_at = db.Column(db.DateTime, nullable=True, index=True)
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -3044,6 +3050,9 @@ class ContainerVulnerability(db.Model):
             'data_source': self.data_source,
             'primary_url': self.primary_url,
             'acknowledged': self.acknowledged,
+            'acknowledged_at': self.acknowledged_at.isoformat() if self.acknowledged_at else None,
+            'acknowledged_by': self.acknowledged_by,
+            'snoozed_until': self.snoozed_until.isoformat() if self.snoozed_until else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -3162,6 +3171,12 @@ class DependencyScanResult(db.Model):
     acknowledged_at = db.Column(db.DateTime, nullable=True)
     acknowledged_by = db.Column(db.String(100), nullable=True)
 
+    # Snooze feature - temporarily suppress alerts until this datetime
+    snoozed_until = db.Column(db.DateTime, nullable=True, index=True)
+
+    # Alert tracking - when first alert was sent for this vuln
+    first_alerted_at = db.Column(db.DateTime, nullable=True, index=True)
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -3212,6 +3227,8 @@ class DependencyScanResult(db.Model):
             'aliases': self.get_aliases(),
             'acknowledged': self.acknowledged,
             'acknowledged_at': self.acknowledged_at.isoformat() if self.acknowledged_at else None,
+            'acknowledged_by': self.acknowledged_by,
+            'snoozed_until': self.snoozed_until.isoformat() if self.snoozed_until else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

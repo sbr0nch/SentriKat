@@ -2690,6 +2690,21 @@ def get_vulnerability_stats():
             container_stats['unique_high'] = unique_sev['HIGH']
             container_stats['unique_medium'] = unique_sev['MEDIUM']
             container_stats['unique_low'] = unique_sev['LOW']
+
+            # Unacknowledged counts
+            unacked_count = ContainerVulnerability.query.filter(
+                ContainerVulnerability.container_image_id.in_(image_ids),
+                ContainerVulnerability.acknowledged == False
+            ).count()
+            container_stats['unacknowledged'] = unacked_count
+
+            # Snoozed counts
+            from datetime import datetime as _dt
+            snoozed_count = ContainerVulnerability.query.filter(
+                ContainerVulnerability.container_image_id.in_(image_ids),
+                ContainerVulnerability.snoozed_until > _dt.utcnow()
+            ).count()
+            container_stats['snoozed'] = snoozed_count
     except Exception:
         pass  # Container tables may not exist yet
 
@@ -3132,6 +3147,133 @@ def take_vulnerability_snapshot():
         return jsonify({'error': str(e)}), 500
 
 
+def _get_container_vulnerability_list(org_id, request):
+    """Serve container vulnerabilities in the same grouped format as the main vuln list."""
+    from collections import defaultdict
+
+    search = request.args.get('search', '').lower().strip()
+    acknowledged_filter = request.args.get('acknowledged', '')
+    priority_filter = request.args.get('priority', '').lower().strip()
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = min(100, max(1, request.args.get('per_page', 25, type=int)))
+
+    # Get container images for this org
+    if org_id:
+        image_query = ContainerImage.query.filter_by(organization_id=org_id, active=True)
+    else:
+        image_query = ContainerImage.query.filter_by(active=True)
+    image_ids = [img.id for img in image_query.all()]
+
+    if not image_ids:
+        return jsonify({'items': [], 'total': 0, 'page': page, 'per_page': per_page, 'pages': 0})
+
+    # Query container vulnerabilities
+    vuln_query = ContainerVulnerability.query.filter(
+        ContainerVulnerability.container_image_id.in_(image_ids)
+    )
+
+    if acknowledged_filter == 'true':
+        vuln_query = vuln_query.filter(ContainerVulnerability.acknowledged == True)
+    elif acknowledged_filter == 'false':
+        vuln_query = vuln_query.filter(ContainerVulnerability.acknowledged == False)
+
+    if priority_filter:
+        vuln_query = vuln_query.filter(
+            db.func.upper(ContainerVulnerability.severity) == priority_filter.upper()
+        )
+
+    all_vulns = vuln_query.all()
+
+    # Group by CVE ID
+    cve_groups = defaultdict(lambda: {'vulns': [], 'images': set(), 'severities': []})
+    # Build image lookup
+    image_map = {img.id: img for img in image_query.all()}
+
+    for v in all_vulns:
+        if search and search not in (v.vuln_id or '').lower() and search not in (v.title or '').lower() \
+                and search not in (v.pkg_name or '').lower():
+            continue
+        group = cve_groups[v.vuln_id]
+        group['vulns'].append(v)
+        group['images'].add(v.container_image_id)
+        group['severities'].append((v.severity or 'UNKNOWN').upper())
+
+    # Build results
+    severity_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1, 'UNKNOWN': 0}
+    results = []
+
+    for cve_id, group in cve_groups.items():
+        max_sev_val = max(severity_order.get(s, 0) for s in group['severities'])
+        highest_severity = {v: k for k, v in severity_order.items()}.get(max_sev_val, 'UNKNOWN')
+        unacked = sum(1 for v in group['vulns'] if not v.acknowledged)
+
+        # Collect affected images info
+        affected_images = []
+        for img_id in group['images']:
+            img = image_map.get(img_id)
+            if img:
+                # Get the vuln instances for this image
+                img_vulns = [v for v in group['vulns'] if v.container_image_id == img_id]
+                affected_images.append({
+                    'image_id': img.id,
+                    'image_name': img.full_name,
+                    'asset_hostname': img.asset.hostname if img.asset else None,
+                    'registry': img.registry,
+                    'vuln_instances': [v.to_dict() for v in img_vulns],
+                })
+
+        # Build a vulnerability-like dict for the frontend
+        sample = group['vulns'][0]
+
+        # Cross-reference with CISA KEV for EPSS data
+        kev_vuln = Vulnerability.query.filter_by(cve_id=cve_id).first() if cve_id.startswith('CVE-') else None
+
+        vuln_dict = {
+            'cve_id': cve_id,
+            'title': sample.title or cve_id,
+            'description': sample.description,
+            'severity': highest_severity,
+            'cvss_score': sample.cvss_score,
+            'primary_url': sample.primary_url,
+            'source': 'container',
+            # KEV enrichment
+            'epss_score': kev_vuln.epss_score if kev_vuln else None,
+            'epss_percentile': kev_vuln.epss_percentile if kev_vuln else None,
+            'is_actively_exploited': kev_vuln.is_actively_exploited if kev_vuln else False,
+            'known_ransomware': kev_vuln.known_ransomware if kev_vuln else False,
+            'due_date': kev_vuln.due_date.isoformat() if kev_vuln and kev_vuln.due_date else None,
+        }
+
+        results.append({
+            'cve_id': cve_id,
+            'vulnerability': vuln_dict,
+            'highest_priority': highest_severity.lower(),
+            'affected_images': affected_images,
+            'image_count': len(group['images']),
+            'unacknowledged_count': unacked,
+            'total_instances': len(group['vulns']),
+            'source_type': 'container',
+        })
+
+    # Sort by severity (critical first)
+    results.sort(key=lambda x: -severity_order.get(x['highest_priority'].upper(), 0))
+
+    # Paginate
+    total = len(results)
+    pages = (total + per_page - 1) // per_page
+    start = (page - 1) * per_page
+    paginated = results[start:start + per_page]
+
+    return jsonify({
+        'items': paginated,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'pages': pages,
+        'source_type': 'container',
+    })
+
+
 @bp.route('/api/vulnerabilities/grouped', methods=['GET'])
 @login_required
 def get_vulnerabilities_grouped():
@@ -3196,13 +3338,9 @@ def get_vulnerabilities_grouped():
             'priority': request.args.get('priority'),
             'source_key_type': request.args.get('source_key_type') if request.args.get('source_key_type') in ('server', 'client') else None,
         }
-        # Container filter: containers use ContainerImage model, not Product/VulnerabilityMatch.
-        # Return empty results for container filter since they don't participate in CVE matching.
+        # Container filter: serve container vulnerabilities from ContainerVulnerability model
         if source_type_filter == 'container':
-            return jsonify({
-                'items': [], 'total': 0, 'page': 1, 'per_page': 25,
-                'message': 'Container vulnerabilities are tracked separately via container image scanning.'
-            })
+            return _get_container_vulnerability_list(org_id, request)
         if source_type_filter in ('os_package', 'extension', 'code_library'):
             if include_extensions and source_type_filter == 'code_library':
                 filters['source_types'] = ['code_library', 'extension']
@@ -3991,6 +4129,175 @@ def unacknowledge_by_cve(cve_id):
         'match_ids': unacknowledged_ids,
         'cve_id': cve_id,
         'message': f'Unacknowledged {len(unacknowledged_ids)} product(s) for {cve_id}'
+    })
+
+
+# ============================================================================
+# Container Vulnerability Management API
+# ============================================================================
+
+def _authorize_container_vuln(current_user, vuln):
+    """Check user has access to the container vulnerability's organization."""
+    if current_user.is_super_admin():
+        return True
+    image = ContainerImage.query.get(vuln.container_image_id)
+    if not image:
+        return False
+    user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
+    return image.organization_id in user_org_ids
+
+
+@bp.route('/api/container-vulns/<int:vuln_id>/acknowledge', methods=['POST'])
+@login_required
+def acknowledge_container_vuln(vuln_id):
+    """Acknowledge a container vulnerability."""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    vuln = ContainerVulnerability.query.get_or_404(vuln_id)
+
+    if not _authorize_container_vuln(current_user, vuln):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    vuln.acknowledged = True
+    vuln.acknowledged_at = datetime.utcnow()
+    vuln.acknowledged_by = current_user.email or current_user.username
+    db.session.commit()
+    return jsonify(vuln.to_dict())
+
+
+@bp.route('/api/container-vulns/<int:vuln_id>/unacknowledge', methods=['POST'])
+@login_required
+def unacknowledge_container_vuln(vuln_id):
+    """Unacknowledge a container vulnerability (reopen for alerts)."""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    vuln = ContainerVulnerability.query.get_or_404(vuln_id)
+
+    if not _authorize_container_vuln(current_user, vuln):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    vuln.acknowledged = False
+    vuln.acknowledged_at = None
+    vuln.acknowledged_by = None
+    vuln.first_alerted_at = None  # Reset so it will be alerted again as "new"
+    db.session.commit()
+    return jsonify(vuln.to_dict())
+
+
+@bp.route('/api/container-vulns/<int:vuln_id>/snooze', methods=['POST'])
+@login_required
+def snooze_container_vuln(vuln_id):
+    """Snooze a container vulnerability for a specified duration.
+
+    Request body: { "hours": 24 } or { "days": 7 }
+    """
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    vuln = ContainerVulnerability.query.get_or_404(vuln_id)
+
+    if not _authorize_container_vuln(current_user, vuln):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    data = request.get_json() or {}
+    hours = data.get('hours', 0)
+    days = data.get('days', 0)
+    if not hours and not days:
+        hours = 24
+
+    total_hours = hours + (days * 24)
+    vuln.snoozed_until = datetime.utcnow() + timedelta(hours=total_hours)
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'snoozed_until': vuln.snoozed_until.isoformat(),
+        'vuln': vuln.to_dict()
+    })
+
+
+@bp.route('/api/container-vulns/<int:vuln_id>/unsnooze', methods=['POST'])
+@login_required
+def unsnooze_container_vuln(vuln_id):
+    """Remove snooze from a container vulnerability."""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    vuln = ContainerVulnerability.query.get_or_404(vuln_id)
+
+    if not _authorize_container_vuln(current_user, vuln):
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    vuln.snoozed_until = None
+    db.session.commit()
+    return jsonify(vuln.to_dict())
+
+
+@bp.route('/api/container-vulns/acknowledge-by-cve/<cve_id>', methods=['POST'])
+@login_required
+def acknowledge_container_vulns_by_cve(cve_id):
+    """Acknowledge ALL container vulnerabilities for a given CVE ID across all images."""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    org_id = session.get('organization_id')
+
+    # Find all container vulns for this CVE in the user's org
+    query = ContainerVulnerability.query.join(ContainerImage).filter(
+        ContainerVulnerability.vuln_id == cve_id,
+        ContainerVulnerability.acknowledged == False,
+    )
+    if not current_user.is_super_admin():
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
+        query = query.filter(ContainerImage.organization_id.in_(user_org_ids))
+    elif org_id:
+        query = query.filter(ContainerImage.organization_id == org_id)
+
+    vulns = query.all()
+    now = datetime.utcnow()
+    user_label = current_user.email or current_user.username
+    for v in vulns:
+        v.acknowledged = True
+        v.acknowledged_at = now
+        v.acknowledged_by = user_label
+
+    db.session.commit()
+
+    return jsonify({
+        'acknowledged_count': len(vulns),
+        'cve_id': cve_id,
+        'message': f'Acknowledged {len(vulns)} container vulnerability instance(s) for {cve_id}'
+    })
+
+
+@bp.route('/api/container-vulns/unacknowledge-by-cve/<cve_id>', methods=['POST'])
+@login_required
+def unacknowledge_container_vulns_by_cve(cve_id):
+    """Unacknowledge ALL container vulnerabilities for a given CVE ID."""
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    org_id = session.get('organization_id')
+
+    query = ContainerVulnerability.query.join(ContainerImage).filter(
+        ContainerVulnerability.vuln_id == cve_id,
+        ContainerVulnerability.acknowledged == True,
+    )
+    if not current_user.is_super_admin():
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
+        query = query.filter(ContainerImage.organization_id.in_(user_org_ids))
+    elif org_id:
+        query = query.filter(ContainerImage.organization_id == org_id)
+
+    vulns = query.all()
+    for v in vulns:
+        v.acknowledged = False
+        v.acknowledged_at = None
+        v.acknowledged_by = None
+        v.first_alerted_at = None
+
+    db.session.commit()
+
+    return jsonify({
+        'unacknowledged_count': len(vulns),
+        'cve_id': cve_id,
+        'message': f'Unacknowledged {len(vulns)} container vulnerability instance(s) for {cve_id}'
     })
 
 

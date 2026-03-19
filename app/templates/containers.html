@@ -98,6 +98,7 @@
                         <th style="width:60px">CVSS</th>
                         <th style="width:80px">EPSS</th>
                         <th style="width:50px" title="CISA KEV / Active Exploitation">KEV</th>
+                        <th style="width:120px">Actions</th>
                     </tr></thead>
                     <tbody id="vulnTableBody"></tbody>
                 </table>
@@ -210,6 +211,7 @@ function renderImages(images) {
 }
 
 async function showDetail(imageId) {
+    currentDetailImageId = imageId;
     try {
         const res = await fetch(`/api/containers/${imageId}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -232,7 +234,7 @@ async function showDetail(imageId) {
 
         const tbody = document.getElementById('vulnTableBody');
         if (!vulns.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3"><i class="bi bi-shield-check me-1"></i>No vulnerabilities found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3"><i class="bi bi-shield-check me-1"></i>No vulnerabilities found</td></tr>';
         } else {
             tbody.innerHTML = vulns.map(v => {
                 const sevClass = {'CRITICAL':'bg-danger','HIGH':'bg-warning text-dark','MEDIUM':'bg-secondary','LOW':'bg-info'}[v.severity] || 'bg-secondary';
@@ -260,7 +262,29 @@ async function showDetail(imageId) {
                     kevHtml = '<span class="badge bg-warning text-dark" title="In CISA KEV catalog"><i class="bi bi-exclamation-circle"></i></span>';
                 }
 
-                return `<tr class="vuln-row">
+                // Acknowledge/Snooze status and actions
+                let actionsHtml = '';
+                const isSnoozed = v.snoozed_until && new Date(v.snoozed_until) > new Date();
+                if (v.acknowledged) {
+                    actionsHtml = `<span class="badge bg-success-subtle text-success me-1" title="Acknowledged${v.acknowledged_by ? ' by ' + escHtml(v.acknowledged_by) : ''}"><i class="bi bi-check-circle"></i> Ack'd</span>
+                        <button class="btn btn-link btn-sm p-0 text-muted" onclick="event.stopPropagation(); unackVuln(${v.id})" title="Reopen"><i class="bi bi-arrow-counterclockwise"></i></button>`;
+                } else if (isSnoozed) {
+                    actionsHtml = `<span class="badge bg-warning-subtle text-warning me-1" title="Snoozed until ${escHtml(v.snoozed_until)}"><i class="bi bi-clock-history"></i> Snoozed</span>
+                        <button class="btn btn-link btn-sm p-0 text-muted" onclick="event.stopPropagation(); unsnoozeVuln(${v.id})" title="Unsnooze"><i class="bi bi-alarm"></i></button>`;
+                } else {
+                    actionsHtml = `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="event.stopPropagation(); ackVuln(${v.id})" title="Acknowledge"><i class="bi bi-check-lg"></i></button>
+                        <div class="btn-group">
+                            <button class="btn btn-outline-warning btn-sm py-0 px-1 dropdown-toggle" data-bs-toggle="dropdown" onclick="event.stopPropagation()" title="Snooze"><i class="bi bi-clock"></i></button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); snoozeVuln(${v.id}, 24)">24 hours</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); snoozeVuln(${v.id}, 72)">3 days</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); snoozeVuln(${v.id}, 168)">7 days</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); snoozeVuln(${v.id}, 720)">30 days</a></li>
+                            </ul>
+                        </div>`;
+                }
+
+                return `<tr class="vuln-row${v.acknowledged ? ' table-success' : ''}${isSnoozed ? ' opacity-50' : ''}">
                     <td><span class="badge ${sevClass} severity-badge">${escHtml(v.severity||'?')}</span></td>
                     <td>${v.primary_url ? `<a href="${escHtml(v.primary_url)}" target="_blank" rel="noopener">${escHtml(v.vuln_id)}</a>` : escHtml(v.vuln_id)}</td>
                     <td><code>${escHtml(v.pkg_name)}</code> <small class="text-muted">${escHtml(v.pkg_type||'')}</small></td>
@@ -269,6 +293,7 @@ async function showDetail(imageId) {
                     <td>${v.cvss_score ? `<strong>${v.cvss_score.toFixed(1)}</strong>` : '-'}</td>
                     <td>${epssHtml}</td>
                     <td>${kevHtml || '<span class="text-muted">-</span>'}</td>
+                    <td>${actionsHtml}</td>
                 </tr>`;
             }).join('');
         }
@@ -297,6 +322,45 @@ function timeAgo(date) {
     if (s < 3600) return Math.floor(s/60) + 'm ago';
     if (s < 86400) return Math.floor(s/3600) + 'h ago';
     return Math.floor(s/86400) + 'd ago';
+}
+
+// Track current detail image ID for refresh after actions
+let currentDetailImageId = null;
+
+async function ackVuln(vulnId) {
+    try {
+        const res = await fetch(`/api/container-vulns/${vulnId}/acknowledge`, {method: 'POST', headers: {'Content-Type': 'application/json'}});
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (currentDetailImageId) showDetail(currentDetailImageId);
+    } catch(e) { console.error('Acknowledge failed:', e); }
+}
+
+async function unackVuln(vulnId) {
+    try {
+        const res = await fetch(`/api/container-vulns/${vulnId}/unacknowledge`, {method: 'POST', headers: {'Content-Type': 'application/json'}});
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (currentDetailImageId) showDetail(currentDetailImageId);
+    } catch(e) { console.error('Unacknowledge failed:', e); }
+}
+
+async function snoozeVuln(vulnId, hours) {
+    try {
+        const res = await fetch(`/api/container-vulns/${vulnId}/snooze`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({hours: hours})
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (currentDetailImageId) showDetail(currentDetailImageId);
+    } catch(e) { console.error('Snooze failed:', e); }
+}
+
+async function unsnoozeVuln(vulnId) {
+    try {
+        const res = await fetch(`/api/container-vulns/${vulnId}/unsnooze`, {method: 'POST', headers: {'Content-Type': 'application/json'}});
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (currentDetailImageId) showDetail(currentDetailImageId);
+    } catch(e) { console.error('Unsnooze failed:', e); }
 }
 
 loadImages();

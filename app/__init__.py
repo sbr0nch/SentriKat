@@ -109,6 +109,12 @@ def _apply_schema_migrations(logger, db_uri):
         # Import queue category columns (source_type + ecosystem for filtering)
         ('import_queue', 'source_type', "VARCHAR(30) DEFAULT 'os_package'", "VARCHAR(30) DEFAULT 'os_package'"),
         ('import_queue', 'ecosystem', 'VARCHAR(30)', 'VARCHAR(30)'),
+        # Container vulnerability snooze & alert tracking
+        ('container_vulnerabilities', 'snoozed_until', 'DATETIME', 'TIMESTAMP'),
+        ('container_vulnerabilities', 'first_alerted_at', 'DATETIME', 'TIMESTAMP'),
+        # Dependency scan result snooze & alert tracking
+        ('dependency_scan_results', 'snoozed_until', 'DATETIME', 'TIMESTAMP'),
+        ('dependency_scan_results', 'first_alerted_at', 'DATETIME', 'TIMESTAMP'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
