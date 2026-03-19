@@ -620,12 +620,6 @@ def get_agent_api_key():
 
     if not agent_key:
         logger.warning(f"Agent auth failed: Invalid API key from {source_ip}")
-        # Log failed auth event
-        try:
-            # We don't know which org, so log without org context
-            pass  # Can't log without org_id
-        except Exception:
-            pass
         return None, None
 
     if not agent_key.is_valid():
@@ -949,8 +943,8 @@ def _process_single_job(app, job_id):
             finally:
                 try:
                     db.session.remove()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Session cleanup for job {job_id}: {e}")
     except Exception as e:
         logger.error(f"Worker thread fatal error on job {job_id}: {e}", exc_info=True)
     finally:
@@ -996,8 +990,8 @@ def _handle_job_failure(job_id, error_message):
         logger.error(f"Failed to update job {job_id} failure status: {commit_err}")
         try:
             db.session.rollback()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Rollback cleanup for job {job_id}: {e}")
 
 
 def _worker_pool_supervisor(app):

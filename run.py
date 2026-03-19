@@ -30,5 +30,16 @@ scheduler = start_scheduler(app)
 if __name__ == '__main__':
     # Database is created in create_app() if needed - no need to call db.create_all() here
     # Debug mode ONLY enabled if FLASK_ENV is not production
-    debug_mode = os.environ.get('FLASK_ENV', 'development') != 'production'
+    flask_env = os.environ.get('FLASK_ENV', 'development')
+    sentrikat_env = os.environ.get('SENTRIKAT_ENV', '')
+    debug_mode = flask_env != 'production'
+
+    # Safety: disable debug if SENTRIKAT_ENV indicates production even if FLASK_ENV is wrong
+    if sentrikat_env == 'production' and debug_mode:
+        logger.critical(
+            "FLASK_ENV is not set to 'production' but SENTRIKAT_ENV=production. "
+            "Forcing debug mode OFF for safety."
+        )
+        debug_mode = False
+
     app.run(debug=debug_mode, host='0.0.0.0', port=5000)
