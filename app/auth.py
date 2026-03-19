@@ -506,8 +506,8 @@ def api_login():
                 if global_2fa:
                     must_setup_2fa = True
                     logger.info(f"2FA setup required for {username} (global policy)")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to check global 2FA policy for {username}: {e}")
 
     # Check for password expiration (local users only)
     password_expired = False

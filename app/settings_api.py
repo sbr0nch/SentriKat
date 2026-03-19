@@ -1665,6 +1665,26 @@ MAX_LOGO_SIZE = 2 * 1024 * 1024  # 2MB
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
+
+def _validate_svg_content(file_data):
+    """Reject SVG files containing scripts or dangerous content."""
+    import re
+    content = file_data.decode('utf-8', errors='ignore').lower()
+    dangerous_patterns = [
+        r'<script',
+        r'javascript:',
+        r'on\w+\s*=',       # onclick=, onerror=, onload=, etc.
+        r'<iframe',
+        r'<embed',
+        r'<object',
+        r'<foreignobject',
+        r'xlink:href\s*=\s*["\'](?!#)',  # external xlink references
+    ]
+    for pattern in dangerous_patterns:
+        if re.search(pattern, content):
+            return False
+    return True
+
 @settings_bp.route('/branding/logo', methods=['POST'])
 @admin_required
 def upload_logo():
@@ -1690,6 +1710,14 @@ def upload_logo():
 
     if size > MAX_LOGO_SIZE:
         return jsonify({'error': f'File too large. Maximum size: {MAX_LOGO_SIZE // (1024*1024)}MB'}), 400
+
+    # Validate SVG content for XSS
+    ext = file.filename.rsplit('.', 1)[1].lower()
+    if ext == 'svg':
+        file_data = file.read()
+        file.seek(0)
+        if not _validate_svg_content(file_data):
+            return jsonify({'error': 'SVG file contains potentially unsafe content (scripts, event handlers). Please upload a clean SVG.'}), 400
 
     try:
         # Create uploads directory in /app/data (persistent volume)

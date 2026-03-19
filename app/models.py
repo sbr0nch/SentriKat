@@ -2,6 +2,9 @@ from datetime import datetime, date
 from app import db
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Association table for many-to-many relationship between products and organizations
 product_organizations = db.Table('product_organizations',
@@ -1107,7 +1110,8 @@ class User(db.Model):
                     return True
 
             return False
-        except Exception:
+        except Exception as e:
+            logger.error(f"TOTP verification error for user {self.username}: {e}")
             return False
 
     def enable_totp(self):

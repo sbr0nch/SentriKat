@@ -17,8 +17,14 @@ logger = logging.getLogger(__name__)
 
 def _allow_private_urls():
     """Check if private/internal URLs are allowed (for dev/test environments)."""
-    return (os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true' or
-            os.environ.get('ALLOW_PRIVATE_JIRA_URL', '').lower() == 'true')
+    allowed = (os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true' or
+               os.environ.get('ALLOW_PRIVATE_JIRA_URL', '').lower() == 'true')
+    if allowed and os.environ.get('FLASK_ENV') == 'production':
+        logger.critical(
+            "SECURITY WARNING: ALLOW_PRIVATE_URLS is enabled in production! "
+            "This disables SSRF protection. Remove this setting immediately."
+        )
+    return allowed
 
 
 def is_ssrf_safe_url(url):
