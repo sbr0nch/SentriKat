@@ -4896,7 +4896,7 @@ async function loadLogFile() {
 
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${e.message}</div>`;
+        container.innerHTML = `<div class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -5026,7 +5026,7 @@ async function loadHealthChecks() {
 
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>Error loading health checks: ${e.message}</div>`;
+        container.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>Error loading health checks: ${escapeHtml(e.message)}</div>`;
     }
 }
 

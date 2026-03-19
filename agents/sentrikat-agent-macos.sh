@@ -39,18 +39,72 @@ SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-false}"        # Extension scanning (VS Code
 SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-false}"    # Code library dependency scanning
 
 # ============================================================================
+# Cleanup Handler for Graceful Shutdown
+# ============================================================================
+
+_cleanup_temp_files=()
+register_temp_file() {
+    _cleanup_temp_files+=("$1")
+}
+
+cleanup_on_exit() {
+    local exit_code=$?
+    for f in "${_cleanup_temp_files[@]}"; do
+        rm -f "$f" 2>/dev/null
+    done
+    # Kill background jobs if any
+    jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
+    # Release lock file
+    release_lock
+    exit $exit_code
+}
+trap cleanup_on_exit EXIT INT TERM
+
+# ============================================================================
+# Lock File Mechanism
+# ============================================================================
+
+LOCK_FILE="/var/run/sentrikat-agent.lock"
+
+acquire_lock() {
+    if mkdir "$LOCK_FILE" 2>/dev/null; then
+        echo $$ > "$LOCK_FILE/pid"
+        return 0
+    fi
+    # Check if holding process is still alive
+    local lock_pid
+    lock_pid=$(cat "$LOCK_FILE/pid" 2>/dev/null)
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+        log_warn "Removing stale lock (PID $lock_pid no longer running)"
+        rm -rf "$LOCK_FILE"
+        if mkdir "$LOCK_FILE" 2>/dev/null; then
+            echo $$ > "$LOCK_FILE/pid"
+            return 0
+        fi
+    fi
+    log_warn "Another agent instance is running (PID ${lock_pid:-unknown}), skipping"
+    return 1
+}
+
+release_lock() {
+    rm -rf "$LOCK_FILE" 2>/dev/null
+}
+
+# ============================================================================
 # Logging Functions
 # ============================================================================
 
 json_escape() {
     local str="$1"
+    # Escape backslashes first, then quotes, then control characters
     str="${str//\\/\\\\}"
     str="${str//\"/\\\"}"
+    str="${str//$'\t'/\\t}"
     str="${str//$'\n'/\\n}"
     str="${str//$'\r'/\\r}"
-    str="${str//$'\t'/\\t}"
-    str=$(echo "$str" | tr -d '\000-\011\013-\037')
-    echo "$str"
+    # Remove remaining control characters (null bytes etc) that can't be JSON-escaped
+    str=$(printf '%s' "$str" | tr -d '\000-\010\013\014\016-\037')
+    printf '%s' "$str"
 }
 
 log() {
@@ -694,6 +748,7 @@ except: pass
     # Write JSON array to temp file (avoids ARG_MAX issues)
     local outfile
     outfile=$(mktemp /tmp/sentrikat-products-XXXXXX.json)
+    register_temp_file "$outfile"
 
     printf '[' > "$outfile"
     local first=true
@@ -814,6 +869,7 @@ scan_container_images() {
     # Write scan results directly to temp file (avoids ARG_MAX)
     local results_file
     results_file=$(mktemp /tmp/sentrikat-container-XXXXXX.json)
+    register_temp_file "$results_file"
     printf '[' > "$results_file"
 
     local image_count=0
@@ -826,6 +882,7 @@ scan_container_images() {
 
         local trivy_tmpfile
         trivy_tmpfile=$(mktemp)
+        register_temp_file "$trivy_tmpfile"
         "$TRIVY_BIN" image \
             --format json \
             --severity HIGH,CRITICAL \
@@ -887,6 +944,7 @@ scan_container_images() {
 
     local tmpfile
     tmpfile=$(mktemp)
+    register_temp_file "$tmpfile"
     printf '{"agent_id": "%s", "hostname": "%s", "scanner": "trivy", "scanner_version": "%s", "images": ' \
         "$AGENT_ID" "$my_hostname" "$trivy_version" > "$tmpfile"
     cat "$results_file" >> "$tmpfile"
@@ -977,6 +1035,7 @@ collect_and_send_lockfiles() {
 
     local tmpfile
     tmpfile=$(mktemp /tmp/sentrikat-lockfiles-XXXXXX.json)
+    register_temp_file "$tmpfile"
     local my_hostname
     my_hostname=$(hostname)
 
@@ -1009,6 +1068,7 @@ send_inventory() {
 
     local tmpfile
     tmpfile=$(mktemp)
+    register_temp_file "$tmpfile"
 
     printf '%s' "$system_info" | sed 's/}$//' > "$tmpfile"
     printf ', "products": ' >> "$tmpfile"
@@ -1258,8 +1318,10 @@ auto_update_agent() {
 
     # Download new script to temp file
     tmp_script=$(mktemp /tmp/sentrikat-update-XXXXXX)
+    register_temp_file "$tmp_script"
     local http_code header_file
     header_file=$(mktemp /tmp/sentrikat-headers-XXXXXX)
+    register_temp_file "$header_file"
     http_code=$(curl -s -w "%{http_code}" -o "$tmp_script" -D "$header_file" \
         -H "X-Agent-Key: $API_KEY" \
         --max-time 60 "$download_url" 2>/dev/null)
@@ -1500,6 +1562,18 @@ uninstall_agent() {
     rm -f "$LAUNCHDAEMON_PLIST" "$HEARTBEAT_PLIST"
     rm -f /usr/local/bin/sentrikat-agent
 
+    # Remove configuration (contains API key)
+    if [[ -f "$CONFIG_FILE" ]]; then
+        log_info "Removing configuration..."
+        rm -f "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null
+    fi
+    # Remove log files
+    rm -f "$LOG_FILE"* 2>/dev/null
+    # Remove lock file
+    rm -rf "$LOCK_FILE" 2>/dev/null
+    # Remove backup scripts
+    rm -f /usr/local/bin/sentrikat-agent.backup.* 2>/dev/null
+
     log_info "Agent uninstalled"
     echo "SentriKat Agent uninstalled"
 }
@@ -1511,6 +1585,12 @@ heartbeat_mode() {
 
     if [[ -z "$SERVER_URL" || -z "$API_KEY" ]]; then
         log_error "SERVER_URL and API_KEY are required"
+        exit 1
+    fi
+
+    # Validate HTTPS
+    if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
+        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
         exit 1
     fi
 
@@ -1548,6 +1628,7 @@ Options:
   --run-once           Run inventory collection once and exit
   --heartbeat          Run heartbeat check (polls for commands)
   --verbose            Enable verbose output
+  --allow-http         Allow non-HTTPS server URL (NOT recommended for production)
   --help               Show this help message
 
 Examples:
@@ -1573,6 +1654,15 @@ main() {
         echo "Run '$0 --help' for usage information"
         exit 1
     fi
+
+    # Validate HTTPS (after config is loaded, before any API calls)
+    if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
+        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
+        exit 1
+    fi
+
+    # Acquire lock to prevent concurrent runs
+    acquire_lock || exit 0
 
     local system_info
     system_info=$(get_system_info)
@@ -1617,6 +1707,7 @@ UNINSTALL=false
 RUN_ONCE=false
 HEARTBEAT=false
 VERBOSE=false
+ALLOW_HTTP=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -1650,6 +1741,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --verbose|-v)
             VERBOSE=true
+            shift
+            ;;
+        --allow-http)
+            ALLOW_HTTP=true
             shift
             ;;
         --help|-h)

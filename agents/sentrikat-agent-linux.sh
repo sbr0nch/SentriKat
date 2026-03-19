@@ -36,6 +36,58 @@ SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-false}"        # Extension scanning (VS Code
 SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-false}"    # Code library dependency scanning
 
 # ============================================================================
+# Cleanup Handler for Graceful Shutdown
+# ============================================================================
+
+_cleanup_temp_files=()
+register_temp_file() {
+    _cleanup_temp_files+=("$1")
+}
+
+cleanup_on_exit() {
+    local exit_code=$?
+    for f in "${_cleanup_temp_files[@]}"; do
+        rm -f "$f" 2>/dev/null
+    done
+    # Kill background jobs if any
+    jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
+    # Release lock file
+    release_lock
+    exit $exit_code
+}
+trap cleanup_on_exit EXIT INT TERM
+
+# ============================================================================
+# Lock File Mechanism
+# ============================================================================
+
+LOCK_FILE="/var/run/sentrikat-agent.lock"
+
+acquire_lock() {
+    if mkdir "$LOCK_FILE" 2>/dev/null; then
+        echo $$ > "$LOCK_FILE/pid"
+        return 0
+    fi
+    # Check if holding process is still alive
+    local lock_pid
+    lock_pid=$(cat "$LOCK_FILE/pid" 2>/dev/null)
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+        log_warn "Removing stale lock (PID $lock_pid no longer running)"
+        rm -rf "$LOCK_FILE"
+        if mkdir "$LOCK_FILE" 2>/dev/null; then
+            echo $$ > "$LOCK_FILE/pid"
+            return 0
+        fi
+    fi
+    log_warn "Another agent instance is running (PID ${lock_pid:-unknown}), skipping"
+    return 1
+}
+
+release_lock() {
+    rm -rf "$LOCK_FILE" 2>/dev/null
+}
+
+# ============================================================================
 # Logging Functions
 # ============================================================================
 
@@ -43,14 +95,14 @@ SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-false}"    # Code library dependency sca
 json_escape() {
     local str="$1"
     # Escape backslashes first, then quotes, then control characters
-    str="${str//\\/\\\\}"      # Backslash
-    str="${str//\"/\\\"}"      # Double quote
-    str="${str//$'\n'/\\n}"    # Newline
-    str="${str//$'\r'/\\r}"    # Carriage return
-    str="${str//$'\t'/\\t}"    # Tab
-    # Remove other control characters
-    str=$(echo "$str" | tr -d '\000-\011\013-\037')
-    echo "$str"
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    str="${str//$'\t'/\\t}"
+    str="${str//$'\n'/\\n}"
+    str="${str//$'\r'/\\r}"
+    # Remove remaining control characters (null bytes etc) that can't be JSON-escaped
+    str=$(printf '%s' "$str" | tr -d '\000-\010\013\014\016-\037')
+    printf '%s' "$str"
 }
 
 log() {
@@ -277,16 +329,26 @@ get_installed_software() {
         done < <(rpm -qa --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n' 2>/dev/null)
     fi
 
-    # Alpine: apk
+    # Alpine APK packages
     if command -v apk &>/dev/null; then
-        while IFS='-' read -r name version; do
-            [[ -z "$name" ]] && continue
-
-            name=$(json_escape "$name")
-            version=$(json_escape "$version")
-            products+=("{\"vendor\": \"Alpine\", \"product\": \"$name\", \"version\": \"$version\"}")
+        while IFS= read -r line; do
+            # apk info -v output: package-version-rN
+            # Extract name by removing version suffix
+            local pkg_name pkg_version
+            # Use regex to split at first version-like segment
+            if [[ "$line" =~ ^(.+)-([0-9][0-9a-zA-Z._]*(-r[0-9]+)?)$ ]]; then
+                pkg_name="${BASH_REMATCH[1]}"
+                pkg_version="${BASH_REMATCH[2]}"
+            else
+                continue
+            fi
+            [[ -z "$pkg_name" || -z "$pkg_version" ]] && continue
+            local vendor="Alpine"
+            pkg_name=$(json_escape "$pkg_name")
+            pkg_version=$(json_escape "$pkg_version")
+            products+=("{\"vendor\": \"$vendor\", \"product\": \"$pkg_name\", \"version\": \"$pkg_version\", \"source_type\": \"os\", \"ecosystem\": \"apk\"}")
             ((count++))
-        done < <(apk info -v 2>/dev/null | sed 's/-[0-9].*/-&/' | sed 's/--/-/')
+        done < <(apk info -v 2>/dev/null)
     fi
 
     # Arch: pacman
@@ -644,6 +706,7 @@ except: pass
     # errors. With 1000+ packages the JSON string can exceed bash/kernel ARG_MAX.
     local outfile
     outfile=$(mktemp /tmp/sentrikat-products-XXXXXX.json)
+    register_temp_file "$outfile"
 
     printf '[' > "$outfile"
     local first=true
@@ -802,6 +865,7 @@ scan_container_images() {
     # Write scan results directly to temp file (avoids ARG_MAX)
     local results_file
     results_file=$(mktemp /tmp/sentrikat-container-XXXXXX.json)
+    register_temp_file "$results_file"
     printf '[' > "$results_file"
 
     local image_count=0
@@ -815,6 +879,7 @@ scan_container_images() {
         # Run Trivy scan with JSON output directly to temp file
         local trivy_tmpfile
         trivy_tmpfile=$(mktemp)
+        register_temp_file "$trivy_tmpfile"
         "$TRIVY_BIN" image \
             --format json \
             --severity HIGH,CRITICAL \
@@ -886,6 +951,7 @@ send_container_scan_results() {
     # Assemble payload to temp file (no large bash variables)
     local tmpfile
     tmpfile=$(mktemp)
+    register_temp_file "$tmpfile"
     printf '{"agent_id": "%s", "hostname": "%s", "scanner": "trivy", "scanner_version": "%s", "images": ' \
         "$AGENT_ID" "$my_hostname" "$trivy_version" > "$tmpfile"
     cat "$results_file" >> "$tmpfile"
@@ -1035,6 +1101,7 @@ collect_and_send_lockfiles() {
     # Write payload to temp file
     local tmpfile
     tmpfile=$(mktemp /tmp/sentrikat-lockfiles-XXXXXX.json)
+    register_temp_file "$tmpfile"
     local my_hostname
     my_hostname=$(hostname)
 
@@ -1105,6 +1172,7 @@ send_inventory() {
     # $products_file is a path to a JSON array file written by get_installed_software.
     local tmpfile
     tmpfile=$(mktemp)
+    register_temp_file "$tmpfile"
 
     # Write: { system_info_fields..., "products": <contents of products_file> }
     printf '%s' "$system_info" | sed 's/}$//' > "$tmpfile"
@@ -1289,8 +1357,10 @@ auto_update_agent() {
 
     # Download new script to temp file
     tmp_script=$(mktemp /tmp/sentrikat-update-XXXXXX)
+    register_temp_file "$tmp_script"
     local http_code header_file
     header_file=$(mktemp /tmp/sentrikat-headers-XXXXXX)
+    register_temp_file "$header_file"
     http_code=$(curl -s -w "%{http_code}" -o "$tmp_script" -D "$header_file" \
         -H "X-Agent-Key: $API_KEY" \
         --max-time 60 "$download_url" 2>/dev/null)
@@ -1639,8 +1709,17 @@ uninstall_agent() {
     # Remove script
     rm -f /usr/local/bin/sentrikat-agent
 
-    # Optionally remove config (commented out by default)
-    # rm -rf "$CONFIG_DIR"
+    # Remove configuration (contains API key)
+    if [[ -f "$CONFIG_FILE" ]]; then
+        log_info "Removing configuration..."
+        rm -f "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null
+    fi
+    # Remove log files
+    rm -f "$LOG_FILE"* 2>/dev/null
+    # Remove lock file
+    rm -rf "$LOCK_FILE" 2>/dev/null
+    # Remove backup scripts
+    rm -f /usr/local/bin/sentrikat-agent.backup.* 2>/dev/null
 
     log_info "Agent uninstalled"
     echo "SentriKat Agent uninstalled"
@@ -1654,6 +1733,12 @@ heartbeat_mode() {
 
     if [[ -z "$SERVER_URL" || -z "$API_KEY" ]]; then
         log_error "SERVER_URL and API_KEY are required"
+        exit 1
+    fi
+
+    # Validate HTTPS
+    if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
+        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
         exit 1
     fi
 
@@ -1692,6 +1777,7 @@ Options:
   --run-once           Run inventory collection once and exit
   --heartbeat          Run heartbeat check (polls for commands)
   --verbose            Enable verbose output
+  --allow-http         Allow non-HTTPS server URL (NOT recommended for production)
   --help               Show this help message
 
 Examples:
@@ -1722,6 +1808,15 @@ main() {
         echo "Run '$0 --help' for usage information"
         exit 1
     fi
+
+    # Validate HTTPS (after config is loaded, before any API calls)
+    if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
+        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
+        exit 1
+    fi
+
+    # Acquire lock to prevent concurrent runs
+    acquire_lock || exit 0
 
     # Collect and send inventory
     local system_info
@@ -1769,6 +1864,7 @@ UNINSTALL=false
 RUN_ONCE=false
 HEARTBEAT=false
 VERBOSE=false
+ALLOW_HTTP=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -1802,6 +1898,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --verbose|-v)
             VERBOSE=true
+            shift
+            ;;
+        --allow-http)
+            ALLOW_HTTP=true
             shift
             ;;
         --help|-h)

@@ -1861,13 +1861,19 @@ def batch_delete_products():
     errors = 0
 
     try:
+        # Preload all products with their organizations to avoid N+1 queries
+        products_by_id = {
+            p.id: p for p in Product.query.filter(Product.id.in_(product_ids))
+            .options(selectinload(Product.organizations)).all()
+        }
+
         for pid in product_ids:
             try:
-                product = Product.query.get(pid)
+                product = products_by_id.get(pid)
                 if not product:
                     continue
 
-                product_org_ids = [org.id for org in product.organizations.all()]
+                product_org_ids = [org.id for org in product.organizations]
                 if product.organization_id and product.organization_id not in product_org_ids:
                     product_org_ids.append(product.organization_id)
 
@@ -5677,6 +5683,12 @@ def update_organization(org_id):
         org.webhook_enabled = data['webhook_enabled']
     if 'webhook_url' in data:
         from app.encryption import encrypt_value
+        if data['webhook_url']:
+            # Validate webhook URL against SSRF before saving
+            from app.network_security import validate_url_for_request
+            is_safe, ssrf_error = validate_url_for_request(data['webhook_url'], context="webhook_url configuration")
+            if not is_safe:
+                return jsonify({'error': f'Invalid webhook URL: {ssrf_error}'}), 400
         # Encrypt webhook URL (may contain credentials)
         org.webhook_url = encrypt_value(data['webhook_url']) if data['webhook_url'] else None
     if 'webhook_name' in data:

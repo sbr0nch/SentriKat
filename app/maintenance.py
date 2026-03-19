@@ -784,3 +784,115 @@ def get_version_vulnerability_check(product_id, version):
         'has_cpe': True,
         'message': 'Use NVD API to check vulnerabilities for this specific version'
     }
+
+
+# ============================================================================
+# Data Retention Cleanup
+# ============================================================================
+
+def cleanup_old_agent_events(max_age_days=90, dry_run=False):
+    """Remove agent events older than max_age_days to prevent unbounded growth."""
+    from app.models import AgentEvent
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+    query = AgentEvent.query.filter(AgentEvent.created_at < cutoff)
+    count = query.count()
+    if count == 0:
+        logger.info(f"No agent events older than {max_age_days} days to clean up")
+        return 0
+    if dry_run:
+        logger.info(f"[DRY RUN] Would delete {count} agent events older than {max_age_days} days")
+        return count
+    deleted = query.delete(synchronize_session=False)
+    db.session.commit()
+    logger.info(f"Deleted {deleted} agent events older than {max_age_days} days")
+    return deleted
+
+
+def cleanup_old_inventory_jobs(max_age_days=30, dry_run=False):
+    """Remove completed/failed inventory jobs older than max_age_days."""
+    from app.models import InventoryJob
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+    query = InventoryJob.query.filter(
+        InventoryJob.created_at < cutoff,
+        InventoryJob.status.in_(['completed', 'failed'])
+    )
+    count = query.count()
+    if count == 0:
+        logger.info(f"No old inventory jobs to clean up")
+        return 0
+    if dry_run:
+        logger.info(f"[DRY RUN] Would delete {count} inventory jobs older than {max_age_days} days")
+        return count
+    deleted = query.delete(synchronize_session=False)
+    db.session.commit()
+    logger.info(f"Deleted {deleted} old inventory jobs")
+    return deleted
+
+
+def cleanup_old_alert_logs(max_age_days=180, dry_run=False):
+    """Remove alert logs older than max_age_days."""
+    from app.models import AlertLog
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+    query = AlertLog.query.filter(AlertLog.sent_at < cutoff)
+    count = query.count()
+    if count == 0:
+        logger.info(f"No alert logs older than {max_age_days} days to clean up")
+        return 0
+    if dry_run:
+        logger.info(f"[DRY RUN] Would delete {count} alert logs older than {max_age_days} days")
+        return count
+    deleted = query.delete(synchronize_session=False)
+    db.session.commit()
+    logger.info(f"Deleted {deleted} old alert logs")
+    return deleted
+
+
+def cleanup_old_sync_logs(max_age_days=180, dry_run=False):
+    """Remove sync logs older than max_age_days."""
+    from app.models import SyncLog
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+    query = SyncLog.query.filter(SyncLog.started_at < cutoff)
+    count = query.count()
+    if count == 0:
+        logger.info(f"No sync logs older than {max_age_days} days to clean up")
+        return 0
+    if dry_run:
+        logger.info(f"[DRY RUN] Would delete {count} sync logs older than {max_age_days} days")
+        return count
+    deleted = query.delete(synchronize_session=False)
+    db.session.commit()
+    logger.info(f"Deleted {deleted} old sync logs")
+    return deleted
+
+
+def cleanup_old_vulnerability_snapshots(max_age_days=365, dry_run=False):
+    """Remove vulnerability snapshots older than max_age_days."""
+    from app.models import VulnerabilitySnapshot
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+    query = VulnerabilitySnapshot.query.filter(VulnerabilitySnapshot.snapshot_date < cutoff)
+    count = query.count()
+    if count == 0:
+        logger.info(f"No vulnerability snapshots older than {max_age_days} days to clean up")
+        return 0
+    if dry_run:
+        logger.info(f"[DRY RUN] Would delete {count} vulnerability snapshots older than {max_age_days} days")
+        return count
+    deleted = query.delete(synchronize_session=False)
+    db.session.commit()
+    logger.info(f"Deleted {deleted} old vulnerability snapshots")
+    return deleted
+
+
+def run_all_retention_cleanup(dry_run=False):
+    """Run all data retention cleanup jobs."""
+    logger.info("Starting data retention cleanup...")
+    results = {
+        'agent_events': cleanup_old_agent_events(dry_run=dry_run),
+        'inventory_jobs': cleanup_old_inventory_jobs(dry_run=dry_run),
+        'alert_logs': cleanup_old_alert_logs(dry_run=dry_run),
+        'sync_logs': cleanup_old_sync_logs(dry_run=dry_run),
+        'vulnerability_snapshots': cleanup_old_vulnerability_snapshots(dry_run=dry_run),
+    }
+    total = sum(results.values())
+    logger.info(f"Data retention cleanup complete: {total} total records {'would be ' if dry_run else ''}removed")
+    return results

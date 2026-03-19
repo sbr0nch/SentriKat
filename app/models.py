@@ -13,12 +13,16 @@ product_organizations = db.Table('product_organizations',
     db.Column('assigned_at', db.DateTime, default=datetime.utcnow)
 )
 
+db.Index('idx_product_org_reverse', product_organizations.c.organization_id, product_organizations.c.product_id)
+
 # Association table for many-to-many relationship between agent API keys and organizations
 agent_api_key_organizations = db.Table('agent_api_key_organizations',
     db.Column('api_key_id', db.Integer, db.ForeignKey('agent_api_keys.id', ondelete='CASCADE'), primary_key=True),
     db.Column('organization_id', db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), primary_key=True),
     db.Column('assigned_at', db.DateTime, default=datetime.utcnow)
 )
+
+db.Index('idx_agent_api_key_org_reverse', agent_api_key_organizations.c.organization_id, agent_api_key_organizations.c.api_key_id)
 
 
 class UserOrganization(db.Model):
@@ -40,6 +44,7 @@ class UserOrganization(db.Model):
     # Unique constraint: user can only have one role per organization
     __table_args__ = (
         db.UniqueConstraint('user_id', 'organization_id', name='unique_user_org'),
+        db.Index('idx_user_org_role', 'organization_id', 'role'),
     )
 
     # Relationships

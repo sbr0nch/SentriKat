@@ -53,7 +53,10 @@ param(
     [int]$IntervalMinutes = 240,  # 4 hours default
 
     [Parameter(Mandatory=$false)]
-    [switch]$VerboseOutput
+    [switch]$VerboseOutput,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$AllowHttp
 )
 
 # Use Stop so unexpected errors are visible; individual cmdlets use -ErrorAction SilentlyContinue where intended
@@ -1885,6 +1888,33 @@ function Uninstall-Agent {
 }
 
 # ============================================================================
+# Lock File Mechanism
+# ============================================================================
+
+$LockFile = "$env:ProgramData\SentriKat\agent.lock"
+
+function Acquire-Lock {
+    if (Test-Path $LockFile) {
+        $lockContent = Get-Content $LockFile -ErrorAction SilentlyContinue
+        $lockPid = [int]$lockContent
+        try {
+            $proc = Get-Process -Id $lockPid -ErrorAction Stop
+            Write-Log "Another agent instance is running (PID $lockPid), skipping" -Level "WARN"
+            return $false
+        } catch {
+            Write-Log "Removing stale lock (PID $lockPid no longer running)" -Level "WARN"
+            Remove-Item $LockFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Set-Content -Path $LockFile -Value $PID
+    return $true
+}
+
+function Release-Lock {
+    Remove-Item $LockFile -Force -ErrorAction SilentlyContinue
+}
+
+# ============================================================================
 # Main Execution
 # ============================================================================
 
@@ -1908,6 +1938,18 @@ function Main {
         Write-Host "ERROR: ServerUrl and ApiKey are required. Use -ServerUrl and -ApiKey parameters or create config file at $ConfigFile"
         exit 1
     }
+
+    # Validate HTTPS (after config is loaded, before any API calls)
+    if ($config.ServerUrl -match '^http://' -and -not $AllowHttp) {
+        Write-Host "ERROR: ServerUrl must use HTTPS. Use -AllowHttp to override (NOT recommended)." -ForegroundColor Red
+        exit 1
+    }
+
+    # Acquire lock to prevent concurrent runs
+    if (-not (Acquire-Lock)) {
+        exit 0
+    }
+    try {
 
     # Handle installation
     if ($InstallService) {
@@ -2054,6 +2096,10 @@ function Main {
     catch {
         Write-Log "Fatal error: $_" -Level "ERROR"
         exit 1
+    }
+
+    } finally {
+        Release-Lock
     }
 }
 

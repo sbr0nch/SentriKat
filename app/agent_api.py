@@ -1696,7 +1696,10 @@ def report_inventory():
 
     # Parse JSON body
     try:
-        data = request.get_json(force=True)  # force=True ignores content-type
+        data = request.get_json()
+        if data is None:
+            # Fallback for agents that may not set Content-Type header
+            data = request.get_json(force=True)
     except Exception as e:
         logger.error(f"Failed to parse JSON body: {e}")
         return jsonify({'error': 'Invalid JSON format'}), 400
@@ -2782,7 +2785,7 @@ def delete_asset(asset_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"Failed to delete asset {hostname} (id={asset_id}): {e}")
-        return jsonify({'error': f'Failed to delete endpoint: {str(e)}'}), 500
+        return jsonify({'error': 'Failed to delete endpoint'}), 500
 
     logger.info(f"Asset deleted: {hostname} by user {user.username}"
                 f"{f', cleaned up {orphaned_count} orphaned products' if orphaned_count else ''}")
@@ -3514,7 +3517,7 @@ def simulate_load():
     except Exception as e:
         db.session.rollback()
         logger.exception("Load test creation failed")
-        return jsonify({'error': f'Failed to create test jobs: {str(e)[:200]}'}), 500
+        return jsonify({'error': 'Failed to create test jobs'}), 500
 
 
 @agent_bp.route('/api/admin/worker/load-test-cleanup', methods=['DELETE'])
@@ -3566,7 +3569,7 @@ def cleanup_load_test():
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Cleanup failed: {str(e)[:200]}'}), 500
+        return jsonify({'error': 'Cleanup failed'}), 500
 
 
 # ============================================================================

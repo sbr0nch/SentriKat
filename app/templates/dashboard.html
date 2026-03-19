@@ -1404,7 +1404,7 @@
         const canvas = document.getElementById('widgetCanvas' + slot);
 
         // Update header
-        titleEl.innerHTML = `<i class="bi ${meta.icon} me-2"></i>${meta.title}`;
+        titleEl.innerHTML = `<i class="bi ${escapeHtml(meta.icon)} me-2"></i>${escapeHtml(meta.title)}`;
         subtitleEl.textContent = meta.subtitle;
 
         // Destroy old chart

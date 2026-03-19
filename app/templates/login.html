@@ -312,7 +312,9 @@
     <script>
         // State
         const urlParams = new URLSearchParams(window.location.search);
-        const nextUrl = urlParams.get('next') || '/';
+        const rawNext = urlParams.get('next') || '/';
+        // Prevent open redirect: only allow relative paths starting with /
+        const nextUrl = (rawNext.startsWith('/') && !rawNext.startsWith('//')) ? rawNext : '/';
         let pendingUserId = null;
         let pendingCredentials = null;
 

@@ -58,6 +58,20 @@ else
     echo "No custom CA certificates found in $CUSTOM_CERTS_DIR"
 fi
 
+# ── Validate required secrets in production ──
+if [ "${FLASK_ENV:-}" = "production" ]; then
+    _default_secret="change-this-secret-key-in-production"
+    if [ -z "$SECRET_KEY" ] || [ "$SECRET_KEY" = "$_default_secret" ]; then
+        echo "FATAL: SECRET_KEY must be set to a unique value in production."
+        echo "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        exit 1
+    fi
+    if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" = "sentrikat" ]; then
+        echo "FATAL: DB_PASSWORD must be changed from the default in production."
+        exit 1
+    fi
+fi
+
 # Auto-generate ENCRYPTION_KEY if not set
 # Persists to DATA_DIR/.encryption_key so it survives container rebuilds
 ENCRYPTION_KEY_FILE="${DATA_DIR:-/app/data}/.encryption_key"

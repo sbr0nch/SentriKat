@@ -121,10 +121,13 @@ class Config:
     # Session Security
     # =========================================================================
 
-    # SESSION_COOKIE_SECURE should be 'true' only when using HTTPS
-    # Default to 'false' to support HTTP-only deployments (e.g., behind reverse proxy)
-    # When Secure=true, browsers won't send the cookie over HTTP connections
-    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
+    # SESSION_COOKIE_SECURE: auto-enabled in production (FLASK_ENV=production or FORCE_HTTPS=true)
+    # Can be explicitly overridden via SESSION_COOKIE_SECURE env var
+    _is_production = os.environ.get('FLASK_ENV') == 'production'
+    _force_https = os.environ.get('FORCE_HTTPS', 'false').lower() == 'true'
+    SESSION_COOKIE_SECURE = (
+        os.environ.get('SESSION_COOKIE_SECURE', 'true' if (_is_production or _force_https) else 'false').lower() == 'true'
+    )
     SESSION_COOKIE_HTTPONLY = True
     # Use 'Lax' instead of 'Strict' to allow cookie on navigation redirects
     SESSION_COOKIE_SAMESITE = 'Lax'
