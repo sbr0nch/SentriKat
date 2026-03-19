@@ -7,7 +7,7 @@ versions (not ranges from manifests), including transitive dependencies.
 
 Supported formats:
 - npm: package-lock.json, yarn.lock, pnpm-lock.yaml
-- Python: Pipfile.lock, poetry.lock, requirements.txt (pinned)
+- Python: Pipfile.lock, poetry.lock, requirements.txt (pinned), pyproject.toml (PEP 621 + Poetry), setup.cfg, uv.lock
 - Rust: Cargo.lock
 - Go: go.sum, go.mod
 - Ruby: Gemfile.lock
@@ -109,6 +109,12 @@ def detect_lockfile_type(filename):
         'pnpm-lock.yaml': 'pnpm',
         'pipfile.lock': 'pipfile',
         'poetry.lock': 'poetry',
+        'requirements.txt': 'requirements',
+        'requirements-dev.txt': 'requirements',
+        'requirements-prod.txt': 'requirements',
+        'pyproject.toml': 'pyproject',
+        'setup.cfg': 'setupcfg',
+        'uv.lock': 'uvlock',
         'cargo.lock': 'cargo',
         'go.sum': 'gosum',
         'go.mod': 'gomod',
@@ -146,6 +152,10 @@ def parse_lockfile(filename, content):
         'pnpm': _parse_pnpm_lock,
         'pipfile': _parse_pipfile_lock,
         'poetry': _parse_poetry_lock,
+        'requirements': _parse_requirements_txt,
+        'pyproject': _parse_pyproject_toml,
+        'setupcfg': _parse_setup_cfg,
+        'uvlock': _parse_uv_lock,
         'cargo': _parse_cargo_lock,
         'gosum': _parse_go_sum,
         'gomod': _parse_go_mod,
@@ -321,7 +331,7 @@ def _parse_pnpm_lock(content):
 
             # Package entry: /name@version: or /@scope/name@version:
             # Also handles quoted format: '/@scope/name@version':
-            match = re.match(r"^\s+['\"]?/?(@?[^@'\"]+)@([^:'\"(]+)", stripped)
+            match = re.match(r"^\s+['\"]?/?(@?[^@'\"]{1,500})@([^:'\"(\s]{1,200})", stripped)
             if match:
                 name = match.group(1).rstrip('/')
                 version = match.group(2).strip()
@@ -707,6 +717,319 @@ def _parse_nuget_packages_lock(content):
             if key not in seen:
                 seen.add(key)
                 deps.append(LockfileDependency(name, version, ECOSYSTEM_NUGET, is_direct))
+
+    return deps
+
+
+# =============================================================================
+# Python: requirements.txt (pip freeze format)
+# =============================================================================
+
+def _parse_requirements_txt(content):
+    """Parse requirements.txt (pip format).
+
+    Supports:
+    - name==version (pinned - most useful for vuln matching)
+    - name>=version (minimum - uses minimum as installed version)
+    - name~=version (compatible release)
+    - name (no version - skipped, can't match vulns without version)
+
+    Ignores:
+    - Comments (#)
+    - Options (-i, --index-url, -f, etc.)
+    - Editable installs (-e)
+    - URL/path installs
+    """
+    deps = []
+    seen = set()
+
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or line.startswith('-'):
+            continue
+
+        # Skip URL-based or path-based installs
+        if '://' in line or line.startswith('.') or line.startswith('/'):
+            continue
+
+        # Handle environment markers (e.g. "package==1.0 ; python_version >= '3'")
+        if ';' in line:
+            line = line.split(';')[0].strip()
+
+        # Handle extras (e.g. "package[extra]==1.0")
+        # Keep the base name only for vuln matching
+        base_line = re.sub(r'\[.*?\]', '', line)
+
+        # Parse version specifier
+        # Try == first (exact pin), then ~=, >=, >, <=, <, !=
+        match = re.match(r'^([A-Za-z0-9][\w.\-]*)\s*==\s*([^\s,;]+)', base_line)
+        if not match:
+            # Try >= (use as "at least this version installed")
+            match = re.match(r'^([A-Za-z0-9][\w.\-]*)\s*>=\s*([^\s,;]+)', base_line)
+        if not match:
+            # Try ~= (compatible release, e.g. ~=1.4.2 means >=1.4.2, <1.5.0)
+            match = re.match(r'^([A-Za-z0-9][\w.\-]*)\s*~=\s*([^\s,;]+)', base_line)
+        if not match:
+            # No version or unsupported specifier - skip
+            continue
+
+        name = match.group(1).strip()
+        version = match.group(2).strip()
+
+        # Normalize name (PEP 503: lowercase, replace - and _ and . with -)
+        normalized = re.sub(r'[-_.]+', '-', name).lower()
+
+        key = (normalized, version)
+        if key not in seen:
+            seen.add(key)
+            # All requirements.txt entries are considered direct deps
+            deps.append(LockfileDependency(normalized, version, ECOSYSTEM_PYPI, is_direct=True))
+
+    return deps
+
+
+# =============================================================================
+# Python: pyproject.toml (PEP 621 / Poetry)
+# =============================================================================
+
+def _parse_pyproject_toml(content):
+    """Parse pyproject.toml for dependency declarations.
+
+    Extracts dependencies from:
+    - [project].dependencies (PEP 621 standard)
+    - [tool.poetry.dependencies] (Poetry format)
+
+    Uses stdlib-only TOML-like parsing (no tomllib needed for basic cases).
+    """
+    deps = []
+    seen = set()
+
+    # Strategy: Parse line by line since we can't rely on tomllib (Python 3.11+)
+    # Look for [project] dependencies and [tool.poetry.dependencies]
+
+    lines = content.splitlines()
+    in_project_deps = False
+    in_poetry_deps = False
+    in_poetry_dev_deps = False
+    current_section = None
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Track section headers
+        if stripped.startswith('['):
+            in_project_deps = False
+            in_poetry_deps = False
+            in_poetry_dev_deps = False
+
+            section = stripped.strip('[]').strip()
+            current_section = section
+
+            if section == 'project':
+                current_section = 'project'
+            elif section == 'tool.poetry.dependencies':
+                in_poetry_deps = True
+            elif section in ('tool.poetry.dev-dependencies', 'tool.poetry.group.dev.dependencies'):
+                in_poetry_dev_deps = True
+            continue
+
+        # PEP 621: dependencies = ["package>=1.0", "other==2.0"]
+        if current_section == 'project' and stripped.startswith('dependencies'):
+            # Could be single-line or multi-line array
+            if '=' in stripped:
+                value = stripped.split('=', 1)[1].strip()
+                if value.startswith('['):
+                    # Single-line array or start of multi-line
+                    in_project_deps = True
+                    _parse_pep621_deps_from_value(value, deps, seen)
+                    if ']' in value:
+                        in_project_deps = False
+            continue
+
+        # Multi-line PEP 621 dependencies array
+        if in_project_deps:
+            if ']' in stripped:
+                _parse_pep621_deps_from_value(stripped, deps, seen)
+                in_project_deps = False
+            else:
+                _parse_pep621_deps_from_value(stripped, deps, seen)
+            continue
+
+        # Poetry format: package = "^1.0" or package = {version = "^1.0", ...}
+        if (in_poetry_deps or in_poetry_dev_deps) and '=' in stripped and not stripped.startswith('#'):
+            match = re.match(r'^([a-zA-Z0-9][\w.\-]*)\s*=\s*(.+)', stripped)
+            if match:
+                name = match.group(1).strip()
+                value = match.group(2).strip()
+
+                # Skip python itself
+                if name.lower() == 'python':
+                    continue
+
+                version = None
+                if value.startswith('"') or value.startswith("'"):
+                    # Simple string: "^1.0.0" or ">=1.0,<2.0"
+                    version = value.strip('"').strip("'")
+                elif value.startswith('{'):
+                    # Inline table: {version = "^1.0", optional = true}
+                    ver_match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', value)
+                    if ver_match:
+                        version = ver_match.group(1)
+
+                if version:
+                    # Extract base version from specifier (^1.0.0 -> 1.0.0, >=1.0 -> 1.0)
+                    clean_ver = re.sub(r'^[\^~>=<!]+', '', version.split(',')[0]).strip()
+                    if clean_ver and re.match(r'^\d', clean_ver):
+                        normalized = re.sub(r'[-_.]+', '-', name).lower()
+                        key = (normalized, clean_ver)
+                        if key not in seen:
+                            seen.add(key)
+                            deps.append(LockfileDependency(
+                                normalized, clean_ver, ECOSYSTEM_PYPI, is_direct=True
+                            ))
+
+    return deps
+
+
+def _parse_pep621_deps_from_value(value, deps, seen):
+    """Extract dependencies from a PEP 621 dependencies array value."""
+    # Find all quoted strings in the value
+    for match in re.finditer(r'["\']([^"\']+)["\']', value):
+        dep_str = match.group(1).strip()
+        if not dep_str or dep_str.startswith('#'):
+            continue
+
+        # Handle environment markers
+        if ';' in dep_str:
+            dep_str = dep_str.split(';')[0].strip()
+
+        # Remove extras
+        dep_str = re.sub(r'\[.*?\]', '', dep_str)
+
+        # Parse name and version
+        ver_match = re.match(r'^([A-Za-z0-9][\w.\-]*)\s*([>=~!<]+)\s*([^\s,]+)', dep_str)
+        if ver_match:
+            name = ver_match.group(1)
+            version = ver_match.group(3)
+            normalized = re.sub(r'[-_.]+', '-', name).lower()
+            key = (normalized, version)
+            if key not in seen:
+                seen.add(key)
+                deps.append(LockfileDependency(normalized, version, ECOSYSTEM_PYPI, is_direct=True))
+
+
+# =============================================================================
+# Python: setup.cfg (setuptools declarative config)
+# =============================================================================
+
+def _parse_setup_cfg(content):
+    """Parse setup.cfg for install_requires dependencies."""
+    deps = []
+    seen = set()
+    in_install_requires = False
+
+    for line in content.splitlines():
+        stripped = line.strip()
+
+        # Detect [options] section keys
+        if stripped.startswith('['):
+            in_install_requires = False
+            continue
+
+        if stripped.startswith('install_requires'):
+            in_install_requires = True
+            # Handle inline value after =
+            if '=' in stripped:
+                value = stripped.split('=', 1)[1].strip()
+                if value:
+                    _parse_setup_cfg_dep(value, deps, seen)
+            continue
+
+        # Continuation lines for install_requires (indented)
+        if in_install_requires:
+            if not line.startswith((' ', '\t')) and stripped:
+                # New key, no longer in install_requires
+                in_install_requires = False
+                continue
+            if stripped:
+                _parse_setup_cfg_dep(stripped, deps, seen)
+
+    return deps
+
+
+def _parse_setup_cfg_dep(dep_str, deps, seen):
+    """Parse a single dependency string from setup.cfg."""
+    dep_str = dep_str.strip().rstrip(',')
+    if not dep_str or dep_str.startswith('#'):
+        return
+
+    # Handle markers
+    if ';' in dep_str:
+        dep_str = dep_str.split(';')[0].strip()
+
+    # Remove extras
+    dep_str = re.sub(r'\[.*?\]', '', dep_str)
+
+    match = re.match(r'^([A-Za-z0-9][\w.\-]*)\s*(?:([>=~!<]+)\s*([^\s,]+))?', dep_str)
+    if match and match.group(1):
+        name = match.group(1)
+        version = match.group(3) if match.group(3) else None
+        if version:
+            normalized = re.sub(r'[-_.]+', '-', name).lower()
+            key = (normalized, version)
+            if key not in seen:
+                seen.add(key)
+                deps.append(LockfileDependency(normalized, version, ECOSYSTEM_PYPI, is_direct=True))
+
+
+# =============================================================================
+# Python: uv.lock (uv package manager)
+# =============================================================================
+
+def _parse_uv_lock(content):
+    """Parse uv.lock for Python dependencies.
+
+    uv.lock uses a TOML-like format with [[package]] sections:
+        [[package]]
+        name = "requests"
+        version = "2.31.0"
+        source = { registry = "https://pypi.org/simple" }
+    """
+    deps = []
+    seen = set()
+    current_name = None
+    current_version = None
+
+    for line in content.splitlines():
+        stripped = line.strip()
+
+        if stripped == '[[package]]':
+            # Save previous package
+            if current_name and current_version:
+                key = (current_name, current_version)
+                if key not in seen:
+                    seen.add(key)
+                    deps.append(LockfileDependency(current_name, current_version, ECOSYSTEM_PYPI, is_direct=False))
+            current_name = None
+            current_version = None
+            continue
+
+        if stripped.startswith('name'):
+            match = re.match(r'name\s*=\s*["\']([^"\']+)["\']', stripped)
+            if match:
+                current_name = re.sub(r'[-_.]+', '-', match.group(1)).lower()
+
+        elif stripped.startswith('version'):
+            match = re.match(r'version\s*=\s*["\']([^"\']+)["\']', stripped)
+            if match:
+                current_version = match.group(1)
+
+    # Don't forget the last package
+    if current_name and current_version:
+        key = (current_name, current_version)
+        if key not in seen:
+            seen.add(key)
+            deps.append(LockfileDependency(current_name, current_version, ECOSYSTEM_PYPI, is_direct=False))
 
     return deps
 

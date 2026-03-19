@@ -255,6 +255,7 @@ def login_user_session(user):
     session['user_id'] = user.id
     session['username'] = user.username
     session['is_admin'] = user.is_admin
+    session['_pw_changed_at'] = user.password_changed_at.isoformat() if user.password_changed_at else ''
 
     # Set organization
     if user.organization_id:
@@ -531,6 +532,7 @@ def api_login():
     session['user_id'] = user.id
     session['username'] = user.username
     session['is_admin'] = user.is_admin
+    session['_pw_changed_at'] = user.password_changed_at.isoformat() if user.password_changed_at else ''
 
     # Set flag for password change requirement
     if password_expired:
@@ -619,8 +621,148 @@ def change_password():
     session.pop('must_change_password', None)
     db.session.commit()
 
+    # Update current session so it survives the password-change invalidation check
+    session['_pw_changed_at'] = current_user.password_changed_at.isoformat() if current_user.password_changed_at else ''
+
     logger.info(f"Password changed successfully for {current_user.username}")
     return jsonify({'success': True, 'message': 'Password changed successfully'})
+
+
+# ============================================================================
+# PASSWORD RESET (Forgot Password)
+# ============================================================================
+
+@auth_bp.route('/reset-password', methods=['GET'])
+def reset_password_page():
+    """Display password reset page (no login required)"""
+    return render_template('reset_password.html')
+
+
+@auth_bp.route('/api/auth/request-password-reset', methods=['POST'])
+@limiter.limit("3 per minute")
+def request_password_reset():
+    """Request a password reset link via email"""
+    import logging
+    logger = logging.getLogger('security')
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid request'}), 400
+
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'Email address is required'}), 400
+
+    # Generic success message to prevent email enumeration
+    success_message = 'If an account with that email exists, a password reset link has been sent.'
+
+    try:
+        # Case-insensitive email lookup
+        user = User.query.filter(func.lower(User.email) == email).first()
+
+        if not user or not user.is_active:
+            logger.info(f"Password reset requested for unknown/inactive email: {email} from {request.remote_addr}")
+            return jsonify({'message': success_message})
+
+        if user.auth_type != 'local':
+            logger.info(f"Password reset requested for non-local user: {user.username} (auth_type={user.auth_type}) from {request.remote_addr}")
+            return jsonify({'message': success_message})
+
+        # Generate reset token
+        token = user.generate_password_reset_token()
+        logger.info(f"Password reset token generated for user: {user.username} from {request.remote_addr}")
+
+        # Attempt to send email
+        email_sent = False
+        fallback_token = None
+        try:
+            from app.email_alerts import send_password_reset_email
+            base_url = request.host_url.rstrip('/')
+            success, details = send_password_reset_email(user, token, base_url)
+            if success:
+                email_sent = True
+                logger.info(f"Password reset email sent to {user.email}")
+            else:
+                logger.warning(f"Failed to send password reset email to {user.email}: {details}")
+                fallback_token = token
+        except Exception as e:
+            logger.warning(f"Failed to send password reset email to {user.email}: {e}")
+            # If email sending fails, return token as fallback for self-hosted setups
+            fallback_token = token
+
+        response_data = {'message': success_message}
+        if fallback_token:
+            response_data['token'] = fallback_token
+            response_data['note'] = 'Email sending is not configured or failed. Use this token directly to reset your password.'
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"Password reset request error: {e}")
+        db.session.rollback()
+        return jsonify({'message': success_message})
+
+
+@auth_bp.route('/api/auth/reset-password', methods=['POST'])
+@limiter.limit("5 per minute")
+def reset_password():
+    """Reset password using a valid reset token"""
+    import logging
+    logger = logging.getLogger('security')
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid request'}), 400
+
+    token = (data.get('token') or '').strip()
+    new_password = data.get('new_password') or ''
+
+    if not token:
+        return jsonify({'error': 'Reset token is required'}), 400
+
+    if not new_password:
+        return jsonify({'error': 'New password is required'}), 400
+
+    try:
+        # Verify token
+        user = User.verify_password_reset_token(token)
+        if not user:
+            logger.warning(f"Invalid/expired password reset token used from {request.remote_addr}")
+            return jsonify({'error': 'Invalid or expired reset token. Please request a new password reset.'}), 400
+
+        # Validate password against policy
+        is_valid, error_msg = User.validate_password_policy(new_password)
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
+
+        # Set new password
+        user.update_password(new_password)
+
+        # Clear the reset token (single-use)
+        user.clear_password_reset_token()
+
+        # Reset failed login attempts
+        user.failed_login_attempts = 0
+        user.locked_until = None
+
+        db.session.commit()
+
+        # Clear all sessions for this user (invalidate existing logins)
+        # Flask server-side sessions don't support targeted session invalidation easily,
+        # but we log the event for audit purposes
+        logger.info(f"Password reset completed for user: {user.username} from {request.remote_addr}")
+
+        return jsonify({'message': 'Password has been reset successfully.'})
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error(f"Database error during password reset: {e}")
+        return jsonify({'error': 'An error occurred. Please try again.'}), 500
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Password reset error: {e}")
+        return jsonify({'error': 'An error occurred. Please try again.'}), 500
+
 
 # ============================================================================
 # TWO-FACTOR AUTHENTICATION
@@ -690,6 +832,7 @@ def get_2fa_qrcode():
     return Response(img_io.getvalue(), mimetype='image/png')
 
 @auth_bp.route('/api/auth/2fa/verify', methods=['POST'])
+@limiter.limit("5 per minute")
 @login_required
 def verify_2fa():
     """Verify 2FA code and enable 2FA"""

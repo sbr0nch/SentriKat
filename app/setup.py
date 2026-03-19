@@ -172,10 +172,11 @@ def create_admin_user():
         if not data.get('username') or not data.get('password'):
             return jsonify({'error': 'Username and password are required'}), 400
 
-        # Validate password strength
+        # Validate password against configured policy
         password = data.get('password')
-        if len(password) < 8:
-            return jsonify({'error': 'Password must be at least 8 characters long'}), 400
+        is_valid, error_msg = User.validate_password_policy(password)
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
 
         # Validate email format if provided
         email = data.get('email')
