@@ -325,9 +325,13 @@ function Update-SourceFiles {
             exit 1
         }
 
-        # Extract
+        # Extract (use cmd /c to prevent tar stderr from aborting PowerShell)
         Write-Info "Extracting..."
-        tar xzf $archivePath -C $TempDir
+        cmd /c "tar xzf `"$archivePath`" -C `"$TempDir`" 2>&1"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Failed to extract archive"
+            exit 1
+        }
 
         # Find extracted directory
         $ExtractDir = Get-ChildItem $TempDir -Directory | Select-Object -First 1
@@ -350,10 +354,12 @@ function Update-SourceFiles {
         }
         Write-OK "Backup created"
 
-        # Replace source files (NEVER touch .env, docker-compose.yml, or data/)
+        # Replace source files (NEVER touch .env or data/ — user config lives there)
+        # docker-compose.yml IS updated because it's application structure, not user config.
+        # All user-specific values use ${VAR:-default} and are read from .env.
         Write-Info "Updating application files..."
         $updateItems = @("app", "static", "templates", "scripts", "tools", "agents", "docs", "nginx",
-                         "Dockerfile", "docker-entrypoint.sh", "gunicorn.conf.py",
+                         "Dockerfile", "docker-compose.yml", "docker-entrypoint.sh", "gunicorn.conf.py",
                          "requirements.txt", "VERSION", "README.md", "run.py")
 
         foreach ($item in $updateItems) {
@@ -373,6 +379,16 @@ function Update-SourceFiles {
     }
 }
 
+# Helper: run a Docker command without PowerShell treating stderr as errors.
+# Windows PowerShell 5.x converts native stderr to ErrorRecords and with
+# $ErrorActionPreference=Stop it aborts even on successful commands.
+# Wrapping in cmd /c isolates stderr from PowerShell's error handling.
+function Invoke-Docker {
+    param([string]$Cmd)
+    cmd /c "$Cmd 2>&1"
+    return $LASTEXITCODE
+}
+
 # --- Docker image update ---
 if ($DeployType -eq "docker_image") {
     $DockerCompose = Join-Path $ComposeDir "docker-compose.yml"
@@ -386,10 +402,8 @@ if ($DeployType -eq "docker_image") {
     Push-Location $ComposeDir
     try {
         Write-Info "Pulling new Docker image..."
-        $ErrorActionPreference = "Continue"
-        docker compose pull 2>&1 | Out-Host
-        $ErrorActionPreference = "Stop"
-        if ($LASTEXITCODE -ne 0) {
+        $exitCode = Invoke-Docker "docker compose pull"
+        if ($exitCode -ne 0) {
             Write-Err "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:$TargetVersion"
             Write-Err "Check: https://github.com/$Repo/pkgs/container/sentrikat"
             if ($CurrentVersion -ne "unknown") {
@@ -402,10 +416,8 @@ if ($DeployType -eq "docker_image") {
         Write-OK "Docker image pulled"
 
         Write-Info "Restarting SentriKat..."
-        $ErrorActionPreference = "Continue"
-        docker compose up -d 2>&1 | Out-Host
-        $ErrorActionPreference = "Stop"
-        if ($LASTEXITCODE -ne 0) {
+        $exitCode = Invoke-Docker "docker compose up -d"
+        if ($exitCode -ne 0) {
             Write-Err "Failed to restart containers. Check: docker compose logs"
             exit 1
         }
@@ -425,10 +437,8 @@ if ($DeployType -eq "docker_image") {
     Push-Location $ComposeDir
     try {
         Write-Info "Rebuilding Docker image (this may take a few minutes)..."
-        $ErrorActionPreference = "Continue"
-        docker compose build 2>&1 | Out-Host
-        $ErrorActionPreference = "Stop"
-        if ($LASTEXITCODE -ne 0) {
+        $exitCode = Invoke-Docker "docker compose build"
+        if ($exitCode -ne 0) {
             Write-Err "Docker build failed. Check the output above."
             Write-Warn "Source files were updated. Retry: docker compose build && docker compose up -d"
             exit 1
@@ -436,10 +446,8 @@ if ($DeployType -eq "docker_image") {
         Write-OK "Docker image rebuilt"
 
         Write-Info "Restarting SentriKat..."
-        $ErrorActionPreference = "Continue"
-        docker compose up -d 2>&1 | Out-Host
-        $ErrorActionPreference = "Stop"
-        if ($LASTEXITCODE -ne 0) {
+        $exitCode = Invoke-Docker "docker compose up -d"
+        if ($exitCode -ne 0) {
             Write-Err "Failed to restart containers."
             exit 1
         }
