@@ -92,7 +92,7 @@ def serve_upload(filename):
     if '..' in filename or filename.startswith('/'):
         return jsonify({'error': 'Invalid filename'}), 400
 
-    data_dir = os.environ.get('DATA_DIR', '/app/data')
+    data_dir = os.environ.get('DATA_DIR', '') or '/app/data'
     uploads_dir = os.path.join(data_dir, 'uploads')
     return send_from_directory(uploads_dir, filename)
 
@@ -115,7 +115,7 @@ def serve_branding_logo():
     if not filename.startswith('custom_logo.') or '..' in filename:
         return redirect('/static/images/favicon-128x128.png')
 
-    data_dir = os.environ.get('DATA_DIR', '/app/data')
+    data_dir = os.environ.get('DATA_DIR', '') or '/app/data'
     uploads_dir = os.path.join(data_dir, 'uploads')
     filepath = os.path.join(uploads_dir, filename)
     if not os.path.exists(filepath):
@@ -301,7 +301,7 @@ LOG_FILES = {
 
 def _get_log_dir():
     """Get the log directory path."""
-    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    log_dir = os.environ.get('LOG_DIR', '') or '/var/log/sentrikat'
     if not os.path.exists(log_dir):
         log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
     return log_dir
@@ -6800,7 +6800,7 @@ def get_audit_logs():
     sort_order = request.args.get('order', 'desc')
 
     # Find the audit log file
-    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    log_dir = os.environ.get('LOG_DIR', '') or '/var/log/sentrikat'
     if not os.path.exists(log_dir):
         log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 
@@ -6927,7 +6927,7 @@ def export_audit_logs():
     cutoff_str = cutoff_date.isoformat()
 
     # Find the audit log file
-    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    log_dir = os.environ.get('LOG_DIR', '') or '/var/log/sentrikat'
     if not os.path.exists(log_dir):
         log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 

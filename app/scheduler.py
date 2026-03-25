@@ -151,9 +151,9 @@ def start_scheduler(app):
     )
 
     # Schedule LDAP sync if enabled
-    ldap_sync_enabled = os.environ.get('LDAP_SYNC_ENABLED', 'false').lower() == 'true'
+    ldap_sync_enabled = (os.environ.get('LDAP_SYNC_ENABLED', '') or 'false').lower() == 'true'
     if ldap_sync_enabled:
-        ldap_sync_interval = int(os.environ.get('LDAP_SYNC_INTERVAL_HOURS', '24'))
+        ldap_sync_interval = int(os.environ.get('LDAP_SYNC_INTERVAL_HOURS', '') or 24)
 
         scheduler.add_job(
             func=lambda: _run_with_lock('ldap_sync', ldap_sync_job, app),

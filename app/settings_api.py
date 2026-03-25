@@ -1757,7 +1757,7 @@ def upload_logo():
 
     try:
         # Create uploads directory in /app/data (persistent volume)
-        data_dir = os.environ.get('DATA_DIR', '/app/data')
+        data_dir = os.environ.get('DATA_DIR', '') or '/app/data'
         upload_dir = os.path.join(data_dir, 'uploads')
         os.makedirs(upload_dir, exist_ok=True)
 
@@ -1804,7 +1804,7 @@ def delete_logo():
         if logo_url and logo_url.startswith('/data/uploads/'):
             # Delete file from persistent data directory
             # Use basename to prevent path traversal attacks
-            data_dir = os.environ.get('DATA_DIR', '/app/data')
+            data_dir = os.environ.get('DATA_DIR', '') or '/app/data'
             safe_filename = os.path.basename(logo_url)
             # Extra validation: reject any suspicious patterns
             if '..' in safe_filename or safe_filename.startswith('/'):
