@@ -456,3 +456,304 @@ Stripe funziona perfettamente in Svizzera (attivo dal 2013).
 - **Il modello a 5 tier SaaS** (Free/Starter/Pro/Business/Enterprise) e' predisposto in models.py per il futuro
 - **Per il lancio on-premise** servono solo: security fix + Buy Now button + Stripe live
 - **Per il lancio SaaS** servono le modifiche elencate in Parte 6 (data isolation, org admin self-service, bridge provisioning)
+
+---
+
+## PARTE 8: SECURITY AUDIT DELLA VERSIONE SAAS
+
+### Vulnerabilita' Corrette (Commit aef9866)
+
+| # | Problema | Gravita' | File | Stato |
+|---|----------|----------|------|-------|
+| 1 | Secret SaaS hardcoded nel codice | CRITICO | saas.py | CORRETTO - ora legge da env var SENTRIKAT_SAAS_SECRET |
+| 2 | API key permette override org_id | CRITICO | integrations_api.py | CORRETTO - locked to integration.organization_id |
+| 3 | /api/cpe/coverage espone tutti gli org | CRITICO | cpe_api.py | CORRETTO - aggiunto SaaS org scoping |
+| 4 | SBOM import permette override org_id | CRITICO | integrations_api.py | CORRETTO - locked to integration.organization_id |
+| 5 | Org switch permesso in SaaS mode | MEDIO | routes.py | CORRETTO - bloccato in SaaS mode |
+
+### Vulnerabilita' Corrette (Commit e0c89cd)
+
+| # | Problema | Gravita' | File | Stato |
+|---|----------|----------|------|-------|
+| 6 | super_admin vede tutti gli utenti | CRITICO | routes.py | CORRETTO - SaaS scoping su /api/users |
+| 7 | super_admin vede tutte le org | CRITICO | routes.py | CORRETTO - SaaS scoping su /api/organizations |
+| 8 | reports senza org filter | CRITICO | reports_api.py | CORRETTO - 3 pattern org_filter fixati |
+| 9 | LDAP/SAML solo per super_admin | ALTO | settings_api.py, saml_api.py | CORRETTO - @saas_admin_or_org_admin |
+| 10 | Branding/Logo solo per super_admin | ALTO | settings_api.py | CORRETTO - @saas_admin_or_org_admin |
+| 11 | Integrations senza cross-org check | ALTO | integrations_api.py | CORRETTO - @restrict_cross_org_access |
+| 12 | Backup/restore non bloccato in SaaS | ALTO | settings_api.py | CORRETTO - ritorna 403 in SaaS mode |
+
+### Vulnerabilita' Residue (da risolvere prima del lancio SaaS)
+
+| # | Problema | Gravita' | File | Azione |
+|---|----------|----------|------|--------|
+| A | SystemSettings globali (non per-org) | ALTO | models.py, settings_api.py | Aggiungere organization_id a SystemSettings |
+| B | LDAP config si sovrascrive tra org | ALTO | settings_api.py | Dipende da fix A |
+| C | SMTP config condivisa tra org | MEDIO | email_alerts.py | Dipende da fix A |
+
+**Nota**: I fix A-C richiedono una migration del database (aggiungere `organization_id` alla tabella `system_settings`).
+Questo e' l'unico cambiamento strutturale necessario per il lancio SaaS.
+
+### Come funziona la protezione SaaS Token
+
+```
+On-premise (.env):
+  SENTRIKAT_MODE=onpremise    (o assente = default)
+  → Nessun token necessario
+  → Tutto funziona come prima
+
+SaaS deployment (.env):
+  SENTRIKAT_MODE=saas
+  SENTRIKAT_SAAS_SECRET=<segreto-che-solo-noi-conosciamo>
+  SENTRIKAT_SAAS_TOKEN=<sha256-del-segreto>
+  → Token validato all'avvio
+  → Se il token e' sbagliato, fallback a on-premise
+
+I clienti on-premise NON conoscono SENTRIKAT_SAAS_SECRET,
+quindi anche se settano SENTRIKAT_MODE=saas, il sistema
+cade in on-premise mode. Impossibile attivare SaaS senza il secret.
+```
+
+---
+
+## PARTE 9: COME METTERE IL SAAS ONLINE
+
+### Architettura di Deployment
+
+```
+                        ┌─────────────────────────┐
+                        │   Cloudflare (DNS + CDN) │
+                        │   app.sentrikat.com      │
+                        └────────────┬────────────┘
+                                     │
+                    ┌────────────────┼────────────────┐
+                    │                │                 │
+              ┌─────▼─────┐   ┌─────▼─────┐   ┌──────▼──────┐
+              │  VPS #1   │   │  VPS #2   │   │  VPS #3     │
+              │  WEB      │   │  SAAS APP │   │  (futuro)   │
+              │  ~€10/mo  │   │  ~€15/mo  │   │  Scale-out  │
+              ├───────────┤   ├───────────┤   └─────────────┘
+              │ sentrikat │   │ sentrikat │
+              │ -web      │   │ (Flask +  │
+              │ (Astro +  │   │  Gunicorn │
+              │  Portal)  │   │  + Nginx) │
+              │ License   │   │           │
+              │ Server    │   │ PostgreSQL│
+              └───────────┘   │ 15        │
+                              │ Redis     │
+                              └───────────┘
+```
+
+### Step-by-Step Deployment
+
+**1. Prepara VPS #2 (SaaS App) - Hetzner Cloud**
+```bash
+# Server: CPX21 (3 vCPU, 4GB RAM, 80GB SSD) ~€10/mo
+# OS: Ubuntu 22.04 LTS
+# Location: Falkenstein (Germania) = EU data residency
+
+# Installa Docker
+curl -fsSL https://get.docker.com | sh
+apt install docker-compose-plugin
+
+# Clona il repo
+git clone git@github.com:sbr0nch/SentriKat.git /opt/sentrikat
+cd /opt/sentrikat
+
+# Crea .env per SaaS
+cp .env.example .env
+```
+
+**2. Configura .env per SaaS**
+```bash
+# Genera secrets
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+ENCRYPTION_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+SAAS_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+SAAS_TOKEN=$(python3 -c "import hashlib; print(hashlib.sha256(b'${SAAS_SECRET}'.encode() if isinstance(b'${SAAS_SECRET}', bytes) else '${SAAS_SECRET}'.encode()).hexdigest())")
+
+# In .env:
+SENTRIKAT_MODE=saas
+SENTRIKAT_SAAS_SECRET=${SAAS_SECRET}
+SENTRIKAT_SAAS_TOKEN=${SAAS_TOKEN}
+SENTRIKAT_ENV=production
+SECRET_KEY=${SECRET_KEY}
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
+DATABASE_URL=postgresql://sentrikat:STRONG_PASSWORD@db:5432/sentrikat
+```
+
+**3. Docker Compose per SaaS**
+```bash
+docker compose up -d
+# Verifica che i log dicano "SaaS mode activated and validated."
+docker compose logs app | grep "SaaS mode"
+```
+
+**4. Configura Nginx + SSL**
+```bash
+# Installa certbot
+apt install certbot python3-certbot-nginx
+
+# Ottieni certificato
+certbot --nginx -d app.sentrikat.com
+
+# Nginx proxy a Gunicorn
+# La config gia' presente nel repo funziona
+```
+
+**5. Configura Cloudflare**
+```
+A record: app.sentrikat.com → IP VPS #2
+Proxy: ON (arancione)
+SSL: Full (strict)
+```
+
+**6. Collega Stripe Live**
+```
+- Switcha le API keys da test a live nel license-server
+- Aggiorna i webhook endpoint a app.sentrikat.com
+- Testa un pagamento con carta reale
+```
+
+### Flusso Cliente SaaS
+
+```
+1. Cliente visita sentrikat.com → vede landing page
+2. Clicca "Start Free Trial" → Stripe Checkout
+3. Stripe webhook → License Server crea account
+4. License Server → POST /api/provision su VPS #2
+   - Crea Organization
+   - Crea User (org_admin)
+   - Crea Subscription (trial 14 giorni)
+5. Cliente riceve email con credenziali
+6. Login su app.sentrikat.com → vede SOLO i suoi dati
+7. Dopo 14 giorni: upgrade o downgrade a Free tier
+```
+
+### Scaling Path
+
+| Fase | Trigger | Azione | Costo |
+|------|---------|--------|-------|
+| 1. Lancio | 0-50 clienti | VPS #2 single server | ~€15/mo |
+| 2. Crescita | 50-200 clienti | Managed DB (Hetzner) + Redis separato | ~€40/mo |
+| 3. Scale | 200-500 clienti | 2x app server + Load Balancer | ~€80/mo |
+| 4. Enterprise | 500+ clienti | Kubernetes (Hetzner Cloud) | ~€150/mo+ |
+
+---
+
+## PARTE 10: GESTIONE AGENTS DEI CLIENTI SAAS
+
+### Il Problema
+
+Ogni cliente SaaS puo' avere 10-100+ agents (discovery agents) che:
+- Inviano dati software periodicamente tramite API
+- Consumano risorse (CPU, DB writes, network)
+- Devono essere isolati per organizzazione
+- Devono rispettare i limiti del piano
+
+### Architettura Agent Management
+
+```
+                   Agents del Cliente A          Agents del Cliente B
+                   (PDQ, SCCM, custom)           (Intune, custom)
+                          │                              │
+                          ▼                              ▼
+                   ┌──────────────┐              ┌──────────────┐
+                   │ API Key A    │              │ API Key B    │
+                   │ org_id = 1   │              │ org_id = 2   │
+                   └──────┬───────┘              └──────┬───────┘
+                          │                              │
+                          ▼                              ▼
+                ┌─────────────────────────────────────────────┐
+                │              Rate Limiter (per org)          │
+                │     Free: 100 req/day    Pro: 10,000/day     │
+                └─────────────────────┬───────────────────────┘
+                                      │
+                                      ▼
+                ┌─────────────────────────────────────────────┐
+                │         /api/import  +  /api/import/sbom     │
+                │    (org_id locked to integration.org_id)     │
+                └─────────────────────┬───────────────────────┘
+                                      │
+                                      ▼
+                ┌─────────────────────────────────────────────┐
+                │              Import Queue (per org)          │
+                │     auto_approve o review manuale            │
+                └─────────────────────────────────────────────┘
+```
+
+### Limiti per Piano
+
+| Risorsa | Free | Starter | Professional | Business | Enterprise |
+|---------|------|---------|-------------|----------|-----------|
+| Agents | 2 | 10 | 50 | 200 | Illimitati |
+| API calls/giorno | 100 | 1,000 | 10,000 | 50,000 | 100,000 |
+| Products monitorati | 25 | 100 | 500 | 2,000 | Illimitati |
+| Data retention | 30gg | 90gg | 1 anno | 2 anni | 5 anni |
+
+### Come Gestirlo in Pratica
+
+**1. Gia' implementato:**
+- `AgentRegistration` model in `integrations_models.py` (tracking agents per org)
+- `check_quota()` in `metering.py` (verifica limiti per piano)
+- `Integration` model con `api_key` legata a `organization_id`
+- Agent heartbeat tracking (`last_seen`, `agent_version`, `os_info`)
+
+**2. Da aggiungere per il lancio:**
+- Dashboard admin: overview agents per org (quanti attivi, ultimo heartbeat)
+- Alert automatici: agent offline > 24h
+- Rate limiting per-org sui import endpoints (gia' rate-limited globalmente, serve per-org)
+- Cleanup automatico: agent non visti da > 90 giorni → disabilitati
+
+**3. Per voi operatori (management):**
+- Super admin su `app.sentrikat.com` puo' vedere TUTTE le org (on-premise mode su admin panel separato)
+- Oppure: pannello admin dedicato (endpoint `/api/admin/...`) che bypassa il SaaS scoping
+- Monitoraggio: Prometheus + Grafana su metriche agents (connections, data volume, errors)
+- Alerting: PagerDuty/Telegram quando un org supera i limiti o un agent ha errori
+
+### Script di Monitoraggio (da aggiungere)
+
+```python
+# Endpoint: GET /api/admin/agents/overview (super_admin only, platform mode)
+# Ritorna:
+{
+  "total_agents": 347,
+  "active_24h": 289,
+  "by_organization": [
+    {"org_id": 1, "org_name": "Acme Corp", "agents": 45, "active": 42, "plan": "business"},
+    {"org_id": 2, "org_name": "Foo Inc", "agents": 12, "active": 10, "plan": "starter"}
+  ],
+  "alerts": [
+    {"org_id": 3, "message": "5 agents offline > 24h", "severity": "warning"}
+  ]
+}
+```
+
+---
+
+## RIEPILOGO STATO COMPLETAMENTO
+
+### Fatto (commits su branch claude/code-audit-saas-plan-BUYDj):
+
+- [x] Audit completo SentriKat + SentriKat-web
+- [x] `app/saas.py` - Modulo centrale dual-mode con token validation
+- [x] `tests/test_saas_mode.py` - 21 test tutti passano
+- [x] `.env.example` - Documentazione variabili SaaS
+- [x] `reports_api.py` - 3 fix cross-org data leakage
+- [x] `settings_api.py` - 7 endpoint @saas_admin_or_org_admin + backup/restore block
+- [x] `saml_api.py` - 2 endpoint @saas_admin_or_org_admin
+- [x] `integrations_api.py` - Cross-org fix + API key org lock
+- [x] `routes.py` - Org listing + user listing SaaS scoping + org switch block
+- [x] `cpe_api.py` - Coverage dashboard SaaS scoping
+- [x] Rimosso secret hardcoded dal codice sorgente
+- [x] Security audit completato
+
+### Da fare prima del lancio SaaS:
+
+- [ ] Aggiungere `organization_id` a `SystemSettings` (migration DB)
+- [ ] Rendere `get_setting()`/`set_setting()` org-aware in SaaS mode
+- [ ] Rate limiting per-org sugli import endpoints
+- [ ] Dashboard admin per overview agents
+- [ ] Provisioning bridge: License Server → SaaS app
+- [ ] Stripe live switch su sentrikat-web
+- [ ] Test end-to-end con flusso completo (signup → trial → import → dashboard)
