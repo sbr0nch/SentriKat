@@ -989,12 +989,12 @@ class EmailAlertManager:
                 if host:
                     smtp_config = {
                         'host': host,
-                        'port': int(os.environ.get('SMTP_PORT', os.environ.get('MAIL_PORT', '587'))),
-                        'username': os.environ.get('SMTP_USERNAME', os.environ.get('MAIL_USERNAME', '')),
-                        'password': os.environ.get('SMTP_PASSWORD', os.environ.get('MAIL_PASSWORD', '')),
-                        'use_tls': os.environ.get('SMTP_USE_TLS', 'true').lower() == 'true',
-                        'use_ssl': os.environ.get('SMTP_USE_SSL', 'false').lower() == 'true',
-                        'from_email': os.environ.get('SMTP_FROM_EMAIL', os.environ.get('MAIL_DEFAULT_SENDER', 'sentrikat@localhost')),
+                        'port': int(os.environ.get('SMTP_PORT') or os.environ.get('MAIL_PORT') or '587'),
+                        'username': os.environ.get('SMTP_USERNAME') or os.environ.get('MAIL_USERNAME') or '',
+                        'password': os.environ.get('SMTP_PASSWORD') or os.environ.get('MAIL_PASSWORD') or '',
+                        'use_tls': (os.environ.get('SMTP_USE_TLS') or 'true').lower() == 'true',
+                        'use_ssl': (os.environ.get('SMTP_USE_SSL') or 'false').lower() == 'true',
+                        'from_email': os.environ.get('SMTP_FROM_EMAIL') or os.environ.get('MAIL_DEFAULT_SENDER') or 'sentrikat@localhost',
                         'from_name': 'SentriKat'
                     }
 

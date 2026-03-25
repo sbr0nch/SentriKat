@@ -69,11 +69,11 @@ class Config:
     # The background worker pool (WORKER_POOL_SIZE threads) shares the pool of whichever
     # Gunicorn worker started it. Size the pool to accommodate:
     #   pool_size >= GUNICORN_THREADS + WORKER_POOL_SIZE
-    _db_pool_size = int(os.environ.get('DB_POOL_SIZE', '10'))
-    _db_pool_max_overflow = int(os.environ.get('DB_POOL_MAX_OVERFLOW', '20'))
-    _db_pool_timeout = int(os.environ.get('DB_POOL_TIMEOUT', '30'))
-    _db_pool_recycle = int(os.environ.get('DB_POOL_RECYCLE', '1800'))
-    _db_statement_timeout = int(os.environ.get('DB_STATEMENT_TIMEOUT', '60000'))
+    _db_pool_size = int(os.environ.get('DB_POOL_SIZE', '') or 10)
+    _db_pool_max_overflow = int(os.environ.get('DB_POOL_MAX_OVERFLOW', '') or 20)
+    _db_pool_timeout = int(os.environ.get('DB_POOL_TIMEOUT', '') or 30)
+    _db_pool_recycle = int(os.environ.get('DB_POOL_RECYCLE', '') or 1800)
+    _db_statement_timeout = int(os.environ.get('DB_STATEMENT_TIMEOUT', '') or 60000)
 
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': _db_pool_size,

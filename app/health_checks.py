@@ -469,7 +469,7 @@ def check_smtp_connectivity():
         else:
             # Check environment (same env vars used by settings_api.py)
             smtp_host = os.environ.get('SMTP_HOST') or os.environ.get('SMTP_SERVER') or os.environ.get('MAIL_SERVER')
-            smtp_port = int(os.environ.get('SMTP_PORT', os.environ.get('MAIL_PORT', '587')))
+            smtp_port = int(os.environ.get('SMTP_PORT') or os.environ.get('MAIL_PORT') or '587')
 
         if not smtp_host:
             _record('smtp_connectivity', 'warning',

@@ -82,7 +82,7 @@ MAX_PRODUCTS_PER_REQUEST = 10000  # Absolute maximum products in single request 
 # WORKER_POOL_SIZE: Number of concurrent job processing threads.
 # Default: 4 (handles ~4 jobs simultaneously). For 10K+ agents, set to 8-16.
 # Each worker thread processes one inventory job at a time.
-WORKER_POOL_SIZE = int(os.environ.get('WORKER_POOL_SIZE', '4'))
+WORKER_POOL_SIZE = int(os.environ.get('WORKER_POOL_SIZE', '') or 4)
 WORKER_CHECK_INTERVAL = 2  # seconds between job checks (reduced from 5 for faster pickup)
 MAX_JOB_RETRIES = 5  # Maximum retry attempts before permanent failure
 RETRY_BASE_DELAY = 10  # Base delay in seconds for exponential backoff (10, 20, 40, 80, 160)
