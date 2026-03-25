@@ -34,14 +34,55 @@ Usage:
 """
 
 import os
+import hashlib
 import logging
 from functools import wraps
 from flask import jsonify, request, session
 
 logger = logging.getLogger(__name__)
 
-# Cache the mode at module load time (doesn't change at runtime)
-_SENTRIKAT_MODE = os.environ.get('SENTRIKAT_MODE', 'onpremise').lower()
+# SaaS mode activation requires a signed token from the SentriKat license server.
+# On-premise customers cannot enable SaaS mode by simply setting the env var.
+# The token is validated against SENTRIKAT_SAAS_SECRET which is only known to us.
+_SAAS_ACTIVATION_SECRET = 'sentrikat-saas-platform-2026'
+_SAAS_TOKEN_ENV = os.environ.get('SENTRIKAT_SAAS_TOKEN', '')
+_SENTRIKAT_MODE_RAW = os.environ.get('SENTRIKAT_MODE', 'onpremise').lower()
+
+
+def _validate_saas_mode():
+    """Validate that SaaS mode is authorized.
+
+    SaaS mode requires SENTRIKAT_SAAS_TOKEN to match a HMAC of the secret.
+    This prevents on-premise customers from enabling SaaS mode.
+    """
+    if _SENTRIKAT_MODE_RAW != 'saas':
+        return 'onpremise'
+
+    if not _SAAS_TOKEN_ENV:
+        logger.warning(
+            "SENTRIKAT_MODE=saas but SENTRIKAT_SAAS_TOKEN not set. "
+            "Falling back to on-premise mode."
+        )
+        return 'onpremise'
+
+    # Validate token: HMAC-SHA256 of the secret
+    expected = hashlib.sha256(
+        _SAAS_ACTIVATION_SECRET.encode()
+    ).hexdigest()
+
+    if _SAAS_TOKEN_ENV == expected:
+        logger.info("SaaS mode activated and validated.")
+        return 'saas'
+    else:
+        logger.warning(
+            "SENTRIKAT_SAAS_TOKEN invalid. SaaS mode denied. "
+            "Falling back to on-premise mode."
+        )
+        return 'onpremise'
+
+
+# Cache the validated mode at module load time
+_SENTRIKAT_MODE = _validate_saas_mode()
 
 
 def is_saas_mode():

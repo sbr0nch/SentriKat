@@ -16,6 +16,7 @@ from app.models import SystemSettings, User, Vulnerability, SyncLog
 from app.auth import admin_required
 from app.encryption import encrypt_value, decrypt_value
 from app.licensing import requires_professional
+from app.saas import saas_admin_or_org_admin, is_saas_mode
 from app.error_utils import ERROR_MSGS
 from app.logging_config import log_audit_event
 import os
@@ -326,7 +327,7 @@ def save_batch_settings():
 # ============================================================================
 
 @settings_bp.route('/ldap', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('LDAP')
 def get_ldap_settings():
     """Get LDAP configuration settings"""
@@ -351,7 +352,7 @@ def get_ldap_settings():
     return jsonify(settings)
 
 @settings_bp.route('/ldap', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('LDAP')
 def save_ldap_settings():
     """Save LDAP configuration settings"""
@@ -392,7 +393,7 @@ def save_ldap_settings():
         return jsonify({'error': 'Failed to save LDAP settings. Check server logs for details.'}), 500
 
 @settings_bp.route('/ldap/test', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('LDAP')
 def test_ldap_connection():
     """Test LDAP connection"""
@@ -989,7 +990,7 @@ def save_security_settings():
 # ============================================================================
 
 @settings_bp.route('/branding', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('White Label')
 def get_branding_settings():
     """Get branding/UI settings (Professional license required)"""
@@ -1004,7 +1005,7 @@ def get_branding_settings():
     return jsonify(settings)
 
 @settings_bp.route('/branding', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('White Label')
 def save_branding_settings():
     """Save branding/UI settings (Professional license required)"""
@@ -1722,7 +1723,7 @@ def _validate_svg_content(file_data):
     return True
 
 @settings_bp.route('/branding/logo', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def upload_logo():
     """Upload a custom logo"""
     import os
@@ -1792,7 +1793,7 @@ def upload_logo():
         return jsonify({'error': ERROR_MSGS['upload']}), 500
 
 @settings_bp.route('/branding/logo', methods=['DELETE'])
-@admin_required
+@saas_admin_or_org_admin
 def delete_logo():
     """Remove custom logo and revert to default"""
     import os
@@ -1876,6 +1877,10 @@ def create_backup():
     import json
     from datetime import datetime
     from flask import Response
+
+    # SaaS mode: backup/restore is disabled (managed by platform)
+    if is_saas_mode():
+        return jsonify({'error': 'Backup/restore is not available in SaaS mode. Data is managed by the platform.'}), 403
 
     from app.auth import get_current_user
     current_user = get_current_user()
@@ -2018,6 +2023,10 @@ def restore_backup():
     """
     import json
 
+    # SaaS mode: backup/restore is disabled (managed by platform)
+    if is_saas_mode():
+        return jsonify({'error': 'Backup/restore is not available in SaaS mode. Data is managed by the platform.'}), 403
+
     from app.auth import get_current_user
     current_user = get_current_user()
 
@@ -2090,6 +2099,10 @@ def restore_full_backup():
     import json
     from app.auth import get_current_user
     from app.models import Organization, Product, User, ServiceCatalog
+
+    # SaaS mode: backup/restore is disabled (managed by platform)
+    if is_saas_mode():
+        return jsonify({'error': 'Backup/restore is not available in SaaS mode. Data is managed by the platform.'}), 403
 
     current_user = get_current_user()
 

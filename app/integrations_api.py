@@ -22,6 +22,7 @@ from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User, Asset, ProductInstallation
 from app.auth import admin_required, login_required, get_current_user
 from app.licensing import requires_professional
+from app.saas import saas_admin_or_org_admin, restrict_cross_org_access, is_saas_mode, get_scoped_org_id
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -1069,7 +1070,8 @@ def get_queue_vendors():
 # ============================================================================
 
 @bp.route('/api/integrations', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
+@restrict_cross_org_access
 @requires_professional('Integrations')
 def get_integrations():
     """Get all integrations."""
@@ -1079,11 +1081,19 @@ def get_integrations():
 
     # Filter by organization for non-super-admin users
     if user.is_super_admin():
-        org_id = request.args.get('organization_id', type=int)
-        if org_id:
-            integrations = Integration.query.filter_by(is_active=True, organization_id=org_id).order_by(Integration.name).all()
+        # SaaS mode: always scoped to user's org (no cross-tenant access)
+        if is_saas_mode():
+            saas_org = get_scoped_org_id(user)
+            if saas_org:
+                integrations = Integration.query.filter_by(is_active=True, organization_id=saas_org).order_by(Integration.name).all()
+            else:
+                return jsonify({'error': 'Organization scope required'}), 403
         else:
-            integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
+            org_id = request.args.get('organization_id', type=int)
+            if org_id:
+                integrations = Integration.query.filter_by(is_active=True, organization_id=org_id).order_by(Integration.name).all()
+            else:
+                integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
     else:
         org_id = request.args.get('organization_id', type=int)
         if not org_id:
