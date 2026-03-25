@@ -115,6 +115,9 @@ def _apply_schema_migrations(logger, db_uri):
         # Dependency scan result snooze & alert tracking
         ('dependency_scan_results', 'snoozed_until', 'DATETIME', 'TIMESTAMP'),
         ('dependency_scan_results', 'first_alerted_at', 'DATETIME', 'TIMESTAMP'),
+        # Password reset tokens (added in security audit)
+        ('users', 'password_reset_token', 'VARCHAR(100)', 'VARCHAR(100)'),
+        ('users', 'password_reset_expires', 'DATETIME', 'TIMESTAMP'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
