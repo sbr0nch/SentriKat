@@ -169,9 +169,48 @@ Per il SaaS, ogni cliente (org_admin) deve poter fare tutto da solo.
 
 ---
 
-## PARTE 4: ARCHITETTURA SCALABILE
+## PARTE 4: ARCHITETTURA DUAL-MODE (ON-PREMISE + SAAS)
 
-### Modello On-Premise (ATTUALE)
+### Principio fondamentale
+
+```
+SENTRIKAT_MODE=onpremise (default)  ->  ZERO cambiamenti, tutto come oggi
+SENTRIKAT_MODE=saas                 ->  Tenant isolation + org_admin self-service
+```
+
+Un singolo codebase, un singolo deploy. La modalita' e' controllata da
+una variabile d'ambiente. Nessun fork, nessun branch separato.
+
+### Modulo centrale: app/saas.py
+
+Tutte le decisioni mode-dependent passano da qui:
+
+```python
+from app.saas import (
+    is_saas_mode,              # True/False
+    get_scoped_org_id,         # Forza org_id in SaaS
+    requires_org_scope,        # Decorator: blocca senza org_id
+    saas_admin_or_org_admin,   # Decorator: admin in on-prem, org_admin in SaaS
+    restrict_cross_org_access, # Decorator: blocca cross-org in SaaS
+    requires_feature,          # Decorator: licenza in on-prem, subscription in SaaS
+    get_effective_features,    # Features da licenza o subscription
+)
+```
+
+### Comportamento per ruolo e modalita'
+
+| Azione | On-Premise super_admin | SaaS super_admin | SaaS org_admin |
+|--------|----------------------|------------------|----------------|
+| Vedere tutte le org | SI | NO (solo la sua) | NO |
+| Configurare LDAP | SI (globale) | NO | SI (per la sua org) |
+| Configurare SAML | SI (globale) | NO | SI (per la sua org) |
+| Backup tutti i dati | SI | NO | NO |
+| Backup propria org | SI | SI | SI |
+| Gestire integrazioni | SI (tutte) | NO | SI (per la sua org) |
+| Feature gating | Licenza RSA globale | N/A | Subscription plan |
+| Vedere log | SI (tutti) | NO | SI (solo sua org) |
+
+### Modello On-Premise (ATTUALE, INVARIATO)
 
 ```
 TUA VPS Hetzner (budget)
