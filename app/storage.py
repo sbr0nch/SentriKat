@@ -140,7 +140,7 @@ class LocalStorageBackend(StorageBackend):
     """
 
     def __init__(self):
-        self.base_dir = os.environ.get('DATA_DIR', '/app/data')
+        self.base_dir = os.environ.get('DATA_DIR', '') or '/app/data'
         os.makedirs(self.base_dir, exist_ok=True)
         logger.info(f"Local storage backend initialized: {self.base_dir}")
 
@@ -309,7 +309,7 @@ def get_storage_backend():
     global _storage_backend
 
     if _storage_backend is None:
-        backend_type = os.environ.get('STORAGE_BACKEND', 'local').lower()
+        backend_type = (os.environ.get('STORAGE_BACKEND', '') or 'local').lower()
 
         if backend_type == 's3':
             _storage_backend = S3StorageBackend()

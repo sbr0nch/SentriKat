@@ -27,7 +27,7 @@ def setup_logging(app):
     Creates logs in /var/log/sentrikat/ with automatic rotation
     """
     # Create log directory if it doesn't exist
-    log_dir = os.environ.get('LOG_DIR', '/var/log/sentrikat')
+    log_dir = os.environ.get('LOG_DIR', '') or '/var/log/sentrikat'
     if not os.path.exists(log_dir):
         try:
             os.makedirs(log_dir, exist_ok=True)

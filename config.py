@@ -98,8 +98,8 @@ class Config:
     CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
 
     # Sync schedule (daily at 2 AM UTC)
-    SYNC_HOUR = int(os.environ.get('SYNC_HOUR', 2))
-    SYNC_MINUTE = int(os.environ.get('SYNC_MINUTE', 0))
+    SYNC_HOUR = int(os.environ.get('SYNC_HOUR', '') or 2)
+    SYNC_MINUTE = int(os.environ.get('SYNC_MINUTE', '') or 0)
 
     # Application settings
     ITEMS_PER_PAGE = 50

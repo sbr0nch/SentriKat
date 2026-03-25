@@ -1054,7 +1054,7 @@ def get_agent_usage():
 # License Server Heartbeat
 # ============================================================================
 
-LICENSE_SERVER_URL = os.environ.get('SENTRIKAT_LICENSE_SERVER', 'https://license.sentrikat.com/api')
+LICENSE_SERVER_URL = os.environ.get('SENTRIKAT_LICENSE_SERVER', '') or 'https://license.sentrikat.com/api'
 
 def license_heartbeat():
     """
