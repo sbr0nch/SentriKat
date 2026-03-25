@@ -43,8 +43,9 @@ logger = logging.getLogger(__name__)
 
 # SaaS mode activation requires a signed token from the SentriKat license server.
 # On-premise customers cannot enable SaaS mode by simply setting the env var.
-# The token is validated against SENTRIKAT_SAAS_SECRET which is only known to us.
-_SAAS_ACTIVATION_SECRET = 'sentrikat-saas-platform-2026'
+# The token is validated against SENTRIKAT_SAAS_SECRET which must be set as an
+# environment variable on the SaaS deployment (NEVER hardcoded in source code).
+_SAAS_ACTIVATION_SECRET = os.environ.get('SENTRIKAT_SAAS_SECRET', '')
 _SAAS_TOKEN_ENV = os.environ.get('SENTRIKAT_SAAS_TOKEN', '')
 _SENTRIKAT_MODE_RAW = os.environ.get('SENTRIKAT_MODE', 'onpremise').lower()
 
@@ -65,7 +66,14 @@ def _validate_saas_mode():
         )
         return 'onpremise'
 
-    # Validate token: HMAC-SHA256 of the secret
+    if not _SAAS_ACTIVATION_SECRET:
+        logger.warning(
+            "SENTRIKAT_MODE=saas but SENTRIKAT_SAAS_SECRET not set. "
+            "Falling back to on-premise mode."
+        )
+        return 'onpremise'
+
+    # Validate token: SHA-256 of the secret
     expected = hashlib.sha256(
         _SAAS_ACTIVATION_SECRET.encode()
     ).hexdigest()

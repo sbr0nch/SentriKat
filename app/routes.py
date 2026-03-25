@@ -7241,6 +7241,10 @@ def get_current_organization():
 @login_required
 def switch_organization(org_id):
     """Switch to a different organization (with permission check)"""
+    # SaaS mode: users are locked to their assigned org (no tenant switching)
+    if is_saas_mode():
+        return jsonify({'error': 'Organization switching is not available in SaaS mode'}), 403
+
     try:
         current_user_id = session.get('user_id')
         current_user = User.query.get(current_user_id)

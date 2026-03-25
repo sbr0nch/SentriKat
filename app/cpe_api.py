@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify, session
 from datetime import datetime
 from app import db, csrf
 from app.auth import login_required, manager_required, admin_required
+from app.saas import is_saas_mode, get_scoped_org_id
 from app.models import Product, Vulnerability, ServiceCatalog
 from app.nvd_cpe_api import (
     search_cpe,
@@ -837,6 +838,14 @@ def cpe_coverage_dashboard():
 
     org_id = request.args.get('org_id', type=int)
 
+    # SaaS mode: always scope to user's org (no cross-tenant access)
+    if is_saas_mode():
+        from app.auth import get_current_user
+        user = get_current_user()
+        org_id = get_scoped_org_id(user) if user else None
+        if not org_id:
+            return jsonify({'error': 'Organization scope required in SaaS mode'}), 403
+
     # Base query
     query = Product.query
     if org_id:
@@ -900,9 +909,9 @@ def cpe_coverage_dashboard():
     curated_count = len(SOFTWARE_TO_CPE_MAPPINGS)
     regex_count = len(CPE_MAPPINGS)
 
-    # Coverage by organization (if super admin viewing all)
+    # Coverage by organization (if super admin viewing all, on-premise only)
     org_coverage = []
-    if not org_id:
+    if not org_id and not is_saas_mode():
         orgs = Organization.query.all()
         for org in orgs:
             org_total = Product.query.filter(Product.organization_id == org.id).count() or 0
