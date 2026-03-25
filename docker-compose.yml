@@ -38,40 +38,83 @@ services:
     expose:
       - "5000"
     environment:
+      # === SECURITY (REQUIRED) ===
       - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - DB_PASSWORD=${DB_PASSWORD:-sentrikat}
       - DATABASE_URL=postgresql://sentrikat:${DB_PASSWORD:-sentrikat}@db:5432/sentrikat
+      # === APPLICATION ===
       - SENTRIKAT_URL=${SENTRIKAT_URL:-http://localhost}
-      - FLASK_ENV=production
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - SENTRIKAT_ENV=${SENTRIKAT_ENV:-production}
       - FORCE_HTTPS=${FORCE_HTTPS:-false}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - VERIFY_SSL=${VERIFY_SSL:-true}
+      # === NETWORK / PROXY ===
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,db}
       # Force Python requests to use system CA bundle (includes custom certs)
       - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
       - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      # Allow internal/private URLs for Jira and other integrations (dev/test only)
+      - ALLOW_PRIVATE_URLS=${ALLOW_PRIVATE_URLS:-false}
+      # === LICENSING ===
       # License persistence: Set a fixed installation ID to keep license across rebuilds
       # Generate once with: echo "SK-INST-$(openssl rand -hex 16 | tr '[:lower:]' '[:upper:]')"
       - SENTRIKAT_INSTALLATION_ID=${SENTRIKAT_INSTALLATION_ID:-}
-      # Gunicorn performance tuning (defaults: auto-detect CPUs, 4 threads, gthread workers)
+      - SENTRIKAT_LICENSE=${SENTRIKAT_LICENSE:-}
+      - SENTRIKAT_LICENSE_SERVER=${SENTRIKAT_LICENSE_SERVER:-}
+      - SENTRIKAT_MODE=${SENTRIKAT_MODE:-onpremise}
+      # === KNOWLEDGE BASE SYNC ===
+      - SENTRIKAT_KB_SYNC_ENABLED=${SENTRIKAT_KB_SYNC_ENABLED:-true}
+      - SENTRIKAT_KB_SHARE_MAPPINGS=${SENTRIKAT_KB_SHARE_MAPPINGS:-true}
+      - SENTRIKAT_KB_SERVER=${SENTRIKAT_KB_SERVER:-}
+      # === VULNERABILITY DATA ===
+      - NVD_API_KEY=${NVD_API_KEY:-}
+      - SYNC_HOUR=${SYNC_HOUR:-2}
+      - SYNC_MINUTE=${SYNC_MINUTE:-0}
+      # === GUNICORN PERFORMANCE TUNING ===
+      # Defaults: auto-detect CPUs, 4 threads, gthread workers
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-}
       - GUNICORN_THREADS=${GUNICORN_THREADS:-4}
       - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
-      # Storage root for all persistent data (logs, uploads, backups)
-      # Set STORAGE_ROOT to redirect heavy data to a separate drive/mount
+      - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-2000}
+      - GUNICORN_LOG_LEVEL=${GUNICORN_LOG_LEVEL:-info}
+      - GUNICORN_BIND=${GUNICORN_BIND:-0.0.0.0:5000}
+      # === STORAGE ===
+      # Set STORAGE_ROOT to redirect all persistent data to a single mount
       - STORAGE_ROOT=${STORAGE_ROOT:-}
-      # Background worker pool for concurrent inventory job processing
+      - DATA_DIR=${DATA_DIR:-}
+      - LOG_DIR=${LOG_DIR:-}
+      # S3 storage backend (optional, default: local filesystem)
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
+      - S3_REGION=${S3_REGION:-}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_PUBLIC_URL=${S3_PUBLIC_URL:-}
+      # === BACKGROUND WORKERS ===
       - WORKER_POOL_SIZE=${WORKER_POOL_SIZE:-4}
-      # Database connection pool tuning (per Gunicorn worker process)
+      # === DATABASE CONNECTION POOL ===
       - DB_POOL_SIZE=${DB_POOL_SIZE:-10}
       - DB_POOL_MAX_OVERFLOW=${DB_POOL_MAX_OVERFLOW:-20}
       - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
       - DB_POOL_RECYCLE=${DB_POOL_RECYCLE:-1800}
       - DB_STATEMENT_TIMEOUT=${DB_STATEMENT_TIMEOUT:-60000}
-      # Allow internal/private URLs for Jira and other integrations (dev/test only)
-      - ALLOW_PRIVATE_URLS=${ALLOW_PRIVATE_URLS:-false}
+      # === SMTP / EMAIL (can also be configured via UI) ===
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-false}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-}
+      # === LDAP / AD (can also be configured via UI) ===
+      - LDAP_SYNC_ENABLED=${LDAP_SYNC_ENABLED:-false}
+      - LDAP_SYNC_INTERVAL_HOURS=${LDAP_SYNC_INTERVAL_HOURS:-24}
     volumes:
       - sentrikat_data:/app/data
       # Custom CA certificates for trusting internal/corporate PKI
