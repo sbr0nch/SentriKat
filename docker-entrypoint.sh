@@ -66,8 +66,15 @@ if [ "${FLASK_ENV:-}" = "production" ]; then
         echo "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
         exit 1
     fi
-    if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" = "sentrikat" ]; then
+    # Check DB_PASSWORD: try env var first, then extract from DATABASE_URL
+    _db_pass="${DB_PASSWORD:-}"
+    if [ -z "$_db_pass" ] && [ -n "$DATABASE_URL" ]; then
+        # Extract password from postgresql://user:password@host:port/db
+        _db_pass=$(echo "$DATABASE_URL" | sed -n 's|.*://[^:]*:\([^@]*\)@.*|\1|p')
+    fi
+    if [ -z "$_db_pass" ] || [ "$_db_pass" = "sentrikat" ]; then
         echo "FATAL: DB_PASSWORD must be changed from the default in production."
+        echo "Set DB_PASSWORD in your .env file."
         exit 1
     fi
 fi
