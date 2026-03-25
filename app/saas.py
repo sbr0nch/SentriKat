@@ -277,7 +277,7 @@ def _get_saas_features(org_id):
             return sub.plan.get_features()
 
         # No subscription = free plan features
-        free_plan = SubscriptionPlan.query.filter_by(slug='free').first()
+        free_plan = SubscriptionPlan.query.filter_by(name='free').first()
         if free_plan:
             return free_plan.get_features()
 
