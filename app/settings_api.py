@@ -1667,9 +1667,15 @@ def allowed_file(filename):
 
 
 def _validate_svg_content(file_data):
-    """Reject SVG files containing scripts or dangerous content."""
+    """Reject SVG files containing scripts or dangerous content.
+
+    Uses both regex pattern matching (on lowercased content) and XML parsing
+    to catch encoding tricks and obfuscation attempts.
+    """
     import re
     content = file_data.decode('utf-8', errors='ignore').lower()
+
+    # Phase 1: Regex-based pattern matching (catches obvious attacks)
     dangerous_patterns = [
         r'<script',
         r'javascript:',
@@ -1679,10 +1685,40 @@ def _validate_svg_content(file_data):
         r'<object',
         r'<foreignobject',
         r'xlink:href\s*=\s*["\'](?!#)',  # external xlink references
+        r'data\s*:\s*text/html',          # data: URI with HTML
+        r'data\s*:\s*image/svg\+xml',     # nested SVG data URI
+        r'<animate[^>]+attributename\s*=\s*["\']on',  # animated event handlers
+        r'<set[^>]+attributename\s*=\s*["\']on',      # set event handlers
+        r'&#x?[0-9a-f]+;',               # HTML entities (potential encoding bypass)
+        r'expression\s*\(',              # CSS expressions
+        r'url\s*\(\s*["\']?javascript:',  # CSS url() with javascript
+        r'-moz-binding\s*:',             # Firefox CSS binding
     ]
     for pattern in dangerous_patterns:
         if re.search(pattern, content):
             return False
+
+    # Phase 2: XML parsing (catches obfuscation that regex misses)
+    try:
+        import xml.etree.ElementTree as ET
+        tree = ET.fromstring(file_data)
+        for elem in tree.iter():
+            # Check all attributes for event handlers
+            for attr_name in elem.attrib:
+                attr_lower = attr_name.lower()
+                if attr_lower.startswith('on'):
+                    return False
+                attr_val = elem.attrib[attr_name].lower().strip()
+                if 'javascript:' in attr_val or 'data:text/html' in attr_val:
+                    return False
+            # Check tag names for dangerous elements
+            tag = elem.tag.lower().split('}')[-1]  # Strip namespace
+            if tag in ('script', 'iframe', 'embed', 'object', 'foreignobject'):
+                return False
+    except Exception:
+        # If XML parsing fails, reject the file (malformed SVG)
+        return False
+
     return True
 
 @settings_bp.route('/branding/logo', methods=['POST'])

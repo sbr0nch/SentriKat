@@ -796,6 +796,7 @@ def data_retention_cleanup_job(app):
         try:
             from app.models import SyncLog
             from app.ldap_models import LDAPAuditLog, LDAPSyncLog
+            from app.maintenance import run_all_retention_cleanup
             from app import db
             from datetime import datetime, timedelta
 
@@ -851,6 +852,13 @@ def data_retention_cleanup_job(app):
 
             total_deleted = sum(deleted_counts.values())
             logger.info(f"Data retention cleanup completed. Deleted: {deleted_counts}, Total: {total_deleted}")
+
+            # Run additional retention cleanup (agent events, inventory jobs, alert logs, etc.)
+            try:
+                retention_results = run_all_retention_cleanup()
+                logger.info(f"Additional retention cleanup results: {retention_results}")
+            except Exception as e:
+                logger.error(f"Additional retention cleanup failed: {e}", exc_info=True)
 
         except Exception as e:
             logger.error(f"Data retention cleanup failed: {str(e)}", exc_info=True)

@@ -1213,7 +1213,7 @@
                             <td data-column="actions" onclick="event.stopPropagation();">
                                 <div class="d-flex gap-1">
                                     ${versions.length > 1 ? `
-                                    <button class="btn-action btn-action-edit" onclick="showVersionsModal('${escapeHtml(group.vendor)}', '${escapeHtml(group.product_name)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})" title="Manage Versions">
+                                    <button class="btn-action btn-action-edit" onclick="showVersionsModal('${escapeHtml(group.vendor)}', '${escapeHtml(group.product_name)}', ${JSON.stringify(versions).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;')})" title="Manage Versions">
                                         <i class="bi bi-layers"></i>
                                     </button>` : ''}
                                     ${userPermissions.canManageProducts && firstVersionId ? `
@@ -2946,7 +2946,7 @@
                     html += `
                         <div class="nvd-product-group" id="${productId}">
                             <div class="p-2 border-bottom nvd-result-item" style="cursor: pointer;"
-                                 onclick="toggleVersionPicker('${productId}', '${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(displayName)}', ${JSON.stringify(versions).replace(/"/g, '&quot;')})">
+                                 onclick="toggleVersionPicker('${productId}', '${escapeHtml(vendorKey)}', '${escapeHtml(productKey)}', '${escapeHtml(displayName)}', ${JSON.stringify(versions).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;')})">
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
                                         <div class="fw-bold text-primary">${escapeHtml(fullProductName)}</div>

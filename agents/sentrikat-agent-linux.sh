@@ -36,6 +36,58 @@ SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-false}"        # Extension scanning (VS Code
 SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-false}"    # Code library dependency scanning
 
 # ============================================================================
+# Cleanup Handler for Graceful Shutdown
+# ============================================================================
+
+_cleanup_temp_files=()
+register_temp_file() {
+    _cleanup_temp_files+=("$1")
+}
+
+cleanup_on_exit() {
+    local exit_code=$?
+    for f in "${_cleanup_temp_files[@]}"; do
+        rm -f "$f" 2>/dev/null
+    done
+    # Kill background jobs if any
+    jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
+    # Release lock file
+    release_lock
+    exit $exit_code
+}
+trap cleanup_on_exit EXIT INT TERM
+
+# ============================================================================
+# Lock File Mechanism
+# ============================================================================
+
+LOCK_FILE="/var/run/sentrikat-agent.lock"
+
+acquire_lock() {
+    if mkdir "$LOCK_FILE" 2>/dev/null; then
+        echo $$ > "$LOCK_FILE/pid"
+        return 0
+    fi
+    # Check if holding process is still alive
+    local lock_pid
+    lock_pid=$(cat "$LOCK_FILE/pid" 2>/dev/null)
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+        log_warn "Removing stale lock (PID $lock_pid no longer running)"
+        rm -rf "$LOCK_FILE"
+        if mkdir "$LOCK_FILE" 2>/dev/null; then
+            echo $$ > "$LOCK_FILE/pid"
+            return 0
+        fi
+    fi
+    log_warn "Another agent instance is running (PID ${lock_pid:-unknown}), skipping"
+    return 1
+}
+
+release_lock() {
+    rm -rf "$LOCK_FILE" 2>/dev/null
+}
+
+# ============================================================================
 # Logging Functions
 # ============================================================================
 
@@ -43,14 +95,14 @@ SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-false}"    # Code library dependency sca
 json_escape() {
     local str="$1"
     # Escape backslashes first, then quotes, then control characters
-    str="${str//\\/\\\\}"      # Backslash
-    str="${str//\"/\\\"}"      # Double quote
-    str="${str//$'\n'/\\n}"    # Newline
-    str="${str//$'\r'/\\r}"    # Carriage return
-    str="${str//$'\t'/\\t}"    # Tab
-    # Remove other control characters
-    str=$(echo "$str" | tr -d '\000-\011\013-\037')
-    echo "$str"
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    str="${str//$'\t'/\\t}"
+    str="${str//$'\n'/\\n}"
+    str="${str//$'\r'/\\r}"
+    # Remove remaining control characters (null bytes etc) that can't be JSON-escaped
+    str=$(printf '%s' "$str" | tr -d '\000-\010\013\014\016-\037')
+    printf '%s' "$str"
 }
 
 log() {
@@ -277,16 +329,26 @@ get_installed_software() {
         done < <(rpm -qa --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n' 2>/dev/null)
     fi
 
-    # Alpine: apk
+    # Alpine APK packages
     if command -v apk &>/dev/null; then
-        while IFS='-' read -r name version; do
-            [[ -z "$name" ]] && continue
-
-            name=$(json_escape "$name")
-            version=$(json_escape "$version")
-            products+=("{\"vendor\": \"Alpine\", \"product\": \"$name\", \"version\": \"$version\"}")
+        while IFS= read -r line; do
+            # apk info -v output: package-version-rN
+            # Extract name by removing version suffix
+            local pkg_name pkg_version
+            # Use regex to split at first version-like segment
+            if [[ "$line" =~ ^(.+)-([0-9][0-9a-zA-Z._]*(-r[0-9]+)?)$ ]]; then
+                pkg_name="${BASH_REMATCH[1]}"
+                pkg_version="${BASH_REMATCH[2]}"
+            else
+                continue
+            fi
+            [[ -z "$pkg_name" || -z "$pkg_version" ]] && continue
+            local vendor="Alpine"
+            pkg_name=$(json_escape "$pkg_name")
+            pkg_version=$(json_escape "$pkg_version")
+            products+=("{\"vendor\": \"$vendor\", \"product\": \"$pkg_name\", \"version\": \"$pkg_version\", \"source_type\": \"os\", \"ecosystem\": \"apk\"}")
             ((count++))
-        done < <(apk info -v 2>/dev/null | sed 's/-[0-9].*/-&/' | sed 's/--/-/')
+        done < <(apk info -v 2>/dev/null)
     fi
 
     # Arch: pacman
@@ -644,6 +706,7 @@ except: pass
     # errors. With 1000+ packages the JSON string can exceed bash/kernel ARG_MAX.
     local outfile
     outfile=$(mktemp /tmp/sentrikat-products-XXXXXX.json)
+    register_temp_file "$outfile"
 
     printf '[' > "$outfile"
     local first=true
@@ -802,6 +865,7 @@ scan_container_images() {
     # Write scan results directly to temp file (avoids ARG_MAX)
     local results_file
     results_file=$(mktemp /tmp/sentrikat-container-XXXXXX.json)
+    register_temp_file "$results_file"
     printf '[' > "$results_file"
 
     local image_count=0
@@ -815,6 +879,7 @@ scan_container_images() {
         # Run Trivy scan with JSON output directly to temp file
         local trivy_tmpfile
         trivy_tmpfile=$(mktemp)
+        register_temp_file "$trivy_tmpfile"
         "$TRIVY_BIN" image \
             --format json \
             --severity HIGH,CRITICAL \
@@ -886,6 +951,7 @@ send_container_scan_results() {
     # Assemble payload to temp file (no large bash variables)
     local tmpfile
     tmpfile=$(mktemp)
+    register_temp_file "$tmpfile"
     printf '{"agent_id": "%s", "hostname": "%s", "scanner": "trivy", "scanner_version": "%s", "images": ' \
         "$AGENT_ID" "$my_hostname" "$trivy_version" > "$tmpfile"
     cat "$results_file" >> "$tmpfile"
@@ -1035,6 +1101,7 @@ collect_and_send_lockfiles() {
     # Write payload to temp file
     local tmpfile
     tmpfile=$(mktemp /tmp/sentrikat-lockfiles-XXXXXX.json)
+    register_temp_file "$tmpfile"
     local my_hostname
     my_hostname=$(hostname)
 
@@ -1105,6 +1172,7 @@ send_inventory() {
     # $products_file is a path to a JSON array file written by get_installed_software.
     local tmpfile
     tmpfile=$(mktemp)
+    register_temp_file "$tmpfile"
 
     # Write: { system_info_fields..., "products": <contents of products_file> }
     printf '%s' "$system_info" | sed 's/}$//' > "$tmpfile"
@@ -1241,34 +1309,92 @@ send_heartbeat() {
     return 1
 }
 
+report_update_status() {
+    # Report update result back to server for fleet-wide visibility
+    local status="$1"    # success, failed, rolled_back
+    local old_ver="$2"
+    local new_ver="$3"
+    local error_msg="${4:-}"
+
+    local endpoint="${SERVER_URL}/api/agent/update-status"
+    local payload
+    payload=$(cat <<EOJSON
+{"agent_id":"${AGENT_ID}","hostname":"$(hostname)","status":"${status}","old_version":"${old_ver}","new_version":"${new_ver}","error":"${error_msg}"}
+EOJSON
+)
+    curl -s -X POST "$endpoint" \
+        -H "X-Agent-Key: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        --max-time 15 2>/dev/null || true
+}
+
+verify_agent_health() {
+    # After update, verify the new agent can successfully heartbeat
+    # Returns 0 if healthy, 1 if unhealthy
+    local endpoint="${SERVER_URL}/api/agent/commands?agent_id=${AGENT_ID}&hostname=$(hostname)&version=${1}&platform=linux"
+
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "X-Agent-Key: $API_KEY" \
+        --max-time 15 "$endpoint" 2>/dev/null)
+
+    [[ "$http_code" == "200" ]]
+}
+
 auto_update_agent() {
     # Auto-update the agent script from the server
-    # Flow: download -> verify -> backup -> replace -> restart service
+    # Flow: download -> verify checksum -> atomic replace -> health check -> rollback if needed
     local target_version="$1"
+    local expected_checksum="${2:-}"
     local download_url="${SERVER_URL}/api/agent/download/linux"
     local script_path="/usr/local/bin/sentrikat-agent"
     local backup_path="${script_path}.backup.${AGENT_VERSION}"
     local tmp_script
+    local old_version="${AGENT_VERSION}"
 
     log_info "Auto-updating agent: ${AGENT_VERSION} -> ${target_version}"
 
     # Download new script to temp file
-    tmp_script=$(mktemp)
-    local http_code
-    http_code=$(curl -s -w "%{http_code}" -o "$tmp_script" \
+    tmp_script=$(mktemp /tmp/sentrikat-update-XXXXXX)
+    register_temp_file "$tmp_script"
+    local http_code header_file
+    header_file=$(mktemp /tmp/sentrikat-headers-XXXXXX)
+    register_temp_file "$header_file"
+    http_code=$(curl -s -w "%{http_code}" -o "$tmp_script" -D "$header_file" \
         -H "X-Agent-Key: $API_KEY" \
         --max-time 60 "$download_url" 2>/dev/null)
 
     if [[ "$http_code" != "200" ]]; then
         log_error "Failed to download update (HTTP $http_code)"
-        rm -f "$tmp_script"
+        rm -f "$tmp_script" "$header_file"
+        report_update_status "failed" "$old_version" "$target_version" "Download failed: HTTP $http_code"
         return 1
     fi
+
+    # SHA256 checksum verification
+    local actual_checksum
+    actual_checksum=$(sha256sum "$tmp_script" 2>/dev/null | awk '{print $1}')
+
+    # Try server-provided checksum from header if command didn't include one
+    if [[ -z "$expected_checksum" ]]; then
+        expected_checksum=$(grep -i '^X-Agent-Checksum:' "$header_file" 2>/dev/null | tr -d '\r' | awk '{print $2}')
+    fi
+    rm -f "$header_file"
+
+    if [[ -n "$expected_checksum" && "$actual_checksum" != "$expected_checksum" ]]; then
+        log_error "Checksum verification failed! Expected: ${expected_checksum}, Got: ${actual_checksum}"
+        rm -f "$tmp_script"
+        report_update_status "failed" "$old_version" "$target_version" "Checksum mismatch"
+        return 1
+    fi
+    log_info "Checksum verified: ${actual_checksum}"
 
     # Verify the downloaded script is valid bash
     if ! head -1 "$tmp_script" | grep -q '^#!/bin/bash'; then
         log_error "Downloaded file is not a valid bash script"
         rm -f "$tmp_script"
+        report_update_status "failed" "$old_version" "$target_version" "Invalid script format"
         return 1
     fi
 
@@ -1276,6 +1402,7 @@ auto_update_agent() {
     if ! grep -q "AGENT_VERSION=" "$tmp_script"; then
         log_error "Downloaded script missing AGENT_VERSION marker"
         rm -f "$tmp_script"
+        report_update_status "failed" "$old_version" "$target_version" "Missing version marker"
         return 1
     fi
 
@@ -1285,45 +1412,77 @@ auto_update_agent() {
         log_info "Backed up current agent to $backup_path"
     fi
 
-    # Replace the script
+    # Atomic replacement: chmod tmp, then mv (mv is atomic on same filesystem)
     chmod +x "$tmp_script"
-    if mv "$tmp_script" "$script_path" 2>/dev/null; then
-        log_info "Agent updated successfully to ${target_version}"
+    local replace_success=false
 
-        # Verify systemd service ExecStart paths point to the correct location
-        for svc_file in "$SYSTEMD_SERVICE" "$HEARTBEAT_SERVICE"; do
-            if [[ -f "$svc_file" ]]; then
-                local current_exec
-                current_exec=$(grep -o 'ExecStart=[^ ]*' "$svc_file" 2>/dev/null | cut -d= -f2)
-                if [[ -n "$current_exec" && "$current_exec" != "$script_path" ]]; then
-                    log_warn "Fixing ExecStart path in $svc_file: $current_exec -> $script_path"
-                    sed -i "s|ExecStart=.*|ExecStart=${script_path} $(grep -o 'ExecStart=.* --.*' "$svc_file" 2>/dev/null | sed "s|ExecStart=[^ ]* ||")|" "$svc_file" 2>/dev/null || true
-                    systemctl daemon-reload 2>/dev/null || true
-                fi
-            fi
-        done
-
-        # Restart the systemd service if installed
-        if systemctl is-active --quiet sentrikat-agent.timer 2>/dev/null; then
-            log_info "Restarting agent service..."
-            systemctl restart sentrikat-heartbeat.service 2>/dev/null || true
+    # Try to place tmp on the same filesystem for atomic mv
+    local staging_file="${script_path}.staging.$$"
+    if cp "$tmp_script" "$staging_file" 2>/dev/null || sudo cp "$tmp_script" "$staging_file" 2>/dev/null; then
+        chmod +x "$staging_file" 2>/dev/null || sudo chmod +x "$staging_file" 2>/dev/null
+        if mv "$staging_file" "$script_path" 2>/dev/null || sudo mv "$staging_file" "$script_path" 2>/dev/null; then
+            replace_success=true
         fi
-    else
-        # mv failed (permissions?), try with sudo
-        if command -v sudo &>/dev/null; then
-            sudo mv "$tmp_script" "$script_path" 2>/dev/null && \
-                log_info "Agent updated successfully (via sudo) to ${target_version}" || {
-                log_error "Failed to replace agent script"
-                rm -f "$tmp_script"
-                # Restore backup
-                [[ -f "$backup_path" ]] && mv "$backup_path" "$script_path" 2>/dev/null
-                return 1
-            }
+        rm -f "$staging_file" 2>/dev/null
+    fi
+    rm -f "$tmp_script"
+
+    if [[ "$replace_success" != "true" ]]; then
+        log_error "Failed to replace agent script (permission denied)"
+        if [[ -f "$backup_path" ]]; then
+            mv "$backup_path" "$script_path" 2>/dev/null || sudo mv "$backup_path" "$script_path" 2>/dev/null
+        fi
+        report_update_status "failed" "$old_version" "$target_version" "File replacement failed"
+        return 1
+    fi
+
+    log_info "Agent script replaced successfully"
+
+    # Post-update health check: verify the new agent can reach the server
+    log_info "Running post-update health check..."
+    local health_ok=false
+    for attempt in 1 2 3; do
+        if verify_agent_health "$target_version"; then
+            health_ok=true
+            break
+        fi
+        sleep 2
+    done
+
+    if [[ "$health_ok" != "true" ]]; then
+        log_error "Post-update health check failed! Rolling back to v${old_version}..."
+        if [[ -f "$backup_path" ]]; then
+            mv "$backup_path" "$script_path" 2>/dev/null || sudo mv "$backup_path" "$script_path" 2>/dev/null
+            chmod +x "$script_path" 2>/dev/null || sudo chmod +x "$script_path" 2>/dev/null
+            log_warn "Rolled back to v${old_version}"
+            report_update_status "rolled_back" "$old_version" "$target_version" "Health check failed after update"
         else
-            log_error "Failed to replace agent script (permission denied)"
-            rm -f "$tmp_script"
-            return 1
+            log_error "No backup available for rollback!"
+            report_update_status "failed" "$old_version" "$target_version" "Health check failed, no backup for rollback"
         fi
+        return 1
+    fi
+
+    log_info "Agent updated successfully to ${target_version}"
+    report_update_status "success" "$old_version" "$target_version"
+
+    # Verify systemd service ExecStart paths point to the correct location
+    for svc_file in "$SYSTEMD_SERVICE" "$HEARTBEAT_SERVICE"; do
+        if [[ -f "$svc_file" ]]; then
+            local current_exec
+            current_exec=$(grep -o 'ExecStart=[^ ]*' "$svc_file" 2>/dev/null | cut -d= -f2)
+            if [[ -n "$current_exec" && "$current_exec" != "$script_path" ]]; then
+                log_warn "Fixing ExecStart path in $svc_file: $current_exec -> $script_path"
+                sed -i "s|ExecStart=.*|ExecStart=${script_path} $(grep -o 'ExecStart=.* --.*' "$svc_file" 2>/dev/null | sed "s|ExecStart=[^ ]* ||")|" "$svc_file" 2>/dev/null || true
+                systemctl daemon-reload 2>/dev/null || true
+            fi
+        fi
+    done
+
+    # Restart the systemd service if installed
+    if systemctl is-active --quiet sentrikat-agent.timer 2>/dev/null; then
+        log_info "Restarting agent service..."
+        systemctl restart sentrikat-heartbeat.service 2>/dev/null || true
     fi
 }
 
@@ -1368,10 +1527,16 @@ check_commands() {
     fi
 
     if echo "$response" | grep -q '"command": "update_available"'; then
-        local latest_version
+        local latest_version checksum is_critical
         latest_version=$(echo "$response" | grep -o '"latest_version": "[^"]*"' | cut -d'"' -f4)
-        log_warn "Agent update available: ${AGENT_VERSION} -> ${latest_version}"
-        auto_update_agent "$latest_version"
+        checksum=$(echo "$response" | grep -o '"checksum": "[^"]*"' | cut -d'"' -f4)
+        is_critical=$(echo "$response" | grep -o '"critical": true' | head -1)
+        if [[ -n "$is_critical" ]]; then
+            log_warn "CRITICAL agent update: ${AGENT_VERSION} -> ${latest_version} (immediate)"
+        else
+            log_warn "Agent update available: ${AGENT_VERSION} -> ${latest_version}"
+        fi
+        auto_update_agent "$latest_version" "$checksum"
     fi
 
     # Update scan capabilities from server (license-gated features)
@@ -1544,8 +1709,17 @@ uninstall_agent() {
     # Remove script
     rm -f /usr/local/bin/sentrikat-agent
 
-    # Optionally remove config (commented out by default)
-    # rm -rf "$CONFIG_DIR"
+    # Remove configuration (contains API key)
+    if [[ -f "$CONFIG_FILE" ]]; then
+        log_info "Removing configuration..."
+        rm -f "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null
+    fi
+    # Remove log files
+    rm -f "$LOG_FILE"* 2>/dev/null
+    # Remove lock file
+    rm -rf "$LOCK_FILE" 2>/dev/null
+    # Remove backup scripts
+    rm -f /usr/local/bin/sentrikat-agent.backup.* 2>/dev/null
 
     log_info "Agent uninstalled"
     echo "SentriKat Agent uninstalled"
@@ -1559,6 +1733,12 @@ heartbeat_mode() {
 
     if [[ -z "$SERVER_URL" || -z "$API_KEY" ]]; then
         log_error "SERVER_URL and API_KEY are required"
+        exit 1
+    fi
+
+    # Validate HTTPS
+    if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
+        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
         exit 1
     fi
 
@@ -1597,6 +1777,7 @@ Options:
   --run-once           Run inventory collection once and exit
   --heartbeat          Run heartbeat check (polls for commands)
   --verbose            Enable verbose output
+  --allow-http         Allow non-HTTPS server URL (NOT recommended for production)
   --help               Show this help message
 
 Examples:
@@ -1627,6 +1808,15 @@ main() {
         echo "Run '$0 --help' for usage information"
         exit 1
     fi
+
+    # Validate HTTPS (after config is loaded, before any API calls)
+    if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
+        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
+        exit 1
+    fi
+
+    # Acquire lock to prevent concurrent runs
+    acquire_lock || exit 0
 
     # Collect and send inventory
     local system_info
@@ -1674,6 +1864,7 @@ UNINSTALL=false
 RUN_ONCE=false
 HEARTBEAT=false
 VERBOSE=false
+ALLOW_HTTP=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -1707,6 +1898,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --verbose|-v)
             VERBOSE=true
+            shift
+            ;;
+        --allow-http)
+            ALLOW_HTTP=true
             shift
             ;;
         --help|-h)
