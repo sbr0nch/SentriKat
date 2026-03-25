@@ -386,7 +386,9 @@ if ($DeployType -eq "docker_image") {
     Push-Location $ComposeDir
     try {
         Write-Info "Pulling new Docker image..."
-        docker compose pull 2>&1
+        $ErrorActionPreference = "Continue"
+        docker compose pull 2>&1 | Out-Host
+        $ErrorActionPreference = "Stop"
         if ($LASTEXITCODE -ne 0) {
             Write-Err "Failed to pull Docker image ghcr.io/sbr0nch/sentrikat:$TargetVersion"
             Write-Err "Check: https://github.com/$Repo/pkgs/container/sentrikat"
@@ -400,7 +402,9 @@ if ($DeployType -eq "docker_image") {
         Write-OK "Docker image pulled"
 
         Write-Info "Restarting SentriKat..."
-        docker compose up -d
+        $ErrorActionPreference = "Continue"
+        docker compose up -d 2>&1 | Out-Host
+        $ErrorActionPreference = "Stop"
         if ($LASTEXITCODE -ne 0) {
             Write-Err "Failed to restart containers. Check: docker compose logs"
             exit 1
@@ -421,7 +425,9 @@ if ($DeployType -eq "docker_image") {
     Push-Location $ComposeDir
     try {
         Write-Info "Rebuilding Docker image (this may take a few minutes)..."
-        docker compose build 2>&1
+        $ErrorActionPreference = "Continue"
+        docker compose build 2>&1 | Out-Host
+        $ErrorActionPreference = "Stop"
         if ($LASTEXITCODE -ne 0) {
             Write-Err "Docker build failed. Check the output above."
             Write-Warn "Source files were updated. Retry: docker compose build && docker compose up -d"
@@ -430,7 +436,9 @@ if ($DeployType -eq "docker_image") {
         Write-OK "Docker image rebuilt"
 
         Write-Info "Restarting SentriKat..."
-        docker compose up -d
+        $ErrorActionPreference = "Continue"
+        docker compose up -d 2>&1 | Out-Host
+        $ErrorActionPreference = "Stop"
         if ($LASTEXITCODE -ne 0) {
             Write-Err "Failed to restart containers."
             exit 1
