@@ -251,10 +251,12 @@ def upgrade_subscription():
 
     Called by License Server after Stripe subscription.updated webhook.
 
-    Request body:
+    Request body (accepts either format):
     {
-        "organization_id": 5,                   // Required
-        "plan_name": "pro",                     // Required
+        "organization_id": 5,                   // org_id or email required
+        "email": "user@company.com",            // org_id or email required
+        "plan_name": "pro",                     // plan_name or new_plan required
+        "new_plan": "pro",                      // alias for plan_name
         "stripe_subscription_id": "sub_xxx",    // Optional
         "billing_cycle": "annual"               // Optional
     }
@@ -263,11 +265,20 @@ def upgrade_subscription():
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
+    # Resolve organization: by org_id or by email lookup
     org_id = data.get('organization_id')
-    plan_name = data.get('plan_name')
+    if not org_id and data.get('email'):
+        user = User.query.filter_by(email=data['email'].strip().lower()).first()
+        if user:
+            org_id = user.organization_id
+        else:
+            return jsonify({'error': f'No user found with email {data["email"]}'}), 404
+
+    # Accept both plan_name and new_plan (sentrikat-web sends new_plan)
+    plan_name = data.get('plan_name') or data.get('new_plan')
 
     if not org_id or not plan_name:
-        return jsonify({'error': 'organization_id and plan_name are required'}), 400
+        return jsonify({'error': 'organization_id (or email) and plan_name (or new_plan) are required'}), 400
 
     # Find subscription
     sub = Subscription.query.filter_by(organization_id=org_id).first()
@@ -316,20 +327,30 @@ def cancel_subscription():
 
     Called by License Server after Stripe subscription.deleted webhook.
 
-    Request body:
+    Request body (accepts either format):
     {
-        "organization_id": 5,               // Required
+        "organization_id": 5,               // org_id or email required
+        "email": "user@company.com",         // org_id or email required
         "cancel_at_period_end": true,        // Optional: grace period or immediate
-        "stripe_subscription_id": "sub_xxx"  // Optional
+        "stripe_subscription_id": "sub_xxx", // Optional
+        "reason": "subscription_cancelled"   // Optional
     }
     """
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
+    # Resolve organization: by org_id or by email lookup
     org_id = data.get('organization_id')
+    if not org_id and data.get('email'):
+        user = User.query.filter_by(email=data['email'].strip().lower()).first()
+        if user:
+            org_id = user.organization_id
+        else:
+            return jsonify({'error': f'No user found with email {data["email"]}'}), 404
+
     if not org_id:
-        return jsonify({'error': 'organization_id is required'}), 400
+        return jsonify({'error': 'organization_id or email is required'}), 400
 
     sub = Subscription.query.filter_by(organization_id=org_id).first()
     if not sub:
