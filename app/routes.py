@@ -9,6 +9,7 @@ from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerab
 from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required, org_admin_required, manager_required
 from app.licensing import requires_professional, check_user_limit, check_org_limit, check_product_limit
+from app.saas import is_saas_mode, get_scoped_org_id, restrict_cross_org_access
 from app.error_utils import safe_error_response, ERROR_MSGS
 from app import APP_VERSION
 import json
@@ -5513,7 +5514,14 @@ def get_organizations():
             return jsonify({'error': 'User not found'}), 404
 
         # Super admins and users with can_view_all_orgs see all organizations
-        if current_user.is_super_admin() or current_user.can_view_all_orgs:
+        # SaaS mode: even super_admin is scoped to their org (no cross-tenant access)
+        if is_saas_mode():
+            saas_org = get_scoped_org_id(current_user)
+            if saas_org:
+                orgs = Organization.query.filter_by(id=saas_org, active=True).all()
+            else:
+                orgs = []
+        elif current_user.is_super_admin() or current_user.can_view_all_orgs:
             orgs = Organization.query.filter_by(active=True).order_by(Organization.display_name).all()
         else:
             # Regular users see all organizations they have access to (primary + multi-org memberships)
@@ -5888,7 +5896,16 @@ def get_users():
         return jsonify({'error': 'Unauthorized'}), 401
 
     # Super admins see all users
-    if current_user.is_super_admin():
+    # SaaS mode: even super_admin is scoped to their org (no cross-tenant access)
+    if is_saas_mode():
+        saas_org = get_scoped_org_id(current_user)
+        if saas_org:
+            users = User.query.filter_by(
+                organization_id=saas_org
+            ).order_by(User.username).all()
+        else:
+            return jsonify({'error': 'Organization scope required'}), 403
+    elif current_user.is_super_admin():
         users = User.query.order_by(User.username).all()
     # Org admins see only their organization's users
     elif current_user.is_org_admin():
@@ -7224,6 +7241,10 @@ def get_current_organization():
 @login_required
 def switch_organization(org_id):
     """Switch to a different organization (with permission check)"""
+    # SaaS mode: users are locked to their assigned org (no tenant switching)
+    if is_saas_mode():
+        return jsonify({'error': 'Organization switching is not available in SaaS mode'}), 403
+
     try:
         current_user_id = session.get('user_id')
         current_user = User.query.get(current_user_id)

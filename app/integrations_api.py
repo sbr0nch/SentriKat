@@ -22,6 +22,7 @@ from app.integrations_models import Integration, ImportQueue, AgentRegistration
 from app.models import Product, Organization, User, Asset, ProductInstallation
 from app.auth import admin_required, login_required, get_current_user
 from app.licensing import requires_professional
+from app.saas import saas_admin_or_org_admin, restrict_cross_org_access, is_saas_mode, get_scoped_org_id
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -117,10 +118,20 @@ def import_software():
 
     # Determine integration and organization
     integration = getattr(request, 'integration', None)
-    org_id = data.get('organization_id')
 
-    if not org_id and integration:
+    if integration:
+        # API key auth: always use integration's org (never allow override)
         org_id = integration.organization_id
+        user_requested_org = data.get('organization_id')
+        if user_requested_org and int(user_requested_org) != org_id:
+            logger.warning(
+                f"Integration {integration.id} tried to override org_id to {user_requested_org} "
+                f"(locked to org {org_id})"
+            )
+            return jsonify({'error': 'Cannot import data into a different organization'}), 403
+    else:
+        # Session auth (manual import): use request data
+        org_id = data.get('organization_id')
 
     # Validate organization if specified
     if org_id:
@@ -289,9 +300,21 @@ def import_sbom():
     import re as _re
 
     integration = getattr(request, 'integration', None)
-    org_id = request.args.get('organization_id', type=int)
-    if not org_id and integration:
+
+    if integration:
+        # API key auth: always use integration's org (never allow override)
         org_id = integration.organization_id
+        user_requested_org = request.args.get('organization_id', type=int)
+        if user_requested_org and user_requested_org != org_id:
+            logger.warning(
+                f"Integration {integration.id} tried to override SBOM org_id to {user_requested_org} "
+                f"(locked to org {org_id})"
+            )
+            return jsonify({'error': 'Cannot import SBOM into a different organization'}), 403
+    else:
+        # Session auth: use request params
+        org_id = request.args.get('organization_id', type=int)
+
     auto_approve = request.args.get('auto_approve', 'false').lower() == 'true'
     if integration and integration.auto_approve:
         auto_approve = True
@@ -1069,7 +1092,8 @@ def get_queue_vendors():
 # ============================================================================
 
 @bp.route('/api/integrations', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
+@restrict_cross_org_access
 @requires_professional('Integrations')
 def get_integrations():
     """Get all integrations."""
@@ -1079,11 +1103,19 @@ def get_integrations():
 
     # Filter by organization for non-super-admin users
     if user.is_super_admin():
-        org_id = request.args.get('organization_id', type=int)
-        if org_id:
-            integrations = Integration.query.filter_by(is_active=True, organization_id=org_id).order_by(Integration.name).all()
+        # SaaS mode: always scoped to user's org (no cross-tenant access)
+        if is_saas_mode():
+            saas_org = get_scoped_org_id(user)
+            if saas_org:
+                integrations = Integration.query.filter_by(is_active=True, organization_id=saas_org).order_by(Integration.name).all()
+            else:
+                return jsonify({'error': 'Organization scope required'}), 403
         else:
-            integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
+            org_id = request.args.get('organization_id', type=int)
+            if org_id:
+                integrations = Integration.query.filter_by(is_active=True, organization_id=org_id).order_by(Integration.name).all()
+            else:
+                integrations = Integration.query.filter_by(is_active=True).order_by(Integration.name).all()
     else:
         org_id = request.args.get('organization_id', type=int)
         if not org_id:

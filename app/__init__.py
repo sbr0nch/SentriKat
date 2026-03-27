@@ -267,7 +267,7 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs, provision_api
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
@@ -282,6 +282,7 @@ def create_app(config_class=Config):
     app.register_blueprint(saml_api.saml_bp)
     app.register_blueprint(reports_api.bp)
     app.register_blueprint(api_docs.api_docs_bp)
+    app.register_blueprint(provision_api.provision_bp)
 
     # Error handlers: return JSON for API routes, HTML for browser routes
     @app.errorhandler(404)
@@ -435,8 +436,8 @@ def create_app(config_class=Config):
         ):
             return None
 
-        # Skip setup check for agent API endpoints (they use their own key-based auth)
-        if request.path.startswith('/api/agent/') or request.path == '/api/health':
+        # Skip setup check for agent API and provisioning endpoints (they use their own key-based auth)
+        if request.path.startswith('/api/agent/') or request.path.startswith('/api/provision') or request.path == '/api/health':
             return None
 
         # Check if setup is complete

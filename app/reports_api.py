@@ -5,6 +5,7 @@ API endpoints for scheduled reports management.
 from flask import Blueprint, request, jsonify, session, send_file, Response
 from app.models import ScheduledReport, Organization, User
 from app import db, csrf
+from app.saas import is_saas_mode, get_scoped_org_id, restrict_cross_org_access
 from datetime import datetime
 import logging
 
@@ -585,10 +586,14 @@ def generate_compliance_report():
         return jsonify({'error': 'Authentication required'}), 401
 
     # Determine organization scope
-    if user.role == 'super_admin' and org_id:
+    # SaaS mode: always scoped to user's org (no cross-tenant access)
+    if is_saas_mode():
+        saas_org = get_scoped_org_id(user)
+        org_filter = [saas_org] if saas_org else [m.organization_id for m in user.org_memberships.all()]
+    elif user.role == 'super_admin' and org_id:
         org_filter = [org_id]
     elif user.role == 'super_admin':
-        org_filter = None  # All organizations
+        org_filter = None  # All organizations (on-premise only)
     else:
         org_filter = [m.organization_id for m in user.org_memberships.all()]
 
@@ -1070,10 +1075,14 @@ def generate_nis2_compliance_report():
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
-    if user.role == 'super_admin' and org_id:
+    # SaaS mode: always scoped to user's org
+    if is_saas_mode():
+        saas_org = get_scoped_org_id(user)
+        org_filter = [saas_org] if saas_org else [m.organization_id for m in user.org_memberships.all()]
+    elif user.role == 'super_admin' and org_id:
         org_filter = [org_id]
     elif user.role == 'super_admin':
-        org_filter = None
+        org_filter = None  # On-premise only
     else:
         org_filter = [m.organization_id for m in user.org_memberships.all()]
 
@@ -1449,10 +1458,14 @@ def generate_executive_summary():
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
-    if user.role == 'super_admin' and org_id:
+    # SaaS mode: always scoped to user's org
+    if is_saas_mode():
+        saas_org = get_scoped_org_id(user)
+        org_filter = [saas_org] if saas_org else [m.organization_id for m in user.org_memberships.all()]
+    elif user.role == 'super_admin' and org_id:
         org_filter = [org_id]
     elif user.role == 'super_admin':
-        org_filter = None
+        org_filter = None  # On-premise only
     else:
         org_filter = [m.organization_id for m in user.org_memberships.all()]
 
