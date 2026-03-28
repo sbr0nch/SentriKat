@@ -145,14 +145,16 @@ def _apply_schema_migrations(logger, db_uri):
                     columns = [row[1] for row in result.fetchall()]
                 else:
                     result = conn.execute(text(
-                        f"SELECT column_name FROM information_schema.columns "
-                        f"WHERE table_name = '{table_name}'"
-                    ))
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = :tname"
+                    ), {"tname": table_name})
                     columns = [row[0] for row in result.fetchall()]
 
                 if column_name not in columns:
                     logger.info(f"Adding column {column_name} to {table_name}")
                     col_def = col_def_sqlite if is_sqlite else col_def_pg
+                    # table_name and column_name come from hardcoded MIGRATIONS tuple,
+                    # not user input — safe to use in DDL (can't parameterize DDL identifiers)
                     conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {col_def}"))
                     logger.info(f"Successfully added column {column_name} to {table_name}")
                 else:
@@ -339,7 +341,7 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs, provision_api
+    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs, provision_api, metrics_api, gdpr_api
     app.register_blueprint(routes.bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
@@ -355,6 +357,8 @@ def create_app(config_class=Config):
     app.register_blueprint(reports_api.bp)
     app.register_blueprint(api_docs.api_docs_bp)
     app.register_blueprint(provision_api.provision_bp)
+    app.register_blueprint(metrics_api.metrics_bp)
+    app.register_blueprint(gdpr_api.gdpr_bp)
 
     # Error handlers: return JSON for API routes, HTML for browser routes
     @app.errorhandler(404)

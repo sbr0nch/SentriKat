@@ -1134,21 +1134,25 @@ class User(db.Model):
         self.totp_enabled = False
 
     def generate_password_reset_token(self):
-        """Generate a secure password reset token, set expiry to 30 minutes, save to DB, return token"""
+        """Generate a secure password reset token, set expiry to 30 minutes, save to DB, return token.
+        The token is hashed (SHA-256) before storage so a DB compromise doesn't expose valid tokens."""
         import secrets
+        import hashlib
         from datetime import timedelta
         token = secrets.token_urlsafe(48)
-        self.password_reset_token = token
+        self.password_reset_token = hashlib.sha256(token.encode()).hexdigest()
         self.password_reset_expires = datetime.utcnow() + timedelta(minutes=30)
         db.session.commit()
         return token
 
     @classmethod
     def verify_password_reset_token(cls, token):
-        """Find user by reset token and check expiry. Returns user or None."""
+        """Find user by hashed reset token and check expiry. Returns user or None."""
         if not token:
             return None
-        user = cls.query.filter_by(password_reset_token=token).first()
+        import hashlib
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        user = cls.query.filter_by(password_reset_token=token_hash).first()
         if not user:
             return None
         if not user.password_reset_expires or datetime.utcnow() > user.password_reset_expires:
