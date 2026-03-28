@@ -40,16 +40,16 @@ class LDAPManager:
         from app.settings_api import get_setting
 
         return {
-            'enabled': get_setting('ldap_enabled', 'false') == 'true',
-            'server': get_setting('ldap_server'),
-            'port': int(get_setting('ldap_port', '389')),
-            'base_dn': get_setting('ldap_base_dn'),
-            'bind_dn': get_setting('ldap_bind_dn'),
-            'bind_password': get_setting('ldap_bind_password'),
-            'search_filter': get_setting('ldap_search_filter', '(sAMAccountName={username})'),
-            'username_attr': get_setting('ldap_username_attr', 'sAMAccountName'),
-            'email_attr': get_setting('ldap_email_attr', 'mail'),
-            'use_tls': get_setting('ldap_use_tls', 'false') == 'true'
+            'enabled': get_setting('ldap_enabled', 'false', organization_id=None) == 'true',
+            'server': get_setting('ldap_server', organization_id=None),
+            'port': int(get_setting('ldap_port', '389', organization_id=None)),
+            'base_dn': get_setting('ldap_base_dn', organization_id=None),
+            'bind_dn': get_setting('ldap_bind_dn', organization_id=None),
+            'bind_password': get_setting('ldap_bind_password', organization_id=None),
+            'search_filter': get_setting('ldap_search_filter', '(sAMAccountName={username})', organization_id=None),
+            'username_attr': get_setting('ldap_username_attr', 'sAMAccountName', organization_id=None),
+            'email_attr': get_setting('ldap_email_attr', 'mail', organization_id=None),
+            'use_tls': get_setting('ldap_use_tls', 'false', organization_id=None) == 'true'
         }
 
     @staticmethod
