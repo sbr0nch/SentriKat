@@ -10,7 +10,7 @@ Provides:
 """
 import logging
 from flask import Blueprint, request, jsonify, redirect, url_for, session
-from app.auth import admin_required, get_current_user, login_user_session
+from app.auth import get_current_user, login_user_session
 from app.saas import saas_admin_or_org_admin
 from app.settings_api import get_setting, set_setting
 from app.licensing import requires_professional
@@ -100,7 +100,7 @@ def save_saml_settings():
 
 
 @saml_bp.route('/api/settings/saml/test', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('SAML SSO')
 def test_saml_config():
     """Test SAML configuration by validating IdP metadata"""
