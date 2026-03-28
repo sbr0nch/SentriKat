@@ -452,8 +452,8 @@ Stripe funziona perfettamente in Svizzera (attivo dal 2013).
 
 ## NOTE FINALI
 
-- **Pricing attuale**: 2 tier (Demo gratis + Pro EUR 2,499/anno) - on-premise
-- **Il modello a 5 tier SaaS** (Free/Starter/Pro/Business/Enterprise) e' predisposto in models.py per il futuro
+- **Pricing on-premise**: 2 tier (Demo gratis + Pro EUR 2,499/anno)
+- **Pricing SaaS**: 5 tier — Free (€0), Starter (€39/mo), Pro (€99/mo), Business (€249/mo), Enterprise (€499/mo)
 - **Per il lancio on-premise** servono solo: security fix + Buy Now button + Stripe live
 - **Per il lancio SaaS** servono le modifiche elencate in Parte 6 (data isolation, org admin self-service, bridge provisioning)
 
@@ -684,12 +684,18 @@ Ogni cliente SaaS puo' avere 10-100+ agents (discovery agents) che:
 
 ### Limiti per Piano
 
-| Risorsa | Free | Starter | Professional | Business | Enterprise |
-|---------|------|---------|-------------|----------|-----------|
-| Agents | 2 | 10 | 50 | 200 | Illimitati |
-| API calls/giorno | 100 | 1,000 | 10,000 | 50,000 | 100,000 |
-| Products monitorati | 25 | 100 | 500 | 2,000 | Illimitati |
-| Data retention | 30gg | 90gg | 1 anno | 2 anni | 5 anni |
+| Risorsa | Free (€0) | Starter (€39/mo) | Pro (€99/mo) | Business (€249/mo) | Enterprise (€499/mo) |
+|---------|-----------|------------------|--------------|--------------------|--------------------|
+| Agents | 3 | 25 | 100 | 500 | Illimitati |
+| Users | 1 | 3 | 10 | 50 | Illimitati |
+| API keys | 1 | 2 | 5 | 25 | Illimitati |
+| Products | 25 | Illimitati | Illimitati | Illimitati | Illimitati |
+| Storage | 100MB | 500MB | 2GB | 10GB | Illimitato |
+| Per-agent/anno | - | €18.70 | €11.90 | €5.98 | Custom |
+| LDAP | - | - | ✓ | ✓ | ✓ |
+| SSO | - | - | - | ✓ | ✓ |
+| White Label | - | - | - | ✓ | ✓ |
+| Compliance Reports | - | - | ✓ | ✓ | ✓ |
 
 ### Come Gestirlo in Pratica
 
