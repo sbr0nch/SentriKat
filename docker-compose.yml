@@ -155,6 +155,8 @@ services:
       - ./nginx/${NGINX_TEMPLATE:-nginx.conf.template}:/etc/nginx/templates/default.conf.template:ro
       # Mount SSL certificates (read-only source)
       - ${SSL_CERT_PATH:-./nginx/ssl}:/ssl-certs:ro
+      # SSL certificates for HTTPS (Cloudflare Origin Certificate)
+      - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - sentrikat
     restart: unless-stopped
