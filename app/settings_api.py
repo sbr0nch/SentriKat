@@ -490,7 +490,7 @@ def test_ldap_connection():
 # ============================================================================
 
 @settings_bp.route('/smtp', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Email Alerts')
 def get_smtp_settings():
     """Get global SMTP settings"""
@@ -506,7 +506,7 @@ def get_smtp_settings():
     return jsonify(settings)
 
 @settings_bp.route('/smtp', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def save_smtp_settings():
     """Save global SMTP settings"""
     data = request.get_json()
@@ -542,7 +542,7 @@ def save_smtp_settings():
         return jsonify({'error': 'Failed to save SMTP settings. Check server logs for details.'}), 500
 
 @settings_bp.route('/smtp/test', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def test_smtp_connection():
     """Test global SMTP connection by sending test email"""
     try:
@@ -696,7 +696,7 @@ def test_smtp_connection():
 # ============================================================================
 
 @settings_bp.route('/sync', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 def get_sync_settings():
     """Get sync schedule settings"""
     # Check if NVD API key is configured (return masked indicator)
@@ -714,7 +714,7 @@ def get_sync_settings():
     return jsonify(settings)
 
 @settings_bp.route('/sync', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def save_sync_settings():
     """Save sync schedule settings"""
     data = request.get_json()
@@ -800,7 +800,7 @@ def _validate_nvd_api_key(api_key):
 
 
 @settings_bp.route('/sync/nvd-status', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 def get_nvd_status():
     """
     Check NVD API connectivity and key status.
@@ -880,7 +880,7 @@ def get_nvd_status():
 
 
 @settings_bp.route('/sync/nvd-rate-limit', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 def get_nvd_rate_limit_stats():
     """
     Get NVD API rate limiter statistics.
@@ -905,7 +905,7 @@ def get_nvd_rate_limit_stats():
 
 
 @settings_bp.route('/sync/status', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 def get_sync_status():
     """Get sync status information"""
     try:
@@ -937,7 +937,7 @@ def get_sync_status():
 # ============================================================================
 
 @settings_bp.route('/general', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 def get_general_settings():
     """Get general system settings (date/time, proxy/network)"""
     settings = {
@@ -953,7 +953,7 @@ def get_general_settings():
     return jsonify(settings)
 
 @settings_bp.route('/general', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def save_general_settings():
     """Save general system settings (date/time, proxy/network)"""
     data = request.get_json()
@@ -983,7 +983,7 @@ def save_general_settings():
 # ============================================================================
 
 @settings_bp.route('/security', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 def get_security_settings():
     """Get security settings"""
     settings = {
@@ -1001,7 +1001,7 @@ def get_security_settings():
     return jsonify(settings)
 
 @settings_bp.route('/security', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def save_security_settings():
     """Save security settings"""
     data = request.get_json()
@@ -1074,7 +1074,7 @@ def save_branding_settings():
 # ============================================================================
 
 @settings_bp.route('/notifications', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Email Alerts')
 def get_notification_settings():
     """Get notification/webhook settings (Professional license required)"""
@@ -1128,7 +1128,7 @@ def get_notification_settings():
     return jsonify(settings)
 
 @settings_bp.route('/notifications', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Email Alerts')
 def save_notification_settings():
     """Save notification/webhook settings (Professional license required)"""
@@ -1211,12 +1211,18 @@ def save_notification_settings():
         return jsonify({'error': ERROR_MSGS['config']}), 500
 
 @settings_bp.route('/alerts/org-overrides', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 def get_alert_org_overrides():
     """Get all organizations' alert settings for the unified alerts overview page."""
     from app.models import Organization
+    from app.saas import get_scoped_org_id
     try:
-        orgs = Organization.query.order_by(Organization.name).all()
+        # In SaaS mode, only show the user's own organization
+        scoped_org_id = get_scoped_org_id() if is_saas_mode() else None
+        if scoped_org_id:
+            orgs = Organization.query.filter_by(id=scoped_org_id).order_by(Organization.name).all()
+        else:
+            orgs = Organization.query.order_by(Organization.name).all()
         result = []
         for org in orgs:
             # Parse notification emails count
@@ -1272,11 +1278,18 @@ def get_alert_org_overrides():
 
 
 @settings_bp.route('/alerts/org/<int:org_id>/rules', methods=['PATCH'])
-@admin_required
+@saas_admin_or_org_admin
 def update_org_alert_rules(org_id):
     """Update alert rules for a specific organization (inline editing from Alert Rules page)."""
     from app.models import Organization
+    from app.saas import get_scoped_org_id
     try:
+        # In SaaS mode, verify user can only modify their own org
+        if is_saas_mode():
+            scoped_org_id = get_scoped_org_id()
+            if scoped_org_id and scoped_org_id != org_id:
+                return jsonify({'error': 'Access denied'}), 403
+
         org = Organization.query.get(org_id)
         if not org:
             return jsonify({'error': 'Organization not found'}), 404
@@ -1311,11 +1324,18 @@ def update_org_alert_rules(org_id):
 
 
 @settings_bp.route('/alerts/org/<int:org_id>/delivery', methods=['PATCH'])
-@admin_required
+@saas_admin_or_org_admin
 def update_org_delivery(org_id):
     """Update delivery settings (recipients, webhook) for a specific organization."""
     from app.models import Organization
+    from app.saas import get_scoped_org_id
     try:
+        # In SaaS mode, verify user can only modify their own org
+        if is_saas_mode():
+            scoped_org_id = get_scoped_org_id()
+            if scoped_org_id and scoped_org_id != org_id:
+                return jsonify({'error': 'Access denied'}), 403
+
         org = Organization.query.get(org_id)
         if not org:
             return jsonify({'error': 'Organization not found'}), 404
@@ -1356,11 +1376,18 @@ def update_org_delivery(org_id):
 
 
 @settings_bp.route('/alerts/org/<int:org_id>/reset', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def reset_org_alert_rules(org_id):
     """Reset an organization's alert rules to the current global defaults."""
     from app.models import Organization
+    from app.saas import get_scoped_org_id
     try:
+        # In SaaS mode, verify user can only modify their own org
+        if is_saas_mode():
+            scoped_org_id = get_scoped_org_id()
+            if scoped_org_id and scoped_org_id != org_id:
+                return jsonify({'error': 'Access denied'}), 403
+
         org = Organization.query.get(org_id)
         if not org:
             return jsonify({'error': 'Organization not found'}), 404
@@ -1393,7 +1420,7 @@ def _is_ssrf_safe_url(url):
 
 
 @settings_bp.route('/test-webhook', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def test_org_webhook():
     """Test an organization webhook by sending a test message.
 
@@ -1461,7 +1488,7 @@ def test_org_webhook():
 
 
 @settings_bp.route('/notifications/test', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Email Alerts')
 def test_notification():
     """Test webhook notification (Professional license required)"""
@@ -1647,7 +1674,7 @@ def test_notification():
 # ============================================================================
 
 @settings_bp.route('/retention', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 def get_retention_settings():
     """Get data retention settings"""
     settings = {
@@ -1659,7 +1686,7 @@ def get_retention_settings():
     return jsonify(settings)
 
 @settings_bp.route('/retention', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def save_retention_settings():
     """Save data retention settings"""
     data = request.get_json()
@@ -1677,7 +1704,7 @@ def save_retention_settings():
 
 
 @settings_bp.route('/maintenance/auto-acknowledge', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def run_auto_acknowledge():
     """
     Manually trigger auto-acknowledge for removed software vulnerabilities.

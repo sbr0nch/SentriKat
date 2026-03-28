@@ -753,12 +753,20 @@ def get_import_queue_count():
     return jsonify({'pending': pending_count})
 
 
+def _get_queue_item_or_404(item_id):
+    """Get an import queue item by ID, scoped to current user's org in SaaS mode."""
+    org_id = get_scoped_org_id()
+    if org_id:
+        return ImportQueue.query.filter_by(id=item_id, organization_id=org_id).first_or_404()
+    return ImportQueue.query.get_or_404(item_id)
+
+
 @bp.route('/api/import/queue/<int:item_id>', methods=['GET'])
 @login_required
 @requires_professional('Integrations')
 def get_queue_item(item_id):
     """Get a specific queue item."""
-    item = ImportQueue.query.get_or_404(item_id)
+    item = _get_queue_item_or_404(item_id)
     return jsonify(item.to_dict())
 
 
@@ -767,7 +775,7 @@ def get_queue_item(item_id):
 @requires_professional('Integrations')
 def update_queue_item(item_id):
     """Update a queue item (change version, org)."""
-    item = ImportQueue.query.get_or_404(item_id)
+    item = _get_queue_item_or_404(item_id)
     data = request.get_json()
 
     if item.status != 'pending':
@@ -801,7 +809,7 @@ def update_queue_item(item_id):
 @requires_professional('Integrations')
 def approve_queue_item(item_id):
     """Approve a queue item and create the product."""
-    item = ImportQueue.query.get_or_404(item_id)
+    item = _get_queue_item_or_404(item_id)
 
     if item.status != 'pending':
         return jsonify({'error': 'Item already processed'}), 400
@@ -868,7 +876,7 @@ def approve_queue_item(item_id):
 @requires_professional('Integrations')
 def reject_queue_item(item_id):
     """Reject/ignore a queue item."""
-    item = ImportQueue.query.get_or_404(item_id)
+    item = _get_queue_item_or_404(item_id)
 
     if item.status != 'pending':
         return jsonify({'error': 'Item already processed'}), 400
@@ -1147,12 +1155,20 @@ def get_integrations():
     return jsonify([i.to_dict() for i in integrations])
 
 
+def _get_integration_or_404(integration_id):
+    """Get an integration by ID, scoped to current user's org in SaaS mode."""
+    org_id = get_scoped_org_id()
+    if org_id:
+        return Integration.query.filter_by(id=integration_id, organization_id=org_id).first_or_404()
+    return Integration.query.get_or_404(integration_id)
+
+
 @bp.route('/api/integrations/<int:integration_id>', methods=['GET'])
 @admin_required
 @requires_professional('Integrations')
 def get_integration(integration_id):
     """Get a specific integration."""
-    integration = Integration.query.get_or_404(integration_id)
+    integration = _get_integration_or_404(integration_id)
     # Include sensitive data for editing
     return jsonify(integration.to_dict(include_sensitive=True))
 
@@ -1223,7 +1239,7 @@ def create_integration():
 @requires_professional('Integrations')
 def update_integration(integration_id):
     """Update an integration."""
-    integration = Integration.query.get_or_404(integration_id)
+    integration = _get_integration_or_404(integration_id)
     data = request.get_json()
 
     if not data:
@@ -1262,7 +1278,7 @@ def update_integration(integration_id):
 @requires_professional('Integrations')
 def delete_integration(integration_id):
     """Delete (deactivate) an integration."""
-    integration = Integration.query.get_or_404(integration_id)
+    integration = _get_integration_or_404(integration_id)
 
     integration.is_active = False
     try:
@@ -1280,7 +1296,7 @@ def delete_integration(integration_id):
 @requires_professional('Integrations')
 def regenerate_api_key(integration_id):
     """Regenerate API key for an integration."""
-    integration = Integration.query.get_or_404(integration_id)
+    integration = _get_integration_or_404(integration_id)
 
     integration.api_key = secrets.token_urlsafe(32)
     try:
@@ -1301,7 +1317,7 @@ def regenerate_api_key(integration_id):
 @requires_professional('Integrations')
 def test_integration(integration_id):
     """Test connection to an integration."""
-    integration = Integration.query.get_or_404(integration_id)
+    integration = _get_integration_or_404(integration_id)
 
     if integration.integration_type == 'agent':
         # Agent integrations don't have outbound connections to test
@@ -1327,7 +1343,7 @@ def test_integration(integration_id):
 @requires_professional('Integrations')
 def trigger_sync(integration_id):
     """Manually trigger a sync for a pull integration."""
-    integration = Integration.query.get_or_404(integration_id)
+    integration = _get_integration_or_404(integration_id)
 
     if integration.integration_type == 'agent':
         return jsonify({'error': 'Agent integrations cannot be manually synced'}), 400
