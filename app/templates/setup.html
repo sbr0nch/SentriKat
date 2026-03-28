@@ -773,6 +773,9 @@
                 const data = await response.json();
 
                 if (response.ok && data.success) {
+                    document.getElementById('syncProgress').style.display = 'none';
+                    btn.disabled = false;
+                    btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
                     showAlert(
                         `Sync complete! Downloaded ${data.stored} new vulnerabilities ` +
                         `and updated ${data.updated}. Found ${data.matches} matches.`,
