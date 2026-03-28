@@ -1268,9 +1268,15 @@
                 </li>
                 {% endif %}
                 <li class="nav-item" role="presentation">
+                    {% if saas_mode %}
+                    <button class="nav-link" id="license-tab" type="button" onclick="showSettingsGroup('subscription', this)">
+                        <i class="bi bi-credit-card me-2"></i>Subscription
+                    </button>
+                    {% else %}
                     <button class="nav-link" id="license-tab" type="button" onclick="showSettingsGroup('license', this)">
                         <i class="bi bi-key me-2"></i>License
                     </button>
+                    {% endif %}
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="health-settings-tab" type="button" onclick="showSettingsGroup('health', this)">
@@ -2985,7 +2991,166 @@
                     </div>
                 </div>
 
-                <!-- License Settings -->
+                {% if saas_mode %}
+                <!-- SaaS Subscription Settings -->
+                <div class="tab-pane fade" id="subscriptionSettings" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-credit-card me-2"></i>Subscription Management</span>
+                            {% if subscription and subscription.plan %}
+                            <span class="badge bg-{{ 'success' if subscription.is_active() else 'warning' }}">
+                                {{ subscription.plan.display_name }} — {{ subscription.status|capitalize }}
+                            </span>
+                            {% else %}
+                            <span class="badge bg-secondary">No Subscription</span>
+                            {% endif %}
+                        </div>
+                        <div class="card-body">
+                            <!-- Current Plan -->
+                            <div class="row mb-4">
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <h5 class="card-title mb-3">
+                                                <i class="bi bi-shield-check me-2"></i>Current Plan
+                                            </h5>
+                                            {% if subscription and subscription.plan %}
+                                            <table class="table table-sm table-borderless mb-0">
+                                                <tr>
+                                                    <td class="text-muted">Plan</td>
+                                                    <td class="fw-semibold">{{ subscription.plan.display_name }}</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="text-muted">Status</td>
+                                                    <td>
+                                                        {% if subscription.is_active() %}
+                                                        <span class="badge bg-success">Active</span>
+                                                        {% elif subscription.is_trialing() %}
+                                                        <span class="badge bg-info">Trial</span>
+                                                        {% elif subscription.status == 'past_due' %}
+                                                        <span class="badge bg-warning">Past Due</span>
+                                                        {% elif subscription.status == 'canceled' %}
+                                                        <span class="badge bg-danger">Canceled</span>
+                                                        {% else %}
+                                                        <span class="badge bg-secondary">{{ subscription.status|capitalize }}</span>
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="text-muted">Billing</td>
+                                                    <td>{{ subscription.billing_cycle|capitalize }}</td>
+                                                </tr>
+                                                {% if subscription.current_period_end %}
+                                                <tr>
+                                                    <td class="text-muted">Renews</td>
+                                                    <td>{{ subscription.current_period_end.strftime('%d %b %Y') }}</td>
+                                                </tr>
+                                                {% endif %}
+                                                {% if subscription.cancel_at_period_end %}
+                                                <tr>
+                                                    <td class="text-muted">Cancels</td>
+                                                    <td class="text-danger">At end of current period</td>
+                                                </tr>
+                                                {% endif %}
+                                            </table>
+                                            {% else %}
+                                            <p class="text-muted">No active subscription found.</p>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <h5 class="card-title mb-3">
+                                                <i class="bi bi-bar-chart me-2"></i>Plan Limits
+                                            </h5>
+                                            {% if subscription and subscription.plan %}
+                                            <table class="table table-sm table-borderless mb-0">
+                                                <tr>
+                                                    <td class="text-muted">Agents</td>
+                                                    <td class="fw-semibold">{{ 'Unlimited' if subscription.plan.max_agents == -1 else subscription.plan.max_agents }}</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="text-muted">Users</td>
+                                                    <td class="fw-semibold">{{ 'Unlimited' if subscription.plan.max_users == -1 else subscription.plan.max_users }}</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="text-muted">Products</td>
+                                                    <td class="fw-semibold">{{ 'Unlimited' if subscription.plan.max_products == -1 else subscription.plan.max_products }}</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="text-muted">API Keys</td>
+                                                    <td class="fw-semibold">{{ 'Unlimited' if subscription.plan.max_api_keys == -1 else subscription.plan.max_api_keys }}</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="text-muted">Storage</td>
+                                                    <td class="fw-semibold">{{ 'Unlimited' if subscription.plan.max_storage_mb == -1 else (subscription.plan.max_storage_mb|string + ' MB') }}</td>
+                                                </tr>
+                                            </table>
+                                            {% else %}
+                                            <p class="text-muted">No plan data available.</p>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Features included in plan -->
+                            {% if subscription and subscription.plan %}
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <i class="bi bi-list-check me-2"></i>Features Included
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        {% set features = subscription.plan.get_features() %}
+                                        {% set feature_labels = {
+                                            'email_alerts': 'Email Alerts',
+                                            'ldap': 'LDAP / Active Directory',
+                                            'sso': 'SAML SSO',
+                                            'webhooks': 'Webhooks',
+                                            'white_label': 'White-Labeling',
+                                            'api_access': 'API Access',
+                                            'compliance_reports': 'Compliance Reports',
+                                            'jira_integration': 'Issue Trackers',
+                                            'push_agents': 'Push Agents',
+                                            'backup_restore': 'Backup & Restore',
+                                            'audit_export': 'Audit Log Export',
+                                            'multi_org': 'Multi-Organization'
+                                        } %}
+                                        {% for key, label in feature_labels.items() %}
+                                        <div class="col-md-4 col-sm-6 mb-2">
+                                            {% if features.get(key) %}
+                                            <i class="bi bi-check-circle-fill text-success me-1"></i>
+                                            {% else %}
+                                            <i class="bi bi-x-circle text-muted me-1"></i>
+                                            {% endif %}
+                                            <span class="{{ '' if features.get(key) else 'text-muted' }}">{{ label }}</span>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            <!-- Upgrade CTA -->
+                            {% if subscription and subscription.plan and subscription.plan.name != 'enterprise' %}
+                            <div class="card border-primary">
+                                <div class="card-body text-center py-4">
+                                    <h5><i class="bi bi-rocket-takeoff me-2"></i>Need more capacity?</h5>
+                                    <p class="text-muted mb-3">Upgrade your plan for more agents, users, and advanced features.</p>
+                                    <a href="https://sentrikat.com/pricing" target="_blank" class="btn btn-primary">
+                                        <i class="bi bi-arrow-up-circle me-1"></i>View Plans
+                                    </a>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <!-- On-Premise License Settings -->
                 <div class="tab-pane fade" id="licenseSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
@@ -3219,6 +3384,7 @@
                         </div>
                     </div>
                 </div>
+                {% endif %}
 
                 <!-- Admin Guide -->
                 <div class="tab-pane fade" id="guideSettings" role="tabpanel">

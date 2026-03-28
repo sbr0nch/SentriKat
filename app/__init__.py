@@ -118,6 +118,8 @@ def _apply_schema_migrations(logger, db_uri):
         # Password reset tokens (added in security audit)
         ('users', 'password_reset_token', 'VARCHAR(100)', 'VARCHAR(100)'),
         ('users', 'password_reset_expires', 'DATETIME', 'TIMESTAMP'),
+        # SaaS: per-org settings isolation
+        ('system_settings', 'organization_id', 'INTEGER', 'INTEGER REFERENCES organizations(id) ON DELETE CASCADE'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
@@ -172,8 +174,78 @@ def _apply_schema_migrations(logger, db_uri):
             except Exception:
                 pass
 
+    # Constraint migration: system_settings unique key → (key, organization_id)
+    _migrate_system_settings_constraint(logger, db_uri)
+
     # Data migration: normalize legacy source_type values to 'extension'
     _apply_data_migrations(logger, db_uri)
+
+
+def _migrate_system_settings_constraint(logger, db_uri):
+    """Replace system_settings unique(key) with unique(key, organization_id) for SaaS per-org settings."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+    engine = None
+    try:
+        engine = create_engine(db_uri, poolclass=NullPool, isolation_level="AUTOCOMMIT")
+        conn = engine.connect()
+        is_sqlite = db_uri.startswith('sqlite')
+        try:
+            if is_sqlite:
+                # SQLite: can't ALTER constraints, but db.create_all() handles it for new DBs.
+                # For existing DBs, the unique(key) constraint is fine since on-premise
+                # doesn't use organization_id. The new composite unique is created by
+                # SQLAlchemy on fresh DBs.
+                pass
+            else:
+                # PostgreSQL: check if the new composite constraint exists
+                result = conn.execute(text(
+                    "SELECT 1 FROM information_schema.table_constraints "
+                    "WHERE constraint_name = 'uq_setting_key_org' AND table_name = 'system_settings'"
+                ))
+                if not result.fetchone():
+                    # Drop old unique constraint on key alone (try common names)
+                    for old_name in ['system_settings_key_key', 'uq_system_settings_key']:
+                        try:
+                            conn.execute(text(f"ALTER TABLE system_settings DROP CONSTRAINT IF EXISTS {old_name}"))
+                        except Exception:
+                            pass
+                    # Also try dropping the unnamed unique index
+                    try:
+                        conn.execute(text("DROP INDEX IF EXISTS ix_system_settings_key"))
+                    except Exception:
+                        pass
+                    # Create new composite unique constraint
+                    try:
+                        conn.execute(text(
+                            "ALTER TABLE system_settings ADD CONSTRAINT uq_setting_key_org "
+                            "UNIQUE (key, organization_id)"
+                        ))
+                        logger.info("Added composite unique constraint uq_setting_key_org on system_settings(key, organization_id)")
+                    except Exception as e:
+                        logger.warning(f"Could not add uq_setting_key_org constraint: {e}")
+                    # Create index on organization_id for query performance
+                    try:
+                        conn.execute(text(
+                            "CREATE INDEX IF NOT EXISTS ix_system_settings_organization_id "
+                            "ON system_settings (organization_id)"
+                        ))
+                    except Exception:
+                        pass
+                else:
+                    logger.debug("Constraint uq_setting_key_org already exists")
+        except Exception as e:
+            logger.warning(f"system_settings constraint migration error: {e}")
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning(f"system_settings constraint migration connection error: {e}")
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
 
 
 def _apply_data_migrations(logger, db_uri):
@@ -314,7 +386,8 @@ def create_app(config_class=Config):
     @app.context_processor
     def inject_globals():
         from flask import session, request
-        from app.models import User, SystemSettings
+        from app.models import User, SystemSettings, Subscription
+        from app.saas import is_saas_mode
         import os
 
         current_user = None
@@ -324,7 +397,17 @@ def create_app(config_class=Config):
         # Match auth.py: AUTH_ENABLED = DISABLE_AUTH != 'true'
         auth_enabled = os.environ.get('DISABLE_AUTH', 'false').lower() != 'true'
 
-        # Load branding settings
+        # SaaS mode detection
+        saas_mode = is_saas_mode()
+        org_id = session.get('organization_id') if saas_mode else None
+
+        # Helper: query SystemSettings scoped by org in SaaS mode
+        def _get_branding_setting(key):
+            if org_id:
+                return SystemSettings.query.filter_by(key=key, organization_id=org_id).first()
+            return SystemSettings.query.filter_by(key=key, organization_id=None).first()
+
+        # Load branding settings (org-scoped in SaaS mode)
         branding = {
             'app_name': 'SentriKat',
             'login_message': '',
@@ -334,12 +417,12 @@ def create_app(config_class=Config):
             'report_branding_enabled': True
         }
         try:
-            app_name = SystemSettings.query.filter_by(key='app_name').first()
-            login_message = SystemSettings.query.filter_by(key='login_message').first()
-            support_email = SystemSettings.query.filter_by(key='support_email').first()
-            show_version = SystemSettings.query.filter_by(key='show_version').first()
-            logo_url = SystemSettings.query.filter_by(key='logo_url').first()
-            report_branding = SystemSettings.query.filter_by(key='report_branding_enabled').first()
+            app_name = _get_branding_setting('app_name')
+            login_message = _get_branding_setting('login_message')
+            support_email = _get_branding_setting('support_email')
+            show_version = _get_branding_setting('show_version')
+            logo_url = _get_branding_setting('logo_url')
+            report_branding = _get_branding_setting('report_branding_enabled')
 
             if app_name and app_name.value:
                 branding['app_name'] = app_name.value
@@ -354,38 +437,50 @@ def create_app(config_class=Config):
             if report_branding:
                 branding['report_branding_enabled'] = report_branding.value != 'false'
         except Exception:
-            # Rollback to prevent session corruption on DB errors
             try:
                 db.session.rollback()
             except Exception:
                 pass
 
-        # Load license info
-        # When _lrc=1 query param is present (after license activation/removal),
-        # force-reload from DB to bypass the per-worker in-memory cache.
+        # Load license info (on-premise) or subscription info (SaaS)
         license_info = None
-        try:
-            from app.licensing import get_license, reload_license
-            if request.args.get('_lrc'):
-                reload_license()
-            license_info = get_license()
-            # Update branding based on license
-            if license_info and license_info.is_professional():
-                branding['show_powered_by'] = False
-            else:
-                branding['show_powered_by'] = True
-        except Exception:
-            # Rollback to prevent session corruption on DB errors
+        subscription_info = None
+
+        if saas_mode:
+            # SaaS: load subscription for current org
+            branding['show_powered_by'] = False
             try:
-                db.session.rollback()
+                if org_id:
+                    subscription_info = Subscription.query.filter_by(
+                        organization_id=org_id
+                    ).first()
             except Exception:
-                pass
-            branding['show_powered_by'] = True
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+        else:
+            # On-premise: load RSA license
+            try:
+                from app.licensing import get_license, reload_license
+                if request.args.get('_lrc'):
+                    reload_license()
+                license_info = get_license()
+                if license_info and license_info.is_professional():
+                    branding['show_powered_by'] = False
+                else:
+                    branding['show_powered_by'] = True
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                branding['show_powered_by'] = True
 
         # Load session timeout for client-side handling
         session_timeout_minutes = 480  # Default 8 hours
         try:
-            timeout_setting = SystemSettings.query.filter_by(key='session_timeout').first()
+            timeout_setting = _get_branding_setting('session_timeout')
             if timeout_setting and timeout_setting.value:
                 session_timeout_minutes = int(timeout_setting.value)
         except Exception:
@@ -400,8 +495,8 @@ def create_app(config_class=Config):
             'date_format': 'YYYY-MM-DD HH:mm'
         }
         try:
-            tz_setting = SystemSettings.query.filter_by(key='display_timezone').first()
-            fmt_setting = SystemSettings.query.filter_by(key='date_format').first()
+            tz_setting = _get_branding_setting('display_timezone')
+            fmt_setting = _get_branding_setting('date_format')
             if tz_setting and tz_setting.value:
                 display_settings['timezone'] = tz_setting.value
             if fmt_setting and fmt_setting.value:
@@ -417,6 +512,8 @@ def create_app(config_class=Config):
             auth_enabled=auth_enabled,
             branding=branding,
             license=license_info,
+            saas_mode=saas_mode,
+            subscription=subscription_info,
             session_timeout_minutes=session_timeout_minutes,
             app_version=APP_VERSION,
             display_settings=display_settings
