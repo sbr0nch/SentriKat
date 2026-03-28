@@ -39,6 +39,8 @@ SentriKat is a **self-hosted vulnerability management platform** that discovers 
 - **Vendor backport detection** — automatically detects when Linux distros have patched a CVE via backport, eliminating false positives that plague other scanners
 - **Self-hosted, air-gap capable** — runs entirely on your infrastructure, no data leaves your network
 - **Lightweight agents** — transparent bash/PowerShell scripts (not opaque binaries), auditable by your security team
+- **GDPR compliant** — built-in data export (`/api/gdpr/export`) and right-to-erasure (`/api/gdpr/delete`) endpoints
+- **Prometheus monitoring** — native `/metrics` endpoint for observability integration
 - **10x cheaper** — EUR 2,499/year vs $25,000-$100,000+ for enterprise alternatives
 
 ### How It Works (End-to-End Flow)
