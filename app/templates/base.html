@@ -2870,7 +2870,7 @@
     </style>
     {% block extra_css %}{% endblock %}
 </head>
-<body>
+<body data-saas-mode="{{ 'true' if saas_mode else 'false' }}" {% if subscription and subscription.plan %}data-subscription-plan="{{ subscription.plan.name }}" data-subscription-status="{{ subscription.status }}" data-subscription-features="{{ subscription.plan.get_features()|tojson|e }}"{% endif %}>
     {% if saas_mode %}
     {# SaaS mode: show subscription plan info banner for free/trial plans #}
     {% if subscription and subscription.plan and subscription.plan.name == 'free' %}

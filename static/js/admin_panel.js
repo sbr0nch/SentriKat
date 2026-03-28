@@ -6112,11 +6112,38 @@ document.addEventListener('DOMContentLoaded', function() {
 // ============================================================================
 
 /**
- * Load license info and apply UI restrictions for premium features
- * This is called early during page initialization
- * Uses retry logic to handle app startup timing issues
+ * Load license/subscription info and apply UI restrictions for premium features.
+ * SaaS mode: reads subscription data from body data attributes (server-rendered).
+ * On-premise: fetches /api/license endpoint.
  */
 async function loadLicenseAndApplyRestrictions() {
+    const saasMode = document.body.dataset.saasMode === 'true';
+
+    if (saasMode) {
+        // SaaS mode: subscription info is embedded in the page by the server
+        const planName = document.body.dataset.subscriptionPlan || 'free';
+        const status = document.body.dataset.subscriptionStatus || 'active';
+        let features = {};
+        try {
+            features = JSON.parse(document.body.dataset.subscriptionFeatures || '{}');
+        } catch (e) { /* ignore parse error */ }
+
+        const isActive = ['active', 'trialing'].includes(status);
+        const isPaid = isActive && planName !== 'free';
+
+        // Build a license-compatible object so applyLicenseRestrictions works
+        window.licenseInfo = {
+            is_professional: isPaid,
+            features: Object.keys(features).filter(k => features[k]),
+            saas_mode: true,
+            plan: planName,
+            status: status
+        };
+        applyLicenseRestrictions();
+        return;
+    }
+
+    // On-premise mode: fetch license from API
     try {
         const response = await fetchWithRetry('/api/license', {}, 5, 800);
         if (!response.ok) {
@@ -6251,11 +6278,22 @@ function applyLicenseRestrictions() {
 function isFeatureLicensed(feature) {
     const license = window.licenseInfo;
     if (!license) return false;
+    // In both modes, licenseInfo has is_professional and features[]
     if (license.is_professional) return true;
     return (license.features || []).includes(feature);
 }
 
+/**
+ * Check if the app is running in SaaS mode (client-side)
+ */
+function isSaasMode() {
+    return document.body.dataset.saasMode === 'true';
+}
+
 async function loadLicenseInfo() {
+    // SaaS mode: subscription info is rendered server-side, no API call needed
+    if (isSaasMode()) return;
+
     const detailsEl = SK.DOM.get('licenseDetails');
     const usageEl = SK.DOM.get('licenseUsage');
 

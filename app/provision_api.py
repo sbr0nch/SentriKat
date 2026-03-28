@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import Blueprint, request, jsonify
-from app import db, csrf
+from app import db, csrf, limiter
 from app.models import Organization, User, Subscription, SubscriptionPlan, UserOrganization
 from app.saas import is_saas_mode
 
@@ -79,6 +79,7 @@ def _generate_temp_password():
 
 
 @provision_bp.route('', methods=['POST'])
+@limiter.limit("10/minute")
 @_require_provision_key
 def provision_tenant():
     """
@@ -244,6 +245,7 @@ def provision_tenant():
 
 
 @provision_bp.route('/upgrade', methods=['POST'])
+@limiter.limit("10/minute")
 @_require_provision_key
 def upgrade_subscription():
     """
@@ -320,6 +322,7 @@ def upgrade_subscription():
 
 
 @provision_bp.route('/cancel', methods=['POST'])
+@limiter.limit("10/minute")
 @_require_provision_key
 def cancel_subscription():
     """
@@ -385,6 +388,7 @@ def cancel_subscription():
 
 
 @provision_bp.route('/status', methods=['GET'])
+@limiter.limit("30/minute")
 @_require_provision_key
 def get_tenant_status():
     """
