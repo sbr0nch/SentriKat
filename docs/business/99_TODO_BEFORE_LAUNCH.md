@@ -132,12 +132,17 @@ Prima di fissare i prezzi definitivi:
 
 ### 5.1 Priorità Immediata
 
-| Requisito | Priorità | Timeline |
-|-----------|----------|----------|
-| GDPR Compliance | ALTA | Prima del lancio EU |
-| Privacy Policy completa | ALTA | Prima del lancio |
-| Cookie Banner | ALTA | Per il sito web |
-| DPA (Data Processing Agreement) | MEDIA | Per clienti enterprise |
+| Requisito | Priorità | Timeline | Stato |
+|-----------|----------|----------|-------|
+| GDPR Export endpoint (`/api/gdpr/export`) | ALTA | Prima del lancio EU | FATTO |
+| GDPR Delete endpoint (`/api/gdpr/delete`) | ALTA | Prima del lancio EU | FATTO |
+| security.txt (`/.well-known/security.txt`) | ALTA | Prima del lancio | FATTO |
+| Prometheus metrics (`/metrics`) | MEDIA | Prima del lancio | FATTO |
+| Password reset token hashing (SHA-256) | ALTA | Prima del lancio | FATTO |
+| Docker read-only filesystem | MEDIA | Prima del lancio | FATTO |
+| Privacy Policy completa | ALTA | Prima del lancio | Da fare (testo in docs/business/06) |
+| Cookie Banner | ALTA | Per il sito web | Da fare (sentrikat-web) |
+| DPA (Data Processing Agreement) | MEDIA | Per clienti enterprise | Da fare |
 
 ### 5.2 Priorità Futura (Post-Launch)
 

@@ -23,6 +23,8 @@
 15. [Health Checks](#health-checks)
 16. [Agent API Keys (Multi-Org)](#agent-api-keys-multi-org)
 17. [Dependency Scanning (Code Dependencies)](#dependency-scanning-code-dependencies)
+18. [GDPR & Privacy](#gdpr--privacy)
+19. [Prometheus Metrics](#prometheus-metrics)
 
 ---
 
@@ -1426,4 +1428,113 @@ The scanner is a single Python file with zero dependencies (Python 3.7+). Downlo
 curl -O https://your-sentrikat-server/downloads/sentrikat-scan.py
 chmod +x sentrikat-scan.py
 ./sentrikat-scan.py --fail-on high
+```
+
+---
+
+## GDPR & Privacy
+
+### Export Personal Data (GDPR Article 15 — Right of Access)
+
+```http
+GET /api/gdpr/export
+Authorization: Session (any authenticated user)
+Rate Limit: 5/hour
+```
+
+Returns a JSON file containing all personal data for the current user: profile, organization memberships, and API keys created.
+
+**Response** (200 — `Content-Disposition: attachment`):
+```json
+{
+  "export_date": "2026-03-28T12:00:00",
+  "gdpr_article": "Art. 15 — Right of Access",
+  "user": {
+    "id": 12,
+    "username": "mario.rossi@acme.com",
+    "email": "mario.rossi@acme.com",
+    "full_name": "Mario Rossi",
+    "role": "org_admin",
+    "auth_type": "local",
+    "is_active": true,
+    "created_at": "2026-01-15T10:30:00",
+    "last_login": "2026-03-28T09:00:00",
+    "totp_enabled": true
+  },
+  "organizations": [
+    {"id": 1, "name": "Acme Corp", "role": "org_admin"}
+  ],
+  "api_keys": [
+    {"id": 5, "name": "prod-agent-key", "active": true, "created_at": "2026-02-01T..."}
+  ]
+}
+```
+
+### Delete Personal Data (GDPR Article 17 — Right to Erasure)
+
+```http
+POST /api/gdpr/delete
+Authorization: Session (any authenticated user)
+Rate Limit: 3/day
+```
+
+Anonymizes the user's account and deactivates it. Vulnerability data is retained in anonymized form per GDPR Art. 17(3)(d) (public security exception).
+
+**Response** (200):
+```json
+{
+  "success": true,
+  "message": "Your account has been anonymized and deactivated..."
+}
+```
+
+**Error** (409 — last super_admin):
+```json
+{
+  "error": "Cannot delete the only super_admin account. Promote another user first."
+}
+```
+
+---
+
+## Prometheus Metrics
+
+### Get Metrics
+
+```http
+GET /metrics
+Authorization: Bearer <SENTRIKAT_METRICS_KEY> (optional) or localhost access
+```
+
+Returns Prometheus text format metrics.
+
+**Key metrics:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `sentrikat_organizations_active` | Gauge | Active organizations |
+| `sentrikat_users_active` | Gauge | Active users |
+| `sentrikat_products_active` | Gauge | Monitored products |
+| `sentrikat_agents_online` | Gauge | Agents checked in within 14 days |
+| `sentrikat_agents_total` | Gauge | Total registered agents |
+| `sentrikat_vulnerabilities_total` | Gauge | Vulnerabilities in database |
+| `sentrikat_vulnerability_matches_total` | Gauge | Total vulnerability matches |
+| `sentrikat_vulnerability_matches_by_severity` | Gauge | Matches by severity (CRITICAL/HIGH/MEDIUM/LOW) |
+| `sentrikat_api_keys_active` | Gauge | Active agent API keys |
+| `sentrikat_subscriptions` | Gauge | Subscriptions by status (SaaS only) |
+
+**Prometheus scrape config:**
+```yaml
+scrape_configs:
+  - job_name: 'sentrikat'
+    static_configs:
+      - targets: ['sentrikat.example.com']
+    scheme: https
+    authorization:
+      credentials: '<SENTRIKAT_METRICS_KEY>'
+```
+
+**Environment variable:**
+```bash
+SENTRIKAT_METRICS_KEY=your-secure-random-key-here
 ```

@@ -248,13 +248,13 @@ undercuts Tenable/Qualys/Rapid7 by 3-10x while covering the core use case.
 | Documentation (Internal) | 8/10 | Comprehensive business docs, good README, API docs |
 | Documentation (Customer) | 6/10 | Depends on live docs site quality (not testable here) |
 | Deployment Experience | 7/10 | Clean Docker setup, could use a demo-mode shortcut |
-| Feature Completeness | 7/10 | Core features strong, SBOM and NIS2 are key gaps |
+| Feature Completeness | 7.5/10 | Core features strong, GDPR endpoints and Prometheus metrics added, SBOM and NIS2 are remaining gaps |
 | Competitive Position | 8/10 | Price and simplicity are genuine advantages |
 | **Overall** | **7.5/10** | **Strong product ready for early adopters** |
 
 ### Bottom Line
 
-SentriKat is a technically impressive product with genuine market differentiation.
+SentriKat is a technically impressive product with genuine market differentiation. GDPR compliance endpoints (`/api/gdpr/export`, `/api/gdpr/delete`) and Prometheus monitoring (`/metrics`) further differentiate it from competitors lacking these features.
 The CISA KEV-first approach, vendor backport detection, and aggressive pricing create
 a compelling value proposition for mid-market security teams.
 

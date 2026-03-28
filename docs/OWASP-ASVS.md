@@ -6,7 +6,7 @@
 
 | Field | Value |
 |---|---|
-| **Product** | SentriKat v1.0.2 |
+| **Product** | SentriKat v1.0.3 |
 | **Standard** | [OWASP ASVS 4.0.3](https://owasp.org/www-project-application-security-verification-standard/) |
 | **Target Level** | Level 1 (Opportunistic) |
 | **Assessment Type** | Self-Assessment |

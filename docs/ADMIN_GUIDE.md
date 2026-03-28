@@ -21,9 +21,13 @@ Operations reference for managing a SentriKat vulnerability management platform.
 | Web UI | `http://localhost` (port 80) | Main interface |
 | HTTPS | `https://localhost` (port 443) | When SSL is enabled |
 | Health check | `GET /api/health` | Load balancer / uptime monitoring (no auth) |
+| Metrics | `GET /metrics` | Prometheus-compatible metrics (optional auth via `SENTRIKAT_METRICS_KEY`) |
+| GDPR export | `GET /api/gdpr/export` | Personal data export (authenticated user) |
+| GDPR delete | `POST /api/gdpr/delete` | Account anonymization (authenticated user) |
 | Sync status | `GET /api/sync/status` | CISA KEV / NVD sync status (auth required) |
 | System health | `GET /api/system/health` | Detailed system health (auth required) |
 | Health checks | `GET /api/admin/health-checks` | Background health check results (admin) |
+| Security policy | `/.well-known/security.txt` | Responsible disclosure policy |
 | Setup wizard | `/setup` | First-run configuration (disabled after setup) |
 
 ### Key Configuration Files

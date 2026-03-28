@@ -12,10 +12,10 @@ Il 90% dell'infrastruttura SaaS e' gia' implementata. Per il lancio on-premise m
 | Metrica | Valore |
 |---------|--------|
 | Linee di codice (app) | ~50,000+ |
-| API endpoints | 186+ |
+| API endpoints | 190+ |
 | Tabelle DB | 33 |
 | Test functions | 1,278 |
-| Versione | 1.0.0-beta.1 |
+| Versione | 1.0.0-beta.2 |
 | SaaS readiness | ~90% (on-premise pronto) |
 
 ---
