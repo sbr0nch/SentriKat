@@ -315,7 +315,7 @@ def _send_welcome_email(user, org, api_key):
     """Send welcome email to new tenant admin."""
     from app.settings_api import get_setting
 
-    smtp_host = get_setting('smtp_host')
+    smtp_host = get_setting('smtp_host', organization_id=None)
     if not smtp_host:
         logger.info("Provisioning: No SMTP configured, skipping welcome email")
         return False
@@ -363,12 +363,12 @@ def _send_welcome_email(user, org, api_key):
 
     smtp_config = {
         'host': smtp_host,
-        'port': int(get_setting('smtp_port', '587') or '587'),
-        'username': get_setting('smtp_username'),
-        'password': get_setting('smtp_password'),
-        'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-        'from_email': get_setting('smtp_from_email'),
-        'from_name': get_setting('smtp_from_name', 'SentriKat'),
+        'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+        'username': get_setting('smtp_username', organization_id=None),
+        'password': get_setting('smtp_password', organization_id=None),
+        'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+        'from_email': get_setting('smtp_from_email', organization_id=None),
+        'from_name': get_setting('smtp_from_name', 'SentriKat', organization_id=None),
     }
 
     # Decrypt password if encrypted

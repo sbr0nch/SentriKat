@@ -551,15 +551,15 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
 
         # Send to Generic webhook if enabled (RocketChat, Mattermost, Discord, etc.)
         from app.settings_api import get_setting
-        generic_enabled = get_setting('generic_webhook_enabled') == 'true'
-        generic_url_raw = get_setting('generic_webhook_url')
+        generic_enabled = get_setting('generic_webhook_enabled', organization_id=None) == 'true'
+        generic_url_raw = get_setting('generic_webhook_url', organization_id=None)
         if generic_enabled and generic_url_raw:
             try:
                 from app.encryption import decrypt_value, is_encrypted
                 generic_url = decrypt_value(generic_url_raw) if is_encrypted(generic_url_raw) else generic_url_raw
-                generic_format = get_setting('generic_webhook_format', 'slack')
-                generic_name = get_setting('generic_webhook_name', 'Custom Webhook')
-                generic_token = get_setting('generic_webhook_token', '')
+                generic_format = get_setting('generic_webhook_format', 'slack', organization_id=None)
+                generic_name = get_setting('generic_webhook_name', 'Custom Webhook', organization_id=None)
+                generic_token = get_setting('generic_webhook_token', '', organization_id=None)
                 if generic_token and is_encrypted(generic_token):
                     generic_token = decrypt_value(generic_token)
 

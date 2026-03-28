@@ -76,14 +76,14 @@ class EmailAlertManager:
         if not smtp_config['host'] or not smtp_config['from_email']:
             from app.settings_api import get_setting
             smtp_config = {
-                'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587') or '587'),
-                'username': get_setting('smtp_username'),
-                'password': get_setting('smtp_password'),
-                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-                'from_email': get_setting('smtp_from_email'),
-                'from_name': get_setting('smtp_from_name', 'SentriKat Alerts')
+                'host': get_setting('smtp_host', organization_id=None),
+                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+                'username': get_setting('smtp_username', organization_id=None),
+                'password': get_setting('smtp_password', organization_id=None),
+                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+                'from_email': get_setting('smtp_from_email', organization_id=None),
+                'from_name': get_setting('smtp_from_name', 'SentriKat Alerts', organization_id=None)
             }
 
         # Check if any SMTP is configured
@@ -633,14 +633,14 @@ class EmailAlertManager:
         if not smtp_config['host'] or not smtp_config['from_email']:
             from app.settings_api import get_setting
             smtp_config = {
-                'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587') or '587'),
-                'username': get_setting('smtp_username'),
-                'password': get_setting('smtp_password'),
-                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-                'from_email': get_setting('smtp_from_email'),
-                'from_name': get_setting('smtp_from_name', 'SentriKat Alerts')
+                'host': get_setting('smtp_host', organization_id=None),
+                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+                'username': get_setting('smtp_username', organization_id=None),
+                'password': get_setting('smtp_password', organization_id=None),
+                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+                'from_email': get_setting('smtp_from_email', organization_id=None),
+                'from_name': get_setting('smtp_from_name', 'SentriKat Alerts', organization_id=None)
             }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
@@ -1064,14 +1064,14 @@ def send_user_invite_email(user):
             from app.settings_api import get_setting
 
             smtp_config = {
-                'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587') or '587'),
-                'username': get_setting('smtp_username'),
-                'password': get_setting('smtp_password'),
-                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-                'from_email': get_setting('smtp_from_email'),
-                'from_name': get_setting('smtp_from_name', 'SentriKat')
+                'host': get_setting('smtp_host', organization_id=None),
+                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+                'username': get_setting('smtp_username', organization_id=None),
+                'password': get_setting('smtp_password', organization_id=None),
+                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+                'from_email': get_setting('smtp_from_email', organization_id=None),
+                'from_name': get_setting('smtp_from_name', 'SentriKat', organization_id=None)
             }
 
         # Final check - SMTP must be configured
@@ -1345,14 +1345,14 @@ def send_user_status_email(user, is_blocked, blocked_by_username=None):
             from app.settings_api import get_setting
 
             smtp_config = {
-                'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587') or '587'),
-                'username': get_setting('smtp_username'),
-                'password': get_setting('smtp_password'),
-                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-                'from_email': get_setting('smtp_from_email'),
-                'from_name': get_setting('smtp_from_name', 'SentriKat')
+                'host': get_setting('smtp_host', organization_id=None),
+                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+                'username': get_setting('smtp_username', organization_id=None),
+                'password': get_setting('smtp_password', organization_id=None),
+                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+                'from_email': get_setting('smtp_from_email', organization_id=None),
+                'from_name': get_setting('smtp_from_name', 'SentriKat', organization_id=None)
             }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
@@ -1493,14 +1493,14 @@ def send_role_change_email(user, old_role, new_role, changed_by_username=None):
             from app.settings_api import get_setting
 
             smtp_config = {
-                'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587') or '587'),
-                'username': get_setting('smtp_username'),
-                'password': get_setting('smtp_password'),
-                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-                'from_email': get_setting('smtp_from_email'),
-                'from_name': get_setting('smtp_from_name', 'SentriKat')
+                'host': get_setting('smtp_host', organization_id=None),
+                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+                'username': get_setting('smtp_username', organization_id=None),
+                'password': get_setting('smtp_password', organization_id=None),
+                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+                'from_email': get_setting('smtp_from_email', organization_id=None),
+                'from_name': get_setting('smtp_from_name', 'SentriKat', organization_id=None)
             }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
@@ -1662,14 +1662,14 @@ def send_2fa_reset_email(user, reset_by_username=None):
             smtp_source = "global"
             from app.settings_api import get_setting
             smtp_config = {
-                'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587') or '587'),
-                'username': get_setting('smtp_username'),
-                'password': get_setting('smtp_password'),
-                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-                'from_email': get_setting('smtp_from_email'),
-                'from_name': get_setting('smtp_from_name', 'SentriKat')
+                'host': get_setting('smtp_host', organization_id=None),
+                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+                'username': get_setting('smtp_username', organization_id=None),
+                'password': get_setting('smtp_password', organization_id=None),
+                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+                'from_email': get_setting('smtp_from_email', organization_id=None),
+                'from_name': get_setting('smtp_from_name', 'SentriKat', organization_id=None)
             }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
@@ -1811,14 +1811,14 @@ def send_password_change_forced_email(user, forced_by_username=None):
             smtp_source = "global"
             from app.settings_api import get_setting
             smtp_config = {
-                'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587') or '587'),
-                'username': get_setting('smtp_username'),
-                'password': get_setting('smtp_password'),
-                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-                'from_email': get_setting('smtp_from_email'),
-                'from_name': get_setting('smtp_from_name', 'SentriKat')
+                'host': get_setting('smtp_host', organization_id=None),
+                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+                'username': get_setting('smtp_username', organization_id=None),
+                'password': get_setting('smtp_password', organization_id=None),
+                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+                'from_email': get_setting('smtp_from_email', organization_id=None),
+                'from_name': get_setting('smtp_from_name', 'SentriKat', organization_id=None)
             }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
@@ -1955,14 +1955,14 @@ def send_scheduled_report(recipients, report_name, org_name, pdf_buffer):
     try:
         # Get global SMTP settings
         smtp_config = {
-            'host': get_setting('smtp_host'),
-            'port': int(get_setting('smtp_port', '587') or '587'),
-            'username': get_setting('smtp_username'),
-            'password': get_setting('smtp_password'),
-            'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-            'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-            'from_email': get_setting('smtp_from_email'),
-            'from_name': get_setting('smtp_from_name', 'SentriKat Reports')
+            'host': get_setting('smtp_host', organization_id=None),
+            'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+            'username': get_setting('smtp_username', organization_id=None),
+            'password': get_setting('smtp_password', organization_id=None),
+            'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+            'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+            'from_email': get_setting('smtp_from_email', organization_id=None),
+            'from_name': get_setting('smtp_from_name', 'SentriKat Reports', organization_id=None)
         }
 
         if not smtp_config['host'] or not smtp_config['from_email']:
@@ -2100,14 +2100,14 @@ def send_password_reset_email(user, token, base_url):
         # Fall back to global SMTP if org SMTP not configured
         if not smtp_config or not smtp_config.get('host') or not smtp_config.get('from_email'):
             smtp_config = {
-                'host': get_setting('smtp_host'),
-                'port': int(get_setting('smtp_port', '587') or '587'),
-                'username': get_setting('smtp_username'),
-                'password': get_setting('smtp_password'),
-                'use_tls': get_setting('smtp_use_tls', 'true') == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false') == 'true',
-                'from_email': get_setting('smtp_from_email'),
-                'from_name': get_setting('smtp_from_name', 'SentriKat')
+                'host': get_setting('smtp_host', organization_id=None),
+                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
+                'username': get_setting('smtp_username', organization_id=None),
+                'password': get_setting('smtp_password', organization_id=None),
+                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
+                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
+                'from_email': get_setting('smtp_from_email', organization_id=None),
+                'from_name': get_setting('smtp_from_name', 'SentriKat', organization_id=None)
             }
 
         # Final check - SMTP must be configured
