@@ -5908,6 +5908,7 @@ const SETTINGS_GROUPS = {
     compliance: ['auditLogs', 'complianceReports'],
     appearance: ['brandingSettings'],
     license:    ['licenseSettings'],
+    subscription: ['subscriptionSettings'],
     health:     ['healthSettings'],
     logs:       ['logsSettings'],
     guide:      ['guideSettings']

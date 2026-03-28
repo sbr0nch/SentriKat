@@ -2871,7 +2871,34 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <!-- Demo Version Banner (shown when no PRO license) -->
+    {% if saas_mode %}
+    {# SaaS mode: show subscription plan info banner for free/trial plans #}
+    {% if subscription and subscription.plan and subscription.plan.name == 'free' %}
+    <div class="demo-banner bg-info text-white text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
+        <i class="bi bi-info-circle-fill me-2"></i>
+        <strong>Free Plan</strong> — {{ subscription.plan.max_agents }} agents, {{ subscription.plan.max_users }} user.
+        <a href="/admin-panel#settings:subscription" class="ms-2 text-white fw-semibold text-decoration-underline">Upgrade Plan</a>
+        <button type="button" class="btn-close btn-close-white btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
+    </div>
+    <style>
+        .demo-banner ~ * { margin-top: 40px !important; }
+        .demo-banner ~ .top-navbar { margin-top: 40px !important; }
+    </style>
+    {% elif subscription and subscription.is_trialing() %}
+    <div class="demo-banner bg-warning text-dark text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
+        <i class="bi bi-clock-fill me-2"></i>
+        <strong>Trial</strong> — {{ subscription.plan.display_name }} plan.
+        {% if subscription.trial_end %}Ends {{ subscription.trial_end.strftime('%d %b %Y') }}.{% endif %}
+        <a href="/admin-panel#settings:subscription" class="ms-2 text-dark fw-semibold text-decoration-underline">Subscribe Now</a>
+        <button type="button" class="btn-close btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
+    </div>
+    <style>
+        .demo-banner ~ * { margin-top: 40px !important; }
+        .demo-banner ~ .top-navbar { margin-top: 40px !important; }
+    </style>
+    {% endif %}
+    {% else %}
+    {# On-premise mode: show DEMO banner when no PRO license #}
     {% if license and not license.is_professional() %}
     <div class="demo-banner bg-warning text-dark text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
         <i class="bi bi-exclamation-triangle-fill me-2"></i>
@@ -2883,6 +2910,7 @@
         .demo-banner ~ * { margin-top: 40px !important; }
         .demo-banner ~ .top-navbar { margin-top: 40px !important; }
     </style>
+    {% endif %}
     {% endif %}
 
     <!-- Clean license-reload param from URL after page load -->
@@ -3041,8 +3069,9 @@
                     </div>
                 </div>
 
-                <!-- User Management Section (visible for admins, Professional license only) -->
-                {% if license and license.is_professional() %}
+                <!-- User Management Section (visible for admins; PRO license on-premise or paid plan on SaaS) -->
+                {% set has_pro_features = (saas_mode and subscription and subscription.is_active()) or (not saas_mode and license and license.is_professional()) %}
+                {% if has_pro_features %}
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Management</div>
@@ -3058,7 +3087,8 @@
                             <i class="bi bi-person"></i>
                             All Users
                         </a>
-                        {% if license and license.is_professional() %}
+                        {% set has_ldap = (saas_mode and subscription and subscription.has_feature('ldap')) or (not saas_mode and license and license.is_professional()) %}
+                        {% if has_ldap %}
                         <a href="/admin-panel#ldapUsers" class="sidebar-sublink" data-hash="ldapUsers">
                             <i class="bi bi-diagram-3"></i>
                             LDAP Users
@@ -3072,17 +3102,19 @@
                         {% endif %}
                     </div>
 
-                    <!-- Organizations -->
+                    <!-- Organizations (hidden in SaaS — each tenant is one org) -->
+                    {% if not saas_mode %}
                     <a href="/admin-panel#organizations" class="sidebar-link" data-tooltip="Organizations" data-hash="organizations">
                         <i class="bi bi-building"></i>
                         <span class="link-text">Organizations</span>
                     </a>
+                    {% endif %}
                 </div>
                 {% endif %}
                 {% endif %}
 
-                <!-- Integrations Section (PRO license required) -->
-                {% if license and license.is_professional() %}
+                <!-- Integrations Section (PRO license or SaaS paid plan) -->
+                {% if has_pro_features %}
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Integrations</div>
@@ -3113,8 +3145,8 @@
                 {% endif %}
                 {% endif %}
 
-                <!-- Settings Section (Super Admin only) -->
-                {% if current_user and current_user.is_super_admin() %}
+                <!-- Settings Section (Super Admin or org_admin in SaaS) -->
+                {% if current_user and (current_user.is_super_admin() or (saas_mode and current_user.is_org_admin())) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">System</div>
                     <a href="#" class="sidebar-link" onclick="toggleSubmenu(this, event)" data-tooltip="Settings" data-admin-panel-hashes="settings">
@@ -3123,13 +3155,13 @@
                         <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
                     <div class="sidebar-submenu">
-                        {% if license and license.is_professional() %}
+                        {% if has_pro_features %}
                         <a href="/admin-panel#settings:auth" class="sidebar-sublink" data-hash="settings:auth">
                             <i class="bi bi-shield-lock"></i>
                             Authentication
                         </a>
                         {% endif %}
-                        {% if license and license.is_professional() %}
+                        {% if has_pro_features %}
                         <a href="/alerts/settings" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.alerts_settings' else '' }}" data-tooltip="Alert Management">
                             <i class="bi bi-bell"></i>
                             Alert Management
@@ -3147,22 +3179,31 @@
                             <i class="bi bi-gear"></i>
                             System
                         </a>
-                        {% if license and license.is_professional() %}
+                        {% if has_pro_features %}
                         <a href="/admin-panel#settings:compliance" class="sidebar-sublink" data-hash="settings:compliance">
                             <i class="bi bi-clipboard-check"></i>
                             Compliance
                         </a>
                         {% endif %}
-                        {% if license and license.is_professional() %}
+                        {% if has_pro_features %}
                         <a href="/admin-panel#settings:appearance" class="sidebar-sublink" data-hash="settings:appearance">
                             <i class="bi bi-palette"></i>
                             Appearance
                         </a>
                         {% endif %}
+                        {% if saas_mode %}
+                        {# SaaS: show Subscription instead of License #}
+                        <a href="/admin-panel#settings:subscription" class="sidebar-sublink" data-hash="settings:subscription">
+                            <i class="bi bi-credit-card"></i>
+                            Subscription
+                        </a>
+                        {% else %}
+                        {# On-premise: show License #}
                         <a href="/admin-panel#settings:license" class="sidebar-sublink" data-hash="settings:license">
                             <i class="bi bi-key"></i>
                             License
                         </a>
+                        {% endif %}
                         <a href="/admin-panel#settings:health" class="sidebar-sublink" data-hash="settings:health">
                             <i class="bi bi-heart-pulse"></i>
                             Health Checks

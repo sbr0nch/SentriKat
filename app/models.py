@@ -1369,17 +1369,28 @@ class User(db.Model):
         }
 
 class SystemSettings(db.Model):
-    """Global system settings"""
+    """
+    System settings — global (on-premise) or per-organization (SaaS).
+
+    On-premise: organization_id is NULL → settings are global (legacy behavior).
+    SaaS: organization_id is set → each tenant has its own settings.
+    """
     __tablename__ = 'system_settings'
 
     id = db.Column(db.Integer, primary_key=True)
-    key = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    key = db.Column(db.String(100), nullable=False, index=True)
     value = db.Column(db.Text, nullable=True)
     category = db.Column(db.String(50), nullable=False, index=True)  # 'ldap', 'smtp', 'sync', 'general'
     description = db.Column(db.Text, nullable=True)
     is_encrypted = db.Column(db.Boolean, default=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=True, index=True)
+
+    # Unique constraint: key is unique per organization (NULL org = global)
+    __table_args__ = (
+        db.UniqueConstraint('key', 'organization_id', name='uq_setting_key_org'),
+    )
 
     def to_dict(self):
         return {

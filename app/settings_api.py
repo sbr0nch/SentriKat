@@ -95,14 +95,32 @@ def _get_env_value(key):
 # Helper Functions
 # ============================================================================
 
-def get_setting(key, default=None, include_source=False):
+def _get_settings_org_id(organization_id=None):
+    """
+    Determine the organization_id for settings queries.
+
+    In SaaS mode: returns the current user's org or the explicit org_id.
+    On-premise: always returns None (global settings).
+    """
+    if not is_saas_mode():
+        return None
+    if organization_id is not None:
+        return organization_id
+    return session.get('organization_id')
+
+
+def get_setting(key, default=None, include_source=False, organization_id=None):
     """
     Get a setting value with priority: Database > Environment > Default.
+
+    In SaaS mode, settings are scoped per-organization automatically.
+    On-premise mode uses global (organization_id=NULL) settings.
 
     Args:
         key: Setting key name
         default: Default value if not found anywhere
         include_source: If True, returns tuple (value, source) where source is 'database', 'environment', or 'default'
+        organization_id: Explicit org_id override (SaaS mode only; auto-detected from session if omitted)
 
     Returns:
         Value (or tuple of value, source if include_source=True)
@@ -110,8 +128,15 @@ def get_setting(key, default=None, include_source=False):
     source = 'default'
     value = default
 
-    # First, check database
-    setting = SystemSettings.query.filter_by(key=key).first()
+    # Determine org scope
+    org_id = _get_settings_org_id(organization_id)
+
+    # First, check database (scoped by org in SaaS mode)
+    if org_id is not None:
+        setting = SystemSettings.query.filter_by(key=key, organization_id=org_id).first()
+    else:
+        setting = SystemSettings.query.filter_by(key=key, organization_id=None).first()
+
     if setting and setting.value:
         # Decrypt if the setting is marked as encrypted
         if setting.is_encrypted:
@@ -208,10 +233,13 @@ ALLOWED_SETTING_KEYS = {
 }
 
 
-def set_setting(key, value, category, description=None, is_encrypted=False, skip_validation=False):
+def set_setting(key, value, category, description=None, is_encrypted=False, skip_validation=False, organization_id=None):
     """
     Set a setting value in database.
     Encrypts the value if is_encrypted=True.
+
+    In SaaS mode, settings are scoped per-organization automatically.
+    On-premise mode uses global (organization_id=NULL) settings.
 
     Args:
         key: Setting key name
@@ -220,6 +248,7 @@ def set_setting(key, value, category, description=None, is_encrypted=False, skip
         description: Optional description
         is_encrypted: Whether to encrypt the value
         skip_validation: If True, skip key validation (for internal use only)
+        organization_id: Explicit org_id override (SaaS mode only; auto-detected from session if omitted)
     """
     # Validate setting key to prevent arbitrary setting injection
     if not skip_validation and key not in ALLOWED_SETTING_KEYS:
@@ -227,6 +256,9 @@ def set_setting(key, value, category, description=None, is_encrypted=False, skip
         raise ValueError(f"Setting key '{key}' is not allowed")
 
     user_id = session.get('user_id')
+
+    # Determine org scope
+    org_id = _get_settings_org_id(organization_id)
 
     # Encrypt the value if required
     stored_value = value
@@ -237,7 +269,12 @@ def set_setting(key, value, category, description=None, is_encrypted=False, skip
             logger.error(f"Failed to encrypt setting '{key}': {type(e).__name__}")
             raise
 
-    setting = SystemSettings.query.filter_by(key=key).first()
+    # Query scoped by org
+    if org_id is not None:
+        setting = SystemSettings.query.filter_by(key=key, organization_id=org_id).first()
+    else:
+        setting = SystemSettings.query.filter_by(key=key, organization_id=None).first()
+
     if setting:
         setting.value = stored_value
         setting.is_encrypted = is_encrypted
@@ -250,7 +287,8 @@ def set_setting(key, value, category, description=None, is_encrypted=False, skip
             category=category,
             description=description,
             is_encrypted=is_encrypted,
-            updated_by=user_id
+            updated_by=user_id,
+            organization_id=org_id
         )
         db.session.add(setting)
 
@@ -262,7 +300,7 @@ def set_setting(key, value, category, description=None, is_encrypted=False, skip
 # ============================================================================
 
 @settings_bp.route('/batch', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def save_batch_settings():
     """
     Save multiple settings at once.
