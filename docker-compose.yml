@@ -120,6 +120,10 @@ services:
       # === LDAP / AD (can also be configured via UI) ===
       - LDAP_SYNC_ENABLED=${LDAP_SYNC_ENABLED:-false}
       - LDAP_SYNC_INTERVAL_HOURS=${LDAP_SYNC_INTERVAL_HOURS:-24}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/logs
     volumes:
       - sentrikat_data:/app/data
       # Custom CA certificates for trusting internal/corporate PKI

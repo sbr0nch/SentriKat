@@ -1,0 +1,9 @@
+# SentriKat Security Policy
+# https://securitytxt.org/
+
+Contact: mailto:security@sentrikat.com
+Preferred-Languages: en, it
+Canonical: https://sentrikat.com/.well-known/security.txt
+Encryption: https://sentrikat.com/pgp-key.txt
+Policy: https://sentrikat.com/security
+Expires: 2027-03-28T00:00:00.000Z

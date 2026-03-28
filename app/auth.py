@@ -123,8 +123,8 @@ def admin_required(f):
                 return jsonify({'error': 'User not found'}), 401
             return redirect(url_for('auth.login'))
 
-        # Allow super_admin role or legacy is_admin flag
-        has_permission = user.role == 'super_admin' or user.is_admin == True
+        # Allow super_admin role (is_admin flag kept for backwards compat during migration)
+        has_permission = user.role == 'super_admin' or getattr(user, 'is_admin', False) is True
 
         if not has_permission:
             if request.is_json or request.path.startswith('/api/'):
@@ -165,11 +165,11 @@ def manager_required(f):
                 return jsonify({'error': 'User not found'}), 401
             return redirect(url_for('auth.login'))
 
-        # Allow manager, org_admin, super_admin roles, is_admin flag, or can_manage_products
+        # Allow manager, org_admin, super_admin roles, or can_manage_products
         has_permission = (
             user.role in ['manager', 'org_admin', 'super_admin'] or
-            user.is_admin == True or
-            user.can_manage_products == True
+            getattr(user, 'is_admin', False) is True or
+            getattr(user, 'can_manage_products', False) is True
         )
 
         if not has_permission:
@@ -210,9 +210,9 @@ def org_admin_required(f):
                 return jsonify({'error': 'User not found'}), 401
             return redirect(url_for('auth.login'))
 
-        # Allow org_admin, super_admin roles, or legacy is_admin flag
+        # Allow org_admin or super_admin roles (is_admin flag for backwards compat)
         has_permission = (user.role in ['org_admin', 'super_admin'] or
-                         user.is_admin == True)
+                         getattr(user, 'is_admin', False) is True)
 
         if not has_permission:
             logger.warning(
