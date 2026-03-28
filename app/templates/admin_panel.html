@@ -300,11 +300,14 @@
 {% endblock %}
 
 {% block content %}
+{% set has_pro_features = (saas_mode and subscription and subscription.is_active()) or (not saas_mode and license and license.is_professional()) %}
+{% set has_ldap = (saas_mode and subscription and subscription.has_feature('ldap')) or (not saas_mode and license and license.is_professional()) %}
+{% set has_sso = (saas_mode and subscription and subscription.has_feature('sso')) or (not saas_mode and license and license.is_professional()) %}
 <div class="fade-in">
     <!-- Hidden tab triggers (for programmatic switching) -->
     <div id="adminTabs" class="d-none">
         <button id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button"></button>
-        {% if license and license.is_professional() %}
+        {% if has_ldap %}
         <button id="ldapUsers-tab" data-bs-toggle="tab" data-bs-target="#ldapUsers" type="button"></button>
         <button id="ldapGroups-tab" data-bs-toggle="tab" data-bs-target="#ldapGroups" type="button"></button>
         {% endif %}
@@ -527,8 +530,8 @@
             </div>
         </div>
 
-        {% if license and license.is_professional() %}
-        <!-- LDAP Groups Section (Professional License Only) -->
+        {% if has_ldap %}
+        <!-- LDAP Groups Section (LDAP feature required) -->
         <div class="tab-pane fade" id="ldapGroups" role="tabpanel">
             <div class="mb-4">
                 <h2 class="h4 fw-bold mb-1"><i class="bi bi-diagram-2 me-2"></i>LDAP Groups</h2>
@@ -768,7 +771,7 @@
         </div>
         {% endif %}
 
-        {% if license and license.is_professional() %}
+        {% if has_pro_features %}
         <!-- Integrations Section -->
         <div class="tab-pane fade" id="integrations" role="tabpanel">
             <div class="mb-4">
@@ -783,7 +786,7 @@
                     </button>
                 </li>
                 <!-- Import Queue moved to Inventory page (/admin#import-queue) -->
-                {% if license and license.is_professional() %}
+                {% if has_pro_features %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="jira-integration-tab" data-bs-toggle="pill" data-bs-target="#jiraIntegration" type="button">
                         <i class="bi bi-kanban me-2"></i>Issue Trackers
@@ -957,7 +960,7 @@
                     </div>
                 </div>
 
-                {% if license and license.is_professional() %}
+                {% if has_pro_features %}
                 <!-- Issue Trackers Sub-Tab -->
                 <div class="tab-pane fade" id="jiraIntegration" role="tabpanel">
                     <div class="card">
@@ -1216,8 +1219,8 @@
             </div>
             <!-- Settings Sub-Tabs (Consolidated into 6 groups) -->
             <ul class="nav nav-pills mb-4" id="settingsTabs" role="tablist">
-                {% if current_user and current_user.is_super_admin() %}
-                {% if license and license.is_professional() %}
+                {% if current_user and (current_user.is_super_admin() or (saas_mode and current_user.is_org_admin())) %}
+                {% if has_pro_features %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="auth-settings-tab" type="button" onclick="showSettingsGroup('auth', this)">
                         <i class="bi bi-shield-lock me-2"></i>Authentication
@@ -1247,7 +1250,7 @@
                         <i class="bi bi-gear me-2"></i>System
                     </button>
                 </li>
-                {% if license and license.is_professional() %}
+                {% if has_pro_features %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="syslog-settings-tab" type="button" onclick="showSettingsGroup('syslog', this)">
                         <i class="bi bi-broadcast me-2"></i>SIEM / Syslog
@@ -1260,7 +1263,7 @@
                         <i class="bi bi-clipboard-check me-2"></i>Compliance
                     </button>
                 </li>
-                {% if license and license.is_professional() %}
+                {% if has_pro_features %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="appearance-settings-tab" type="button" onclick="showSettingsGroup('appearance', this)">
                         <i class="bi bi-palette me-2"></i>Appearance
@@ -1297,8 +1300,8 @@
             </ul>
 
             <div class="tab-content" id="settingsTabContent">
-                {% if current_user and current_user.is_super_admin() and license and license.is_professional() %}
-                <!-- LDAP Settings (Super Admin + Professional License Only) -->
+                {% if (current_user and (current_user.is_super_admin() or (saas_mode and current_user.is_org_admin()))) and has_ldap %}
+                <!-- LDAP Settings (Admin + LDAP feature required) -->
                 <div class="tab-pane fade show active" id="ldapSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
@@ -1568,7 +1571,7 @@
                 {% endif %}
 
                 <!-- Global SMTP Settings -->
-                <div class="tab-pane fade {% if not current_user or not current_user.is_super_admin() or not license or not license.is_professional() %}show active{% endif %}" id="smtpSettings" role="tabpanel">
+                <div class="tab-pane fade {% if not current_user or not (current_user.is_super_admin() or (saas_mode and current_user.is_org_admin())) or not has_ldap %}show active{% endif %}" id="smtpSettings" role="tabpanel">
                     <div class="card">
                         <div class="card-header">
                             <i class="bi bi-envelope me-2"></i>Global SMTP Configuration
@@ -2258,7 +2261,7 @@
                     </div>
                 </div>
 
-                {% if license and license.is_professional() %}
+                {% if has_pro_features %}
                 <!-- Notifications Settings (Professional License Only) -->
                 <div class="tab-pane fade" id="notificationsSettings" role="tabpanel">
                     <div class="card">

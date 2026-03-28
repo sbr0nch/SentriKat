@@ -101,12 +101,19 @@ def _get_settings_org_id(organization_id=None):
 
     In SaaS mode: returns the current user's org or the explicit org_id.
     On-premise: always returns None (global settings).
+    Background tasks (no request context): returns None (global settings).
     """
     if not is_saas_mode():
         return None
     if organization_id is not None:
         return organization_id
-    return session.get('organization_id')
+    # Safe access — session may not exist in background tasks
+    try:
+        return session.get('organization_id')
+    except RuntimeError:
+        # Outside request context (background task, scheduled job)
+        # Return None to query global settings
+        return None
 
 
 def get_setting(key, default=None, include_source=False, organization_id=None):
