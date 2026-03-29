@@ -300,7 +300,8 @@
 {% endblock %}
 
 {% block content %}
-{% set has_pro_features = (saas_mode and subscription and subscription.is_active()) or (not saas_mode and license and license.is_professional()) %}
+{% set has_pro_features = (saas_mode and subscription and subscription.is_active() and subscription.plan and subscription.plan.name != 'free') or (not saas_mode and license and license.is_professional()) %}
+{% set has_agents = (saas_mode and subscription and subscription.is_active()) or (not saas_mode) %}
 {% set has_ldap = (saas_mode and subscription and subscription.has_feature('ldap')) or (not saas_mode and license and license.is_professional()) %}
 {% set has_sso = (saas_mode and subscription and subscription.has_feature('sso')) or (not saas_mode and license and license.is_professional()) %}
 <div class="fade-in">
@@ -771,8 +772,8 @@
         </div>
         {% endif %}
 
-        {% if has_pro_features %}
-        <!-- Integrations Section -->
+        {% if has_agents or has_pro_features %}
+        <!-- Integrations Section (Agent Keys for all plans; Issue Trackers for paid plans) -->
         <div class="tab-pane fade" id="integrations" role="tabpanel">
             <div class="mb-4">
                 <h2 class="h4 fw-bold mb-1"><i class="bi bi-plug-fill me-2"></i>Integrations</h2>

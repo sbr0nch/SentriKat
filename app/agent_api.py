@@ -2906,7 +2906,6 @@ def list_asset_groups():
 
 @agent_bp.route('/api/agent-keys', methods=['GET'])
 @login_required
-@requires_professional('Agent Keys')
 def list_agent_keys():
     """List agent API keys for organization."""
     from app.auth import get_current_user
@@ -2973,7 +2972,6 @@ def list_agent_keys():
 
 @agent_bp.route('/api/agent-keys', methods=['POST'])
 @login_required
-@requires_professional('Agent Keys')
 def create_agent_key():
     """Create a new agent API key. Supports multi-org deployment."""
     from app.auth import get_current_user
@@ -3081,7 +3079,6 @@ def create_agent_key():
 
 @agent_bp.route('/api/agent-keys/<int:key_id>', methods=['DELETE'])
 @login_required
-@requires_professional('Agent Keys')
 def delete_agent_key(key_id):
     """Delete an agent API key."""
     from app.auth import get_current_user
