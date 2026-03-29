@@ -980,6 +980,13 @@ def approve_all_queue():
     org_filter = data.get('organization_id')
     source_type_filter = data.get('source_type')
 
+    # SaaS: enforce org scope — org_admin can only approve items in their own org
+    if is_saas_mode():
+        scoped_org = get_scoped_org_id()
+        if org_filter and int(org_filter) != scoped_org:
+            return jsonify({'error': 'Access denied: cannot manage another organization\'s queue'}), 403
+        org_filter = scoped_org  # Always scope to user's org in SaaS
+
     query = ImportQueue.query.filter_by(status='pending')
     if vendor_filter:
         query = query.filter(ImportQueue.vendor == vendor_filter)
@@ -1034,6 +1041,13 @@ def reject_all_queue():
     vendor_filter = data.get('vendor')
     org_filter = data.get('organization_id')
     source_type_filter = data.get('source_type')
+
+    # SaaS: enforce org scope — org_admin can only reject items in their own org
+    if is_saas_mode():
+        scoped_org = get_scoped_org_id()
+        if org_filter and int(org_filter) != scoped_org:
+            return jsonify({'error': 'Access denied: cannot manage another organization\'s queue'}), 403
+        org_filter = scoped_org  # Always scope to user's org in SaaS
 
     query = ImportQueue.query.filter_by(status='pending')
     if vendor_filter:

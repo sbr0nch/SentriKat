@@ -1215,13 +1215,43 @@ csrf.exempt(license_bp)
 
 @license_bp.route('/api/license', methods=['GET'])
 def get_license_info():
-    """Get current license information"""
+    """Get current license information.
+
+    On-premise: returns global license info with usage stats.
+    SaaS: returns org-scoped subscription info (prevents cross-tenant data leakage).
+    """
     from app.auth import get_current_user
-    from app.models import User, Organization, Product, Asset, AgentApiKey
+    from app.saas import is_saas_mode
 
     user = get_current_user()
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
+
+    if is_saas_mode():
+        # SaaS: return org-scoped subscription info instead of global license data
+        from app.saas import get_scoped_org_id, get_effective_features
+        from app.models import User, Product, Asset, AgentApiKey, Subscription
+        org_id = get_scoped_org_id(user)
+        features = get_effective_features(org_id)
+        sub = Subscription.query.filter_by(organization_id=org_id).filter(
+            Subscription.status.in_(['active', 'trialing'])
+        ).first()
+        is_pro = sub is not None and sub.plan and sub.plan.name != 'free'
+        return jsonify({
+            'is_professional': is_pro,
+            'edition': sub.plan.name if sub and sub.plan else 'free',
+            'features': list(k for k, v in features.items() if v),
+            'saas_mode': True,
+            'usage': {
+                'users': User.query.filter(User.is_active == True, User.organization_id == org_id).count() or 0,
+                'organizations': 1,
+                'products': Product.query.filter_by(organization_id=org_id).count() or 0,
+                'agents': Asset.query.filter(Asset.active == True, Asset.organization_id == org_id).count() or 0,
+                'agent_api_keys': AgentApiKey.query.filter(AgentApiKey.active == True, AgentApiKey.organization_id == org_id).count() or 0,
+            }
+        })
+
+    from app.models import User, Organization, Product, Asset, AgentApiKey
 
     license_info = get_license()
     response = license_info.to_dict()

@@ -1676,7 +1676,19 @@ def test_notification():
 @settings_bp.route('/retention', methods=['GET'])
 @saas_admin_or_org_admin
 def get_retention_settings():
-    """Get data retention settings"""
+    """Get data retention settings.
+
+    In SaaS mode, only platform super_admin can view retention settings
+    (retention is platform policy, not per-tenant configurable).
+    """
+    from app.saas import is_saas_mode
+    from app.auth import get_current_user
+
+    if is_saas_mode():
+        user = get_current_user()
+        if not user or not user.is_super_admin():
+            return jsonify({'error': 'Retention settings are managed by the platform in SaaS mode.'}), 403
+
     settings = {
         'audit_log_retention_days': int(get_setting('audit_log_retention_days', '365')),
         'sync_history_retention_days': int(get_setting('sync_history_retention_days', '90')),
