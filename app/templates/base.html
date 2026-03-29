@@ -3076,8 +3076,9 @@
                     </div>
                 </div>
 
-                <!-- User Management Section (visible for admins; PRO license on-premise or paid plan on SaaS) -->
-                {% set has_pro_features = (saas_mode and subscription and subscription.is_active()) or (not saas_mode and license and license.is_professional()) %}
+                <!-- User Management Section (visible for admins; PRO license on-premise or paid SaaS plan) -->
+                {% set has_pro_features = (saas_mode and subscription and subscription.is_active() and subscription.plan and subscription.plan.name != 'free') or (not saas_mode and license and license.is_professional()) %}
+                {% set has_agents = (saas_mode and subscription and subscription.is_active()) or (not saas_mode) %}
                 {% if has_pro_features %}
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
@@ -3120,8 +3121,8 @@
                 {% endif %}
                 {% endif %}
 
-                <!-- Integrations Section (PRO license or SaaS paid plan) -->
-                {% if has_pro_features %}
+                <!-- Integrations Section: Agent Keys/Activity visible to ALL plans with agents; others PRO only -->
+                {% if has_agents or has_pro_features %}
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Integrations</div>
@@ -3139,6 +3140,7 @@
                             <i class="bi bi-activity"></i>
                             Agent Activity
                         </a>
+                        {% if has_pro_features %}
                         <a href="/reports/scheduled" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.scheduled_reports' else '' }}" data-tooltip="Scheduled Reports">
                             <i class="bi bi-calendar-check"></i>
                             Scheduled Reports
@@ -3147,6 +3149,7 @@
                             <i class="bi bi-kanban"></i>
                             Issue Trackers
                         </a>
+                        {% endif %}
                     </div>
                 </div>
                 {% endif %}

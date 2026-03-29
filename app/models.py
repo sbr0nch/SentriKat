@@ -3460,7 +3460,7 @@ class SubscriptionPlan(db.Model):
                 'email_alerts': False, 'ldap': False, 'sso': False,
                 'webhooks': False, 'white_label': False, 'api_access': False,
                 'compliance_reports': False, 'jira_integration': False,
-                'push_agents': False, 'backup_restore': False,
+                'push_agents': True, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False,
             }),
             'is_default': True, 'sort_order': 0,
@@ -3481,7 +3481,7 @@ class SubscriptionPlan(db.Model):
                 'email_alerts': True, 'ldap': False, 'sso': False,
                 'webhooks': True, 'white_label': False, 'api_access': True,
                 'compliance_reports': False, 'jira_integration': False,
-                'push_agents': False, 'backup_restore': False,
+                'push_agents': True, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False,
             }),
             'is_default': False, 'sort_order': 1,
@@ -3553,14 +3553,29 @@ class SubscriptionPlan(db.Model):
 
     @classmethod
     def seed_default_plans(cls):
-        """Seed default subscription plans if none exist."""
-        if cls.query.count() > 0:
-            return  # Plans already exist
+        """Seed default subscription plans if none exist, or update features of existing plans."""
+        if cls.query.count() == 0:
+            # Fresh install: create all plans
+            for plan_data in cls.DEFAULT_PLANS:
+                plan = cls(**plan_data)
+                db.session.add(plan)
+            db.session.commit()
+            return
 
+        # Plans exist: update features and limits to match latest defaults
         for plan_data in cls.DEFAULT_PLANS:
-            plan = cls(**plan_data)
-            db.session.add(plan)
-
+            existing = cls.query.filter_by(name=plan_data['name']).first()
+            if existing:
+                # Update features, limits, and pricing to latest defaults
+                for key in ('features', 'max_agents', 'max_users', 'max_organizations',
+                            'max_products', 'max_api_keys', 'max_storage_mb',
+                            'price_monthly_cents', 'price_annual_cents'):
+                    if key in plan_data:
+                        setattr(existing, key, plan_data[key])
+            else:
+                # New plan not yet in DB
+                plan = cls(**plan_data)
+                db.session.add(plan)
         db.session.commit()
 
 
