@@ -9,7 +9,7 @@ from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerab
 from app.email_alerts import EmailAlertManager
 from app.auth import admin_required, login_required, org_admin_required, manager_required
 from app.licensing import requires_professional, check_user_limit, check_org_limit, check_product_limit
-from app.saas import is_saas_mode, get_scoped_org_id, restrict_cross_org_access
+from app.saas import is_saas_mode, get_scoped_org_id, restrict_cross_org_access, saas_admin_or_org_admin
 from app.error_utils import safe_error_response, ERROR_MSGS
 from app import APP_VERSION
 import json
@@ -664,8 +664,17 @@ def system_notifications():
 def get_version():
     """
     Get application version information.
-    Useful for update checking and support.
+    On-premise: no auth required (useful for update checking).
+    SaaS: returns minimal info to unauthenticated requests (prevents info disclosure).
     """
+    if is_saas_mode() and 'user_id' not in session:
+        # SaaS: only expose minimal info to unauthenticated requests
+        return jsonify({
+            'name': APP_NAME,
+            'version': APP_VERSION,
+            'api_version': API_VERSION,
+        })
+
     from app.licensing import get_license
 
     license_info = get_license()
@@ -686,7 +695,9 @@ def get_version():
 @login_required
 @admin_required
 def check_for_updates():
-    """Check the SentriKat portal for the latest release."""
+    """Check the SentriKat portal for the latest release (on-premise only)."""
+    if is_saas_mode():
+        return jsonify({'error': 'Update checking is not available in SaaS mode. Updates are managed by the platform.'}), 403
     try:
         from config import Config
         from app.licensing import get_installation_id, LICENSE_SERVER_URL
@@ -795,8 +806,13 @@ def check_for_updates():
 def get_status():
     """
     Get system status including last sync time.
-    No authentication required - basic status only.
+    On-premise: no auth required (load balancer health).
+    SaaS: returns minimal status to unauthenticated requests (prevents info disclosure).
     """
+    if is_saas_mode() and 'user_id' not in session:
+        # SaaS: only expose minimal health status to unauthenticated requests
+        return jsonify({'status': 'online', 'version': APP_VERSION})
+
     try:
         last_sync = SyncLog.query.order_by(SyncLog.sync_date.desc()).first()
         vuln_count = Vulnerability.query.count() or 0
@@ -5552,7 +5568,11 @@ def get_organizations():
 @bp.route('/api/organizations', methods=['POST'])
 @admin_required
 def create_organization():
-    """Create a new organization"""
+    """Create a new organization (on-premise only; SaaS orgs are created via provisioning)"""
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return jsonify({'error': 'Organization creation is not available in SaaS mode. Organizations are provisioned automatically.'}), 403
+
     # Check license limit for organizations
     allowed, limit, message = check_org_limit()
     if not allowed:
@@ -5726,7 +5746,10 @@ def update_organization(org_id):
 @bp.route('/api/organizations/<int:org_id>', methods=['DELETE'])
 @admin_required
 def delete_organization(org_id):
-    """Delete an organization"""
+    """Delete an organization (on-premise only; SaaS orgs are managed via provisioning)"""
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return jsonify({'error': 'Organization deletion is not available in SaaS mode.'}), 403
     org = Organization.query.get_or_404(org_id)
 
     # Check if organization has products
@@ -5741,13 +5764,19 @@ def delete_organization(org_id):
     return jsonify({'success': True})
 
 @bp.route('/api/organizations/<int:org_id>/smtp/test', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 def test_smtp(org_id):
     """Test SMTP connection for an organization by sending a test email"""
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
     from datetime import datetime
+
+    # SaaS: org_admin can only test their own org's SMTP
+    if is_saas_mode():
+        scoped_org = get_scoped_org_id()
+        if scoped_org and scoped_org != org_id:
+            return jsonify({'error': 'Access denied: cannot test SMTP for another organization'}), 403
 
     org = Organization.query.get_or_404(org_id)
     smtp_config = org.get_smtp_config()

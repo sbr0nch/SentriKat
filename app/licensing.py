@@ -917,18 +917,59 @@ def remove_license():
 # ============================================================================
 
 def requires_professional(feature=None):
-    """Decorator to require Professional license for a route."""
+    """Decorator to require Professional license (on-premise) or active paid plan (SaaS).
+
+    Dual-mode aware: in SaaS mode, checks the org's subscription plan features
+    instead of the RSA-signed license. This allows the same decorator to work
+    across both deployment modes without requiring callers to change.
+    """
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            license_info = get_license()
-            if not license_info.is_professional():
-                feature_name = feature or 'This feature'
-                return jsonify({
-                    'error': f'{feature_name} requires a Professional license',
-                    'license_required': True,
-                    'current_edition': license_info.get_effective_edition()
-                }), 403
+            from app.saas import is_saas_mode, get_scoped_org_id, get_effective_features
+
+            if is_saas_mode():
+                # SaaS: check subscription plan features for the current org
+                org_id = get_scoped_org_id()
+                features = get_effective_features(org_id)
+                # Map feature display names to feature keys
+                feature_key_map = {
+                    'LDAP': 'ldap', 'SAML SSO': 'sso', 'Email Alerts': 'email_alerts',
+                    'White Label': 'white_label', 'Integrations': 'push_agents',
+                    'Jira Integration': 'jira_integration', 'Issue Tracker Integration': 'jira_integration',
+                    'Audit Export': 'audit_export', 'Backup & Restore': 'backup_restore',
+                    'Agent Keys': 'push_agents',
+                }
+                feature_key = feature_key_map.get(feature, feature.lower().replace(' ', '_') if feature else None)
+                if feature_key and not features.get(feature_key, False):
+                    feature_name = feature or 'This feature'
+                    return jsonify({
+                        'error': f'{feature_name} is not available on your current plan',
+                        'feature_required': feature_key,
+                        'upgrade_required': True
+                    }), 403
+                # If no specific feature key mapped, check if subscription is active (any paid plan)
+                if not feature_key:
+                    from app.models import Subscription
+                    sub = Subscription.query.filter_by(organization_id=org_id).filter(
+                        Subscription.status.in_(['active', 'trialing'])
+                    ).first()
+                    if not sub or (sub.plan and sub.plan.name == 'free'):
+                        feature_name = feature or 'This feature'
+                        return jsonify({
+                            'error': f'{feature_name} requires a paid plan',
+                            'upgrade_required': True
+                        }), 403
+            else:
+                # On-premise: check RSA-signed license
+                license_info = get_license()
+                if not license_info.is_professional():
+                    feature_name = feature or 'This feature'
+                    return jsonify({
+                        'error': f'{feature_name} requires a Professional license',
+                        'license_required': True,
+                        'current_edition': license_info.get_effective_edition()
+                    }), 403
             return f(*args, **kwargs)
         return decorated_function
     return decorator
@@ -1199,7 +1240,11 @@ def get_license_info():
 
 @license_bp.route('/api/license', methods=['POST'])
 def activate_license():
-    """Activate a license key"""
+    """Activate a license key (on-premise only)"""
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return jsonify({'error': 'License activation is not available in SaaS mode. Use the Subscription panel instead.'}), 403
+
     from app.auth import get_current_user
     from app.logging_config import log_audit_event
 
@@ -1228,7 +1273,7 @@ def activate_license():
 
 @license_bp.route('/api/license/activate-online', methods=['POST'])
 def activate_license_online():
-    """Activate a license online using an activation code.
+    """Activate a license online using an activation code (on-premise only).
 
     The customer provides their activation code (from purchase confirmation).
     This endpoint contacts the SentriKat license portal to exchange the code
@@ -1237,6 +1282,9 @@ def activate_license_online():
     Requires SSL/HTTPS connectivity to portal.sentrikat.com.
     Rate limited to 5 attempts per hour to prevent brute force.
     """
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return jsonify({'error': 'Online license activation is not available in SaaS mode.'}), 403
     import re
     from app import limiter
     from app.auth import get_current_user
@@ -1379,7 +1427,11 @@ def _check_activation_rate_limit():
 
 @license_bp.route('/api/license', methods=['DELETE'])
 def deactivate_license():
-    """Remove license and revert to Demo"""
+    """Remove license and revert to Demo (on-premise only)"""
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return jsonify({'error': 'License management is not available in SaaS mode.'}), 403
+
     from app.auth import get_current_user
     from app.logging_config import log_audit_event
 
@@ -1399,7 +1451,11 @@ def deactivate_license():
 
 @license_bp.route('/api/license/installation-id', methods=['GET'])
 def get_installation_id_api():
-    """Get this installation's ID for license requests"""
+    """Get this installation's ID for license requests (on-premise only)"""
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return jsonify({'error': 'Installation ID is not applicable in SaaS mode.'}), 403
+
     from app.auth import get_current_user
 
     user = get_current_user()

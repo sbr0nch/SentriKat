@@ -165,7 +165,8 @@
 
     <!-- Worker Status + Queue Stats Row -->
     <div class="row g-3 mb-3">
-        <!-- Worker Status -->
+        <!-- Worker Status (infrastructure-level; hide from SaaS org_admin) -->
+        {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
         <div class="col-lg-4">
             <div class="card worker-status-card" id="workerCard">
                 <div class="card-body py-3">
@@ -184,6 +185,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}{# end not saas_mode or super_admin (worker status) #}
 
         <!-- Queue Stats -->
         <div class="col-lg-8">
@@ -268,7 +270,7 @@
                         <option value="registered">Registered</option>
                         <option value="inventory_reported">Inventory</option>
                         <option value="heartbeat">Heartbeat</option>
-                        <option value="license_exceeded">License Exceeded</option>
+                        <option value="license_exceeded">{% if saas_mode %}Quota Exceeded{% else %}License Exceeded{% endif %}</option>
                         <option value="ip_blocked">IP Blocked</option>
                         <option value="auth_failed">Auth Failed</option>
                         <option value="status_changed">Status Changed</option>
@@ -304,7 +306,7 @@
                             <option value="dependency_scan">Dependency Scan</option>
                             <option value="agent_updated">Agent Updated</option>
                             <option value="update_requested">Update Requested</option>
-                            <option value="license_exceeded">License Exceeded</option>
+                            <option value="license_exceeded">{% if saas_mode %}Quota Exceeded{% else %}License Exceeded{% endif %}</option>
                             <option value="ip_blocked">IP Blocked</option>
                             <option value="auth_failed">Auth Failed</option>
                         </select>
@@ -560,9 +562,9 @@ function getEventDescription(event) {
             }
             return `Status: ${event.old_value || '?'} → ${event.new_value || '?'}`;
         case 'license_exceeded':
-            return `License limit exceeded: ${details.message || 'Agent limit reached'}`;
+            return `{% if saas_mode %}Quota{% else %}License{% endif %} limit exceeded: ${details.message || 'Agent limit reached'}`;
         case 'license_warning':
-            return `License warning: ${details.message || ''}`;
+            return `{% if saas_mode %}Quota{% else %}License{% endif %} warning: ${details.message || ''}`;
         case 'ip_blocked':
             return `Connection blocked from ${details.blocked_ip || 'unknown IP'}`;
         case 'auth_failed':
@@ -737,8 +739,8 @@ function getLogTypeBadge(eventType) {
         agent_updated: '<span class="badge bg-success"><i class="bi bi-cloud-check me-1"></i>Updated</span>',
         update_requested: '<span class="badge bg-warning text-dark"><i class="bi bi-cloud-arrow-up me-1"></i>Update Push</span>',
         scan_requested: '<span class="badge bg-primary bg-opacity-75"><i class="bi bi-play-circle me-1"></i>Scan Push</span>',
-        license_exceeded: '<span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>License</span>',
-        license_warning: '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>License</span>',
+        license_exceeded: '<span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>{% if saas_mode %}Quota{% else %}License{% endif %}</span>',
+        license_warning: '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>{% if saas_mode %}Quota{% else %}License{% endif %}</span>',
         ip_blocked: '<span class="badge bg-danger"><i class="bi bi-shield-x me-1"></i>Blocked</span>',
         auth_failed: '<span class="badge bg-danger"><i class="bi bi-lock me-1"></i>Auth Fail</span>',
         decommissioned: '<span class="badge bg-dark"><i class="bi bi-trash3 me-1"></i>Removed</span>',
