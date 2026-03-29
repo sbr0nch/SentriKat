@@ -20,6 +20,7 @@
 9. [Environment Configuration](#9-environment-configuration)
 10. [Deployment Architecture](#10-deployment-architecture)
 11. [Migration Plan: On-Premise Portal → SaaS Portal](#11-migration-plan)
+12. [SaaS vs On-Premise Mode Isolation](#12-saas-vs-on-premise-mode-isolation)
 
 ---
 
@@ -1166,6 +1167,92 @@ Stripe             sentrikat.com        app.sentrikat.com
 [ ] Usage approaching limit → warning shown in dashboard
 [ ] Usage at limit → new agents rejected with clear error
 ```
+
+---
+
+---
+
+## 12. SaaS vs On-Premise Mode Isolation
+
+**Added:** 2026-03-29 (Platform Audit)
+
+This section documents all UI and API differences between SaaS and On-Premise modes,
+and the guards enforcing proper isolation between them.
+
+### 12.1 UI Elements Hidden in SaaS Mode
+
+| Component | Location | Reason |
+|-----------|----------|--------|
+| Organization Switcher (dropdown) | `base.html` navbar | SaaS tenants are single-org; shows static org badge instead |
+| Organizations management menu | `base.html` sidebar | Orgs are created/deleted only via provisioning API |
+| Backup & Restore card | `admin_panel.html` settings | Infrastructure operation, not per-tenant |
+| System Logs tab & panel | `admin_panel.html` / `base.html` sidebar | Infrastructure logs visible only to platform super_admin |
+| Health Checks tab & panel | `admin_panel.html` / `base.html` sidebar | Infrastructure health visible only to platform super_admin |
+| NVD Sync & Updates sub-tab | `admin_panel.html` system settings | Sync is centrally managed; org_admin cannot change NVD API key |
+| Data Retention sub-tab | `admin_panel.html` system settings | Retention is platform policy with enforced minimums |
+| License tab/panel | `admin_panel.html` settings | Replaced by Subscription tab in SaaS |
+| Worker Status card | `agent_activity.html` | Infrastructure detail hidden from org_admin |
+| Check for Updates button | `admin_panel.js` | Updates managed by platform |
+
+### 12.2 UI Elements Hidden in On-Premise Mode
+
+| Component | Location | Reason |
+|-----------|----------|--------|
+| Subscription tab/panel | `admin_panel.html` settings | Replaced by License tab in on-premise |
+| Free Plan / Trial banners | `base.html` top banner | On-premise uses DEMO VERSION banner instead |
+
+### 12.3 API Endpoints Blocked in SaaS Mode
+
+| Endpoint | Method | Guard | Error Message |
+|----------|--------|-------|---------------|
+| `/api/license` | POST | `is_saas_mode()` check | "License activation is not available in SaaS mode" |
+| `/api/license` | DELETE | `is_saas_mode()` check | "License management is not available in SaaS mode" |
+| `/api/license/activate-online` | POST | `is_saas_mode()` check | "Online license activation is not available in SaaS mode" |
+| `/api/license/installation-id` | GET | `is_saas_mode()` check | "Installation ID is not applicable in SaaS mode" |
+| `/api/organizations` | POST | `is_saas_mode()` check | "Organization creation is not available in SaaS mode" |
+| `/api/organizations/<id>` | DELETE | `is_saas_mode()` check | "Organization deletion is not available in SaaS mode" |
+| `/api/updates/check` | GET | `is_saas_mode()` check | "Update checking is not available in SaaS mode" |
+| `/api/settings/backup` | POST | `is_saas_mode()` check | "Backup/restore is not available in SaaS mode" |
+| `/api/settings/restore` | POST | `is_saas_mode()` check | "Backup/restore is not available in SaaS mode" |
+
+### 12.4 API Endpoints with Reduced Info in SaaS (Unauthenticated)
+
+| Endpoint | SaaS Unauthenticated Response | Full Response (authenticated) |
+|----------|-------------------------------|-------------------------------|
+| `/api/version` | `{name, version, api_version}` only | Adds `edition, database, python, api_docs` |
+| `/api/status` | `{status, version}` only | Adds `vulnerabilities_tracked, last_sync, last_sync_status` |
+
+### 12.5 Decorator Usage for Dual-Mode Access Control
+
+| Decorator | On-Premise | SaaS | Used For |
+|-----------|-----------|------|----------|
+| `@admin_required` | super_admin only | super_admin only | Infrastructure operations (logs, health, workers) |
+| `@saas_admin_or_org_admin` | super_admin only | super_admin + org_admin | Tenant-scoped settings (LDAP, SMTP, integrations) |
+| `@requires_professional(feature)` | Checks RSA license | Checks subscription plan features | Feature gating (LDAP, SSO, Jira, etc.) |
+| `@requires_feature(feature)` | Checks RSA license | Checks subscription plan features | Dual-mode feature gating (from `saas.py`) |
+| `@requires_org_scope` | No effect | Ensures org_id always present | Data isolation |
+| `@restrict_cross_org_access` | No effect | Blocks cross-org bulk access | Tenant isolation |
+
+### 12.6 SaaS Retention Policy Enforcement
+
+In SaaS mode, the platform enforces minimum retention periods regardless of tenant settings:
+
+| Setting | Minimum (SaaS) | Default |
+|---------|----------------|---------|
+| `audit_log_retention_days` | 90 days | 365 days |
+| `sync_history_retention_days` | 30 days | 90 days |
+| `session_log_retention_days` | 14 days | 30 days |
+
+Only platform `super_admin` can modify retention settings in SaaS mode.
+
+### 12.7 Terminology Differences
+
+| Concept | On-Premise | SaaS |
+|---------|-----------|------|
+| Feature gating | "License" / "Professional license required" | "Plan" / "Not available on your current plan" |
+| Agent limit events | "License Exceeded" / "License Warning" | "Quota Exceeded" / "Quota Warning" |
+| Upgrade CTA | "Get a License" (links to contact-sales) | "Upgrade Plan" / "View Plans" (links to pricing) |
+| Settings tab | "License" (key icon) | "Subscription" (credit card icon) |
 
 ---
 

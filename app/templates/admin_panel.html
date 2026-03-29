@@ -1281,6 +1281,8 @@
                     </button>
                     {% endif %}
                 </li>
+                {# Health Checks & Logs: infrastructure-level, hide from SaaS org_admin #}
+                {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="health-settings-tab" type="button" onclick="showSettingsGroup('health', this)">
                         <i class="bi bi-heart-pulse me-2"></i>Health Checks
@@ -1291,6 +1293,7 @@
                         <i class="bi bi-journal-text me-2"></i>Logs
                     </button>
                 </li>
+                {% endif %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="guide-settings-tab" type="button" onclick="showSettingsGroup('guide', this)">
                         <i class="bi bi-book me-2"></i>Admin Guide
@@ -1654,11 +1657,14 @@
                 <!-- System Sub-Tabs Navigation -->
                 <div class="tab-pane fade" id="systemSubTabs" role="tabpanel">
                     <ul class="nav nav-pills mb-3" id="systemSubNav" role="tablist">
+                        {# Sync & Updates: in SaaS, only super_admin (platform) manages sync infrastructure #}
+                        {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
                         <li class="nav-item" role="presentation">
                             <button class="nav-link active" type="button" onclick="showSystemSubTab('sync', this)">
                                 <i class="bi bi-arrow-clockwise me-1"></i>Sync & Updates
                             </button>
                         </li>
+                        {% endif %}
                         {% if current_user and current_user.is_super_admin() %}
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" type="button" onclick="showSystemSubTab('general', this)">
@@ -1671,11 +1677,14 @@
                             </button>
                         </li>
                         {% endif %}
+                        {# Data Retention: in SaaS, retention is platform policy, not per-tenant #}
+                        {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" type="button" onclick="showSystemSubTab('retention', this)">
                                 <i class="bi bi-archive me-1"></i>Data Retention
                             </button>
                         </li>
+                        {% endif %}
                     </ul>
                 </div>
 
@@ -2213,7 +2222,8 @@
                         </div>
                     </div>
 
-                    <!-- Backup & Restore Card -->
+                    <!-- Backup & Restore Card (on-premise only) -->
+                    {% if not saas_mode %}
                     <div class="card mt-4" id="backupRestoreCard">
                         <div class="card-header">
                             <i class="bi bi-cloud-download me-2"></i>Backup & Restore
@@ -2259,6 +2269,7 @@
                             </div>
                         </div>
                     </div>
+                    {% endif %}{# end not saas_mode backup/restore #}
                 </div>
 
                 {% if has_pro_features %}
@@ -3691,6 +3702,8 @@
                     </div>
                 </div>
 
+                {# Log Viewer & Health Checks: infrastructure-level, hide from SaaS org_admin #}
+                {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
                 <!-- Log Viewer -->
                 <div class="tab-pane fade" id="logsSettings" role="tabpanel">
                     <div class="card">
@@ -3800,6 +3813,7 @@
                         </div>
                     </div>
                 </div>
+                {% endif %}{# end not saas_mode or super_admin (logs/health) #}
 
                 {% endif %}
             </div>

@@ -2903,7 +2903,7 @@
     <div class="demo-banner bg-warning text-dark text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
         <i class="bi bi-exclamation-triangle-fill me-2"></i>
         <strong>DEMO VERSION</strong> - Limited to {{ license.get_effective_limits().max_users }} user, {{ license.get_effective_limits().max_products }} products.
-        <a href="https://sentrikat.com/pricing" target="_blank" class="ms-2 text-dark fw-semibold text-decoration-underline">Upgrade to Professional</a>
+        <a href="https://sentrikat.com/contact-sales" target="_blank" class="ms-2 text-dark fw-semibold text-decoration-underline">Get a License</a>
         <button type="button" class="btn-close btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
     </div>
     <style>
@@ -2938,7 +2938,8 @@
                     </a>
                 </div>
                 <div class="d-flex align-items-center gap-3">
-                    <!-- Organization Switcher -->
+                    <!-- Organization Switcher (hidden in SaaS — each tenant is one org) -->
+                    {% if not saas_mode %}
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="orgDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-building"></i> <span id="currentOrgName">{% if current_user and current_user.organization %}{{ current_user.organization.display_name }}{% else %}Organization{% endif %}</span>
@@ -2947,6 +2948,12 @@
                             <li><span class="dropdown-item-text text-muted small">Loading organizations...</span></li>
                         </ul>
                     </div>
+                    {% else %}
+                    {# SaaS: show org name as static badge (no dropdown) #}
+                    <span class="badge bg-secondary bg-opacity-10 text-body px-3 py-2">
+                        <i class="bi bi-building me-1"></i>{% if current_user and current_user.organization %}{{ current_user.organization.display_name }}{% else %}Organization{% endif %}
+                    </span>
+                    {% endif %}
 
                     <div class="vr"></div>
                     <button class="btn btn-primary btn-sm" id="syncBtn" onclick="triggerSync(this)">
@@ -3204,6 +3211,8 @@
                             License
                         </a>
                         {% endif %}
+                        {# Health Checks & System Logs: infrastructure-level, hide from SaaS org_admin #}
+                        {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
                         <a href="/admin-panel#settings:health" class="sidebar-sublink" data-hash="settings:health">
                             <i class="bi bi-heart-pulse"></i>
                             Health Checks
@@ -3212,6 +3221,7 @@
                             <i class="bi bi-journal-text"></i>
                             System Logs
                         </a>
+                        {% endif %}
                         <a href="/admin-panel#settings:guide" class="sidebar-sublink" data-hash="settings:guide">
                             <i class="bi bi-book"></i>
                             Admin Guide

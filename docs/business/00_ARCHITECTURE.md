@@ -275,6 +275,43 @@ during Docker build via `scripts/download_vendor_assets.sh`. Templates use local
 
 All HTTP calls respect proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`) and SSL verification (`VERIFY_SSL`).
 
+## 3.7 Dual-Mode Architecture (SaaS vs On-Premise)
+
+SentriKat operates in two mutually exclusive modes controlled by the `SENTRIKAT_MODE` environment variable:
+
+- **`onpremise`** (default): Traditional self-hosted deployment with RSA-4096 signed license keys.
+- **`saas`**: Multi-tenant cloud deployment with per-organization subscription plans via Stripe.
+
+SaaS mode activation requires cryptographic validation (`SENTRIKAT_SAAS_TOKEN` = SHA-256 of `SENTRIKAT_SAAS_SECRET`) to prevent on-premise customers from enabling it.
+
+### Mode Isolation Summary
+
+The following controls enforce proper feature separation between modes:
+
+**SaaS-only restrictions (not available to tenants):**
+- Organization create/delete (provisioned by platform only)
+- License activation/deactivation (subscriptions managed via Stripe)
+- Backup & Restore (infrastructure operation)
+- System Logs and Health Checks (visible only to platform super_admin)
+- NVD Sync Settings (centrally managed)
+- Data Retention Settings (platform policy with enforced minimums)
+- Check for Updates (platform-managed)
+- Worker management (infrastructure)
+
+**On-Premise-only elements:**
+- Organization Switcher (SaaS tenants are single-org)
+- License management UI (RSA key activation/deactivation)
+- Installation ID exposure
+- DEMO VERSION banner
+
+**Decorator system for dual-mode access control:**
+- `@saas_admin_or_org_admin`: Allows org_admin in SaaS, requires super_admin in on-premise
+- `@requires_professional(feature)`: SaaS-aware; checks subscription plan features in SaaS, RSA license in on-premise
+- `@requires_feature(feature)`: Explicit dual-mode feature gating via `saas.py`
+- `@restrict_cross_org_access`: Enforces tenant isolation in SaaS (no effect in on-premise)
+
+See `docs/SAAS_INTEGRATION_SPEC.md` Section 12 for the complete isolation matrix.
+
 ---
 
 # 4. SYSTEM ARCHITECTURE

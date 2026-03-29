@@ -6539,6 +6539,12 @@ async function checkForUpdates() {
     const container = document.getElementById('updateCheckContainer');
     if (!container) return;
 
+    // Skip update checks in SaaS mode (updates are managed by the platform)
+    if (isSaasMode()) {
+        container.innerHTML = '<small class="text-muted">Updates are managed by the platform.</small>';
+        return;
+    }
+
     // Show loading indicator
     container.innerHTML = `
         <small class="text-muted">

@@ -971,7 +971,7 @@ def bulk_process_queue():
 
 
 @bp.route('/api/import/queue/approve-all', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def approve_all_queue():
     """Approve all pending import queue items, optionally filtered by vendor, organization, or source_type."""
@@ -979,6 +979,13 @@ def approve_all_queue():
     vendor_filter = data.get('vendor')
     org_filter = data.get('organization_id')
     source_type_filter = data.get('source_type')
+
+    # SaaS: enforce org scope — org_admin can only approve items in their own org
+    if is_saas_mode():
+        scoped_org = get_scoped_org_id()
+        if org_filter and int(org_filter) != scoped_org:
+            return jsonify({'error': 'Access denied: cannot manage another organization\'s queue'}), 403
+        org_filter = scoped_org  # Always scope to user's org in SaaS
 
     query = ImportQueue.query.filter_by(status='pending')
     if vendor_filter:
@@ -1026,7 +1033,7 @@ def approve_all_queue():
 
 
 @bp.route('/api/import/queue/reject-all', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def reject_all_queue():
     """Reject all pending import queue items, optionally filtered by vendor, organization, or source_type."""
@@ -1034,6 +1041,13 @@ def reject_all_queue():
     vendor_filter = data.get('vendor')
     org_filter = data.get('organization_id')
     source_type_filter = data.get('source_type')
+
+    # SaaS: enforce org scope — org_admin can only reject items in their own org
+    if is_saas_mode():
+        scoped_org = get_scoped_org_id()
+        if org_filter and int(org_filter) != scoped_org:
+            return jsonify({'error': 'Access denied: cannot manage another organization\'s queue'}), 403
+        org_filter = scoped_org  # Always scope to user's org in SaaS
 
     query = ImportQueue.query.filter_by(status='pending')
     if vendor_filter:
@@ -1164,7 +1178,7 @@ def _get_integration_or_404(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def get_integration(integration_id):
     """Get a specific integration."""
@@ -1174,7 +1188,7 @@ def get_integration(integration_id):
 
 
 @bp.route('/api/integrations', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def create_integration():
     """Create a new integration."""
@@ -1235,7 +1249,7 @@ def create_integration():
 
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['PUT'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def update_integration(integration_id):
     """Update an integration."""
@@ -1274,7 +1288,7 @@ def update_integration(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>', methods=['DELETE'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def delete_integration(integration_id):
     """Delete (deactivate) an integration."""
@@ -1292,7 +1306,7 @@ def delete_integration(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>/regenerate-key', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def regenerate_api_key(integration_id):
     """Regenerate API key for an integration."""
@@ -1313,7 +1327,7 @@ def regenerate_api_key(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>/test', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def test_integration(integration_id):
     """Test connection to an integration."""
@@ -1339,7 +1353,7 @@ def test_integration(integration_id):
 
 
 @bp.route('/api/integrations/<int:integration_id>/sync', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def trigger_sync(integration_id):
     """Manually trigger a sync for a pull integration."""
@@ -1617,7 +1631,7 @@ def process_software_import(integration, data):
 # ============================================================================
 
 @bp.route('/api/agents', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def get_agents():
     """Get all registered agents."""
@@ -1640,7 +1654,7 @@ def get_agents():
 
 
 @bp.route('/api/agents/<int:agent_id>', methods=['DELETE'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Integrations')
 def delete_agent(agent_id):
     """Delete (deactivate) an agent."""
@@ -1809,7 +1823,7 @@ def download_macos_agent():
 # ============================================================================
 
 @bp.route('/api/integrations/jira/test', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Jira Integration')
 def test_jira_connection():
     """Test Jira connection with provided credentials."""
@@ -1838,7 +1852,7 @@ def test_jira_connection():
 
 
 @bp.route('/api/integrations/jira/projects', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Jira Integration')
 def get_jira_projects():
     """Get available Jira projects."""
@@ -1853,7 +1867,7 @@ def get_jira_projects():
 
 
 @bp.route('/api/integrations/jira/issue-types/<project_key>', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Jira Integration')
 def get_jira_issue_types(project_key):
     """Get available issue types for a Jira project."""
@@ -1923,7 +1937,7 @@ def get_issue_tracker_config():
 
 
 @bp.route('/api/integrations/issue-tracker/test', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Issue Tracker Integration')
 def test_issue_tracker():
     """Test connection to configured issue tracker."""
@@ -2008,7 +2022,7 @@ def test_issue_tracker():
 
 
 @bp.route('/api/integrations/jira/issue-types', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Issue Tracker Integration')
 def fetch_jira_issue_types_post():
     """Fetch available issue types from Jira for a specific project."""
@@ -2045,7 +2059,7 @@ def fetch_jira_issue_types_post():
 
 
 @bp.route('/api/integrations/jira/fields', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Issue Tracker Integration')
 def fetch_jira_create_fields():
     """Fetch required and optional fields for creating an issue in Jira."""
@@ -2120,7 +2134,7 @@ def fetch_jira_create_fields():
 
 
 @bp.route('/api/integrations/jira/projects', methods=['POST'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Issue Tracker Integration')
 def fetch_jira_projects_post():
     """Fetch available projects from Jira."""
@@ -2197,7 +2211,7 @@ def create_issue_generic():
 
 
 @bp.route('/api/integrations/youtrack/projects', methods=['GET'])
-@admin_required
+@saas_admin_or_org_admin
 @requires_professional('Issue Tracker Integration')
 def get_youtrack_projects():
     """Get available YouTrack projects."""
