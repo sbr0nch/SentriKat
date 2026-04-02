@@ -168,21 +168,24 @@ Data isolation is handled at the database level:
 
 | | Demo | Professional |
 |---|---|---|
-| Price | Free | €2,499/year |
+| Price | Free | €4,999/year |
 | Agents | 5 | 10 base + packs |
-| Agent Packs | - | +25=€499, +50=€899, +100=€1,499, Unlimited=€2,199 |
+| Agent Packs | - | +25=€999, +50=€1,499, +100=€2,499, Unlimited=€3,999 |
+| Support Pack | - | €999/year |
+
 | Delivery | Docker download | Docker download + license key |
 
 ### SaaS Plans (NEW - add to pricing page)
 
 | | Free | Starter | Professional | Business | Enterprise |
 |---|---|---|---|---|---|
-| **Monthly** | €0 | €29/mo | €79/mo | €199/mo | €499/mo+ |
-| **Annual** | €0 | €290/yr | €790/yr | €1,990/yr | €4,990/yr+ |
+| **Monthly** | €0 | €59/mo | €199/mo | €499/mo | €999/mo+ |
+| **Annual** | €0 | €590/yr | €1,990/yr | €4,990/yr | €9,990/yr+ |
 | **Savings** | - | 17% | 17% | 17% | 17% |
 | | | | | | |
-| **Agents** | 5 | 25 | 100 | 500 | Unlimited |
-| **Users** | 1 | 3 | 10 | 50 | Unlimited |
+| **Agents** | 5 | 10 | 25 | 50 | Unlimited |
+| **Users** | 1 | 3 | 5 | 10 | Unlimited |
+
 | **Organizations** | 1 | 1 | 3 | 10 | Unlimited |
 | **Products** | 50 | Unlimited | Unlimited | Unlimited | Unlimited |
 | **API Keys** | 1 | 2 | 5 | 25 | Unlimited |
@@ -209,14 +212,14 @@ Data isolation is handled at the database level:
 ```
 Per-agent cost comparison (annual):
 
-€40/agent  SentriKat On-Premise (with packs)
+€80/agent  SentriKat On-Premise (with packs)
+€71/agent  SentriKat SaaS Starter  ◄ Premium positioning (10 agents)
 €23/agent  Rapid7 InsightVM
 €22/agent  Tenable VM Cloud
-€14/agent  SentriKat SaaS Starter  ◄ Undercuts Rapid7/Tenable
 €10/agent  Nucleus Security
- €8/agent  SentriKat SaaS Pro      ◄ Best mid-market value
+ €96/agent SentriKat SaaS Pro      ◄ Mid-market (25 agents)
+€120/agent SentriKat SaaS Business ◄ Enterprise (50 agents)
  €7/agent  ManageEngine VM+
- €4/agent  SentriKat SaaS Business ◄ Cheapest at scale
 ```
 
 ### Why SaaS doesn't cannibalize On-Premise
@@ -225,7 +228,8 @@ Per-agent cost comparison (annual):
 |---|---|
 | Government, military, finance (compliance) | Startups, SMBs, MSPs |
 | Must keep data in-house | Wants zero infrastructure |
-| Pays €2,499+ upfront for control | Pays €29-199/mo for convenience |
+| Pays €4,999+ upfront for control | Pays €59-999/mo for convenience |
+
 | Manages own server | We manage everything |
 | Different market segment | Different market segment |
 
@@ -238,7 +242,7 @@ Per-agent cost comparison (annual):
 ```
 1. Customer visits sentrikat.com/pricing
 2. Clicks "Buy Professional" (on-premise)
-3. Stripe Checkout → pays €2,499
+3. Stripe Checkout → pays €4,999/yr
 4. Stripe webhook → Portal creates:
    - Customer account
    - License record
@@ -262,7 +266,7 @@ Per-agent cost comparison (annual):
 1. Customer visits sentrikat.com/pricing
 2. Clicks "Start Free" or "Subscribe to Pro" (SaaS tab)
 3. For Free: just email + password signup form
-   For Paid: Stripe Checkout → pays €29-499/mo
+   For Paid: Stripe Checkout → pays €59-999/mo
 4. Stripe webhook → Portal calls SaaS provisioning API:
 
    POST app.sentrikat.com/api/internal/provision
@@ -333,11 +337,12 @@ Per-agent cost comparison (annual):
      "organization_id": 42,
      "new_plan": "business",
      "new_limits": {
-       "max_agents": 500,
-       "max_users": 50,
+       "max_agents": 50,
+       "max_users": 10,
        "max_organizations": 10,
        "max_api_keys": 25
      },
+
      "features": {
        "email_alerts": true,
        "ldap": true,
@@ -366,14 +371,14 @@ Per-agent cost comparison (annual):
 
 ```
 Stripe Product: "SentriKat SaaS"
-  └── Price: "Starter Monthly"   → €29/mo,   recurring, EUR
-  └── Price: "Starter Annual"    → €290/yr,   recurring, EUR
-  └── Price: "Pro Monthly"       → €79/mo,   recurring, EUR
-  └── Price: "Pro Annual"        → €790/yr,   recurring, EUR
-  └── Price: "Business Monthly"  → €199/mo,  recurring, EUR
-  └── Price: "Business Annual"   → €1,990/yr, recurring, EUR
-  └── Price: "Enterprise Monthly"→ €499/mo,  recurring, EUR
-  └── Price: "Enterprise Annual" → €4,990/yr, recurring, EUR
+  └── Price: "Starter Monthly"   → €59/mo,   recurring, EUR
+  └── Price: "Starter Annual"    → €590/yr,   recurring, EUR
+  └── Price: "Pro Monthly"       → €199/mo,  recurring, EUR
+  └── Price: "Pro Annual"        → €1,990/yr, recurring, EUR
+  └── Price: "Business Monthly"  → €499/mo,  recurring, EUR
+  └── Price: "Business Annual"   → €4,990/yr, recurring, EUR
+  └── Price: "Enterprise Monthly"→ €999/mo,  recurring, EUR
+  └── Price: "Enterprise Annual" → €9,990/yr, recurring, EUR
 
 Stripe Product: "SentriKat On-Premise" (existing, keep as-is)
   └── (your existing prices)
@@ -507,8 +512,8 @@ Success Response (200):
   "old_plan": "pro",
   "new_plan": "business",
   "new_limits": {
-    "max_agents": 500,
-    "max_users": 50,
+    "max_agents": 50,
+    "max_users": 10,
     "max_organizations": 10,
     "max_api_keys": 25,
     "max_storage_mb": 10000
@@ -586,22 +591,22 @@ Success Response (200):
   "organization_name": "ACME Corp",
   "plan": "pro",
   "limits": {
-    "max_agents": 100,
-    "max_users": 10,
+    "max_agents": 25,
+    "max_users": 5,
     "max_organizations": 3,
     "max_products": -1,
     "max_api_keys": 5
   },
   "current_usage": {
-    "agents_active": 67,
-    "assets_total": 72,
+    "agents_active": 18,
+    "assets_total": 22,
     "products_total": 340,
-    "users_active": 5,
+    "users_active": 3,
     "api_keys": 3
   },
   "percentage_used": {
-    "agents": 67,          // 67 of 100 = 67%
-    "users": 50,           // 5 of 10 = 50%
+    "agents": 72,          // 18 of 25 = 72%
+    "users": 60,           // 3 of 5 = 60%
     "api_keys": 60         // 3 of 5 = 60%
   },
   "measured_at": "2026-02-19T14:30:00Z"
@@ -1090,9 +1095,9 @@ Agent              app.sentrikat.com           Database
   │                      │<───────────────────────│
   │                      │                        │
   │                      │  Check quota:          │
-  │                      │  agents_active < 100?  │
+  │                      │  agents_active < 25?   │
   │                      │───────────────────────>│
-  │                      │  Yes (67 < 100)        │
+  │                      │  Yes (18 < 25)         │
   │                      │<───────────────────────│
   │                      │                        │
   │                      │  Save products with    │
