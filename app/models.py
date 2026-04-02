@@ -3429,7 +3429,7 @@ class SubscriptionPlan(db.Model):
     #
     # Pricing rationale (competitive analysis, Feb 2026):
     #
-    # On-premise Professional = €2,499/yr (10 agents) + agent packs
+    # On-premise Professional = €4,999/yr (10 agents) + agent packs
     # On-premise with 100 agents = ~€4,000/yr (~€40/agent/yr)
     #
     # Competitors (per-asset/yr):
@@ -3439,19 +3439,18 @@ class SubscriptionPlan(db.Model):
     #   ManageEngine VM+:    ~€7-12/workstation/yr
     #   Qualys VMDR:         ~€40-199/asset/yr (enterprise discounts)
     #
-    # SaaS strategy: Lower entry point than on-premise to attract SMBs
-    # who can't afford €2,499 upfront. On-premise remains attractive for
-    # compliance-driven orgs that need data in their own network.
+    # SaaS strategy: Premium positioning, still 3-5x cheaper than Tenable/Qualys.
+    # Early Access: All tenants provisioned as Pro with EA limits (free).
+    # Post-EA: Plans activate with prices below.
     #
     # All prices in EUR cents. Currency configurable per-plan.
     DEFAULT_PLANS = [
         {
-            # Free: €0 forever, 3 agents
-            # Purpose: lead generation, let prospects try the product
-            # Limited enough to push upgrades, generous enough to show value
+            # Free: €0 forever, 3 agents (fallback tier for post-EA downgrade)
+            # Purpose: safety net for EA customers who don't convert
             'name': 'free',
             'display_name': 'Free',
-            'description': 'Try SentriKat with up to 3 agents - no credit card required',
+            'description': 'Basic vulnerability tracking with up to 3 agents',
             'max_agents': 3, 'max_users': 1, 'max_organizations': 1,
             'max_products': 25, 'max_api_keys': 1, 'max_storage_mb': 100,
             'price_monthly_cents': 0, 'price_annual_cents': 0,
@@ -3466,16 +3465,15 @@ class SubscriptionPlan(db.Model):
             'is_default': True, 'sort_order': 0,
         },
         {
-            # Starter: €39/mo (€390/yr), ~€18.70/agent/yr at 25 agents
+            # Starter: €59/mo (€590/yr)
+            # EA limits: 10 agents, 3 users
             # Targets: freelancers, small IT teams, MSPs getting started
-            # Still cheaper than ManageEngine VM+ ($695/yr) with more features
-            # Higher margin than €29 to cover support costs per customer
             'name': 'starter',
             'display_name': 'Starter',
-            'description': 'For small teams and IT consultants - 25 agents',
-            'max_agents': 25, 'max_users': 3, 'max_organizations': 1,
+            'description': 'For small teams and IT consultants',
+            'max_agents': 10, 'max_users': 3, 'max_organizations': 1,
             'max_products': -1, 'max_api_keys': 2, 'max_storage_mb': 500,
-            'price_monthly_cents': 3900, 'price_annual_cents': 39000,
+            'price_monthly_cents': 5900, 'price_annual_cents': 59000,
             'currency': 'EUR',
             'features': json.dumps({
                 'email_alerts': True, 'ldap': False, 'sso': False,
@@ -3487,16 +3485,15 @@ class SubscriptionPlan(db.Model):
             'is_default': False, 'sort_order': 1,
         },
         {
-            # Professional: €99/mo (€990/yr), ~€11.90/agent/yr at 100 agents
-            # Clean price point, strong margin, still undercuts Rapid7/Tenable by 50%+
+            # Professional: €199/mo (€1,990/yr)
+            # EA limits: 25 agents, 5 users
             # Includes LDAP, integrations, compliance reports - real enterprise value
-            # Much cheaper than on-premise (€2,499/yr) but SaaS = recurring revenue
             'name': 'pro',
             'display_name': 'Professional',
-            'description': 'For growing organizations - 100 agents with LDAP and integrations',
-            'max_agents': 100, 'max_users': 10, 'max_organizations': 3,
+            'description': 'For growing organizations with LDAP and integrations',
+            'max_agents': 25, 'max_users': 5, 'max_organizations': 3,
             'max_products': -1, 'max_api_keys': 5, 'max_storage_mb': 2000,
-            'price_monthly_cents': 9900, 'price_annual_cents': 99000,
+            'price_monthly_cents': 19900, 'price_annual_cents': 199000,
             'currency': 'EUR',
             'features': json.dumps({
                 'email_alerts': True, 'ldap': True, 'sso': False,
@@ -3508,16 +3505,15 @@ class SubscriptionPlan(db.Model):
             'is_default': False, 'sort_order': 2,
         },
         {
-            # Business: €249/mo (€2,490/yr), ~€5.98/agent/yr at 500 agents
-            # Best value for volume - cheapest per-agent in the market
-            # Includes SSO, white-label = MSP/MSSP friendly
-            # Comparable to on-premise Pro price but with 5x more agents + managed
+            # Business: €499/mo (€4,990/yr)
+            # EA limits: 50 agents, 10 users
+            # SSO, white-label = MSP/MSSP friendly
             'name': 'business',
             'display_name': 'Business',
-            'description': 'For mid-market and MSPs - 500 agents with SSO and white-label',
-            'max_agents': 500, 'max_users': 50, 'max_organizations': 10,
+            'description': 'For mid-market and MSPs with SSO and white-label',
+            'max_agents': 50, 'max_users': 10, 'max_organizations': 10,
             'max_products': -1, 'max_api_keys': 25, 'max_storage_mb': 10000,
-            'price_monthly_cents': 24900, 'price_annual_cents': 249000,
+            'price_monthly_cents': 49900, 'price_annual_cents': 499000,
             'currency': 'EUR',
             'features': json.dumps({
                 'email_alerts': True, 'ldap': True, 'sso': True,
@@ -3529,16 +3525,14 @@ class SubscriptionPlan(db.Model):
             'is_default': False, 'sort_order': 3,
         },
         {
-            # Enterprise: €499/mo (€4,990/yr) starting point
-            # For 1000+ agents, dedicated infrastructure option, SLA
-            # Competes with Qualys/Rapid7 enterprise deals at fraction of cost
-            # Price shown is starting point - actual negotiated per-deal
+            # Enterprise: €999/mo (€9,990/yr) starting point
+            # Unlimited, dedicated support, custom SLA
             'name': 'enterprise',
             'display_name': 'Enterprise',
             'description': 'Unlimited agents with dedicated support and custom SLA',
             'max_agents': -1, 'max_users': -1, 'max_organizations': -1,
             'max_products': -1, 'max_api_keys': -1, 'max_storage_mb': -1,
-            'price_monthly_cents': 49900, 'price_annual_cents': 499000,
+            'price_monthly_cents': 99900, 'price_annual_cents': 999000,
             'currency': 'EUR',
             'features': json.dumps({
                 'email_alerts': True, 'ldap': True, 'sso': True,
