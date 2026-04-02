@@ -2955,10 +2955,13 @@
                     </span>
                     {% endif %}
 
+                    {# Sync button: in SaaS, only platform super_admin triggers sync (centralized) #}
+                    {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
                     <div class="vr"></div>
                     <button class="btn btn-primary btn-sm" id="syncBtn" onclick="triggerSync(this)">
                         <i class="bi bi-arrow-clockwise"></i> Sync
                     </button>
+                    {% endif %}
 
                     <!-- Dark Mode Toggle -->
                     <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" id="themeToggle" aria-label="Toggle dark mode">
