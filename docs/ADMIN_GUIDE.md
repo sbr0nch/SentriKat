@@ -553,3 +553,99 @@ For additional isolation, place SentriKat on a management VLAN and restrict agen
 4. Revoke the old key.
 
 Sensitive settings (LDAP bind password, SMTP password, webhook tokens) are encrypted at rest using the `ENCRYPTION_KEY`. If you rotate the encryption key, re-enter all encrypted settings.
+
+---
+
+## 9. SaaS Agent Connectivity Guide
+
+This section is for **SaaS customers** (`app.sentrikat.com`) who need to connect agents from their on-premises network to the SentriKat cloud platform.
+
+### How It Works
+
+SentriKat agents run on your servers/endpoints and periodically send software inventory data to the SaaS platform over HTTPS. The communication is **outbound only** — agents initiate all connections. No inbound ports need to be opened.
+
+```
+Your Network                         Internet                    SentriKat Cloud
+┌──────────────┐                                           ┌──────────────────┐
+│ Your Server  │    HTTPS (port 443) outbound only         │ app.sentrikat.com│
+│              │──────────────────────────────────────────►│                  │
+│ SentriKat    │  POST /api/agent/inventory                │ Agent API        │
+│ Agent        │  POST /api/agent/heartbeat                │ receives data    │
+│              │  GET  /api/agent/jobs                     │                  │
+│              │  Header: X-Agent-Key: sk_agent_xxx        │ Dashboard shows  │
+└──────────────┘                                           │ vulnerabilities  │
+                                                           └──────────────────┘
+```
+
+### Network Requirements
+
+Your firewall/proxy must allow **outbound HTTPS** to the SentriKat platform:
+
+| Destination | Port | Protocol | Required |
+|-------------|------|----------|----------|
+| `app.sentrikat.com` | 443 | HTTPS (TLS 1.2+) | **YES** |
+
+**That's it.** No inbound ports, no VPN, no static IP required.
+
+### What the Agent Sends
+
+| Data | Frequency | Size |
+|------|-----------|------|
+| Software inventory (installed packages, versions) | Every 4-24 hours (configurable) | 50-200 KB |
+| Heartbeat (agent status) | Every 5 minutes | < 1 KB |
+| Job polling (check for tasks) | Every 60 seconds | < 1 KB |
+
+The agent sends **only software inventory data** (package names, versions, OS info). It does **not** send files, credentials, user data, network topology, or any other sensitive information.
+
+### Setup Steps
+
+1. **Create an Agent Key** in the SentriKat web UI: Settings > Integrations > Agent Keys > Create API Key
+2. **Download the agent** script from the Agent Keys page
+3. **Install the agent** on your server:
+   ```bash
+   # Linux
+   curl -sSL https://app.sentrikat.com/agent/install.sh | bash -s -- --key YOUR_AGENT_KEY
+
+   # Windows (PowerShell as Administrator)
+   iwr -Uri https://app.sentrikat.com/agent/install.ps1 -OutFile install.ps1; .\install.ps1 -Key YOUR_AGENT_KEY
+   ```
+4. **Verify** the agent appears in the SentriKat dashboard within a few minutes
+
+### Firewall / Proxy Configuration
+
+If your network uses a web proxy:
+
+```bash
+# Set proxy for the agent
+export HTTPS_PROXY=http://proxy.yourcompany.com:8080
+export NO_PROXY=localhost,127.0.0.1
+```
+
+If your firewall requires domain allowlisting, add:
+- `app.sentrikat.com` (port 443)
+
+If your firewall requires IP allowlisting, resolve `app.sentrikat.com` to get the current IP. Note: the IP may change; domain-based rules are preferred.
+
+### Verifying Connectivity
+
+Test from the server where the agent will run:
+
+```bash
+# Quick connectivity test
+curl -s https://app.sentrikat.com/api/health
+# Should return: {"status": "ok"}
+
+# Full agent simulation
+curl -s -H "X-Agent-Key: YOUR_KEY" https://app.sentrikat.com/api/agent/heartbeat -X POST
+# Should return: 200 OK
+```
+
+### Troubleshooting
+
+| Issue | Check |
+|-------|-------|
+| Agent can't connect | `curl -v https://app.sentrikat.com/api/health` — check for TLS or proxy errors |
+| Firewall blocking | Ensure outbound 443 is allowed to `app.sentrikat.com` |
+| Corporate proxy | Set `HTTPS_PROXY` environment variable for the agent process |
+| SSL inspection | If your firewall does SSL inspection, add the corporate CA to the agent's trust store |
+| Agent not appearing | Check agent logs; verify the API key is correct and active |
