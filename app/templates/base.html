@@ -3077,8 +3077,10 @@
                 </div>
 
                 <!-- User Management Section (visible for admins; PRO license on-premise or paid SaaS plan) -->
-                {% set has_pro_features = (saas_mode and subscription and subscription.is_active() and subscription.plan and subscription.plan.name != 'free') or (not saas_mode and license and license.is_professional()) %}
-                {% set has_agents = (saas_mode and subscription and subscription.is_active()) or (not saas_mode) %}
+                {# super_admin always sees everything (platform support); org_admin sees based on plan #}
+                {% set is_platform_admin = current_user and current_user.is_super_admin() %}
+                {% set has_pro_features = is_platform_admin or (saas_mode and subscription and subscription.is_active() and subscription.plan and subscription.plan.name != 'free') or (not saas_mode and license and license.is_professional()) %}
+                {% set has_agents = is_platform_admin or (saas_mode and subscription and subscription.is_active()) or (not saas_mode) %}
                 {% if has_pro_features %}
                 {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
                 <div class="sidebar-nav-section">
