@@ -21,6 +21,8 @@
 10. [Deployment Architecture](#10-deployment-architecture)
 11. [Migration Plan: On-Premise Portal → SaaS Portal](#11-migration-plan)
 12. [SaaS vs On-Premise Mode Isolation](#12-saas-vs-on-premise-mode-isolation)
+13. [Agent Connectivity for SaaS Customers](#13-agent-connectivity-for-saas-customers)
+14. [Vulnerability Data Sources & Resilience](#14-vulnerability-data-sources--resilience)
 
 ---
 
@@ -1253,6 +1255,108 @@ Only platform `super_admin` can modify retention settings in SaaS mode.
 | Agent limit events | "License Exceeded" / "License Warning" | "Quota Exceeded" / "Quota Warning" |
 | Upgrade CTA | "Get a License" (links to contact-sales) | "Upgrade Plan" / "View Plans" (links to pricing) |
 | Settings tab | "License" (key icon) | "Subscription" (credit card icon) |
+
+---
+
+## 13. Agent Connectivity for SaaS Customers
+
+### Overview
+
+SaaS customers deploy SentriKat agents inside their corporate networks. Agents communicate
+**outbound only** over HTTPS (port 443) to `app.sentrikat.com`. No inbound ports, VPN, or
+static IP is required on the customer side.
+
+### Customer Network Requirements
+
+| Destination | Port | Protocol | Required |
+|-------------|------|----------|----------|
+| `app.sentrikat.com` | 443 | HTTPS (TLS 1.2+) | **YES** |
+
+### Agent Communication Pattern
+
+| Endpoint | Method | Frequency | Payload |
+|----------|--------|-----------|---------|
+| `/api/agent/inventory` | POST | Every 4-24h | Software inventory (50-200 KB) |
+| `/api/agent/heartbeat` | POST | Every 5 min | Status ping (< 1 KB) |
+| `/api/agent/jobs` | GET | Every 60s | Job polling (< 1 KB) |
+
+All requests include the `X-Agent-Key` header for authentication.
+
+### Data Sent by Agents
+
+Agents send **only software inventory**: package names, versions, OS details.
+They do **not** send: files, credentials, user data, network topology, screenshots, or
+any personal/sensitive information.
+
+### Platform Capacity (Hetzner 4GB — Early Access)
+
+| Metric | Capacity |
+|--------|----------|
+| Concurrent agents | ~100-200 |
+| Tenants | ~10-20 |
+| Inventory reports/day | ~60MB bandwidth |
+| Upgrade trigger | > 200 agents → Hetzner 8GB |
+
+### Rate Limits (per agent API key)
+
+| Endpoint | Limit |
+|----------|-------|
+| Inventory reports | 60/minute |
+| Heartbeats | 120/minute |
+| Job polling | 60/minute |
+
+---
+
+## 14. Vulnerability Data Sources & Resilience
+
+### Centralized Sync Architecture
+
+In SaaS mode, **one** centralized sync process fetches vulnerability data from all sources.
+The data is stored in a shared PostgreSQL database accessible to all tenants. Individual
+tenants do NOT make their own API calls to external sources.
+
+### Data Sources
+
+| Source | API Key Required | Rate Limit | Geo | Fallback Role |
+|--------|-----------------|------------|-----|---------------|
+| CISA KEV | No (static JSON) | None | USA | Primary: known exploited vulns |
+| NVD API | Yes (1 free key) | 50 req/30s | USA | Primary: CVSS, CPE data |
+| CVE.org | No | Generous | USA (MITRE) | Fallback if NVD is down |
+| ENISA EUVD | No | Generous | EU | Fallback for CVSS + EU exploited vulns |
+| OSV | No | Generous | Global (Google) | False positive reduction |
+| EPSS | No (bulk download) | 1 file/day | Global (FIRST.org) | Exploit probability scoring |
+| Red Hat / Debian / MSRC | No | Generous | Mixed | Vendor patch detection |
+
+### Resilience Model
+
+```
+NVD down?      → Automatic fallback to CVE.org → then ENISA EUVD
+CISA down?     → Cached locally, retry with exponential backoff
+All USA down?  → ENISA EUVD (EU) still provides CVSS + exploited CVEs
+All down?      → Local DB retains all previously synced data
+```
+
+### Legal Basis for Commercial Use
+
+All sources are public government or open-source datasets:
+- **CISA KEV**: US government public data (no use restrictions)
+- **NVD**: US government public data (attribution required, commercial use allowed)
+- **CVE.org**: Public, MITRE-operated (open use)
+- **ENISA EUVD**: EU agency public data
+- **OSV**: Open-source, Apache 2.0 licensed
+- **EPSS**: FIRST.org public data
+
+### Knowledge Base Sync
+
+SentriKat includes a community knowledge base (`kb_sync.py`) that shares **anonymized
+CPE mappings** (software name → CPE identifier) between instances. This helps improve
+matching accuracy over time. Controlled via:
+
+- `SENTRIKAT_KB_SYNC_ENABLED=true` — Enable/disable KB sync
+- `SENTRIKAT_KB_SHARE_MAPPINGS=true` — Share local mappings with the community KB
+
+No customer data, organization names, or user information is shared — only
+"Software X maps to CPE Y" entries.
 
 ---
 
