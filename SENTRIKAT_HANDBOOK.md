@@ -256,20 +256,20 @@ GET /api/health          → {"status": "healthy", "database": "ok"}
 | Piano | Prezzo | Cosa include |
 |-------|--------|-------------|
 | Demo | Gratis | 1 user, 50 prodotti, no integrations |
-| Professional | €2,499/anno | Illimitato, LDAP, SAML, integrazioni, white-label |
+| Professional | €4,999/anno | Illimitato, LDAP, SAML, integrazioni, white-label |
 
 ### SaaS (app.sentrikat.com):
 | Piano | Prezzo | Agents | Users | Costo/agent/anno |
 |-------|--------|--------|-------|-----------------|
 | Free | €0 | 3 | 1 | - |
-| Starter | €39/mo | 25 | 3 | €18.70 |
-| Professional | €99/mo | 100 | 10 | €11.90 |
-| Business | €249/mo | 500 | 50 | €5.98 |
-| Enterprise | €499/mo | Illimitati | Illimitati | Custom |
+| Starter | €59/mo | 10 | 3 | €70.80 |
+| Professional | €199/mo | 25 | 5 | €95.60 |
+| Business | €499/mo | 50 | 10 | €119.76 |
+| Enterprise | €999/mo | Illimitati | Illimitati | Custom |
 
 ### Confronto Mercato:
 ```
-SentriKat Pro:    €11.90/agent/anno
+SentriKat Pro:    €95.60/agent/anno
 Nucleus Security: €8-12/asset
 Rapid7 InsightVM: €20-25/asset
 Tenable.io:       €20-30/asset
@@ -350,9 +350,9 @@ Agent (sul PC del cliente) → POST /api/import con API key
 ### Limiti per Piano:
 ```
 Free:       3 agents
-Starter:    25 agents
-Pro:        100 agents
-Business:   500 agents
+Starter:    10 agents
+Pro:        25 agents
+Business:   50 agents
 Enterprise: illimitati
 ```
 

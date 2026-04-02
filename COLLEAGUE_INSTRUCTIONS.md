@@ -44,18 +44,18 @@ configurata sul server SaaS (VPS #2). Se la cambi su uno, cambiala su entrambi.
 
 I prezzi SaaS aggiornati sono:
 
-| Piano | Prezzo Mensile | Prezzo Annuale | Agents |
-|-------|---------------|----------------|--------|
-| Free | €0 | €0 | 3 |
-| Starter | €39/mo | €390/anno | 25 |
-| Professional | €99/mo | €990/anno | 100 |
-| Business | €249/mo | €2,490/anno | 500 |
-| Enterprise | €499/mo | €4,990/anno | Illimitati |
+| Piano | Prezzo Mensile | Prezzo Annuale | Agents | Users |
+|-------|---------------|----------------|--------|-------|
+| Free | €0 | €0 | 3 | 1 |
+| Starter | €59/mo | €590/anno | 10 | 3 |
+| Professional | €199/mo | €1,990/anno | 25 | 5 |
+| Business | €499/mo | €4,990/anno | 50 | 10 |
+| Enterprise | €999/mo | €9,990/anno | Illimitati | Illimitati |
 
 **File da modificare**: `landing/src/pages/pricing.astro` (o equivalente)
 
 Per ora il pricing SaaS puo' mostrare "Coming Soon" o "Contact Us".
-La pagina on-premise resta come e' (Demo gratis + Pro €2,499/anno).
+La pagina on-premise resta come e' (Demo gratis + Pro €4,999/anno).
 
 ### PRIORITA' 4 — Aggiornare il Portal Admin
 

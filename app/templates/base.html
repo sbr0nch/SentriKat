@@ -2872,7 +2872,7 @@
 </head>
 <body data-saas-mode="{{ 'true' if saas_mode else 'false' }}" {% if subscription and subscription.plan %}data-subscription-plan="{{ subscription.plan.name }}" data-subscription-status="{{ subscription.status }}" data-subscription-features="{{ subscription.plan.get_features()|tojson|e }}"{% endif %}>
     {% if saas_mode %}
-    {# SaaS mode: show subscription plan info banner for free/trial plans #}
+    {# SaaS mode: show Early Access banner or plan-specific banners #}
     {% if subscription and subscription.plan and subscription.plan.name == 'free' %}
     <div class="demo-banner bg-info text-white text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
         <i class="bi bi-info-circle-fill me-2"></i>
@@ -2885,12 +2885,12 @@
         .demo-banner ~ .top-navbar { margin-top: 40px !important; }
     </style>
     {% elif subscription and subscription.is_trialing() %}
-    <div class="demo-banner bg-warning text-dark text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
-        <i class="bi bi-clock-fill me-2"></i>
-        <strong>Trial</strong> — {{ subscription.plan.display_name }} plan.
+    <div class="demo-banner bg-success bg-opacity-75 text-white text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
+        <i class="bi bi-rocket-takeoff-fill me-2"></i>
+        <strong>Early Access</strong> — {{ subscription.plan.display_name }} plan (all features free).
         {% if subscription.trial_end %}Ends {{ subscription.trial_end.strftime('%d %b %Y') }}.{% endif %}
-        <a href="/admin-panel#settings:subscription" class="ms-2 text-dark fw-semibold text-decoration-underline">Subscribe Now</a>
-        <button type="button" class="btn-close btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
+        <a href="/admin-panel#settings:subscription" class="ms-2 text-white fw-semibold text-decoration-underline">View Plan</a>
+        <button type="button" class="btn-close btn-close-white btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
     </div>
     <style>
         .demo-banner ~ * { margin-top: 40px !important; }

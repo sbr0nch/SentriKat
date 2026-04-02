@@ -24,7 +24,7 @@
 │                         SENTRIKAT EDITIONS                          │
 ├─────────────────┬─────────────────────────────────────────────────-─┤
 │      DEMO       │            PROFESSIONAL                           │
-│     (Free)      │           EUR 2,499/year                          │
+│     (Free)      │           EUR 4,999/year                          │
 ├─────────────────┼──────────────────────────────────────────────────-┤
 │   5 Agents      │   10 Agents (expandable via agent packs)          │
 │   1 User        │   Unlimited Users                                 │
@@ -41,7 +41,7 @@
 
 | Feature | Demo | Professional |
 |---------|------|-------------|
-| **Price** | Free forever | EUR 2,499/year |
+| **Price** | Free forever | EUR 4,999/year |
 | **Agents** | 5 | 10 (expandable) |
 | **Users** | 1 | Unlimited |
 | **Organizations** | 1 | Unlimited |
@@ -67,27 +67,27 @@
 
 | Pack | Agents Added | Annual Price (EUR) |
 |------|-------------|-------------------|
-| +25 Agents | +25 | EUR 499/year |
-| +50 Agents | +50 | EUR 899/year |
-| +100 Agents | +100 | EUR 1,499/year |
-| Unlimited Agents | Unlimited | EUR 2,199/year |
+| +25 Agents | +25 | EUR 999/year |
+| +50 Agents | +50 | EUR 1,499/year |
+| +100 Agents | +100 | EUR 2,499/year |
+| Unlimited Agents | Unlimited | EUR 3,999/year |
 
 ### Priority Support Add-on
 
 | Add-on | Annual Price (EUR) | Details |
 |--------|-------------------|---------|
-| Priority Support | EUR 499/year | 4-hour response SLA |
+| Priority Support | EUR 999/year | 4-hour response SLA |
 
 ### Example Configurations
 
 | Customer Size | Base License | Agent Pack | Total Agents | Annual Cost (EUR) |
 |---------------|-------------|------------|--------------|-------------------|
-| Small IT Team | Professional | - | 10 | 2,499 |
-| Growing Business | Professional | +25 | 35 | 2,998 |
-| Medium Business | Professional | +50 | 60 | 3,398 |
-| Large Business | Professional | +100 | 110 | 3,998 |
-| Enterprise | Professional | Unlimited | Unlimited | 4,698 |
-| Enterprise + Support | Professional | Unlimited + Priority | Unlimited | 5,197 |
+| Small IT Team | Professional | - | 10 | 4,999 |
+| Growing Business | Professional | +25 | 35 | 5,998 |
+| Medium Business | Professional | +50 | 60 | 6,498 |
+| Large Business | Professional | +100 | 110 | 7,498 |
+| Enterprise | Professional | Unlimited | Unlimited | 8,998 |
+| Enterprise + Support | Professional | Unlimited + Priority | Unlimited | 9,997 |
 
 ---
 
@@ -95,9 +95,9 @@
 
 | Commitment | Discount | PRO Annual Price (EUR) | Total Savings |
 |------------|----------|----------------------|---------------|
-| 1 Year | Full price | EUR 2,499/year | - |
-| 2 Years | 10% off | EUR 2,249/year | EUR 500 over 2 years |
-| 3 Years | 15% off | EUR 2,124/year | EUR 1,125 over 3 years |
+| 1 Year | Full price | EUR 4,999/year | - |
+| 2 Years | 10% off | EUR 4,499/year | EUR 1,000 over 2 years |
+| 3 Years | 15% off | EUR 4,249/year | EUR 2,250 over 3 years |
 
 Multi-year discounts apply to the entire subscription (base + add-ons).
 

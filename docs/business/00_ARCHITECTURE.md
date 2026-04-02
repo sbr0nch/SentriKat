@@ -1428,19 +1428,33 @@ jobs:
 
 ## 13.1 Pricing Tiers
 
+**On-Premise:**
+
 | Tier | Price | Agents | Features |
 |------|-------|--------|----------|
 | Demo | Free | 5 | Basic only |
-| Professional | $X/month | 10 | All features |
-| Agent Pack +10 | +$Y/month | +10 | Add-on |
-| Agent Pack +25 | +$Z/month | +25 | Add-on |
-| Unlimited | Custom | ∞ | Enterprise |
+| Professional | €4,999/year | 10 base + packs | All features |
+| Agent Pack +25 | +€999/year | +25 | Add-on |
+| Agent Pack +50 | +€1,499/year | +50 | Add-on |
+| Agent Pack +100 | +€2,499/year | +100 | Add-on |
+| Unlimited Agents | +€3,999/year | Unlimited | Add-on |
+| Support Pack | +€999/year | - | Priority support |
+
+**SaaS (app.sentrikat.com):**
+
+| Tier | Monthly | Annual | Agents | Users |
+|------|---------|--------|--------|-------|
+| Free | €0 | €0 | 3 | 1 |
+| Starter | €59/mo | €590/yr | 10 | 3 |
+| Professional | €199/mo | €1,990/yr | 25 | 5 |
+| Business | €499/mo | €4,990/yr | 50 | 10 |
+| Enterprise | €999/mo | €9,990/yr | Unlimited | Unlimited |
 
 ## 13.2 Revenue Model
 
-- **Subscription**: Monthly/annual licenses
-- **Agent Packs**: Pay for endpoint scale
-- **Support**: Premium support tiers
+- **Subscription**: Monthly/annual SaaS plans (€59-999/mo) or on-premise license (€4,999/yr)
+- **Agent Packs**: Pay for endpoint scale (on-premise: +25/+50/+100/unlimited)
+- **Support**: Premium support pack (€999/yr)
 - **Services**: Implementation, training
 
 ## 13.3 Target Market
