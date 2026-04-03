@@ -303,7 +303,16 @@ def bulk_invite_ldap_users():
         'already_exists': []
     }
 
-    for user_data in users_data:
+    # Progress tracking for bulk invites
+    import time as _time
+    from app import progress as prog
+    job_id = f'ldap_invite_{int(_time.time())}' if len(users_data) > 3 else None
+    if job_id:
+        prog.start(job_id, len(users_data), f'Inviting {len(users_data)} LDAP users...')
+
+    for idx, user_data in enumerate(users_data):
+        if job_id:
+            prog.update(job_id, idx + 1, f'Processing user {idx + 1}/{len(users_data)}', user_data.get('username', ''))
         username = user_data.get('username')
         email = user_data.get('email')
         full_name = user_data.get('full_name')
@@ -332,6 +341,9 @@ def bulk_invite_ldap_users():
                 results['already_exists'].append(username)
             else:
                 results['failed'].append({'username': username, 'error': result.get('error')})
+
+    if job_id:
+        prog.finish(job_id, {'invited': len(results['success']), 'failed': len(results['failed'])})
 
     return jsonify({
         'success': True,

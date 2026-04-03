@@ -4812,18 +4812,24 @@ def sync_epss():
         - Admin only
     """
     from app.epss_sync import sync_epss_scores
+    from app import progress as prog
 
     force = request.args.get('force', '').lower() == 'true'
+    job_id = f'epss_{int(time.time())}'
 
     try:
+        prog.start(job_id, 2, 'Fetching EPSS scores from FIRST.org...')
         updated, errors, message = sync_epss_scores(force=force)
+        prog.finish(job_id, {'updated': updated, 'errors': errors})
         return jsonify({
             'success': True,
             'updated': updated,
             'errors': errors,
-            'message': message
+            'message': message,
+            'job_id': job_id
         })
     except Exception as e:
+        prog.fail(job_id, str(e))
         logger.exception("EPSS sync failed")
         return jsonify({
             'success': False,
