@@ -295,6 +295,10 @@ def create_app(config_class=Config):
     csrf.init_app(app)
     limiter.init_app(app)
 
+    # Session cookie hardening (applies in all environments)
+    app.config.setdefault('SESSION_COOKIE_HTTPONLY', True)
+    app.config.setdefault('SESSION_COOKIE_SAMESITE', 'Lax')
+
     # Security headers via Talisman (only in production)
     # Set FORCE_HTTPS=false in .env if not using HTTPS (e.g., behind reverse proxy)
     if os.environ.get('FLASK_ENV') == 'production':

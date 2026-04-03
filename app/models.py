@@ -978,11 +978,16 @@ class User(db.Model):
     organization = db.relationship('Organization', backref='users')
 
     def set_password(self, password):
-        """Hash and set password for local auth"""
-        self.password_hash = generate_password_hash(password)
+        """Hash and set password for local auth using scrypt (strongest available)"""
+        self.password_hash = generate_password_hash(password, method='scrypt')
 
     def check_password(self, password):
-        """Check password for local auth"""
+        """Check password for local auth.
+
+        Supports both legacy pbkdf2 and current scrypt hashes for seamless
+        migration - existing users' passwords verify against their original
+        hash and get re-hashed to scrypt on next password change.
+        """
         if not self.password_hash:
             return False
         return check_password_hash(self.password_hash, password)
