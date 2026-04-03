@@ -80,6 +80,15 @@ class LDAPManager:
             if not server_host:
                 return {'success': False, 'error': 'LDAP server URL is empty'}
 
+            # SSRF protection: validate LDAP server is not targeting internal networks
+            try:
+                from app.network_security import is_ssrf_safe_url
+                check_url = f"{'ldaps' if use_ssl else 'ldap'}://{server_host}:{config['port']}"
+                if not is_ssrf_safe_url(check_url):
+                    return {'success': False, 'error': 'LDAP server address targets a private/internal network'}
+            except ImportError:
+                pass  # network_security module not available, skip check
+
             # Create server and connection
             server = ldap3.Server(server_host, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)
             conn = ldap3.Connection(server, user=config['bind_dn'], password=config['bind_password'], auto_bind=True)
@@ -227,6 +236,15 @@ class LDAPManager:
             server_host, use_ssl = _parse_ldap_server(config['server'])
             if not server_host:
                 return {'success': False, 'error': 'LDAP server URL is empty'}
+
+            # SSRF protection: validate LDAP server is not targeting internal networks
+            try:
+                from app.network_security import is_ssrf_safe_url
+                check_url = f"{'ldaps' if use_ssl else 'ldap'}://{server_host}:{config['port']}"
+                if not is_ssrf_safe_url(check_url):
+                    return {'success': False, 'error': 'LDAP server address targets a private/internal network'}
+            except ImportError:
+                pass  # network_security module not available, skip check
 
             # Create server and connection
             server = ldap3.Server(server_host, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)

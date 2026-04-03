@@ -349,6 +349,15 @@ def save_batch_settings():
             # Determine if this key should be encrypted
             should_encrypt = key in encrypt_keys
 
+            # SSRF validation for URL-type settings (Jira, GitLab, YouTrack, etc.)
+            _URL_SETTING_KEYS = {'jira_url', 'youtrack_url', 'gitlab_url', 'webhook_url', 'syslog_host'}
+            if key in _URL_SETTING_KEYS and value:
+                str_val = str(value)
+                # syslog_host is a hostname, others are full URLs
+                check_url = str_val if str_val.startswith('http') else f'https://{str_val}'
+                if not _is_ssrf_safe_url(check_url):
+                    return jsonify({'error': f'Setting "{key}" targets a private/internal network address. External URLs are required.'}), 400
+
             # Only save non-empty values (or explicitly set to clear)
             if value is not None and value != '':
                 set_setting(key, str(value), category, is_encrypted=should_encrypt)
