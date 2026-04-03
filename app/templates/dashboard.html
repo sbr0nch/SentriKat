@@ -661,7 +661,8 @@
         </div>
     </div>
 
-    <!-- Last Sync Info -->
+    <!-- Last Sync Info (hidden from SaaS org_admin - sync is platform-managed) -->
+    {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
     <div class="card mt-4">
         <div class="card-body">
             <div class="row align-items-center">
@@ -677,6 +678,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 
 <!-- Sync History Modal -->

@@ -3193,17 +3193,19 @@
                             Email (SMTP)
                         </a>
                         {% endif %}
-                        {% if is_platform_admin or plan_features.get('compliance_reports') or (not saas_mode and has_pro_features) %}
+                        {% if is_platform_admin or (plan_features.get('compliance_reports') and (plan_features.get('ldap') or plan_features.get('sso'))) or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:syslog" class="sidebar-sublink" data-hash="settings:syslog">
                             <i class="bi bi-broadcast"></i>
                             SIEM / Syslog
                         </a>
                         {% endif %}
+                        {% if is_platform_admin or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:system" class="sidebar-sublink" data-hash="settings:system">
                             <i class="bi bi-gear"></i>
                             System
                         </a>
-                        {% if is_platform_admin or plan_features.get('compliance_reports') or (not saas_mode and has_pro_features) %}
+                        {% endif %}
+                        {% if is_platform_admin or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:compliance" class="sidebar-sublink" data-hash="settings:compliance">
                             <i class="bi bi-clipboard-check"></i>
                             Compliance
@@ -3239,10 +3241,12 @@
                             System Logs
                         </a>
                         {% endif %}
+                        {% if is_platform_admin or not saas_mode %}
                         <a href="/admin-panel#settings:guide" class="sidebar-sublink" data-hash="settings:guide">
                             <i class="bi bi-book"></i>
                             Admin Guide
                         </a>
+                        {% endif %}
                     </div>
                 </div>
                 {% endif %}
