@@ -487,7 +487,7 @@ async function loadEvents() {
             const timeAgo = formatTimeAgo(event.created_at);
             const hostname = event.asset_hostname || 'Unknown';
             const description = getEventDescription(event);
-            const sourceIp = event.source_ip ? `<span class="text-muted">(${event.source_ip})</span>` : '';
+            const sourceIp = event.source_ip ? `<span class="text-muted">(${escapeHtml(event.source_ip)})</span>` : '';
 
             return `
                 <div class="event-item d-flex align-items-start gap-2">
@@ -496,7 +496,7 @@ async function loadEvents() {
                     </div>
                     <div class="flex-grow-1 small">
                         <div class="fw-semibold">${escapeHtml(hostname)} ${sourceIp}</div>
-                        <div class="text-muted">${description}</div>
+                        <div class="text-muted">${escapeHtml(description)}</div>
                     </div>
                     <div class="event-time">${timeAgo}</div>
                 </div>`;
@@ -547,48 +547,50 @@ function getEventIcon(eventType) {
 
 function getEventDescription(event) {
     const details = event.details || {};
+    // Helper to safely coerce detail fields to strings (defense-in-depth)
+    const s = (v, fallback) => String(v != null ? v : (fallback != null ? fallback : ''));
     switch (event.event_type) {
         case 'registered':
-            return `New agent registered (${details.products_count || 0} products)`;
+            return `New agent registered (${parseInt(details.products_count) || 0} products)`;
         case 'inventory_reported':
-            const created = details.products_created || 0;
-            const installs = details.installations_created || 0;
-            return `Inventory reported: ${details.products_count || 0} products (${created} new, ${installs} installations)`;
+            const created = parseInt(details.products_created) || 0;
+            const installs = parseInt(details.installations_created) || 0;
+            return `Inventory reported: ${parseInt(details.products_count) || 0} products (${created} new, ${installs} installations)`;
         case 'heartbeat':
             return 'Heartbeat received';
         case 'status_changed':
             if (details.warning === 'hostname_collision') {
-                return `Hostname collision detected! Old agent: ${(details.old_agent_id || '').substring(0, 8)}... New: ${(details.new_agent_id || '').substring(0, 8)}...`;
+                return `Hostname collision detected! Old agent: ${s(details.old_agent_id).substring(0, 8)}... New: ${s(details.new_agent_id).substring(0, 8)}...`;
             }
-            return `Status: ${event.old_value || '?'} → ${event.new_value || '?'}`;
+            return `Status: ${s(event.old_value, '?')} → ${s(event.new_value, '?')}`;
         case 'license_exceeded':
-            return `{% if saas_mode %}Quota{% else %}License{% endif %} limit exceeded: ${details.message || 'Agent limit reached'}`;
+            return `{% if saas_mode %}Quota{% else %}License{% endif %} limit exceeded: ${s(details.message, 'Agent limit reached')}`;
         case 'license_warning':
-            return `{% if saas_mode %}Quota{% else %}License{% endif %} warning: ${details.message || ''}`;
+            return `{% if saas_mode %}Quota{% else %}License{% endif %} warning: ${s(details.message)}`;
         case 'ip_blocked':
-            return `Connection blocked from ${details.blocked_ip || 'unknown IP'}`;
+            return `Connection blocked from ${s(details.blocked_ip, 'unknown IP')}`;
         case 'auth_failed':
-            return `Authentication failed: ${details.reason || 'invalid key'}`;
+            return `Authentication failed: ${s(details.reason, 'invalid key')}`;
         case 'container_scan':
-            const imgs = details.images_processed || 0;
-            const vulns = details.total_vulnerabilities || 0;
+            const imgs = parseInt(details.images_processed) || 0;
+            const vulns = parseInt(details.total_vulnerabilities) || 0;
             return `Container scan: ${imgs} image${imgs !== 1 ? 's' : ''}, ${vulns} vulnerabilit${vulns !== 1 ? 'ies' : 'y'}`;
         case 'dependency_scan':
-            const depCount = details.total_dependencies || 0;
-            const depVulns = details.total_vulnerabilities || 0;
-            const vulnPkgs = details.vulnerable_packages || 0;
-            const lockfiles = details.lockfiles_parsed || 0;
+            const depCount = parseInt(details.total_dependencies) || 0;
+            const depVulns = parseInt(details.total_vulnerabilities) || 0;
+            const vulnPkgs = parseInt(details.vulnerable_packages) || 0;
+            const lockfiles = parseInt(details.lockfiles_parsed) || 0;
             return `Dependency scan: ${lockfiles} lockfile${lockfiles !== 1 ? 's' : ''}, ${depCount} dependencies, ${vulnPkgs} vulnerable (${depVulns} CVE${depVulns !== 1 ? 's' : ''})`;
         case 'agent_updated':
-            return `Agent updated: v${event.old_value || '?'} → v${event.new_value || '?'}`;
+            return `Agent updated: v${s(event.old_value, '?')} → v${s(event.new_value, '?')}`;
         case 'update_requested':
-            return `Agent update pushed${details.message ? ': ' + details.message : ''}`;
+            return `Agent update pushed${details.message ? ': ' + s(details.message) : ''}`;
         case 'scan_requested':
-            return `Immediate scan requested${details.message ? ': ' + details.message : ''}`;
+            return `Immediate scan requested${details.message ? ': ' + s(details.message) : ''}`;
         case 'decommissioned':
             return 'Agent decommissioned';
         default:
-            return event.event_type.replace(/_/g, ' ');
+            return s(event.event_type).replace(/_/g, ' ');
     }
 }
 

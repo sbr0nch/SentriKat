@@ -5,7 +5,8 @@ API endpoints for scheduled reports management.
 from flask import Blueprint, request, jsonify, session, send_file, Response
 from app.models import ScheduledReport, Organization, User
 from app import db, csrf
-from app.saas import is_saas_mode, get_scoped_org_id, restrict_cross_org_access
+from app.saas import is_saas_mode, get_scoped_org_id, restrict_cross_org_access, saas_admin_or_org_admin
+from app.licensing import requires_professional
 from datetime import datetime
 import logging
 
@@ -157,6 +158,7 @@ def _add_report_integrity(report_data, generated_by_user=None):
 
 @bp.route('/api/reports/scheduled', methods=['GET'])
 @login_required
+@requires_professional('Scheduled Reports')
 def get_scheduled_reports():
     """Get all scheduled reports for the current organization"""
     org_id = session.get('organization_id')
@@ -182,6 +184,7 @@ def get_scheduled_report(report_id):
 
 @bp.route('/api/reports/scheduled', methods=['POST'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def create_scheduled_report():
     """Create a new scheduled report"""
     org_id = session.get('organization_id')
@@ -272,6 +275,7 @@ def create_scheduled_report():
 
 @bp.route('/api/reports/scheduled/<int:report_id>', methods=['PUT'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def update_scheduled_report(report_id):
     """Update a scheduled report"""
     org_id = session.get('organization_id')
@@ -344,6 +348,7 @@ def update_scheduled_report(report_id):
 
 @bp.route('/api/reports/scheduled/<int:report_id>', methods=['DELETE'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def delete_scheduled_report(report_id):
     """Delete a scheduled report"""
     org_id = session.get('organization_id')
@@ -372,6 +377,7 @@ def delete_scheduled_report(report_id):
 
 @bp.route('/api/reports/scheduled/<int:report_id>/toggle', methods=['POST'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def toggle_scheduled_report(report_id):
     """Toggle enabled/disabled status of a scheduled report"""
     org_id = session.get('organization_id')
@@ -404,6 +410,7 @@ def toggle_scheduled_report(report_id):
 
 @bp.route('/api/reports/scheduled/<int:report_id>/send-now', methods=['POST'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def send_report_now(report_id):
     """Manually trigger a scheduled report to send immediately"""
     org_id = session.get('organization_id')
@@ -1710,32 +1717,26 @@ def generate_executive_summary():
 # ============================================================================
 
 @bp.route('/api/settings/syslog', methods=['GET'])
-@login_required
+@saas_admin_or_org_admin
 def get_syslog_settings():
-    """Get current syslog forwarding configuration."""
-    from app.models import SystemSettings
-
-    settings = {}
-    for key in ['syslog_enabled', 'syslog_host', 'syslog_port', 'syslog_protocol',
-                'syslog_format', 'syslog_facility']:
-        setting = SystemSettings.query.filter_by(key=key).first()
-        settings[key] = setting.value if setting else None
+    """Get current syslog forwarding configuration (org-scoped in SaaS mode)."""
+    from app.settings_api import get_setting
 
     return jsonify({
-        'enabled': settings.get('syslog_enabled', 'false') == 'true',
-        'host': settings.get('syslog_host', ''),
-        'port': int(settings.get('syslog_port', '514') or '514'),
-        'protocol': settings.get('syslog_protocol', 'udp'),
-        'format': settings.get('syslog_format', 'cef'),
-        'facility': settings.get('syslog_facility', 'local0'),
+        'enabled': get_setting('syslog_enabled', 'false') == 'true',
+        'host': get_setting('syslog_host', ''),
+        'port': int(get_setting('syslog_port', '514') or '514'),
+        'protocol': get_setting('syslog_protocol', 'udp'),
+        'format': get_setting('syslog_format', 'cef'),
+        'facility': get_setting('syslog_facility', 'local0'),
     })
 
 
 @bp.route('/api/settings/syslog', methods=['POST'])
-@login_required
+@saas_admin_or_org_admin
 def update_syslog_settings():
-    """Update syslog forwarding configuration."""
-    from app.models import SystemSettings
+    """Update syslog forwarding configuration (org-scoped in SaaS mode)."""
+    from app.settings_api import set_setting
 
     data = request.get_json()
     if not data:
@@ -1754,31 +1755,19 @@ def update_syslog_settings():
     if port < 1 or port > 65535:
         return jsonify({'error': 'Port must be 1-65535'}), 400
 
-    # Save settings
-    settings_map = {
-        'syslog_enabled': str(data.get('enabled', False)).lower(),
-        'syslog_host': data.get('host', ''),
-        'syslog_port': str(port),
-        'syslog_protocol': protocol,
-        'syslog_format': fmt,
-        'syslog_facility': data.get('facility', 'local0'),
-    }
-
-    for key, value in settings_map.items():
-        setting = SystemSettings.query.filter_by(key=key).first()
-        if setting:
-            setting.value = value
-        else:
-            setting = SystemSettings(key=key, value=value, category='syslog')
-            db.session.add(setting)
-
-    db.session.commit()
+    # Save settings (org-scoped via set_setting helper)
+    set_setting('syslog_enabled', str(data.get('enabled', False)).lower(), 'syslog')
+    set_setting('syslog_host', data.get('host', ''), 'syslog')
+    set_setting('syslog_port', str(port), 'syslog')
+    set_setting('syslog_protocol', protocol, 'syslog')
+    set_setting('syslog_format', fmt, 'syslog')
+    set_setting('syslog_facility', data.get('facility', 'local0'), 'syslog')
 
     return jsonify({'success': True, 'message': 'Syslog settings updated'})
 
 
 @bp.route('/api/settings/syslog/test', methods=['POST'])
-@login_required
+@saas_admin_or_org_admin
 def test_syslog():
     """Send a test message to the configured syslog server."""
     try:
@@ -1818,24 +1807,20 @@ def send_syslog_event(event_type, cve_id, severity, product, message, **kwargs):
         True if sent successfully, False if syslog not configured
     """
     import socket
-    from app.models import SystemSettings
+    from app.settings_api import get_setting
 
-    # Check if enabled
-    enabled_setting = SystemSettings.query.filter_by(key='syslog_enabled').first()
-    if not enabled_setting or enabled_setting.value != 'true':
+    # Check if enabled (org-scoped in SaaS mode)
+    # Accept optional organization_id kwarg for background tasks
+    org_id = kwargs.pop('organization_id', None)
+
+    if get_setting('syslog_enabled', 'false', organization_id=org_id) != 'true':
         return False
 
-    host_setting = SystemSettings.query.filter_by(key='syslog_host').first()
-    port_setting = SystemSettings.query.filter_by(key='syslog_port').first()
-    protocol_setting = SystemSettings.query.filter_by(key='syslog_protocol').first()
-    format_setting = SystemSettings.query.filter_by(key='syslog_format').first()
-    facility_setting = SystemSettings.query.filter_by(key='syslog_facility').first()
-
-    host = host_setting.value if host_setting else ''
-    port = int(port_setting.value) if port_setting else 514
-    protocol = protocol_setting.value if protocol_setting else 'udp'
-    fmt = format_setting.value if format_setting else 'cef'
-    facility = facility_setting.value if facility_setting else 'local0'
+    host = get_setting('syslog_host', '', organization_id=org_id)
+    port = int(get_setting('syslog_port', '514', organization_id=org_id) or '514')
+    protocol = get_setting('syslog_protocol', 'udp', organization_id=org_id)
+    fmt = get_setting('syslog_format', 'cef', organization_id=org_id)
+    facility = get_setting('syslog_facility', 'local0', organization_id=org_id)
 
     if not host:
         return False

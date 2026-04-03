@@ -924,6 +924,19 @@ class ServiceCatalog(db.Model):
             'usage_frequency': self.usage_frequency
         }
 
+class PasswordHistory(db.Model):
+    """Stores previous password hashes to prevent password reuse.
+
+    Enforced by the password_history_count setting (0 = disabled).
+    """
+    __tablename__ = 'password_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    password_hash = db.Column(db.String(256), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class User(db.Model):
     """User accounts for authentication"""
     __tablename__ = 'users'
@@ -978,14 +991,25 @@ class User(db.Model):
     organization = db.relationship('Organization', backref='users')
 
     def set_password(self, password):
-        """Hash and set password for local auth"""
-        self.password_hash = generate_password_hash(password)
+        """Hash and set password for local auth using scrypt (strongest available)"""
+        self.password_hash = generate_password_hash(password, method='scrypt')
 
     def check_password(self, password):
-        """Check password for local auth"""
+        """Check password for local auth.
+
+        Supports both legacy pbkdf2 and current scrypt hashes. If a legacy
+        hash is detected and verification succeeds, the hash is transparently
+        upgraded to scrypt so all users migrate over time without any action.
+        """
         if not self.password_hash:
             return False
-        return check_password_hash(self.password_hash, password)
+        if not check_password_hash(self.password_hash, password):
+            return False
+        # Auto-upgrade legacy hashes (pbkdf2) to scrypt on successful login
+        if not self.password_hash.startswith('scrypt:'):
+            self.password_hash = generate_password_hash(password, method='scrypt')
+            # Caller must commit the session for the upgrade to persist
+        return True
 
     def is_locked(self):
         """Check if account is locked due to failed login attempts"""
@@ -1002,15 +1026,10 @@ class User(db.Model):
 
     def record_failed_login(self):
         """Record a failed login attempt and lock if threshold reached"""
-        from app.models import SystemSettings
-
-        # Get lockout settings
-        # Note: setting key is 'max_failed_logins' (as saved by security settings API)
-        max_attempts_setting = SystemSettings.query.filter_by(key='max_failed_logins').first()
-        lockout_duration_setting = SystemSettings.query.filter_by(key='lockout_duration').first()
-
-        max_attempts = int(max_attempts_setting.value) if max_attempts_setting else 5
-        lockout_minutes = int(lockout_duration_setting.value) if lockout_duration_setting else 30
+        # Get lockout settings (org-scoped in SaaS mode)
+        from app.settings_api import get_setting
+        max_attempts = int(get_setting('max_failed_logins', '5') or '5')
+        lockout_minutes = int(get_setting('lockout_duration', '30') or '30')
 
         # Increment failed attempts
         self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
@@ -1033,9 +1052,9 @@ class User(db.Model):
         if self.must_change_password:
             return True
 
-        # Get expiration setting
-        expiry_setting = SystemSettings.query.filter_by(key='password_expiry_days').first()
-        expiry_days = int(expiry_setting.value) if expiry_setting else 0
+        # Get expiration setting (org-scoped in SaaS mode)
+        from app.settings_api import get_setting
+        expiry_days = int(get_setting('password_expiry_days', '0') or '0')
 
         if expiry_days <= 0:
             return False  # Password expiration disabled
@@ -1052,8 +1071,8 @@ class User(db.Model):
         if self.auth_type != 'local':
             return None
 
-        expiry_setting = SystemSettings.query.filter_by(key='password_expiry_days').first()
-        expiry_days = int(expiry_setting.value) if expiry_setting else 0
+        from app.settings_api import get_setting
+        expiry_days = int(get_setting('password_expiry_days', '0') or '0')
 
         if expiry_days <= 0:
             return None  # Never expires
@@ -1067,7 +1086,28 @@ class User(db.Model):
         return max(0, remaining)
 
     def update_password(self, new_password):
-        """Update password and reset expiration timer"""
+        """Update password with history check and expiration reset.
+
+        Raises ValueError if the new password matches a recent password
+        within the configured password_history_count window.
+        """
+        from app.settings_api import get_setting
+
+        # Check password history if enabled
+        history_count = int(get_setting('password_history_count', '0') or '0')
+        if history_count > 0 and self.password_hash:
+            recent = PasswordHistory.query.filter_by(user_id=self.id).order_by(
+                PasswordHistory.created_at.desc()
+            ).limit(history_count).all()
+            for entry in recent:
+                if check_password_hash(entry.password_hash, new_password):
+                    raise ValueError(f'Cannot reuse any of your last {history_count} passwords')
+            # Also check current password
+            if check_password_hash(self.password_hash, new_password):
+                raise ValueError(f'Cannot reuse any of your last {history_count} passwords')
+            # Save current hash to history before changing
+            db.session.add(PasswordHistory(user_id=self.id, password_hash=self.password_hash))
+
         self.set_password(new_password)
         self.password_changed_at = datetime.utcnow()
         self.must_change_password = False
@@ -1171,18 +1211,13 @@ class User(db.Model):
         Returns (is_valid, error_message)
         Only applies to local users.
         """
-        # Get policy settings
-        min_length = SystemSettings.query.filter_by(key='password_min_length').first()
-        req_upper = SystemSettings.query.filter_by(key='password_require_uppercase').first()
-        req_lower = SystemSettings.query.filter_by(key='password_require_lowercase').first()
-        req_numbers = SystemSettings.query.filter_by(key='password_require_numbers').first()
-        req_special = SystemSettings.query.filter_by(key='password_require_special').first()
-
-        min_len = int(min_length.value) if min_length else 8
-        require_upper = req_upper.value == 'true' if req_upper else True
-        require_lower = req_lower.value == 'true' if req_lower else True
-        require_numbers = req_numbers.value == 'true' if req_numbers else True
-        require_special = req_special.value == 'true' if req_special else False
+        # Get policy settings (org-scoped in SaaS mode)
+        from app.settings_api import get_setting
+        min_len = int(get_setting('password_min_length', '8') or '8')
+        require_upper = get_setting('password_require_uppercase', 'true') == 'true'
+        require_lower = get_setting('password_require_lowercase', 'true') == 'true'
+        require_numbers = get_setting('password_require_numbers', 'true') == 'true'
+        require_special = get_setting('password_require_special', 'false') == 'true'
 
         errors = []
 

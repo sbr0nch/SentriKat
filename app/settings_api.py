@@ -237,6 +237,9 @@ ALLOWED_SETTING_KEYS = {
     'saml_enabled', 'saml_idp_metadata', 'saml_sp_entity_id', 'saml_sp_acs_url',
     'saml_sp_sls_url', 'saml_default_org_id', 'saml_user_mapping',
     'saml_auto_provision', 'saml_update_user_info',
+    # Syslog / SIEM forwarding settings
+    'syslog_enabled', 'syslog_host', 'syslog_port', 'syslog_protocol',
+    'syslog_format', 'syslog_facility',
 }
 
 
@@ -345,6 +348,15 @@ def save_batch_settings():
 
             # Determine if this key should be encrypted
             should_encrypt = key in encrypt_keys
+
+            # SSRF validation for URL-type settings (Jira, GitLab, YouTrack, etc.)
+            _URL_SETTING_KEYS = {'jira_url', 'youtrack_url', 'gitlab_url', 'webhook_url', 'syslog_host'}
+            if key in _URL_SETTING_KEYS and value:
+                str_val = str(value)
+                # syslog_host is a hostname, others are full URLs
+                check_url = str_val if str_val.startswith('http') else f'https://{str_val}'
+                if not _is_ssrf_safe_url(check_url):
+                    return jsonify({'error': f'Setting "{key}" targets a private/internal network address. External URLs are required.'}), 400
 
             # Only save non-empty values (or explicitly set to clear)
             if value is not None and value != '':
@@ -1863,9 +1875,13 @@ def upload_logo():
         upload_dir = os.path.join(data_dir, 'uploads')
         os.makedirs(upload_dir, exist_ok=True)
 
-        # Generate safe filename
+        # Generate safe, org-specific filename to prevent collisions in SaaS
         ext = file.filename.rsplit('.', 1)[1].lower()
-        filename = f'custom_logo.{ext}'
+        org_id = _get_settings_org_id()
+        if org_id:
+            filename = f'custom_logo_org{org_id}.{ext}'
+        else:
+            filename = f'custom_logo.{ext}'
         filepath = os.path.join(upload_dir, filename)
 
         # Save file
@@ -1935,8 +1951,12 @@ def delete_logo():
             if os.path.exists(filepath):
                 os.remove(filepath)
 
-        # Remove setting
-        setting = SystemSettings.query.filter_by(key='logo_url').first()
+        # Remove setting (org-scoped in SaaS mode)
+        org_id = _get_settings_org_id()
+        if org_id is not None:
+            setting = SystemSettings.query.filter_by(key='logo_url', organization_id=org_id).first()
+        else:
+            setting = SystemSettings.query.filter_by(key='logo_url', organization_id=None).first()
         if setting:
             db.session.delete(setting)
             db.session.commit()

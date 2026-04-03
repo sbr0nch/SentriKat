@@ -104,9 +104,31 @@ def serve_branding_logo():
 
     This public endpoint is needed so the login page can display custom logos.
     Only serves files named custom_logo.* from the uploads directory.
+
+    In SaaS mode, uses session org_id (if logged in) or org query parameter
+    (for login page) to serve the correct tenant's logo.
     """
     from app.models import SystemSettings
-    setting = SystemSettings.query.filter_by(key='logo_url').first()
+    from app.saas import is_saas_mode
+
+    # Determine org_id for tenant-aware logo serving
+    org_id = None
+    if is_saas_mode():
+        # Try session first (authenticated users)
+        try:
+            org_id = session.get('organization_id')
+        except RuntimeError:
+            pass
+        # Fall back to query parameter (login page passes org context)
+        if not org_id:
+            org_id = request.args.get('org', type=int)
+
+    # Query logo_url scoped to the org (or global for on-premise)
+    if org_id:
+        setting = SystemSettings.query.filter_by(key='logo_url', organization_id=org_id).first()
+    else:
+        setting = SystemSettings.query.filter_by(key='logo_url', organization_id=None).first()
+
     if not setting or not setting.value or '/uploads/' not in setting.value:
         # No custom logo set — redirect to default
         return redirect('/static/images/favicon-128x128.png')
@@ -853,21 +875,14 @@ def validate_password_strength(password):
     Validate password meets security requirements from database settings.
     Only applies to local users.
     """
-    from app.models import SystemSettings
+    from app.settings_api import get_setting
 
-    # Get policy settings from database
-    min_length = SystemSettings.query.filter_by(key='password_min_length').first()
-    req_upper = SystemSettings.query.filter_by(key='password_require_uppercase').first()
-    req_lower = SystemSettings.query.filter_by(key='password_require_lowercase').first()
-    req_numbers = SystemSettings.query.filter_by(key='password_require_numbers').first()
-    req_special = SystemSettings.query.filter_by(key='password_require_special').first()
-
-    # Use settings or defaults
-    min_len = int(min_length.value) if min_length else 8
-    require_upper = req_upper.value == 'true' if req_upper else True
-    require_lower = req_lower.value == 'true' if req_lower else True
-    require_numbers = req_numbers.value == 'true' if req_numbers else True
-    require_special = req_special.value == 'true' if req_special else False
+    # Get policy settings (org-scoped in SaaS mode)
+    min_len = int(get_setting('password_min_length', '8') or '8')
+    require_upper = get_setting('password_require_uppercase', 'true') == 'true'
+    require_lower = get_setting('password_require_lowercase', 'true') == 'true'
+    require_numbers = get_setting('password_require_numbers', 'true') == 'true'
+    require_special = get_setting('password_require_special', 'false') == 'true'
 
     errors = []
 
@@ -1032,8 +1047,8 @@ def get_products():
             else:
                 query = query.filter(Product.organization_id == filter_org)
     else:
-        # Get user's current organization from session
-        org_id = session.get('organization_id') or current_user.organization_id
+        # Get user's current organization using scoped helper (handles SaaS + on-premise)
+        org_id = get_scoped_org_id(current_user)
         logger.info(f"get_products: org_id={org_id}")
 
         if not org_id:
@@ -1066,13 +1081,16 @@ def get_products():
         search_terms = search.split()
         for term in search_terms:
             term_pattern = f"%{term}%"
-            # Each term must match at least one field
+            # Each term must match at least one field (including CPE fields)
             query = query.filter(
                 db.or_(
                     Product.vendor.ilike(term_pattern),
                     Product.product_name.ilike(term_pattern),
                     Product.version.ilike(term_pattern),
-                    Product.keywords.ilike(term_pattern)
+                    Product.keywords.ilike(term_pattern),
+                    Product.cpe_vendor.ilike(term_pattern),
+                    Product.cpe_product.ilike(term_pattern),
+                    Product.cpe_uri.ilike(term_pattern)
                 )
             )
         logger.info(f"get_products: search terms={search_terms}")
@@ -1664,8 +1682,8 @@ def delete_product(product_id):
     exclude_from_scans = request.args.get('exclude', 'false').lower() == 'true'
     scope = request.args.get('scope', 'all')  # 'all' or comma-separated org IDs
 
-    # Get user's current organization
-    user_org_id = session.get('organization_id') or current_user.organization_id
+    # Get user's current organization (handles SaaS + on-premise)
+    user_org_id = get_scoped_org_id(current_user)
 
     # Get all organizations this product is assigned to (many-to-many + legacy fallback)
     product_org_ids = [org.id for org in product.organizations.all()]
@@ -1870,7 +1888,7 @@ def batch_delete_products():
     exclude_from_scans = data.get('exclude', False)
     scope = data.get('scope', 'all')
 
-    user_org_id = session.get('organization_id') or current_user.organization_id
+    user_org_id = get_scoped_org_id(current_user)
     is_super = current_user.is_super_admin()
 
     deleted = 0

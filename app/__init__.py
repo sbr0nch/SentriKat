@@ -295,6 +295,10 @@ def create_app(config_class=Config):
     csrf.init_app(app)
     limiter.init_app(app)
 
+    # Session cookie hardening (applies in all environments)
+    app.config.setdefault('SESSION_COOKIE_HTTPONLY', True)
+    app.config.setdefault('SESSION_COOKIE_SAMESITE', 'Lax')
+
     # Security headers via Talisman (only in production)
     # Set FORCE_HTTPS=false in .env if not using HTTPS (e.g., behind reverse proxy)
     if os.environ.get('FLASK_ENV') == 'production':
@@ -361,6 +365,30 @@ def create_app(config_class=Config):
     app.register_blueprint(gdpr_api.gdpr_bp)
 
     # Error handlers: return JSON for API routes, HTML for browser routes
+    # Global helper: sanitize error messages in production to prevent info leakage
+    @app.after_request
+    def sanitize_error_responses(response):
+        """In production, strip detailed error messages from 500 responses.
+
+        Individual endpoints often return str(e) in error responses which can
+        leak internal paths, database schema, or stack trace fragments.
+        In production, replace with a generic message while keeping the original
+        logged server-side.
+        """
+        if (app.config.get('ENV') == 'production' or os.environ.get('FLASK_ENV') == 'production'):
+            if response.status_code == 500 and response.content_type and 'json' in response.content_type:
+                try:
+                    import json
+                    data = json.loads(response.get_data(as_text=True))
+                    if 'error' in data:
+                        # Log the real error for debugging
+                        app.logger.error(f"Sanitized 500 error: {data['error']}")
+                        data['error'] = 'An internal error occurred. Please try again or contact support.'
+                        response.set_data(json.dumps(data))
+                except Exception:
+                    pass
+        return response
+
     @app.errorhandler(404)
     def not_found_error(e):
         from flask import request as _req, jsonify as _jfy
@@ -556,13 +584,13 @@ def create_app(config_class=Config):
     @app.before_request
     def enforce_session_timeout():
         from flask import session
-        from app.models import SystemSettings
         if 'user_id' not in session:
             return None
         try:
-            timeout_setting = SystemSettings.query.filter_by(key='session_timeout').first()
-            if timeout_setting and timeout_setting.value:
-                timeout_minutes = int(timeout_setting.value)
+            from app.settings_api import get_setting
+            timeout_val = get_setting('session_timeout', None)
+            if timeout_val:
+                timeout_minutes = int(timeout_val)
                 if timeout_minutes > 0:
                     app.permanent_session_lifetime = timedelta(minutes=timeout_minutes)
         except Exception:
