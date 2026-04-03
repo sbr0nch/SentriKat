@@ -465,11 +465,12 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
         new_cve_ids: Optional list of CVE IDs for batched message
     """
     try:
-        # Get webhook settings
-        slack_enabled = SystemSettings.query.filter_by(key='slack_enabled').first()
-        slack_url = SystemSettings.query.filter_by(key='slack_webhook_url').first()
-        teams_enabled = SystemSettings.query.filter_by(key='teams_enabled').first()
-        teams_url = SystemSettings.query.filter_by(key='teams_webhook_url').first()
+        # Get webhook settings (org-scoped in SaaS mode via get_setting helper)
+        from app.settings_api import get_setting
+        slack_enabled_val = get_setting('slack_enabled', 'false')
+        slack_url_val = get_setting('slack_webhook_url', '')
+        teams_enabled_val = get_setting('teams_enabled', 'false')
+        teams_url_val = get_setting('teams_webhook_url', '')
 
         results = []
 
@@ -482,11 +483,11 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
                 cve_list_str = ", ".join(new_cve_ids[:5]) + f" +{len(new_cve_ids) - 5} more"
 
         # Send to Slack if enabled
-        if slack_enabled and slack_enabled.value == 'true' and slack_url and slack_url.value:
+        if slack_enabled_val == 'true' and slack_url_val:
             try:
                 # Decrypt webhook URL if encrypted
                 from app.encryption import decrypt_value
-                webhook_url = decrypt_value(slack_url.value) if slack_url.value.startswith('gAAAA') else slack_url.value
+                webhook_url = decrypt_value(slack_url_val) if slack_url_val.startswith('gAAAA') else slack_url_val
 
                 # Use batched format if CVE IDs provided
                 if cve_list_str:
@@ -516,10 +517,10 @@ def send_webhook_notification(new_cves_count, critical_count, total_matches, new
                 results.append({'slack': False, 'error': str(e)})
 
         # Send to Teams if enabled
-        if teams_enabled and teams_enabled.value == 'true' and teams_url and teams_url.value:
+        if teams_enabled_val == 'true' and teams_url_val:
             try:
                 from app.encryption import decrypt_value
-                webhook_url = decrypt_value(teams_url.value) if teams_url.value.startswith('gAAAA') else teams_url.value
+                webhook_url = decrypt_value(teams_url_val) if teams_url_val.startswith('gAAAA') else teams_url_val
 
                 facts = [
                     {"name": "Source", "value": "Global CVE Sync"},

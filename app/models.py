@@ -1002,15 +1002,10 @@ class User(db.Model):
 
     def record_failed_login(self):
         """Record a failed login attempt and lock if threshold reached"""
-        from app.models import SystemSettings
-
-        # Get lockout settings
-        # Note: setting key is 'max_failed_logins' (as saved by security settings API)
-        max_attempts_setting = SystemSettings.query.filter_by(key='max_failed_logins').first()
-        lockout_duration_setting = SystemSettings.query.filter_by(key='lockout_duration').first()
-
-        max_attempts = int(max_attempts_setting.value) if max_attempts_setting else 5
-        lockout_minutes = int(lockout_duration_setting.value) if lockout_duration_setting else 30
+        # Get lockout settings (org-scoped in SaaS mode)
+        from app.settings_api import get_setting
+        max_attempts = int(get_setting('max_failed_logins', '5') or '5')
+        lockout_minutes = int(get_setting('lockout_duration', '30') or '30')
 
         # Increment failed attempts
         self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
@@ -1033,9 +1028,9 @@ class User(db.Model):
         if self.must_change_password:
             return True
 
-        # Get expiration setting
-        expiry_setting = SystemSettings.query.filter_by(key='password_expiry_days').first()
-        expiry_days = int(expiry_setting.value) if expiry_setting else 0
+        # Get expiration setting (org-scoped in SaaS mode)
+        from app.settings_api import get_setting
+        expiry_days = int(get_setting('password_expiry_days', '0') or '0')
 
         if expiry_days <= 0:
             return False  # Password expiration disabled
@@ -1052,8 +1047,8 @@ class User(db.Model):
         if self.auth_type != 'local':
             return None
 
-        expiry_setting = SystemSettings.query.filter_by(key='password_expiry_days').first()
-        expiry_days = int(expiry_setting.value) if expiry_setting else 0
+        from app.settings_api import get_setting
+        expiry_days = int(get_setting('password_expiry_days', '0') or '0')
 
         if expiry_days <= 0:
             return None  # Never expires
@@ -1171,18 +1166,13 @@ class User(db.Model):
         Returns (is_valid, error_message)
         Only applies to local users.
         """
-        # Get policy settings
-        min_length = SystemSettings.query.filter_by(key='password_min_length').first()
-        req_upper = SystemSettings.query.filter_by(key='password_require_uppercase').first()
-        req_lower = SystemSettings.query.filter_by(key='password_require_lowercase').first()
-        req_numbers = SystemSettings.query.filter_by(key='password_require_numbers').first()
-        req_special = SystemSettings.query.filter_by(key='password_require_special').first()
-
-        min_len = int(min_length.value) if min_length else 8
-        require_upper = req_upper.value == 'true' if req_upper else True
-        require_lower = req_lower.value == 'true' if req_lower else True
-        require_numbers = req_numbers.value == 'true' if req_numbers else True
-        require_special = req_special.value == 'true' if req_special else False
+        # Get policy settings (org-scoped in SaaS mode)
+        from app.settings_api import get_setting
+        min_len = int(get_setting('password_min_length', '8') or '8')
+        require_upper = get_setting('password_require_uppercase', 'true') == 'true'
+        require_lower = get_setting('password_require_lowercase', 'true') == 'true'
+        require_numbers = get_setting('password_require_numbers', 'true') == 'true'
+        require_special = get_setting('password_require_special', 'false') == 'true'
 
         errors = []
 

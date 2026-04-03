@@ -2947,7 +2947,16 @@ def list_agent_keys():
             if org_id:
                 keys = AgentApiKey.query.filter_by(organization_id=org_id).all()
             else:
-                keys = AgentApiKey.query.all()
+                # In SaaS mode, even super_admin should be scoped to their org
+                from app.saas import is_saas_mode
+                if is_saas_mode():
+                    scoped_org = session.get('organization_id') or user.organization_id
+                    if scoped_org:
+                        keys = AgentApiKey.query.filter_by(organization_id=scoped_org).all()
+                    else:
+                        keys = []
+                else:
+                    keys = AgentApiKey.query.all()
 
         # Safely convert to dict
         api_keys = []

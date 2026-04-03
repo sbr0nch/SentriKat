@@ -104,9 +104,31 @@ def serve_branding_logo():
 
     This public endpoint is needed so the login page can display custom logos.
     Only serves files named custom_logo.* from the uploads directory.
+
+    In SaaS mode, uses session org_id (if logged in) or org query parameter
+    (for login page) to serve the correct tenant's logo.
     """
     from app.models import SystemSettings
-    setting = SystemSettings.query.filter_by(key='logo_url').first()
+    from app.saas import is_saas_mode
+
+    # Determine org_id for tenant-aware logo serving
+    org_id = None
+    if is_saas_mode():
+        # Try session first (authenticated users)
+        try:
+            org_id = session.get('organization_id')
+        except RuntimeError:
+            pass
+        # Fall back to query parameter (login page passes org context)
+        if not org_id:
+            org_id = request.args.get('org', type=int)
+
+    # Query logo_url scoped to the org (or global for on-premise)
+    if org_id:
+        setting = SystemSettings.query.filter_by(key='logo_url', organization_id=org_id).first()
+    else:
+        setting = SystemSettings.query.filter_by(key='logo_url', organization_id=None).first()
+
     if not setting or not setting.value or '/uploads/' not in setting.value:
         # No custom logo set — redirect to default
         return redirect('/static/images/favicon-128x128.png')
@@ -853,21 +875,14 @@ def validate_password_strength(password):
     Validate password meets security requirements from database settings.
     Only applies to local users.
     """
-    from app.models import SystemSettings
+    from app.settings_api import get_setting
 
-    # Get policy settings from database
-    min_length = SystemSettings.query.filter_by(key='password_min_length').first()
-    req_upper = SystemSettings.query.filter_by(key='password_require_uppercase').first()
-    req_lower = SystemSettings.query.filter_by(key='password_require_lowercase').first()
-    req_numbers = SystemSettings.query.filter_by(key='password_require_numbers').first()
-    req_special = SystemSettings.query.filter_by(key='password_require_special').first()
-
-    # Use settings or defaults
-    min_len = int(min_length.value) if min_length else 8
-    require_upper = req_upper.value == 'true' if req_upper else True
-    require_lower = req_lower.value == 'true' if req_lower else True
-    require_numbers = req_numbers.value == 'true' if req_numbers else True
-    require_special = req_special.value == 'true' if req_special else False
+    # Get policy settings (org-scoped in SaaS mode)
+    min_len = int(get_setting('password_min_length', '8') or '8')
+    require_upper = get_setting('password_require_uppercase', 'true') == 'true'
+    require_lower = get_setting('password_require_lowercase', 'true') == 'true'
+    require_numbers = get_setting('password_require_numbers', 'true') == 'true'
+    require_special = get_setting('password_require_special', 'false') == 'true'
 
     errors = []
 

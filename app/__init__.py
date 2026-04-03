@@ -556,13 +556,13 @@ def create_app(config_class=Config):
     @app.before_request
     def enforce_session_timeout():
         from flask import session
-        from app.models import SystemSettings
         if 'user_id' not in session:
             return None
         try:
-            timeout_setting = SystemSettings.query.filter_by(key='session_timeout').first()
-            if timeout_setting and timeout_setting.value:
-                timeout_minutes = int(timeout_setting.value)
+            from app.settings_api import get_setting
+            timeout_val = get_setting('session_timeout', None)
+            if timeout_val:
+                timeout_minutes = int(timeout_val)
                 if timeout_minutes > 0:
                     app.permanent_session_lifetime = timedelta(minutes=timeout_minutes)
         except Exception:
