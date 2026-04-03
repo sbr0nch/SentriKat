@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, session, send_file, Response
 from app.models import ScheduledReport, Organization, User
 from app import db, csrf
 from app.saas import is_saas_mode, get_scoped_org_id, restrict_cross_org_access, saas_admin_or_org_admin
+from app.licensing import requires_professional
 from datetime import datetime
 import logging
 
@@ -157,6 +158,7 @@ def _add_report_integrity(report_data, generated_by_user=None):
 
 @bp.route('/api/reports/scheduled', methods=['GET'])
 @login_required
+@requires_professional('Scheduled Reports')
 def get_scheduled_reports():
     """Get all scheduled reports for the current organization"""
     org_id = session.get('organization_id')
@@ -182,6 +184,7 @@ def get_scheduled_report(report_id):
 
 @bp.route('/api/reports/scheduled', methods=['POST'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def create_scheduled_report():
     """Create a new scheduled report"""
     org_id = session.get('organization_id')
@@ -272,6 +275,7 @@ def create_scheduled_report():
 
 @bp.route('/api/reports/scheduled/<int:report_id>', methods=['PUT'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def update_scheduled_report(report_id):
     """Update a scheduled report"""
     org_id = session.get('organization_id')
@@ -344,6 +348,7 @@ def update_scheduled_report(report_id):
 
 @bp.route('/api/reports/scheduled/<int:report_id>', methods=['DELETE'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def delete_scheduled_report(report_id):
     """Delete a scheduled report"""
     org_id = session.get('organization_id')
@@ -372,6 +377,7 @@ def delete_scheduled_report(report_id):
 
 @bp.route('/api/reports/scheduled/<int:report_id>/toggle', methods=['POST'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def toggle_scheduled_report(report_id):
     """Toggle enabled/disabled status of a scheduled report"""
     org_id = session.get('organization_id')
@@ -404,6 +410,7 @@ def toggle_scheduled_report(report_id):
 
 @bp.route('/api/reports/scheduled/<int:report_id>/send-now', methods=['POST'])
 @admin_required
+@requires_professional('Scheduled Reports')
 def send_report_now(report_id):
     """Manually trigger a scheduled report to send immediately"""
     org_id = session.get('organization_id')
