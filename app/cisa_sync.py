@@ -1316,54 +1316,68 @@ def enrich_with_euvd_exploited():
         return 0, 0
 
 
-def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=100):
+def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=100, job_id=None):
     """Main sync function to download and process CISA KEV"""
+    from app import progress as prog
+    if job_id:
+        prog.start(job_id, 7, 'Starting sync...')
+
     start_time = datetime.utcnow()
     sync_log = SyncLog()
 
+    _p = lambda s, d, dt='': prog.update(job_id, s, d, dt) if job_id else None
+
     try:
-        # Download CISA KEV data
+        # Step 1: Download CISA KEV data
+        _p(1, 'Downloading CISA KEV catalog...')
         kev_data = download_cisa_kev()
+        vuln_count = len(kev_data.get('vulnerabilities', []))
+        _p(1, 'Downloading CISA KEV catalog...', f'{vuln_count} vulnerabilities in catalog')
 
-        # Parse and store vulnerabilities
+        # Step 2: Parse and store vulnerabilities
+        _p(2, 'Parsing and storing vulnerabilities...', f'Processing {vuln_count} CVEs')
         stored, updated = parse_and_store_vulnerabilities(kev_data)
+        _p(2, 'Parsing and storing vulnerabilities...', f'{stored} new, {updated} updated')
 
-        # Fetch CPE version data from NVD BEFORE matching
-        # This enables precise version-based matching
+        # Step 3: Fetch CPE version data from NVD BEFORE matching
         cpe_enriched = 0
         if fetch_cpe:
             try:
+                _p(3, 'Fetching CPE version data from NVD...', f'Up to {cpe_limit} CVEs')
                 cpe_enriched = fetch_cpe_version_data(limit=cpe_limit)
+                _p(3, 'Fetching CPE version data from NVD...', f'{cpe_enriched} enriched')
                 logger.info(f"Fetched CPE version data for {cpe_enriched} vulnerabilities")
             except Exception as e:
                 logger.warning(f"CPE version fetch failed (non-critical): {e}")
+                _p(3, 'CPE version fetch skipped', str(e)[:80])
 
-        # Match vulnerabilities with products (now with version data if available)
-        # Use rematch_all_products() to BOTH clean up stale matches (where CPE
-        # version ranges have changed, e.g. vendor released cumulative update)
-        # AND create new matches.  Without cleanup, matches persist even after
-        # the NVD narrows the affected version range.
+        # Step 4: Match vulnerabilities with products
+        _p(4, 'Matching vulnerabilities with products...')
         from app.filters import rematch_all_products
         removed_count, matches_count = rematch_all_products()
+        _p(4, 'Matching vulnerabilities with products...', f'{matches_count} matches found, {removed_count} stale removed')
         if removed_count:
             logger.info(f"Cleaned up {removed_count} stale matches (no longer in affected version range)")
 
-        # Enrich with CVSS data (multi-source: NVD → CVE.org → EUVD)
+        # Step 5: Enrich with CVSS data (multi-source: NVD, CVE.org, EUVD)
         if enrich_cvss:
             try:
+                _p(5, 'Enriching CVSS scores...', f'Up to {cvss_limit} CVEs from NVD/CVE.org')
                 enrich_with_cvss_data(limit=cvss_limit)
+                _p(5, 'Enriching CVSS scores...', 'Done')
             except Exception as e:
                 logger.warning(f"CVSS enrichment failed (non-critical): {e}")
+                _p(5, 'CVSS enrichment skipped', str(e)[:80])
 
-        # Cross-reference with ENISA EUVD exploited vulnerabilities
-        # Also creates NEW entries for actively exploited CVEs not yet in CISA KEV
+        # Step 6: Cross-reference with ENISA EUVD exploited vulnerabilities
         euvd_new_count = 0
         try:
+            _p(6, 'Cross-referencing EUVD exploited CVEs...')
             euvd_enriched, euvd_new_count = enrich_with_euvd_exploited()
+            _p(6, 'Cross-referencing EUVD exploited CVEs...', f'{euvd_new_count} new entries')
         except Exception as e:
             logger.warning(f"EUVD enrichment failed (non-critical): {e}")
 
-        # If EUVD added new vulnerabilities, match them against products
         if euvd_new_count > 0:
             try:
                 _, euvd_matches = rematch_all_products()
@@ -1371,11 +1385,13 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
             except Exception as e:
                 logger.warning(f"EUVD product matching failed (non-critical): {e}")
 
-        # Send email and webhook alerts for all new matches from this sync
+        # Step 7: Send alerts for new matches
         alert_results = []
         try:
+            _p(7, 'Sending alerts for new matches...')
             alerts = send_alerts_for_new_matches(start_time, source_label='cisa_kev')
             alert_results = alerts.get('alert_results', [])
+            _p(7, 'Sending alerts for new matches...', f'{len(alert_results)} alerts sent')
         except Exception as e:
             logger.warning(f"Alert sending failed (non-critical): {e}")
 
@@ -1389,7 +1405,7 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
         db.session.add(sync_log)
         db.session.commit()
 
-        return {
+        result = {
             'status': 'success',
             'stored': stored,
             'updated': updated,
@@ -1398,8 +1414,13 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
             'duration': duration,
             'alerts_sent': alert_results
         }
+        if job_id:
+            prog.finish(job_id, result)
+        return result
 
     except Exception as e:
+        if job_id:
+            prog.fail(job_id, str(e))
         # Rollback any failed transaction first
         try:
             db.session.rollback()

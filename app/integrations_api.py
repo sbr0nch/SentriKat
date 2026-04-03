@@ -10,6 +10,7 @@ Provides:
 
 from flask import Blueprint, request, jsonify, session, Response
 from datetime import datetime
+import time
 import secrets
 import uuid
 import logging
@@ -925,7 +926,16 @@ def bulk_process_queue():
 
     results = {'processed': 0, 'errors': 0, 'products': []}
 
-    for item_id in item_ids:
+    # Progress tracking for bulk operations
+    from app import progress as prog
+    job_id = f'import_bulk_{int(time.time())}' if len(item_ids) > 5 else None
+    if job_id:
+        prog.start(job_id, len(item_ids), f'Processing {len(item_ids)} items...')
+
+    for idx, item_id in enumerate(item_ids):
+        if job_id:
+            prog.update(job_id, idx + 1, f'Processing item {idx + 1}/{len(item_ids)}')
+
         item = ImportQueue.query.get(item_id)
         if not item or item.status != 'pending':
             results['errors'] += 1
@@ -953,8 +963,12 @@ def bulk_process_queue():
 
     try:
         db.session.commit()
+        if job_id:
+            prog.finish(job_id, results)
     except Exception as e:
         db.session.rollback()
+        if job_id:
+            prog.fail(job_id, str(e))
         logger.error(f"Bulk process commit failed: {e}")
         return jsonify({'error': 'Database error during bulk processing'}), 500
 

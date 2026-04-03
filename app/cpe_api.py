@@ -965,21 +965,40 @@ def apply_cpe_suggestions():
     product_ids = data.get('product_ids', [])
 
     if apply_all:
-        updated, total = batch_apply_cpe_mappings(commit=True)
+        import time
+        from app import progress as prog
+        job_id = f'cpe_map_{int(time.time())}'
+        prog.start(job_id, 2, 'Applying CPE mappings to all products...')
+        try:
+            updated, total = batch_apply_cpe_mappings(commit=True)
+            prog.finish(job_id, {'updated': updated, 'total': total})
+        except Exception as e:
+            prog.fail(job_id, str(e))
+            raise
         return jsonify({
             'success': True,
             'updated': updated,
             'total_without_cpe': total,
+            'job_id': job_id,
             'message': f'Applied CPE mappings to {updated} of {total} products'
         })
     elif product_ids:
+        import time
+        from app import progress as prog
+        job_id = f'cpe_map_{int(time.time())}' if len(product_ids) > 10 else None
+        if job_id:
+            prog.start(job_id, len(product_ids), f'Mapping {len(product_ids)} products...')
         updated = 0
-        for pid in product_ids[:100]:  # Limit to 100 at a time
+        for idx, pid in enumerate(product_ids[:100]):
+            if job_id:
+                prog.update(job_id, idx + 1, f'Mapping product {idx + 1}/{min(len(product_ids), 100)}')
             product = Product.query.get(pid)
             if product and apply_cpe_to_product(product):
                 updated += 1
         if updated > 0:
             db.session.commit()
+        if job_id:
+            prog.finish(job_id, {'updated': updated})
         return jsonify({
             'success': True,
             'updated': updated,

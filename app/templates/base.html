@@ -3694,6 +3694,81 @@
             toastEl.addEventListener('hidden.bs.toast', function() { toastEl.remove(); });
         }
 
+        // Progress banner management
+        let _progressPollInterval = null;
+
+        function showProgressBanner(jobId) {
+            // Create banner if it doesn't exist
+            let banner = document.getElementById('progressBanner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'progressBanner';
+                banner.className = 'alert alert-info py-2 px-3 mb-0 rounded-0 border-0 d-flex align-items-center gap-2';
+                banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;font-size:0.85rem;';
+                banner.innerHTML = `
+                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                    <div class="flex-grow-1">
+                        <span id="progressDesc">Starting...</span>
+                        <small class="text-muted ms-2" id="progressDetail"></small>
+                    </div>
+                    <div class="progress flex-shrink-0" style="width:120px;height:6px;">
+                        <div class="progress-bar" id="progressBar" role="progressbar" style="width:0%"></div>
+                    </div>
+                    <small class="text-muted" id="progressPercent">0%</small>
+                `;
+                document.body.prepend(banner);
+                // Push content down
+                document.body.style.paddingTop = '40px';
+            }
+            banner.style.display = 'flex';
+
+            // Start polling
+            if (_progressPollInterval) clearInterval(_progressPollInterval);
+            _progressPollInterval = setInterval(() => pollProgress(jobId), 1500);
+        }
+
+        function hideProgressBanner() {
+            const banner = document.getElementById('progressBanner');
+            if (banner) {
+                banner.style.display = 'none';
+                document.body.style.paddingTop = '';
+            }
+            if (_progressPollInterval) {
+                clearInterval(_progressPollInterval);
+                _progressPollInterval = null;
+            }
+        }
+
+        async function pollProgress(jobId) {
+            try {
+                const response = await fetch(`/api/progress/${jobId}`);
+                if (!response.ok) return;
+                const p = await response.json();
+
+                const descEl = document.getElementById('progressDesc');
+                const detailEl = document.getElementById('progressDetail');
+                const barEl = document.getElementById('progressBar');
+                const pctEl = document.getElementById('progressPercent');
+
+                if (descEl) descEl.textContent = p.description || 'Processing...';
+                if (detailEl) detailEl.textContent = p.detail || '';
+                if (barEl) barEl.style.width = (p.percent || 0) + '%';
+                if (pctEl) pctEl.textContent = `Step ${p.step}/${p.total_steps}`;
+
+                if (p.status === 'completed') {
+                    hideProgressBanner();
+                    const r = p.result || {};
+                    showToast(`Sync completed! ${r.matches || 0} matches found in ${(r.duration || 0).toFixed(1)}s`, 'success');
+                    setTimeout(() => location.reload(), 2000);
+                } else if (p.status === 'error') {
+                    hideProgressBanner();
+                    showToast(`Sync failed: ${p.detail || 'Unknown error'}`, 'danger');
+                }
+            } catch (e) {
+                // Polling error - ignore, will retry
+            }
+        }
+
         async function triggerSync(btn) {
             const confirmed = await showConfirm(
                 'Sync vulnerability data from CISA KEV and NVD, then update all product matches?\n\nThis may take a minute.',
@@ -3708,21 +3783,19 @@
 
             const syncBtn = btn || document.getElementById('syncBtn');
             setButtonLoading(syncBtn, 'Syncing...');
-            showLoading();
             try {
                 const response = await fetch('/api/sync', { method: 'POST' });
                 const result = await response.json();
 
-                if (result.status === 'success') {
-                    showToast(`Sync completed! ${result.updated} vulnerabilities updated, ${result.matches} new matches found.`, 'success');
-                    setTimeout(() => location.reload(), 2000);
-                } else {
-                    showToast(`Sync failed: ${result.error}`, 'danger');
+                if (result.job_id) {
+                    // Background sync started - show progress banner
+                    showProgressBanner(result.job_id);
+                } else if (result.error) {
+                    showToast(result.error, 'danger');
+                    resetButton(syncBtn);
                 }
             } catch (error) {
                 showToast(`Error: ${error.message}`, 'danger');
-            } finally {
-                hideLoading();
                 resetButton(syncBtn);
             }
         }
@@ -3740,6 +3813,12 @@
             document.querySelectorAll('.tz-label').forEach(function(el) {
                 el.textContent = DISPLAY_TIMEZONE;
             });
+            // Check for active background jobs (e.g. sync in progress after page refresh)
+            fetch('/api/progress/active').then(r => r.json()).then(data => {
+                if (data.jobs && data.jobs.length > 0) {
+                    showProgressBanner(data.jobs[0].job_id);
+                }
+            }).catch(() => {});
         });
 
         function formatDate(dateString) {
