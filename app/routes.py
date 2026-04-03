@@ -3,6 +3,7 @@ from app import db, csrf, limiter
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 import os
+import time
 from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory, ContainerImage, ContainerVulnerability, DependencyScan, SystemSettings
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
@@ -4492,32 +4493,70 @@ def trigger_sync():
     """
     Manually trigger full vulnerability sync (CISA KEV + NVD recent CVEs).
 
+    Runs in a background thread so the frontend can poll progress.
+    Returns immediately with a job_id for tracking.
+
     Permissions:
     - Super Admin only: Can trigger manual sync
     """
-    result = sync_cisa_kev()
+    import threading
+    from app import progress as prog
 
-    # Also run NVD recent CVEs sync for zero-day coverage.
-    # Without this, "Awaiting Analysis" CVEs in NVD are only picked up
-    # by the 2-hour scheduled job — not by the manual sync button.
-    try:
-        from app.cisa_sync import sync_nvd_recent_cves
-        nvd_new, nvd_skipped, nvd_errors = sync_nvd_recent_cves()
-        result['nvd_new'] = nvd_new
-        result['nvd_skipped'] = nvd_skipped
-        result['nvd_errors'] = nvd_errors
+    # Check if a sync is already running
+    active = prog.get_active()
+    if any(j['job_id'].startswith('sync_') for j in active):
+        return jsonify({'error': 'A sync is already running', 'job_id': active[0]['job_id']}), 409
 
-        # If NVD imported new CVEs, rematch — these were imported AFTER the
-        # rematch inside sync_cisa_kev() already ran.
-        if nvd_new > 0:
-            from app.filters import rematch_all_products
-            _, nvd_matches = rematch_all_products()
-            result['nvd_matches'] = nvd_matches
-    except Exception as e:
-        logger.warning(f"NVD sync during manual trigger failed (non-critical): {e}")
-        result['nvd_error'] = str(e)
+    job_id = f'sync_{int(time.time())}'
 
-    return jsonify(result)
+    def _run_sync(app):
+        with app.app_context():
+            try:
+                result = sync_cisa_kev(job_id=job_id)
+
+                # Also run NVD recent CVEs sync
+                try:
+                    prog.update(job_id, 7, 'Syncing recent NVD CVEs...', 'Zero-day coverage')
+                    from app.cisa_sync import sync_nvd_recent_cves
+                    nvd_new, nvd_skipped, nvd_errors = sync_nvd_recent_cves()
+                    if nvd_new > 0:
+                        prog.update(job_id, 7, 'Matching NVD CVEs with products...', f'{nvd_new} new CVEs')
+                        from app.filters import rematch_all_products
+                        rematch_all_products()
+                except Exception as e:
+                    logger.warning(f"NVD sync during manual trigger failed (non-critical): {e}")
+
+                prog.finish(job_id, result)
+            except Exception as e:
+                logger.error(f"Background sync failed: {e}")
+                prog.fail(job_id, str(e))
+
+    app = current_app._get_current_object()
+    t = threading.Thread(target=_run_sync, args=(app,), daemon=True)
+    t.start()
+
+    return jsonify({'job_id': job_id, 'status': 'started'})
+
+
+@bp.route('/api/progress/<job_id>', methods=['GET'])
+@login_required
+def get_progress(job_id):
+    """Get progress of a running job."""
+    from app import progress as prog
+    prog.cleanup()  # Housekeeping
+    p = prog.get(job_id)
+    if not p:
+        return jsonify({'status': 'not_found'}), 404
+    return jsonify(p)
+
+
+@bp.route('/api/progress/active', methods=['GET'])
+@login_required
+def get_active_progress():
+    """Get all active jobs (for the progress banner)."""
+    from app import progress as prog
+    prog.cleanup()
+    return jsonify({'jobs': prog.get_active()})
 
 @bp.route('/api/sync/cve/<cve_id>', methods=['POST'])
 @admin_required
