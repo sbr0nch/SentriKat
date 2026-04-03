@@ -1221,9 +1221,12 @@
                 </div>
             </div>
             <!-- Settings Sub-Tabs (Consolidated into 6 groups) -->
+            {# Plan-aware settings tabs - match sidebar visibility logic #}
+            {% set plan_features = subscription.plan.get_features() if (subscription and subscription.plan) else {} %}
+            {% set is_platform_admin = current_user and current_user.is_super_admin() %}
             <ul class="nav nav-pills mb-4" id="settingsTabs" role="tablist">
-                {% if current_user and (current_user.is_super_admin() or (saas_mode and current_user.is_org_admin())) %}
-                {% if has_pro_features %}
+                {# Authentication: only when plan has ldap/sso, or on-premise pro, or super_admin #}
+                {% if is_platform_admin or plan_features.get('ldap') or plan_features.get('sso') or (not saas_mode and has_pro_features) %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="auth-settings-tab" type="button" onclick="showSettingsGroup('auth', this)">
                         <i class="bi bi-shield-lock me-2"></i>Authentication
@@ -1235,57 +1238,61 @@
                     </button>
                 </li>
                 {% else %}
+                {# No auth tab - make Email & Alerts the active/default tab #}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="email-settings-tab" type="button" onclick="showSettingsGroup('email', this)">
                         <i class="bi bi-envelope me-2"></i>Email & Alerts
                     </button>
                 </li>
                 {% endif %}
-                {% else %}
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="email-settings-tab" type="button" onclick="showSettingsGroup('email', this)">
-                        <i class="bi bi-envelope me-2"></i>Email & Alerts
-                    </button>
-                </li>
-                {% endif %}
+                {# System: super_admin or on-premise only (SaaS org_admin has nothing useful here) #}
+                {% if is_platform_admin or not saas_mode %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="system-settings-tab" type="button" onclick="showSettingsGroup('system', this)">
                         <i class="bi bi-gear me-2"></i>System
                     </button>
                 </li>
-                {% if has_pro_features %}
+                {% endif %}
+                {# SIEM/Syslog: Business+ plans or on-premise pro or super_admin #}
+                {% if is_platform_admin or (plan_features.get('compliance_reports') and (plan_features.get('ldap') or plan_features.get('sso'))) or (not saas_mode and has_pro_features) %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="syslog-settings-tab" type="button" onclick="showSettingsGroup('syslog', this)">
                         <i class="bi bi-broadcast me-2"></i>SIEM / Syslog
                     </button>
                 </li>
                 {% endif %}
-                {% if current_user and current_user.is_super_admin() %}
+                {# Compliance: super_admin or on-premise only #}
+                {% if is_platform_admin or (not saas_mode and has_pro_features) %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="compliance-settings-tab" type="button" onclick="showSettingsGroup('compliance', this)">
                         <i class="bi bi-clipboard-check me-2"></i>Compliance
                     </button>
                 </li>
-                {% if has_pro_features %}
+                {% endif %}
+                {# Appearance/White Label: only when plan has it or super_admin #}
+                {% if is_platform_admin or plan_features.get('white_label') or (not saas_mode and has_pro_features) %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="appearance-settings-tab" type="button" onclick="showSettingsGroup('appearance', this)">
                         <i class="bi bi-palette me-2"></i>Appearance
                     </button>
                 </li>
                 {% endif %}
+                {# Subscription (SaaS) or License (on-premise) #}
+                {% if saas_mode %}
                 <li class="nav-item" role="presentation">
-                    {% if saas_mode %}
                     <button class="nav-link" id="license-tab" type="button" onclick="showSettingsGroup('subscription', this)">
                         <i class="bi bi-credit-card me-2"></i>Subscription
                     </button>
-                    {% else %}
+                </li>
+                {% else %}
+                <li class="nav-item" role="presentation">
                     <button class="nav-link" id="license-tab" type="button" onclick="showSettingsGroup('license', this)">
                         <i class="bi bi-key me-2"></i>License
                     </button>
-                    {% endif %}
                 </li>
+                {% endif %}
                 {# Health Checks & Logs: infrastructure-level, hide from SaaS org_admin #}
-                {% if not saas_mode or (current_user and current_user.is_super_admin()) %}
+                {% if not saas_mode or is_platform_admin %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="health-settings-tab" type="button" onclick="showSettingsGroup('health', this)">
                         <i class="bi bi-heart-pulse me-2"></i>Health Checks
@@ -1297,6 +1304,8 @@
                     </button>
                 </li>
                 {% endif %}
+                {# Admin Guide: super_admin or on-premise only #}
+                {% if is_platform_admin or not saas_mode %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="guide-settings-tab" type="button" onclick="showSettingsGroup('guide', this)">
                         <i class="bi bi-book me-2"></i>Admin Guide
