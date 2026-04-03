@@ -3064,17 +3064,21 @@
                             <i class="bi bi-pc-display"></i>
                             Endpoints
                         </a>
-                        <a href="/containers" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.containers' else '' }}" data-tooltip="Container Security">
+                        <a href="/admin#containers" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.containers' else '' }}" onclick="navigateInventoryTab('containers', event)" data-tooltip="Container Security">
                             <i class="bi bi-box-seam"></i>
                             Containers
                         </a>
-                        <a href="/dependencies" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.dependencies' else '' }}" data-tooltip="Dependencies">
+                        <a href="/admin#dependencies" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.dependencies' else '' }}" onclick="navigateInventoryTab('dependencies', event)" data-tooltip="Dependencies">
                             <i class="bi bi-diagram-3"></i>
                             Dependencies
                         </a>
                         <a href="/admin#import-queue" class="sidebar-sublink" onclick="navigateInventoryTab('import-queue', event)" data-tooltip="Import Queue">
                             <i class="bi bi-inbox"></i>
                             Import Queue
+                        </a>
+                        <a href="/admin#exclusions" class="sidebar-sublink" onclick="navigateInventoryTab('exclusions', event)" data-tooltip="Exclusions">
+                            <i class="bi bi-shield-x"></i>
+                            Exclusions
                         </a>
                     </div>
                 </div>
@@ -4113,6 +4117,16 @@
         // Navigate to an inventory tab (Products/Endpoints/Software Overview)
         // If already on /admin, switch tabs in-place; otherwise navigate via href
         function navigateInventoryTab(tabName, event) {
+            // Containers and Dependencies are separate pages - always navigate
+            if (tabName === 'containers') {
+                window.location.href = '/containers';
+                return;
+            }
+            if (tabName === 'dependencies') {
+                window.location.href = '/dependencies';
+                return;
+            }
+
             const isOnAdmin = window.location.pathname === '/admin';
             if (isOnAdmin) {
                 event.preventDefault();
@@ -4120,7 +4134,8 @@
                 const tabMap = {
                     'products': 'products-tab',
                     'endpoints': 'endpoints-tab',
-                    'import-queue': 'import-queue-tab'
+                    'import-queue': 'import-queue-tab',
+                    'exclusions': 'exclusions-tab'
                 };
                 const tabId = tabMap[tabName];
                 const tabEl = document.getElementById(tabId);

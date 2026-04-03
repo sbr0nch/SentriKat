@@ -1,0 +1,33 @@
+<!-- Shared Inventory Tabs navigation - included in admin.html, containers.html, dependencies.html -->
+<ul class="nav nav-tabs mb-3" id="inventoryTabs" role="tablist">
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if request.endpoint == 'main.admin' and not request.args.get('tab') }}" href="/admin">
+            <i class="bi bi-box-seam me-1"></i>Products List
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="/admin#endpoints">
+            <i class="bi bi-pc-display me-1"></i>Endpoints
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if request.endpoint == 'main.containers' }}" href="/containers">
+            <i class="bi bi-box-seam me-1"></i>Containers
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if request.endpoint == 'main.dependencies' }}" href="/dependencies">
+            <i class="bi bi-diagram-3 me-1"></i>Dependencies
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="/admin#import-queue">
+            <i class="bi bi-inbox me-1"></i>Import Queue
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="/admin#exclusions">
+            <i class="bi bi-shield-x me-1"></i>Exclusions
+        </a>
+    </li>
+</ul>

@@ -1345,7 +1345,10 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
 
         # Enrich with CVSS data (multi-source: NVD → CVE.org → EUVD)
         if enrich_cvss:
-            enrich_with_cvss_data(limit=cvss_limit)
+            try:
+                enrich_with_cvss_data(limit=cvss_limit)
+            except Exception as e:
+                logger.warning(f"CVSS enrichment failed (non-critical): {e}")
 
         # Cross-reference with ENISA EUVD exploited vulnerabilities
         # Also creates NEW entries for actively exploited CVEs not yet in CISA KEV
@@ -1364,8 +1367,12 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
                 logger.warning(f"EUVD product matching failed (non-critical): {e}")
 
         # Send email and webhook alerts for all new matches from this sync
-        alerts = send_alerts_for_new_matches(start_time, source_label='cisa_kev')
-        alert_results = alerts.get('alert_results', [])
+        alert_results = []
+        try:
+            alerts = send_alerts_for_new_matches(start_time, source_label='cisa_kev')
+            alert_results = alerts.get('alert_results', [])
+        except Exception as e:
+            logger.warning(f"Alert sending failed (non-critical): {e}")
 
         # Log success
         duration = (datetime.utcnow() - start_time).total_seconds()

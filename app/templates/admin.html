@@ -17,7 +17,7 @@
         </div>
     </div>
 
-    <!-- Inventory Tabs: Products | Endpoints -->
+    <!-- Inventory Tabs: Products | Endpoints | Containers | Dependencies | Import Queue | Exclusions -->
     <ul class="nav nav-tabs mb-3" id="inventoryTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="products-tab" data-bs-toggle="tab" data-bs-target="#productsPane" type="button">
@@ -28,6 +28,16 @@
             <button class="nav-link" id="endpoints-tab" data-bs-toggle="tab" data-bs-target="#endpointsPane" type="button">
                 <i class="bi bi-pc-display me-1"></i>Endpoints
             </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link" id="containers-tab" href="/containers">
+                <i class="bi bi-box-seam me-1"></i>Containers
+            </a>
+        </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link" id="dependencies-tab" href="/dependencies">
+                <i class="bi bi-diagram-3 me-1"></i>Dependencies
+            </a>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="import-queue-tab" data-bs-toggle="tab" data-bs-target="#importQueuePane" type="button">
@@ -2953,7 +2963,7 @@
                                         <small class="text-muted font-monospace">cpe:${escapeHtml(vendorKey)}:${escapeHtml(productKey)}</small>
                                         ${versionHint ? `<small class="text-muted ms-2">(e.g. ${escapeHtml(versionHint)})</small>` : ''}
                                     </div>
-                                    <span class="badge bg-primary"><i class="bi bi-chevron-down"></i> ${versionCount} ver</span>
+                                    <span class="badge bg-primary"><i class="bi bi-chevron-down"></i> ${versionCount > 0 ? versionCount + ' ver' : 'All versions'}</span>
                                 </div>
                             </div>
                             <div class="version-picker bg-light p-2" style="display: none;">
@@ -3297,7 +3307,7 @@
                                         <code>cpe:2.3:a:${escapeHtml(vendorKey)}:${escapeHtml(productKey)}:*</code>
                                     </small>
                                 </div>
-                                <span class="badge bg-secondary">${versions.length} versions</span>
+                                <span class="badge bg-secondary">${versions.length > 0 ? versions.length + ' versions' : 'All versions'}</span>
                             </div>
                             ${versionPreview ? `<small class="text-muted">Versions: ${escapeHtml(versionPreview)}${versions.length > 5 ? '...' : ''}</small>` : ''}
                         </div>
@@ -4331,6 +4341,7 @@
         if (!endpointsLoaded) loadEndpoints();
         loadAgentVersionSummary();
     });
+
     // Also load if the tab is already active on page load (hash navigation)
     document.addEventListener('DOMContentLoaded', function() {
         const epTab = document.getElementById('endpointsPane');

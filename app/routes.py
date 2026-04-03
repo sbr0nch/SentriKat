@@ -1032,8 +1032,8 @@ def get_products():
             else:
                 query = query.filter(Product.organization_id == filter_org)
     else:
-        # Get user's current organization from session
-        org_id = session.get('organization_id') or current_user.organization_id
+        # Get user's current organization using scoped helper (handles SaaS + on-premise)
+        org_id = get_scoped_org_id(current_user)
         logger.info(f"get_products: org_id={org_id}")
 
         if not org_id:
@@ -1066,13 +1066,16 @@ def get_products():
         search_terms = search.split()
         for term in search_terms:
             term_pattern = f"%{term}%"
-            # Each term must match at least one field
+            # Each term must match at least one field (including CPE fields)
             query = query.filter(
                 db.or_(
                     Product.vendor.ilike(term_pattern),
                     Product.product_name.ilike(term_pattern),
                     Product.version.ilike(term_pattern),
-                    Product.keywords.ilike(term_pattern)
+                    Product.keywords.ilike(term_pattern),
+                    Product.cpe_vendor.ilike(term_pattern),
+                    Product.cpe_product.ilike(term_pattern),
+                    Product.cpe_uri.ilike(term_pattern)
                 )
             )
         logger.info(f"get_products: search terms={search_terms}")
@@ -1664,8 +1667,8 @@ def delete_product(product_id):
     exclude_from_scans = request.args.get('exclude', 'false').lower() == 'true'
     scope = request.args.get('scope', 'all')  # 'all' or comma-separated org IDs
 
-    # Get user's current organization
-    user_org_id = session.get('organization_id') or current_user.organization_id
+    # Get user's current organization (handles SaaS + on-premise)
+    user_org_id = get_scoped_org_id(current_user)
 
     # Get all organizations this product is assigned to (many-to-many + legacy fallback)
     product_org_ids = [org.id for org in product.organizations.all()]
@@ -1870,7 +1873,7 @@ def batch_delete_products():
     exclude_from_scans = data.get('exclude', False)
     scope = data.get('scope', 'all')
 
-    user_org_id = session.get('organization_id') or current_user.organization_id
+    user_org_id = get_scoped_org_id(current_user)
     is_super = current_user.is_super_admin()
 
     deleted = 0

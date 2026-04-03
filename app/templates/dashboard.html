@@ -2034,11 +2034,15 @@
 
             if (sync.sync_date) {
                 const date = new Date(sync.sync_date);
-                const statusBadge = sync.status === 'success' ?
-                    '<span class="badge bg-success">Success</span>' :
-                    '<span class="badge bg-danger">Failed</span>';
+                let statusBadge;
+                if (sync.status === 'success') {
+                    statusBadge = '<span class="badge bg-success">Success</span>';
+                } else {
+                    statusBadge = '<span class="badge bg-danger">Failed</span>';
+                }
+                const errorHint = sync.error_message ? ` <small class="text-muted" title="${sync.error_message.substring(0, 200)}"><i class="bi bi-info-circle"></i></small>` : '';
                 document.getElementById('lastSync').innerHTML = `
-                    ${date.toLocaleString()} ${statusBadge} |
+                    ${date.toLocaleString()} ${statusBadge}${errorHint} |
                     ${sync.matches_found || 0} matches found in ${(sync.duration_seconds || 0).toFixed(2)}s
                 `;
             }
