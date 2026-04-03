@@ -3149,11 +3149,13 @@
                             <i class="bi bi-activity"></i>
                             Agent Activity
                         </a>
-                        {% if has_pro_features %}
+                        {% if is_platform_admin or plan_features.get('email_alerts') or (not saas_mode and has_pro_features) %}
                         <a href="/reports/scheduled" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.scheduled_reports' else '' }}" data-tooltip="Scheduled Reports">
                             <i class="bi bi-calendar-check"></i>
                             Scheduled Reports
                         </a>
+                        {% endif %}
+                        {% if is_platform_admin or plan_features.get('jira_integration') or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#integrations:jiraIntegration" class="sidebar-sublink" data-hash="integrations:jiraIntegration">
                             <i class="bi bi-kanban"></i>
                             Issue Trackers
@@ -3173,14 +3175,16 @@
                         <span class="link-text">Settings</span>
                         <i class="bi bi-chevron-right submenu-arrow"></i>
                     </a>
+                    {# Build plan features dict for granular sidebar visibility #}
+                    {% set plan_features = subscription.plan.get_features() if (subscription and subscription.plan) else {} %}
                     <div class="sidebar-submenu">
-                        {% if has_pro_features %}
+                        {% if is_platform_admin or plan_features.get('ldap') or plan_features.get('sso') or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:auth" class="sidebar-sublink" data-hash="settings:auth">
                             <i class="bi bi-shield-lock"></i>
                             Authentication
                         </a>
                         {% endif %}
-                        {% if has_pro_features %}
+                        {% if is_platform_admin or plan_features.get('email_alerts') or (not saas_mode and has_pro_features) %}
                         <a href="/alerts/settings" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.alerts_settings' else '' }}" data-tooltip="Alert Management">
                             <i class="bi bi-bell"></i>
                             Alert Management
@@ -3189,6 +3193,8 @@
                             <i class="bi bi-envelope"></i>
                             Email (SMTP)
                         </a>
+                        {% endif %}
+                        {% if is_platform_admin or plan_features.get('compliance_reports') or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:syslog" class="sidebar-sublink" data-hash="settings:syslog">
                             <i class="bi bi-broadcast"></i>
                             SIEM / Syslog
@@ -3198,13 +3204,13 @@
                             <i class="bi bi-gear"></i>
                             System
                         </a>
-                        {% if has_pro_features %}
+                        {% if is_platform_admin or plan_features.get('compliance_reports') or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:compliance" class="sidebar-sublink" data-hash="settings:compliance">
                             <i class="bi bi-clipboard-check"></i>
                             Compliance
                         </a>
                         {% endif %}
-                        {% if has_pro_features %}
+                        {% if is_platform_admin or plan_features.get('white_label') or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:appearance" class="sidebar-sublink" data-hash="settings:appearance">
                             <i class="bi bi-palette"></i>
                             Appearance
@@ -3698,6 +3704,8 @@
         let _progressPollInterval = null;
 
         function showProgressBanner(jobId) {
+            // Persist job_id so banner survives page navigation
+            sessionStorage.setItem('activeJobId', jobId);
             // Create banner if it doesn't exist
             let banner = document.getElementById('progressBanner');
             if (!banner) {
@@ -3728,6 +3736,7 @@
         }
 
         function hideProgressBanner() {
+            sessionStorage.removeItem('activeJobId');
             const banner = document.getElementById('progressBanner');
             if (banner) {
                 banner.style.display = 'none';
@@ -3813,12 +3822,29 @@
             document.querySelectorAll('.tz-label').forEach(function(el) {
                 el.textContent = DISPLAY_TIMEZONE;
             });
-            // Check for active background jobs (e.g. sync in progress after page refresh)
-            fetch('/api/progress/active').then(r => r.json()).then(data => {
-                if (data.jobs && data.jobs.length > 0) {
-                    showProgressBanner(data.jobs[0].job_id);
-                }
-            }).catch(() => {});
+            // Restore progress banner after page navigation / refresh
+            const savedJobId = sessionStorage.getItem('activeJobId');
+            if (savedJobId) {
+                // Verify the job is still running before showing banner
+                fetch(`/api/progress/${savedJobId}`).then(r => r.json()).then(p => {
+                    if (p.status === 'running') {
+                        showProgressBanner(savedJobId);
+                    } else {
+                        sessionStorage.removeItem('activeJobId');
+                        if (p.status === 'completed') {
+                            const r = p.result || {};
+                            showToast(`Sync completed! ${r.matches || 0} matches found`, 'success');
+                        }
+                    }
+                }).catch(() => sessionStorage.removeItem('activeJobId'));
+            } else {
+                // Fallback: check server for any active jobs
+                fetch('/api/progress/active').then(r => r.json()).then(data => {
+                    if (data.jobs && data.jobs.length > 0) {
+                        showProgressBanner(data.jobs[0].job_id);
+                    }
+                }).catch(() => {});
+            }
         });
 
         function formatDate(dateString) {
@@ -5479,6 +5505,9 @@
                 const data = await response.json();
 
                 if (data.success) {
+                    // Close the modal first
+                    const modal2fa = bootstrap.Modal.getInstance(document.getElementById('securitySettingsModal'));
+                    if (modal2fa) modal2fa.hide();
                     await showAlert('Two-factor authentication has been enabled successfully!', 'Success', 'success');
                     load2FAStatus();
                 } else {
