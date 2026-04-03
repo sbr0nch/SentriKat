@@ -3494,6 +3494,7 @@ class SubscriptionPlan(db.Model):
                 'email_alerts': False, 'ldap': False, 'sso': False,
                 'webhooks': False, 'white_label': False, 'api_access': False,
                 'compliance_reports': False, 'jira_integration': False,
+                'siem_integration': False,
                 'push_agents': True, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False,
             }),
@@ -3514,6 +3515,7 @@ class SubscriptionPlan(db.Model):
                 'email_alerts': True, 'ldap': False, 'sso': False,
                 'webhooks': True, 'white_label': False, 'api_access': True,
                 'compliance_reports': False, 'jira_integration': False,
+                'siem_integration': False,
                 'push_agents': True, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False,
             }),
@@ -3534,8 +3536,9 @@ class SubscriptionPlan(db.Model):
                 'email_alerts': True, 'ldap': False, 'sso': False,
                 'webhooks': True, 'white_label': False, 'api_access': True,
                 'compliance_reports': True, 'jira_integration': True,
+                'siem_integration': True,
                 'push_agents': True, 'backup_restore': False,
-                'audit_export': True, 'multi_org': True,
+                'audit_export': True, 'multi_org': False,
             }),
             'is_default': False, 'sort_order': 2,
         },
@@ -3554,6 +3557,7 @@ class SubscriptionPlan(db.Model):
                 'email_alerts': True, 'ldap': True, 'sso': True,
                 'webhooks': True, 'white_label': True, 'api_access': True,
                 'compliance_reports': True, 'jira_integration': True,
+                'siem_integration': True,
                 'push_agents': True, 'backup_restore': True,
                 'audit_export': True, 'multi_org': True,
             }),
@@ -3573,6 +3577,7 @@ class SubscriptionPlan(db.Model):
                 'email_alerts': True, 'ldap': True, 'sso': True,
                 'webhooks': True, 'white_label': True, 'api_access': True,
                 'compliance_reports': True, 'jira_integration': True,
+                'siem_integration': True,
                 'push_agents': True, 'backup_restore': True,
                 'audit_export': True, 'multi_org': True,
             }),
@@ -3728,3 +3733,60 @@ class UsageRecord(db.Model):
             'period_end': self.period_end.isoformat() if self.period_end else None,
             'recorded_at': self.recorded_at.isoformat() if self.recorded_at else None,
         }
+
+
+class SaasLog(db.Model):
+    """
+    Structured log entries for SaaS platform events.
+
+    Stores important events (auth failures, sync errors, tenant actions) in the
+    database so the admin portal on the Web VM can pull them via /internal/logs.
+    Retention: 90 days (cleaned up by data_retention_cleanup_job).
+    """
+    __tablename__ = 'saas_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    source = db.Column(db.String(50), nullable=False, index=True)
+    # Sources: 'app', 'worker', 'scheduler', 'auth'
+    level = db.Column(db.String(20), nullable=False, index=True)
+    # Levels: 'debug', 'info', 'warning', 'error', 'critical'
+    message = db.Column(db.Text, nullable=False)
+    details = db.Column(db.JSON, nullable=True)
+    tenant_id = db.Column(db.String(100), nullable=True, index=True)
+    ip_address = db.Column(db.String(45), nullable=True)
+    user_agent = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.Index('idx_saas_logs_ts_level', 'timestamp', 'level'),
+    )
+
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat() + 'Z' if self.timestamp else None,
+            'source': self.source,
+            'level': self.level,
+            'message': self.message,
+            'details': self.details,
+            'tenant_id': self.tenant_id,
+        }
+
+    @classmethod
+    def log(cls, source, level, message, details=None, tenant_id=None,
+            ip_address=None, user_agent=None):
+        """Convenience method to create a log entry."""
+        entry = cls(
+            source=source,
+            level=level,
+            message=message,
+            details=details,
+            tenant_id=tenant_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        db.session.add(entry)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return entry

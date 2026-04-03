@@ -832,6 +832,17 @@ def data_retention_cleanup_job(app):
                 db.session.rollback()
                 deleted_counts['ldap_sync_logs'] = 0
 
+            # Clean up old SaaS structured logs (90-day retention)
+            try:
+                from app.models import SaasLog
+                saas_cutoff = datetime.utcnow() - timedelta(days=90)
+                deleted = SaasLog.query.filter(SaasLog.timestamp < saas_cutoff).delete()
+                deleted_counts['saas_logs'] = deleted
+            except Exception as e:
+                logger.error(f"Error cleaning SaaS logs: {e}")
+                db.session.rollback()
+                deleted_counts['saas_logs'] = 0
+
             # Note: Application audit logs are file-based (audit.log), managed by log rotation.
             # Only LDAP audit logs are stored in the database.
 

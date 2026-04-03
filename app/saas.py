@@ -286,6 +286,7 @@ def _get_saas_features(org_id):
             'email_alerts': False, 'ldap': False, 'sso': False,
             'webhooks': False, 'white_label': False, 'api_access': False,
             'compliance_reports': False, 'jira_integration': False,
+            'siem_integration': False,
             'push_agents': True, 'backup_restore': False,
             'audit_export': False, 'multi_org': False
         }
@@ -304,6 +305,7 @@ def _get_license_features():
                 'email_alerts': True, 'ldap': True, 'sso': True,
                 'webhooks': True, 'white_label': True, 'api_access': True,
                 'compliance_reports': True, 'jira_integration': True,
+                'siem_integration': True,
                 'push_agents': True, 'backup_restore': True,
                 'audit_export': True, 'multi_org': True
             }
@@ -313,6 +315,7 @@ def _get_license_features():
                 'email_alerts': False, 'ldap': False, 'sso': False,
                 'webhooks': False, 'white_label': False, 'api_access': False,
                 'compliance_reports': False, 'jira_integration': False,
+                'siem_integration': False,
                 'push_agents': False, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False
             }
