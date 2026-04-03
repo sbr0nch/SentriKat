@@ -365,6 +365,30 @@ def create_app(config_class=Config):
     app.register_blueprint(gdpr_api.gdpr_bp)
 
     # Error handlers: return JSON for API routes, HTML for browser routes
+    # Global helper: sanitize error messages in production to prevent info leakage
+    @app.after_request
+    def sanitize_error_responses(response):
+        """In production, strip detailed error messages from 500 responses.
+
+        Individual endpoints often return str(e) in error responses which can
+        leak internal paths, database schema, or stack trace fragments.
+        In production, replace with a generic message while keeping the original
+        logged server-side.
+        """
+        if (app.config.get('ENV') == 'production' or os.environ.get('FLASK_ENV') == 'production'):
+            if response.status_code == 500 and response.content_type and 'json' in response.content_type:
+                try:
+                    import json
+                    data = json.loads(response.get_data(as_text=True))
+                    if 'error' in data:
+                        # Log the real error for debugging
+                        app.logger.error(f"Sanitized 500 error: {data['error']}")
+                        data['error'] = 'An internal error occurred. Please try again or contact support.'
+                        response.set_data(json.dumps(data))
+                except Exception:
+                    pass
+        return response
+
     @app.errorhandler(404)
     def not_found_error(e):
         from flask import request as _req, jsonify as _jfy

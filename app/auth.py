@@ -616,8 +616,11 @@ def change_password():
     if not is_valid:
         return jsonify({'error': error_msg}), 400
 
-    # Update password
-    current_user.update_password(new_password)
+    # Update password (may raise ValueError for password history violation)
+    try:
+        current_user.update_password(new_password)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     session.pop('must_change_password', None)
     db.session.commit()
 
@@ -735,8 +738,11 @@ def reset_password():
         if not is_valid:
             return jsonify({'error': error_msg}), 400
 
-        # Set new password
-        user.update_password(new_password)
+        # Set new password (may raise ValueError for password history violation)
+        try:
+            user.update_password(new_password)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
 
         # Clear the reset token (single-use)
         user.clear_password_reset_token()

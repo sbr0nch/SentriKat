@@ -924,6 +924,19 @@ class ServiceCatalog(db.Model):
             'usage_frequency': self.usage_frequency
         }
 
+class PasswordHistory(db.Model):
+    """Stores previous password hashes to prevent password reuse.
+
+    Enforced by the password_history_count setting (0 = disabled).
+    """
+    __tablename__ = 'password_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    password_hash = db.Column(db.String(256), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class User(db.Model):
     """User accounts for authentication"""
     __tablename__ = 'users'
@@ -984,13 +997,19 @@ class User(db.Model):
     def check_password(self, password):
         """Check password for local auth.
 
-        Supports both legacy pbkdf2 and current scrypt hashes for seamless
-        migration - existing users' passwords verify against their original
-        hash and get re-hashed to scrypt on next password change.
+        Supports both legacy pbkdf2 and current scrypt hashes. If a legacy
+        hash is detected and verification succeeds, the hash is transparently
+        upgraded to scrypt so all users migrate over time without any action.
         """
         if not self.password_hash:
             return False
-        return check_password_hash(self.password_hash, password)
+        if not check_password_hash(self.password_hash, password):
+            return False
+        # Auto-upgrade legacy hashes (pbkdf2) to scrypt on successful login
+        if not self.password_hash.startswith('scrypt:'):
+            self.password_hash = generate_password_hash(password, method='scrypt')
+            # Caller must commit the session for the upgrade to persist
+        return True
 
     def is_locked(self):
         """Check if account is locked due to failed login attempts"""
@@ -1067,7 +1086,28 @@ class User(db.Model):
         return max(0, remaining)
 
     def update_password(self, new_password):
-        """Update password and reset expiration timer"""
+        """Update password with history check and expiration reset.
+
+        Raises ValueError if the new password matches a recent password
+        within the configured password_history_count window.
+        """
+        from app.settings_api import get_setting
+
+        # Check password history if enabled
+        history_count = int(get_setting('password_history_count', '0') or '0')
+        if history_count > 0 and self.password_hash:
+            recent = PasswordHistory.query.filter_by(user_id=self.id).order_by(
+                PasswordHistory.created_at.desc()
+            ).limit(history_count).all()
+            for entry in recent:
+                if check_password_hash(entry.password_hash, new_password):
+                    raise ValueError(f'Cannot reuse any of your last {history_count} passwords')
+            # Also check current password
+            if check_password_hash(self.password_hash, new_password):
+                raise ValueError(f'Cannot reuse any of your last {history_count} passwords')
+            # Save current hash to history before changing
+            db.session.add(PasswordHistory(user_id=self.id, password_hash=self.password_hash))
+
         self.set_password(new_password)
         self.password_changed_at = datetime.utcnow()
         self.must_change_password = False

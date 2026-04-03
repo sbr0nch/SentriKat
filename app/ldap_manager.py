@@ -2,6 +2,29 @@
 LDAP User Discovery and Management
 Handles LDAP user search, group discovery, and synchronization
 """
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _enforce_saas_ldap_tls(use_ssl, use_tls):
+    """In SaaS mode, refuse plaintext LDAP connections.
+
+    Customers should use ldaps:// or enable STARTTLS to protect credentials
+    in transit. On-premise deployments can use plain LDAP on trusted networks.
+    """
+    from app.saas import is_saas_mode
+    if is_saas_mode() and not use_ssl and not use_tls:
+        return {
+            'success': False,
+            'error': (
+                'Encrypted LDAP connection required in SaaS mode. '
+                'Use ldaps:// or enable STARTTLS. '
+                'For cloud authentication, we recommend SAML 2.0 SSO instead '
+                '(Settings → Authentication → SAML).'
+            )
+        }
+    return None
 
 from app.models import SystemSettings, User, Organization
 from app import db
@@ -88,6 +111,11 @@ class LDAPManager:
                     return {'success': False, 'error': 'LDAP server address targets a private/internal network'}
             except ImportError:
                 pass  # network_security module not available, skip check
+
+            # In SaaS mode, require encrypted LDAP connections
+            tls_err = _enforce_saas_ldap_tls(use_ssl, config.get('use_tls', False))
+            if tls_err:
+                return tls_err
 
             # Create server and connection
             server = ldap3.Server(server_host, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)
@@ -245,6 +273,11 @@ class LDAPManager:
                     return {'success': False, 'error': 'LDAP server address targets a private/internal network'}
             except ImportError:
                 pass  # network_security module not available, skip check
+
+            # In SaaS mode, require encrypted LDAP connections
+            tls_err = _enforce_saas_ldap_tls(use_ssl, config.get('use_tls', False))
+            if tls_err:
+                return tls_err
 
             # Create server and connection
             server = ldap3.Server(server_host, port=config['port'], use_ssl=use_ssl, get_info=ldap3.ALL)
