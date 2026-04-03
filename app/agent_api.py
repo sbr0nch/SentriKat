@@ -3936,6 +3936,7 @@ def list_version_history():
 # ============================================================================
 
 @agent_bp.route('/api/admin/license-tiers', methods=['GET'])
+@login_required
 def get_license_tiers():
     """Get available license tiers and their limits."""
     return jsonify({
