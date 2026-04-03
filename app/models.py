@@ -3531,7 +3531,7 @@ class SubscriptionPlan(db.Model):
             'price_monthly_cents': 19900, 'price_annual_cents': 199000,
             'currency': 'EUR',
             'features': json.dumps({
-                'email_alerts': True, 'ldap': True, 'sso': False,
+                'email_alerts': True, 'ldap': False, 'sso': False,
                 'webhooks': True, 'white_label': False, 'api_access': True,
                 'compliance_reports': True, 'jira_integration': True,
                 'push_agents': True, 'backup_restore': False,

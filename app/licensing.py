@@ -928,6 +928,18 @@ def requires_professional(feature=None):
         def decorated_function(*args, **kwargs):
             from app.saas import is_saas_mode, get_scoped_org_id, get_effective_features
 
+            # Super admin bypasses all plan restrictions (platform operator)
+            try:
+                from flask import session
+                from app.models import User
+                uid = session.get('user_id')
+                if uid:
+                    user = User.query.get(uid)
+                    if user and user.is_super_admin():
+                        return f(*args, **kwargs)
+            except Exception:
+                pass
+
             if is_saas_mode():
                 # SaaS: check subscription plan features for the current org
                 org_id = get_scoped_org_id()
