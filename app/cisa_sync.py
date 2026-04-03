@@ -835,7 +835,11 @@ def download_cisa_kev(max_retries=3, retry_delay=5):
                 Config.CISA_KEV_URL,
                 timeout=30,
                 proxies=proxies,
-                verify=verify_ssl
+                verify=verify_ssl,
+                headers={
+                    'User-Agent': 'SentriKat/1.0 (Vulnerability Management; +https://sentrikat.com)',
+                    'Accept': 'application/json',
+                }
             )
             response.raise_for_status()
             return response.json()

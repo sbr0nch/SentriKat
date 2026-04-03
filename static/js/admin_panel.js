@@ -6828,6 +6828,11 @@ async function loadAgentKeys() {
     const tbody = SK.DOM.get('agentKeysTableBody');
     if (!tbody) return;
 
+    // Ensure user info is loaded before making org-scoped API calls
+    if (!window.currentUserInfo) {
+        await loadCurrentUserInfo();
+    }
+
     try {
         const response = await fetchWithRetry('/api/agent-keys' + getOrgIdParam(), {}, 3, 800);
         if (!response.ok) {
