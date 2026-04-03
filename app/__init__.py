@@ -676,4 +676,13 @@ def create_app(config_class=Config):
             logger.info("Applying schema migrations for PostgreSQL...")
             _apply_schema_migrations(logger, db_uri)
 
+            # Sync subscription plan features/limits with code defaults
+            # This ensures DB plans stay aligned when DEFAULT_PLANS changes
+            try:
+                from app.models import SubscriptionPlan
+                SubscriptionPlan.seed_default_plans()
+                logger.info("Subscription plans synced with defaults")
+            except Exception as e:
+                logger.warning(f"Could not sync subscription plans: {e}")
+
     return app
