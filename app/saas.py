@@ -281,12 +281,12 @@ def _get_saas_features(org_id):
         if free_plan:
             return free_plan.get_features()
 
-        # Absolute fallback: no features
+        # Absolute fallback: minimal features (agents always allowed)
         return {
             'email_alerts': False, 'ldap': False, 'sso': False,
             'webhooks': False, 'white_label': False, 'api_access': False,
             'compliance_reports': False, 'jira_integration': False,
-            'push_agents': False, 'backup_restore': False,
+            'push_agents': True, 'backup_restore': False,
             'audit_export': False, 'multi_org': False
         }
     except Exception as e:
