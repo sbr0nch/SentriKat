@@ -5514,10 +5514,13 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    await showAlert('Password changed successfully!', 'Success', 'success');
+                    // Close the modal first, then show success toast
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('securitySettingsModal'));
+                    if (modal) modal.hide();
                     document.getElementById('secCurrentPassword').value = '';
                     document.getElementById('secNewPassword').value = '';
                     document.getElementById('secConfirmPassword').value = '';
+                    await showAlert('Password changed successfully!', 'Success', 'success');
                 } else {
                     // Show field-specific error if possible
                     if (data.error && data.error.toLowerCase().includes('current')) {
