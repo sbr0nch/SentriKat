@@ -1253,16 +1253,16 @@
                     </button>
                 </li>
                 {% endif %}
-                {# SIEM/Syslog: Business+ plans or on-premise pro or super_admin #}
-                {% if is_platform_admin or (plan_features.get('compliance_reports') and (plan_features.get('ldap') or plan_features.get('sso'))) or (not saas_mode and has_pro_features) %}
+                {# SIEM/Syslog: Pro+ plans (siem_integration) or on-premise pro or super_admin #}
+                {% if is_platform_admin or plan_features.get('siem_integration') or (not saas_mode and has_pro_features) %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="syslog-settings-tab" type="button" onclick="showSettingsGroup('syslog', this)">
                         <i class="bi bi-broadcast me-2"></i>SIEM / Syslog
                     </button>
                 </li>
                 {% endif %}
-                {# Compliance: super_admin or on-premise only #}
-                {% if is_platform_admin or (not saas_mode and has_pro_features) %}
+                {# Compliance: Pro+ plans (compliance_reports) or on-premise pro or super_admin #}
+                {% if is_platform_admin or plan_features.get('compliance_reports') or (not saas_mode and has_pro_features) %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="compliance-settings-tab" type="button" onclick="showSettingsGroup('compliance', this)">
                         <i class="bi bi-clipboard-check me-2"></i>Compliance
@@ -1280,7 +1280,7 @@
                 {# Subscription (SaaS) or License (on-premise) #}
                 {% if saas_mode %}
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="license-tab" type="button" onclick="showSettingsGroup('subscription', this)">
+                    <button class="nav-link" id="subscription-tab" type="button" onclick="showSettingsGroup('subscription', this)">
                         <i class="bi bi-credit-card me-2"></i>Subscription
                     </button>
                 </li>
@@ -3138,12 +3138,13 @@
                                             'webhooks': 'Webhooks',
                                             'white_label': 'White-Labeling',
                                             'api_access': 'API Access',
-                                            'compliance_reports': 'Compliance Reports',
+                                            'compliance_reports': 'NIS2/DORA Reports',
                                             'jira_integration': 'Issue Trackers',
+                                            'siem_integration': 'SIEM Integration',
                                             'push_agents': 'Push Agents',
                                             'backup_restore': 'Backup & Restore',
                                             'audit_export': 'Audit Log Export',
-                                            'multi_org': 'Multi-Organization'
+                                            'multi_org': 'Multi-Tenant'
                                         } %}
                                         {% for key, label in feature_labels.items() %}
                                         <div class="col-md-4 col-sm-6 mb-2">

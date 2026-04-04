@@ -3150,7 +3150,7 @@
                             <i class="bi bi-activity"></i>
                             Agent Activity
                         </a>
-                        {% if is_platform_admin or plan_features.get('email_alerts') or (not saas_mode and has_pro_features) %}
+                        {% if is_platform_admin or plan_features.get('compliance_reports') or (not saas_mode and has_pro_features) %}
                         <a href="/reports/scheduled" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.scheduled_reports' else '' }}" data-tooltip="Scheduled Reports">
                             <i class="bi bi-calendar-check"></i>
                             Scheduled Reports
@@ -3193,7 +3193,7 @@
                             Email (SMTP)
                         </a>
                         {% endif %}
-                        {% if is_platform_admin or (plan_features.get('compliance_reports') and (plan_features.get('ldap') or plan_features.get('sso'))) or (not saas_mode and has_pro_features) %}
+                        {% if is_platform_admin or plan_features.get('siem_integration') or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:syslog" class="sidebar-sublink" data-hash="settings:syslog">
                             <i class="bi bi-broadcast"></i>
                             SIEM / Syslog
@@ -3205,7 +3205,7 @@
                             System
                         </a>
                         {% endif %}
-                        {% if is_platform_admin or (not saas_mode and has_pro_features) %}
+                        {% if is_platform_admin or plan_features.get('compliance_reports') or (not saas_mode and has_pro_features) %}
                         <a href="/admin-panel#settings:compliance" class="sidebar-sublink" data-hash="settings:compliance">
                             <i class="bi bi-clipboard-check"></i>
                             Compliance

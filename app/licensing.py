@@ -949,6 +949,7 @@ def requires_professional(feature=None):
                     'LDAP': 'ldap', 'SAML SSO': 'sso', 'Email Alerts': 'email_alerts',
                     'White Label': 'white_label', 'Integrations': 'push_agents',
                     'Jira Integration': 'jira_integration', 'Issue Tracker Integration': 'jira_integration',
+                    'SIEM Integration': 'siem_integration', 'SIEM': 'siem_integration',
                     'Audit Export': 'audit_export', 'Backup & Restore': 'backup_restore',
                     'Agent Keys': 'push_agents',
                 }

@@ -15,6 +15,27 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _saas_log(level, message, tenant_id=None, details=None):
+    """Write a structured SaaS log entry (no-op if not SaaS mode)."""
+    try:
+        from app.saas import is_saas_mode
+        if not is_saas_mode():
+            return
+        from app.models import SaasLog
+        SaasLog.log(
+            source='auth',
+            level=level,
+            message=message,
+            tenant_id=tenant_id,
+            details=details,
+            ip_address=request.remote_addr if request else None,
+            user_agent=request.headers.get('User-Agent', '')[:500] if request else None,
+        )
+    except Exception:
+        pass  # Never break auth flow for logging
+
+
 auth_bp = Blueprint('auth', __name__)
 
 # Exempt API routes from CSRF (they use JSON and are protected by SameSite cookies)
@@ -270,6 +291,9 @@ def login_user_session(user):
     user.last_login = datetime.utcnow()
     db.session.commit()
 
+    _saas_log('info', f'User {user.username} logged in',
+              tenant_id=user.organization.name if user.organization else None)
+
     return True
 
 @auth_bp.route('/login', methods=['GET'])
@@ -385,6 +409,7 @@ def api_login():
 
     if not username or not password:
         logger.warning(f"Login failed: missing username or password from {request.remote_addr}")
+        _saas_log('warning', 'Login failed: missing credentials')
         return jsonify({'error': 'Username and password required'}), 400
 
     # Find user - check for duplicates
@@ -436,6 +461,9 @@ def api_login():
                 }), 401
 
             logger.warning(f"Login failed for {username}: invalid password (attempt {user.failed_login_attempts})")
+            _saas_log('warning', f'Login failed: invalid password for {username}',
+                       tenant_id=user.organization.name if user.organization else None,
+                       details={'attempts': user.failed_login_attempts})
             return jsonify({'error': 'Invalid username or password'}), 401
 
     elif user.auth_type == 'ldap':
@@ -568,6 +596,8 @@ def api_logout():
 @auth_bp.route('/logout')
 def logout():
     """Logout route"""
+    username = session.get('username')
+    _saas_log('info', f'User {username} logged out' if username else 'User logged out')
     session.clear()
     return redirect(url_for('auth.login'))
 
