@@ -4,7 +4,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 import os
 import time
-from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory, ContainerImage, ContainerVulnerability, DependencyScan, SystemSettings
+from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride, SyncLog, Organization, ServiceCatalog, User, AlertLog, ProductInstallation, Asset, ProductVersionHistory, ContainerImage, ContainerVulnerability, DependencyScan, SystemSettings, SaasLog
 from app.cisa_sync import sync_cisa_kev
 from app.filters import match_vulnerabilities_to_products, get_filtered_vulnerabilities
 from app.email_alerts import EmailAlertManager
@@ -176,6 +176,112 @@ def health_check():
         return jsonify(health), 503
 
     return jsonify(health), 200
+
+
+# =============================================================================
+# Internal API (cross-VM, Bearer token auth, IP-whitelisted via nginx)
+# =============================================================================
+
+@bp.route('/internal/logs', methods=['GET'])
+def internal_logs():
+    """Return structured SaaS log entries for the admin portal on the Web VM.
+
+    Secured by INTERNAL_API_KEY (Bearer token). nginx should restrict
+    /internal/ to the Web VM IP only.
+
+    Query params:
+        source:    Filter by source (app, worker, scheduler, auth, nginx)
+        level:     Filter by level (info, warning, error, critical)
+        search:    Full-text search on message
+        date_from: ISO date lower bound
+        date_to:   ISO date upper bound
+        limit:     Max entries (default 100, max 1000)
+        offset:    Pagination offset (default 0)
+    """
+    # Verify API key
+    auth = request.headers.get('Authorization', '')
+    expected = os.environ.get('INTERNAL_API_KEY', '')
+    if not expected or auth != f'Bearer {expected}':
+        return jsonify({'error': 'unauthorized'}), 401
+
+    # Parse and validate query params
+    source = request.args.get('source', '').strip().lower()
+    level = request.args.get('level', '').strip().lower()
+    search = request.args.get('search', '').strip()
+    date_from = request.args.get('date_from', '').strip()
+    date_to = request.args.get('date_to', '').strip()
+
+    try:
+        limit = min(int(request.args.get('limit', 100)), 1000)
+    except (ValueError, TypeError):
+        limit = 100
+
+    try:
+        offset = max(int(request.args.get('offset', 0)), 0)
+    except (ValueError, TypeError):
+        offset = 0
+
+    valid_sources = {'app', 'worker', 'scheduler', 'auth', 'nginx'}
+    valid_levels = {'debug', 'info', 'warning', 'error', 'critical'}
+
+    # Build query
+    query = SaasLog.query
+
+    if source and source in valid_sources:
+        query = query.filter(SaasLog.source == source)
+
+    if level and level in valid_levels:
+        query = query.filter(SaasLog.level == level)
+
+    if search:
+        escaped = search.replace('%', r'\%').replace('_', r'\_')
+        query = query.filter(SaasLog.message.ilike(f'%{escaped}%'))
+
+    if date_from:
+        try:
+            dt_from = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+            query = query.filter(SaasLog.timestamp >= dt_from)
+        except ValueError:
+            pass
+
+    if date_to:
+        try:
+            dt_to = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+            query = query.filter(SaasLog.timestamp <= dt_to)
+        except ValueError:
+            pass
+
+    # Total count for pagination
+    total = query.count()
+
+    # Fetch entries ordered by most recent first
+    entries = (
+        query
+        .order_by(SaasLog.timestamp.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    # Today's stats
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    errors_today = SaasLog.query.filter(
+        SaasLog.timestamp >= today_start,
+        SaasLog.level == 'error'
+    ).count()
+    warnings_today = SaasLog.query.filter(
+        SaasLog.timestamp >= today_start,
+        SaasLog.level == 'warning'
+    ).count()
+
+    return jsonify({
+        'entries': [e.to_dict() for e in entries],
+        'stats': {
+            'total': total,
+            'errors_today': errors_today,
+            'warnings_today': warnings_today,
+        }
+    })
 
 
 # =============================================================================
