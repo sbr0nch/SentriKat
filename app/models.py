@@ -3748,13 +3748,16 @@ class SaasLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     source = db.Column(db.String(50), nullable=False, index=True)
-    # Sources: 'app', 'worker', 'scheduler', 'auth'
+    # Sources: 'app', 'worker', 'scheduler', 'auth', 'nginx'
     level = db.Column(db.String(20), nullable=False, index=True)
     # Levels: 'debug', 'info', 'warning', 'error', 'critical'
+    action = db.Column(db.String(100), nullable=True, index=True)
+    # Actions: 'login_ok', 'login_failed', 'logout', 'sync_failed', 'config_changed', etc.
     message = db.Column(db.Text, nullable=False)
     details = db.Column(db.JSON, nullable=True)
     tenant_id = db.Column(db.String(100), nullable=True, index=True)
     ip_address = db.Column(db.String(45), nullable=True)
+    actor_email = db.Column(db.String(255), nullable=True)
     user_agent = db.Column(db.Text, nullable=True)
 
     __table_args__ = (
@@ -3766,22 +3769,28 @@ class SaasLog(db.Model):
             'timestamp': self.timestamp.isoformat() + 'Z' if self.timestamp else None,
             'source': self.source,
             'level': self.level,
+            'action': self.action,
             'message': self.message,
             'details': self.details,
             'tenant_id': self.tenant_id,
+            'ip_address': self.ip_address,
+            'actor_email': self.actor_email,
         }
 
     @classmethod
-    def log(cls, source, level, message, details=None, tenant_id=None,
-            ip_address=None, user_agent=None):
+    def log(cls, source, level, message, action=None, details=None,
+            tenant_id=None, ip_address=None, actor_email=None,
+            user_agent=None):
         """Convenience method to create a log entry."""
         entry = cls(
             source=source,
             level=level,
+            action=action,
             message=message,
             details=details,
             tenant_id=tenant_id,
             ip_address=ip_address,
+            actor_email=actor_email,
             user_agent=user_agent,
         )
         db.session.add(entry)

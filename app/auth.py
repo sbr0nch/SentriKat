@@ -16,7 +16,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _saas_log(level, message, tenant_id=None, details=None):
+def _saas_log(level, message, action=None, tenant_id=None, actor_email=None,
+              details=None):
     """Write a structured SaaS log entry (no-op if not SaaS mode)."""
     try:
         from app.saas import is_saas_mode
@@ -26,8 +27,10 @@ def _saas_log(level, message, tenant_id=None, details=None):
         SaasLog.log(
             source='auth',
             level=level,
+            action=action,
             message=message,
             tenant_id=tenant_id,
+            actor_email=actor_email,
             details=details,
             ip_address=request.remote_addr if request else None,
             user_agent=request.headers.get('User-Agent', '')[:500] if request else None,
@@ -292,7 +295,9 @@ def login_user_session(user):
     db.session.commit()
 
     _saas_log('info', f'User {user.username} logged in',
-              tenant_id=user.organization.name if user.organization else None)
+              action='login_ok',
+              tenant_id=user.organization.name if user.organization else None,
+              actor_email=user.email)
 
     return True
 
@@ -409,7 +414,8 @@ def api_login():
 
     if not username or not password:
         logger.warning(f"Login failed: missing username or password from {request.remote_addr}")
-        _saas_log('warning', 'Login failed: missing credentials')
+        _saas_log('warning', 'Login failed: missing credentials',
+                  action='login_failed')
         return jsonify({'error': 'Username and password required'}), 400
 
     # Find user - check for duplicates
@@ -462,7 +468,9 @@ def api_login():
 
             logger.warning(f"Login failed for {username}: invalid password (attempt {user.failed_login_attempts})")
             _saas_log('warning', f'Login failed: invalid password for {username}',
+                       action='login_failed',
                        tenant_id=user.organization.name if user.organization else None,
+                       actor_email=user.email,
                        details={'attempts': user.failed_login_attempts})
             return jsonify({'error': 'Invalid username or password'}), 401
 
@@ -597,7 +605,8 @@ def api_logout():
 def logout():
     """Logout route"""
     username = session.get('username')
-    _saas_log('info', f'User {username} logged out' if username else 'User logged out')
+    _saas_log('info', f'User {username} logged out' if username else 'User logged out',
+              action='logout')
     session.clear()
     return redirect(url_for('auth.login'))
 
