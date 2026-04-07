@@ -209,8 +209,8 @@ def provision_tenant(
             encrypted_key=encrypted_raw,
             key_type='server',
             scan_os_packages=True,
-            scan_extensions=False,
-            scan_dependencies=False,
+            scan_extensions=True,
+            scan_dependencies=True,
             auto_approve=False,
             created_by=admin.id,
         )

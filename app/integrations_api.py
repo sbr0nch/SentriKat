@@ -1690,7 +1690,8 @@ def delete_agent(agent_id):
 def _get_base_url():
     """Get the SentriKat server URL for embedding in agent scripts."""
     base_url = Config.SENTRIKAT_URL
-    if not base_url:
+    # If SENTRIKAT_URL is not set or points to localhost, derive from request
+    if not base_url or 'localhost' in base_url or '127.0.0.1' in base_url:
         proto = request.headers.get('X-Forwarded-Proto', request.scheme)
         base_url = f"{proto}://{request.host}"
     return base_url.rstrip('/')
