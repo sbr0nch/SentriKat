@@ -444,6 +444,12 @@ def check_match(vulnerability, product):
     if getattr(product, 'source_type', None) == 'extension':
         return [], None, None
 
+    # Skip products without a version — impossible to verify if affected.
+    # Matching without version produces massive false positives (e.g.,
+    # Chrome with no version matches ALL Chrome CVEs ever published).
+    if not product.version or not product.version.strip():
+        return [], None, None
+
     match_type = product.match_type or 'auto'
 
     # Determine which matching methods to use
