@@ -44,7 +44,9 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-sentrikat}
       - DATABASE_URL=postgresql://sentrikat:${DB_PASSWORD:-sentrikat}@db:5432/sentrikat
       # === APPLICATION ===
-      - SENTRIKAT_URL=${SENTRIKAT_URL:-http://localhost}
+      # IMPORTANT: Set SENTRIKAT_URL in .env to your public URL (e.g. https://app.sentrikat.com)
+      # Agent scripts use this URL to phone home. If unset, it's derived from request headers.
+      - SENTRIKAT_URL=${SENTRIKAT_URL:-}
       - FLASK_ENV=${FLASK_ENV:-production}
       - SENTRIKAT_ENV=${SENTRIKAT_ENV:-production}
       - FORCE_HTTPS=${FORCE_HTTPS:-false}

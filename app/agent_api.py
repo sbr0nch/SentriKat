@@ -3049,8 +3049,8 @@ def create_agent_key():
         encrypted_key=encrypted_raw,
         key_type=key_type,
         scan_os_packages=data.get('scan_os_packages', True),
-        scan_extensions=data.get('scan_extensions', False),
-        scan_dependencies=data.get('scan_dependencies', False),
+        scan_extensions=data.get('scan_extensions', True),
+        scan_dependencies=data.get('scan_dependencies', True),
         max_assets=data.get('max_assets'),
         auto_approve=data.get('auto_approve', False),
         created_by=user.id
