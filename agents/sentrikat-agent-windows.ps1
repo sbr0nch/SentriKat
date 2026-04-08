@@ -135,8 +135,8 @@ function Get-AgentConfig {
         ApiKey = $ApiKey
         IntervalMinutes = $IntervalMinutes
         AgentId = $null
-        ScanExtensions = $false
-        ScanDependencies = $false
+        ScanExtensions = $true
+        ScanDependencies = $true
     }
 
     # Load from config file if exists
