@@ -35,8 +35,8 @@ API_KEY=""
 INTERVAL_HOURS=4
 HEARTBEAT_MINUTES=5
 AGENT_ID=""
-SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-false}"        # Extension scanning (VS Code, browsers, IDEs)
-SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-false}"    # Code library dependency scanning
+SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-true}"         # Extension scanning (VS Code, browsers, IDEs)
+SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-true}"     # Code library dependency scanning
 
 # ============================================================================
 # Cleanup Handler for Graceful Shutdown
