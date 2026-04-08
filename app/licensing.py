@@ -952,6 +952,8 @@ def requires_professional(feature=None):
                     'SIEM Integration': 'siem_integration', 'SIEM': 'siem_integration',
                     'Audit Export': 'audit_export', 'Backup & Restore': 'backup_restore',
                     'Agent Keys': 'push_agents',
+                    'Scheduled Reports': 'compliance_reports',
+                    'Compliance Reports': 'compliance_reports',
                 }
                 feature_key = feature_key_map.get(feature, feature.lower().replace(' ', '_') if feature else None)
                 if feature_key and not features.get(feature_key, False):
