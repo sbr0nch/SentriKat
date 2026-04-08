@@ -5950,7 +5950,7 @@ function showSettingsGroup(groupName, btn) {
     groupPanes.forEach((id, index) => {
         const pane = SK.DOM.get(id);
         if (pane) {
-            pane.style.display = '';
+            pane.style.display = 'block';
             pane.classList.add('show', 'active');
 
             // Clear any inline styles from previous group
