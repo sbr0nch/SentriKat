@@ -2288,7 +2288,7 @@ def fetch_cves_by_cpe(cpe_vendor, cpe_product, max_results=2000):
         if api_key:
             headers['apiKey'] = api_key
 
-        limiter = get_rate_limiter(has_api_key=bool(api_key))
+        limiter = get_rate_limiter()
 
         # Build CPE match pattern: cpe:2.3:a:vendor:product:*:*:*:*:*:*:*:*
         cpe_pattern = f"cpe:2.3:a:{cpe_vendor.lower()}:{cpe_product.lower()}:*:*:*:*:*:*:*:*"
