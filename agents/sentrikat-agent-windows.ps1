@@ -1956,7 +1956,9 @@ function Main {
 
     # Handle installation
     if ($InstallService) {
-        Install-WindowsService $config
+        Write-Host "NOTE: -InstallService is deprecated. Using scheduled tasks instead (more reliable)." -ForegroundColor Yellow
+        Write-Host "      Use -Install next time." -ForegroundColor Yellow
+        Install-ScheduledTask $config
         return
     }
 
