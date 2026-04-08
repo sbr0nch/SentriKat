@@ -2283,6 +2283,7 @@
                     </div>
                     {% endif %}{# end not saas_mode backup/restore #}
                 </div>
+                {% endif %}{# end super_admin: proxySettings + securitySettings #}
 
                 {% if has_pro_features %}
                 <!-- Notifications Settings (Professional License Only) -->
@@ -3823,7 +3824,6 @@
                 </div>
                 {% endif %}{# end not saas_mode or super_admin (logs/health) #}
 
-                {% endif %}
             </div>
         </div>
     </div>
