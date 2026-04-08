@@ -1468,8 +1468,8 @@ def process_inventory_job(job):
                         from app.cpe_mapping import apply_cpe_to_product
                         apply_cpe_to_product(product)
 
-                        # Track new CPE pairs for on-demand NVD lookup
-                        if product.cpe_vendor and product.cpe_product:
+                        # Track new CPE pairs for on-demand NVD lookup (skip extensions — no NVD CVEs)
+                        if product.cpe_vendor and product.cpe_product and p_source_type != 'extension':
                             new_cpe_pairs.add((product.cpe_vendor, product.cpe_product))
 
                         db.session.add(product)
