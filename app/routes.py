@@ -1052,7 +1052,7 @@ def dependencies():
 
 
 @bp.route('/alerts/settings')
-@admin_required
+@org_admin_required
 def alerts_settings():
     """Alert Management hub - global defaults, per-org rules, delivery channels overview."""
     return render_template('alerts_settings.html')
