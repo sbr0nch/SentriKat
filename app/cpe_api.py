@@ -6,7 +6,10 @@ and vulnerability matching.
 """
 from flask import Blueprint, request, jsonify, session
 from datetime import datetime
+import logging
 from app import db, csrf
+
+logger = logging.getLogger(__name__)
 from app.auth import login_required, manager_required, admin_required
 from app.saas import is_saas_mode, get_scoped_org_id
 from app.models import Product, Vulnerability, ServiceCatalog
@@ -336,9 +339,16 @@ def link_cpe_to_product(product_id):
 
     db.session.commit()
 
+    # Fetch historical CVEs from NVD for this CPE (on-demand lookup)
+    try:
+        from app.cisa_sync import fetch_cves_by_cpe
+        fetch_cves_by_cpe(data['cpe_vendor'], data['cpe_product'])
+    except Exception as e:
+        logger.warning(f"On-demand NVD CVE fetch failed for {data['cpe_vendor']}:{data['cpe_product']}: {e}")
+
     # Trigger re-matching for this product
     from app.filters import match_vulnerabilities_to_products
-    match_vulnerabilities_to_products()
+    match_vulnerabilities_to_products(target_products=[product])
 
     return jsonify({
         'success': True,

@@ -2252,3 +2252,223 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
     except Exception as e:
         logger.warning(f"NVD CVE sync failed: {e}")
         return 0, 0, 1
+
+
+def fetch_cves_by_cpe(cpe_vendor, cpe_product, max_results=2000):
+    """
+    Fetch all CVEs from NVD that affect a specific vendor:product CPE.
+
+    Called on-demand when a product gets a CPE assigned (auto or manual).
+    This fills the gap for historical CVEs that the periodic sync misses.
+
+    Uses virtualMatchString to query NVD API 2.0 by CPE pattern.
+    Only imports HIGH and CRITICAL CVEs to keep noise low.
+
+    Works identically for on-premise and SaaS deployments.
+
+    Args:
+        cpe_vendor: CPE vendor string (e.g., 'adobe')
+        cpe_product: CPE product string (e.g., 'acrobat_reader_dc')
+        max_results: Maximum CVEs to import per product
+
+    Returns:
+        tuple: (new_count, skipped_count, error_count)
+    """
+    if not cpe_vendor or not cpe_product:
+        return 0, 0, 0
+
+    try:
+        from app.nvd_api import _get_api_key, _get_request_kwargs, _score_to_severity
+        from app.nvd_rate_limiter import get_rate_limiter
+        from app.nvd_cpe_api import parse_cpe_uri
+
+        api_key = _get_api_key()
+        kwargs = _get_request_kwargs()
+        headers = {}
+        if api_key:
+            headers['apiKey'] = api_key
+
+        limiter = get_rate_limiter(has_api_key=bool(api_key))
+
+        # Build CPE match pattern: cpe:2.3:a:vendor:product:*:*:*:*:*:*:*:*
+        cpe_pattern = f"cpe:2.3:a:{cpe_vendor.lower()}:{cpe_product.lower()}:*:*:*:*:*:*:*:*"
+
+        new_count = 0
+        skipped = 0
+        errors = 0
+        start_index = 0
+
+        logger.info(f"Fetching CVEs for CPE {cpe_vendor}:{cpe_product} from NVD...")
+
+        while start_index < max_results:
+            if not limiter.acquire(timeout=60.0, block=True):
+                logger.warning("NVD rate limit timeout during CPE CVE fetch")
+                break
+
+            params = {
+                'virtualMatchString': cpe_pattern,
+                'resultsPerPage': min(200, max_results - start_index),
+                'startIndex': start_index,
+            }
+
+            try:
+                response = requests.get(
+                    'https://services.nvd.nist.gov/rest/json/cves/2.0',
+                    params=params,
+                    headers=headers,
+                    timeout=30,
+                    **kwargs
+                )
+
+                if response.status_code == 403:
+                    logger.warning("NVD API rate limited (403) during CPE fetch, backing off")
+                    _time.sleep(30)
+                    continue
+
+                if response.status_code != 200:
+                    logger.warning(f"NVD CPE fetch: API returned {response.status_code}")
+                    errors += 1
+                    break
+
+                data = response.json()
+                results = data.get('vulnerabilities', [])
+                total_results = data.get('totalResults', 0)
+
+                if not results:
+                    break
+
+                for item in results:
+                    try:
+                        cve_data = item.get('cve', {})
+                        cve_id = cve_data.get('id', '')
+
+                        if not cve_id or not cve_id.startswith('CVE-'):
+                            continue
+
+                        # Skip if already in DB with CPE data
+                        existing = Vulnerability.query.filter_by(cve_id=cve_id).first()
+                        if existing and existing.has_cpe_data():
+                            skipped += 1
+                            continue
+
+                        # Extract description
+                        description = ''
+                        for desc in cve_data.get('descriptions', []):
+                            if desc.get('lang') == 'en':
+                                description = desc.get('value', '')
+                                break
+                        if not description:
+                            continue
+
+                        # Skip rejected/disputed
+                        vuln_status = cve_data.get('vulnStatus', '')
+                        if vuln_status in ('Rejected', 'Disputed'):
+                            continue
+
+                        # Extract CVSS
+                        metrics = cve_data.get('metrics', {})
+                        cvss_score, cvss_severity, cvss_type = _extract_cvss_from_metrics(metrics)
+                        if not cvss_severity:
+                            cvss_severity = _score_to_severity(cvss_score)
+
+                        # Extract vendor/product/CPE entries
+                        vendor = ''
+                        product_name = ''
+                        cpe_entries = []
+
+                        for config in cve_data.get('configurations', []):
+                            for node in config.get('nodes', []):
+                                for match in node.get('cpeMatch', []):
+                                    if not match.get('vulnerable', False):
+                                        continue
+                                    cpe_uri = match.get('criteria', '')
+                                    parsed = parse_cpe_uri(cpe_uri)
+
+                                    if not vendor and parsed.get('vendor'):
+                                        vendor = parsed['vendor'].replace('_', ' ').title()
+                                    if not product_name and parsed.get('product'):
+                                        product_name = parsed['product'].replace('_', ' ').title()
+
+                                    cpe_version = parsed.get('version', '*')
+                                    has_range = (
+                                        match.get('versionStartIncluding') or
+                                        match.get('versionStartExcluding') or
+                                        match.get('versionEndIncluding') or
+                                        match.get('versionEndExcluding')
+                                    )
+
+                                    cpe_entries.append({
+                                        'cpe_uri': cpe_uri,
+                                        'vendor': parsed.get('vendor', ''),
+                                        'product': parsed.get('product', ''),
+                                        'version_start': match.get('versionStartIncluding') or match.get('versionStartExcluding'),
+                                        'version_end': match.get('versionEndIncluding') or match.get('versionEndExcluding'),
+                                        'version_start_type': 'including' if match.get('versionStartIncluding') else 'excluding' if match.get('versionStartExcluding') else None,
+                                        'version_end_type': 'including' if match.get('versionEndIncluding') else 'excluding' if match.get('versionEndExcluding') else None,
+                                        'exact_version': cpe_version if (not has_range and cpe_version not in ('*', '-', '')) else None,
+                                    })
+
+                        # Fallback vendor/product from description
+                        if not vendor and not product_name and description:
+                            vendor, product_name = _extract_vendor_product_from_description(description)
+
+                        if existing:
+                            # Update existing record with CPE data
+                            if vendor and existing.vendor_project == 'Unknown':
+                                existing.vendor_project = vendor
+                            if product_name and existing.product == 'Unknown':
+                                existing.product = product_name
+                            if cpe_entries:
+                                existing.set_cpe_entries(cpe_entries)
+                            if cvss_score is not None and existing.cvss_score is None:
+                                existing.cvss_score = cvss_score
+                                existing.severity = cvss_severity
+                            existing.nvd_status = vuln_status or existing.nvd_status
+                            new_count += 1
+                        else:
+                            # Create new vulnerability
+                            vuln = Vulnerability(
+                                cve_id=cve_id,
+                                vendor_project=vendor or 'Unknown',
+                                product=product_name or 'Unknown',
+                                vulnerability_name=description[:500],
+                                date_added=datetime.utcnow().date(),
+                                short_description=description,
+                                required_action='Apply vendor patches. (Source: NVD)',
+                                known_ransomware=False,
+                                notes=f'Auto-imported from NVD for CPE {cpe_vendor}:{cpe_product}.',
+                                cvss_score=cvss_score,
+                                severity=cvss_severity,
+                                cvss_source='nvd',
+                                source='nvd',
+                                nvd_status=vuln_status or None,
+                            )
+                            if cpe_entries:
+                                vuln.set_cpe_entries(cpe_entries)
+                            db.session.add(vuln)
+                            new_count += 1
+
+                    except Exception as e:
+                        logger.debug(f"CPE CVE fetch: error processing CVE: {e}")
+                        errors += 1
+                        continue
+
+                db.session.commit()
+                start_index += len(results)
+                if start_index >= total_results:
+                    break
+
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"NVD CPE CVE fetch request failed: {e}")
+                errors += 1
+                break
+
+        logger.info(
+            f"CPE CVE fetch for {cpe_vendor}:{cpe_product}: "
+            f"{new_count} new/updated, {skipped} existing, {errors} errors"
+        )
+        return new_count, skipped, errors
+
+    except Exception as e:
+        logger.warning(f"CPE CVE fetch failed for {cpe_vendor}:{cpe_product}: {e}")
+        return 0, 0, 1
