@@ -3995,11 +3995,15 @@
 
         // Organization Switcher Functions
         async function loadNavbarOrganizations() {
+            // SaaS mode: org switcher is hidden, skip loading
+            const orgNameEl = document.getElementById('currentOrgName');
+            if (!orgNameEl) return;
+
             try {
                 // Show cached organization name immediately to avoid "Loading..." flash
                 const cachedOrgName = localStorage.getItem('currentOrgName');
                 if (cachedOrgName) {
-                    document.getElementById('currentOrgName').textContent = cachedOrgName;
+                    orgNameEl.textContent = cachedOrgName;
                 }
 
                 // Get current organization
