@@ -577,20 +577,28 @@ def generate_compliance_report():
     from datetime import date, timedelta
     from io import BytesIO
 
-    # Check professional license
-    license_info = get_license()
-    if not license_info or not license_info.is_professional():
-        return jsonify({
-            'error': 'CISA BOD 22-01 Compliance Reports require a Professional license',
-            'feature': 'compliance_reports'
-        }), 403
-
-    output_format = request.args.get('format', 'json').lower()
-    org_id = request.args.get('organization_id', type=int)
-
+    # Check professional license (SaaS: check org subscription; on-premise: check RSA license)
+    from app.saas import is_saas_mode, get_scoped_org_id, get_effective_features
     user = User.query.get(session.get('user_id'))
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
+    if is_saas_mode():
+        org_features = get_effective_features(get_scoped_org_id(user))
+        if not org_features.get('compliance_reports', False):
+            return jsonify({
+                'error': 'CISA BOD 22-01 Compliance Reports require a Professional license',
+                'feature': 'compliance_reports'
+            }), 403
+    else:
+        license_info = get_license()
+        if not license_info or not license_info.is_professional():
+            return jsonify({
+                'error': 'CISA BOD 22-01 Compliance Reports require a Professional license',
+                'feature': 'compliance_reports'
+            }), 403
+
+    output_format = request.args.get('format', 'json').lower()
+    org_id = request.args.get('organization_id', type=int)
 
     # Determine organization scope
     # SaaS mode: always scoped to user's org (no cross-tenant access)
@@ -1068,19 +1076,28 @@ def generate_nis2_compliance_report():
     from datetime import date, timedelta
     from io import BytesIO
 
-    license_info = get_license()
-    if not license_info or not license_info.is_professional():
-        return jsonify({
-            'error': 'NIS2 Compliance Reports require a Professional license',
-            'feature': 'compliance_reports'
-        }), 403
-
-    output_format = request.args.get('format', 'json').lower()
-    org_id = request.args.get('organization_id', type=int)
-
+    # Check professional license (SaaS: check org subscription)
+    from app.saas import is_saas_mode, get_scoped_org_id, get_effective_features
     user = User.query.get(session.get('user_id'))
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
+    if is_saas_mode():
+        org_features = get_effective_features(get_scoped_org_id(user))
+        if not org_features.get('compliance_reports', False):
+            return jsonify({
+                'error': 'NIS2 Compliance Reports require a Professional license',
+                'feature': 'compliance_reports'
+            }), 403
+    else:
+        license_info = get_license()
+        if not license_info or not license_info.is_professional():
+            return jsonify({
+                'error': 'NIS2 Compliance Reports require a Professional license',
+                'feature': 'compliance_reports'
+            }), 403
+
+    output_format = request.args.get('format', 'json').lower()
+    org_id = request.args.get('organization_id', type=int)
 
     # SaaS mode: always scoped to user's org
     if is_saas_mode():
@@ -1451,19 +1468,28 @@ def generate_executive_summary():
     from datetime import date, timedelta
     from io import BytesIO
 
-    license_info = get_license()
-    if not license_info or not license_info.is_professional():
-        return jsonify({
-            'error': 'Executive Summary reports require a Professional license',
-            'feature': 'executive_reports'
-        }), 403
-
-    output_format = request.args.get('format', 'pdf').lower()
-    org_id = request.args.get('organization_id', type=int)
-
+    # Check professional license (SaaS: check org subscription)
+    from app.saas import is_saas_mode, get_scoped_org_id, get_effective_features
     user = User.query.get(session.get('user_id'))
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
+    if is_saas_mode():
+        org_features = get_effective_features(get_scoped_org_id(user))
+        if not org_features.get('compliance_reports', False):
+            return jsonify({
+                'error': 'Executive Summary reports require a Professional license',
+                'feature': 'executive_reports'
+            }), 403
+    else:
+        license_info = get_license()
+        if not license_info or not license_info.is_professional():
+            return jsonify({
+                'error': 'Executive Summary reports require a Professional license',
+                'feature': 'executive_reports'
+            }), 403
+
+    output_format = request.args.get('format', 'pdf').lower()
+    org_id = request.args.get('organization_id', type=int)
 
     # SaaS mode: always scoped to user's org
     if is_saas_mode():

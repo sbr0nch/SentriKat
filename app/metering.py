@@ -252,7 +252,7 @@ def _check_license_quota(org_id, resource):
         from app.licensing import check_agent_limit, check_user_limit, check_org_limit
 
         if resource == 'agents':
-            allowed, limit, msg = check_agent_limit(org_id)
+            allowed, limit, msg = check_agent_limit()
             return allowed, msg
         elif resource == 'users':
             allowed, limit, msg = check_user_limit()

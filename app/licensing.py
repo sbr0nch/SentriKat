@@ -989,7 +989,12 @@ def requires_professional(feature=None):
 
 
 def check_user_limit():
-    """Check if user limit is reached"""
+    """Check if user limit is reached.
+    SaaS: limits are managed per-org by subscription plan, not globally.
+    """
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return True, -1, None  # SaaS: no global limit, managed by subscription
     from app.models import User
     license_info = get_license()
     current_users = User.query.filter(User.is_active == True).count() or 0
@@ -997,7 +1002,12 @@ def check_user_limit():
 
 
 def check_org_limit():
-    """Check if organization limit is reached"""
+    """Check if organization limit is reached.
+    SaaS: orgs are provisioned by the platform, no global limit.
+    """
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return True, -1, None  # SaaS: no global limit
     from app.models import Organization
     license_info = get_license()
     current_orgs = Organization.query.count() or 0
@@ -1005,7 +1015,12 @@ def check_org_limit():
 
 
 def check_product_limit():
-    """Check if product limit is reached"""
+    """Check if product limit is reached.
+    SaaS: limits are managed per-org by subscription plan, not globally.
+    """
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return True, -1, None  # SaaS: no global limit
     from app.models import Product
     license_info = get_license()
     current_products = Product.query.count() or 0
@@ -1016,12 +1031,14 @@ def check_agent_limit():
     """
     Check if agent (endpoint) limit is reached.
 
-    IMPORTANT: Counts agents GLOBALLY across all organizations.
-    This prevents the multi-org bypass vulnerability where users
-    create multiple organizations to get around per-org limits.
+    On-premise: Counts agents GLOBALLY across all organizations.
+    SaaS: No global limit — managed per-org by subscription plan.
 
     Returns: (allowed, limit, message) tuple
     """
+    from app.saas import is_saas_mode
+    if is_saas_mode():
+        return True, -1, None  # SaaS: no global limit
     from app.models import Asset
     license_info = get_license()
 

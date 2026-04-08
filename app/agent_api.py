@@ -1354,6 +1354,7 @@ def process_inventory_job(job):
         items_failed = 0
         items_processed = 0
         version_changed_product_ids = set()  # Products whose version changed — need re-matching
+        new_cpe_pairs = set()  # Track unique (cpe_vendor, cpe_product) pairs from new products for NVD lookup
 
         # Resolve the agent_key for license gating (reuse from above if loaded)
         agent_key_for_gating = None
@@ -1466,6 +1467,10 @@ def process_inventory_job(job):
                         # Auto-apply CPE mapping for better vulnerability matching
                         from app.cpe_mapping import apply_cpe_to_product
                         apply_cpe_to_product(product)
+
+                        # Track new CPE pairs for on-demand NVD lookup
+                        if product.cpe_vendor and product.cpe_product:
+                            new_cpe_pairs.add((product.cpe_vendor, product.cpe_product))
 
                         db.session.add(product)
                         db.session.flush()
@@ -1624,6 +1629,25 @@ def process_inventory_job(job):
             except Exception as e:
                 db.session.rollback()
                 logger.warning(f"Post-job re-match failed (non-critical): {e}")
+
+        # On-demand NVD CVE fetch for newly discovered CPE pairs.
+        # This fills in historical CVEs that the periodic sync misses.
+        if new_cpe_pairs:
+            try:
+                from app.cisa_sync import fetch_cves_by_cpe
+                logger.info(f"Job {job_id}: Fetching CVEs for {len(new_cpe_pairs)} new CPE pair(s)...")
+                for cpe_vendor, cpe_product in new_cpe_pairs:
+                    try:
+                        new_cves, _, _ = fetch_cves_by_cpe(cpe_vendor, cpe_product)
+                        if new_cves:
+                            logger.info(f"Job {job_id}: Imported {new_cves} CVEs for {cpe_vendor}:{cpe_product}")
+                    except Exception as e:
+                        logger.warning(f"Job {job_id}: CVE fetch for {cpe_vendor}:{cpe_product} failed: {e}")
+                # Re-run matching after importing new CVEs
+                from app.filters import match_vulnerabilities_to_products
+                match_vulnerabilities_to_products()
+            except Exception as e:
+                logger.warning(f"Job {job_id}: Post-inventory CVE fetch failed (non-critical): {e}")
 
         # Finalize job - re-fetch to ensure fresh object
         job = InventoryJob.query.get(job_id)
@@ -1937,6 +1961,7 @@ def report_inventory():
         installations_updated = 0
         installations_removed = 0
         version_changed_product_ids = set()  # Products whose version changed — need re-matching
+        new_cpe_pairs = set()  # Track unique CPE pairs for on-demand NVD lookup
 
         for product_data in products:
             vendor = product_data.get('vendor')
@@ -2030,6 +2055,10 @@ def report_inventory():
                     # Auto-apply CPE mapping for better vulnerability matching
                     from app.cpe_mapping import apply_cpe_to_product
                     apply_cpe_to_product(product)
+
+                    # Track new CPE pairs for on-demand NVD lookup
+                    if product.cpe_vendor and product.cpe_product:
+                        new_cpe_pairs.add((product.cpe_vendor, product.cpe_product))
 
                     db.session.add(product)
                     db.session.flush()
@@ -2222,6 +2251,24 @@ def report_inventory():
             except Exception as e:
                 db.session.rollback()
                 logger.warning(f"Post-agent-push re-match failed (non-critical): {e}")
+
+        # On-demand NVD CVE fetch for newly discovered CPE pairs
+        if new_cpe_pairs:
+            try:
+                from app.cisa_sync import fetch_cves_by_cpe
+                logger.info(f"Sync inventory: Fetching CVEs for {len(new_cpe_pairs)} new CPE pair(s)...")
+                for cpe_vendor, cpe_product in new_cpe_pairs:
+                    try:
+                        new_cves, _, _ = fetch_cves_by_cpe(cpe_vendor, cpe_product)
+                        if new_cves:
+                            logger.info(f"Sync inventory: Imported {new_cves} CVEs for {cpe_vendor}:{cpe_product}")
+                    except Exception as e:
+                        logger.warning(f"Sync inventory: CVE fetch for {cpe_vendor}:{cpe_product} failed: {e}")
+                # Re-run matching after importing new CVEs
+                from app.filters import match_vulnerabilities_to_products
+                match_vulnerabilities_to_products()
+            except Exception as e:
+                logger.warning(f"Post-sync CVE fetch failed (non-critical): {e}")
 
         # Build response with license warning if applicable
         response = {
