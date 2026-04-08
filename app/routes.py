@@ -2766,11 +2766,22 @@ def get_vulnerability_stats():
     # Count products without CPE mapping (blind spots)
     products_unmapped = Product.query.filter(
         Product.active == True,
+        Product.id.in_(org_product_ids),
         db.or_(
             Product.cpe_vendor.is_(None),
             Product.cpe_vendor == '',
             Product.cpe_product.is_(None),
             Product.cpe_product == ''
+        )
+    ).count()
+
+    # Products without version (cannot verify CVE ranges)
+    products_no_version = Product.query.filter(
+        Product.active == True,
+        Product.id.in_(org_product_ids),
+        db.or_(
+            Product.version.is_(None),
+            Product.version == ''
         )
     ).count()
 
@@ -2942,6 +2953,7 @@ def get_vulnerability_stats():
         'ransomware_related': ransomware,
         'products_tracked': products_tracked,
         'products_unmapped': products_unmapped,  # Products without CPE (blind spots)
+        'products_no_version': products_no_version,  # Products without version (can't verify CVE ranges)
         'priority_breakdown': priority_counts,
         'cve_priority_breakdown': cve_priority_counts,  # CVE-level counts
         'critical_count': priority_counts['critical'],
@@ -3010,11 +3022,62 @@ def get_vulnerability_chart_data():
             return _chart_age_distribution(org_product_ids)
         elif chart_type == 'vuln_timeline':
             return _chart_vuln_timeline(org_product_ids)
+        elif chart_type == 'remediation_actions':
+            return _chart_remediation_actions(org_product_ids)
         else:
             return jsonify({'error': f'Unknown chart type: {chart_type}'}), 400
     except Exception as e:
         logger.exception(f"Error generating chart data for {chart_type}")
         return jsonify({'error': 'Failed to generate chart data'}), 500
+
+
+def _chart_remediation_actions(org_product_ids):
+    """Top products by unacknowledged CVE count — actionable remediation summary.
+
+    Returns products sorted by impact: "Update X to fix N vulnerabilities".
+    """
+    from sqlalchemy import func as sa_func
+
+    if not org_product_ids:
+        return jsonify({'actions': []})
+
+    # Group unacknowledged matches by product
+    rows = db.session.query(
+        Product.id,
+        Product.vendor,
+        Product.product_name,
+        Product.version,
+        sa_func.count(VulnerabilityMatch.id).label('cve_count'),
+        sa_func.sum(db.case((Vulnerability.severity == 'CRITICAL', 1), else_=0)).label('critical'),
+        sa_func.sum(db.case((Vulnerability.severity == 'HIGH', 1), else_=0)).label('high'),
+        sa_func.sum(db.case((Vulnerability.severity == 'MEDIUM', 1), else_=0)).label('medium'),
+    ).join(
+        VulnerabilityMatch, VulnerabilityMatch.product_id == Product.id
+    ).join(
+        Vulnerability, Vulnerability.id == VulnerabilityMatch.vulnerability_id
+    ).filter(
+        Product.id.in_(org_product_ids),
+        VulnerabilityMatch.acknowledged == False
+    ).group_by(
+        Product.id, Product.vendor, Product.product_name, Product.version
+    ).order_by(
+        sa_func.count(VulnerabilityMatch.id).desc()
+    ).limit(15).all()
+
+    actions = []
+    for row in rows:
+        actions.append({
+            'product_id': row.id,
+            'vendor': row.vendor,
+            'product_name': row.product_name,
+            'version': row.version,
+            'cve_count': row.cve_count,
+            'critical': row.critical or 0,
+            'high': row.high or 0,
+            'medium': row.medium or 0,
+        })
+
+    return jsonify({'actions': actions})
 
 
 def _chart_top_vendors(org_product_ids):

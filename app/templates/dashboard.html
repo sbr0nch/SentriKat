@@ -247,6 +247,19 @@
         </div>
     </div>
 
+    <!-- Version Unknown Warning -->
+    <div id="noVersionWarning" class="alert alert-info d-none mb-3 alert-dismissible" role="alert">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-info-circle-fill me-2"></i>
+                <strong><span id="noVersionCount">0</span> products without a known version</strong> -
+                CVE verification requires a version number. Update the agent or assign versions manually in
+                <a href="/admin#products" class="alert-link">Inventory</a>.
+            </div>
+            <button type="button" class="btn-close" aria-label="Dismiss" onclick="this.closest('.alert').classList.add('d-none')"></button>
+        </div>
+    </div>
+
     <!-- Dashboard Top: Two-Column Widget Layout -->
     <div class="row g-3 mb-3">
         <!-- Left Column: Priority + Stats -->
@@ -360,6 +373,7 @@
                                     <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'top_vendors'); return false;"><i class="bi bi-building me-2"></i>Top Vendors</a></li>
                                     <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'vuln_timeline'); return false;"><i class="bi bi-calendar3 me-2"></i>Monthly Timeline</a></li>
                                     <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'remediation_rate'); return false;"><i class="bi bi-check2-circle me-2"></i>Remediation Progress</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="setWidget(1, 'remediation_actions'); return false;"><i class="bi bi-wrench me-2"></i>Remediation Actions</a></li>
                                 </ul>
                             </div>
                         </div>
@@ -1303,6 +1317,16 @@
                 unmappedWarning.classList.add('d-none');
             }
 
+            // Show/hide version unknown warning
+            const noVersionWarning = document.getElementById('noVersionWarning');
+            const noVersionCount = document.getElementById('noVersionCount');
+            if (noVersionWarning && stats.products_no_version > 0 && dashboardSourceFilter !== 'containers') {
+                noVersionCount.textContent = stats.products_no_version;
+                noVersionWarning.classList.remove('d-none');
+            } else if (noVersionWarning) {
+                noVersionWarning.classList.add('d-none');
+            }
+
             // Update configurable dashboard widgets with stats data
             lastStatsData = stats;
             loadAllWidgets();
@@ -1341,7 +1365,8 @@
         age_distribution: { icon: 'bi-clock-history', title: 'Vulnerability Age', subtitle: 'Time since CVEs were added to KEV catalog' },
         top_vendors: { icon: 'bi-building', title: 'Top Affected Vendors', subtitle: 'Top 10 vendors with unacknowledged vulnerabilities' },
         vuln_timeline: { icon: 'bi-calendar3', title: 'Monthly Timeline', subtitle: 'New affecting CVEs per month (last 12 months)' },
-        remediation_rate: { icon: 'bi-check2-circle', title: 'Remediation Progress', subtitle: 'Acknowledged vs unacknowledged over time' }
+        remediation_rate: { icon: 'bi-check2-circle', title: 'Remediation Progress', subtitle: 'Acknowledged vs unacknowledged over time' },
+        remediation_actions: { icon: 'bi-wrench', title: 'Remediation Actions', subtitle: 'Update these products to fix the most vulnerabilities' }
     };
 
     // Get saved widget preferences from localStorage
@@ -1418,6 +1443,11 @@
         try {
             if (widgetType === 'severity_donut') {
                 renderSeverityDonut(slot, lastStatsData);
+            } else if (widgetType === 'remediation_actions') {
+                const response = await fetchWithRetry(`/api/vulnerabilities/charts?chart=remediation_actions`, {}, 2, 500);
+                if (!response.ok) throw new Error(`Server error: ${response.status}`);
+                const data = await response.json();
+                renderRemediationActions(slot, data);
             } else {
                 const response = await fetchWithRetry(`/api/vulnerabilities/charts?chart=${widgetType}`, {}, 2, 500);
                 if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -1487,6 +1517,52 @@
     }
 
     // Generic chart renderer for API-driven widgets
+    function renderRemediationActions(slot, data) {
+        const container = document.getElementById('widgetChartContainer' + slot);
+        const noData = document.getElementById('widgetNoData' + slot);
+        const canvas = document.getElementById('widgetCanvas' + slot);
+
+        const actions = data.actions || [];
+        if (actions.length === 0) {
+            container.classList.add('d-none');
+            noData.classList.remove('d-none');
+            return;
+        }
+
+        container.classList.remove('d-none');
+        noData.classList.add('d-none');
+        canvas.style.display = 'none';
+
+        // Remove old list if present
+        const oldList = container.querySelector('.remediation-list');
+        if (oldList) oldList.remove();
+
+        const list = document.createElement('div');
+        list.className = 'remediation-list';
+        list.style.cssText = 'max-height: 320px; overflow-y: auto; padding: 0.5rem;';
+
+        actions.forEach((a, i) => {
+            const severityBadges = [];
+            if (a.critical > 0) severityBadges.push(`<span class="badge bg-danger">${a.critical} Critical</span>`);
+            if (a.high > 0) severityBadges.push(`<span class="badge bg-warning text-dark">${a.high} High</span>`);
+            if (a.medium > 0) severityBadges.push(`<span class="badge bg-info text-dark">${a.medium} Medium</span>`);
+
+            list.innerHTML += `
+                <div class="d-flex align-items-center justify-content-between py-2 ${i < actions.length - 1 ? 'border-bottom' : ''}">
+                    <div>
+                        <div class="fw-semibold" style="font-size: 0.85rem;">${escapeHtml(a.vendor)} ${escapeHtml(a.product_name)}</div>
+                        <small class="text-muted">${a.version ? 'v' + escapeHtml(a.version) : 'Version unknown'}</small>
+                    </div>
+                    <div class="text-end">
+                        <div class="fw-bold text-danger" style="font-size: 0.9rem;">${a.cve_count} CVEs</div>
+                        <div class="d-flex gap-1 justify-content-end">${severityBadges.join('')}</div>
+                    </div>
+                </div>`;
+        });
+
+        container.appendChild(list);
+    }
+
     function renderChartWidget(slot, widgetType, data) {
         const container = document.getElementById('widgetChartContainer' + slot);
         const noData = document.getElementById('widgetNoData' + slot);
@@ -3022,8 +3098,10 @@
                 statusText = 'Affected';
             }
 
-            // Show product version
-            const versionBadge = prod.version ? `<span class="badge bg-secondary ms-1">v${escapeHtml(prod.version)}</span>` : '';
+            // Show product version or "version unknown" warning
+            const versionBadge = prod.version
+                ? `<span class="badge bg-secondary ms-1">v${escapeHtml(prod.version)}</span>`
+                : `<span class="badge bg-warning text-dark ms-1" title="Version unknown — update the agent or assign version manually to enable CVE verification"><i class="bi bi-exclamation-triangle me-1"></i>Version unknown</span>`;
 
             // Find matching fix version for this product
             let fixBadge = '';
