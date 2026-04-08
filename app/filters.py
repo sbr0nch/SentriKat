@@ -433,6 +433,12 @@ def check_match(vulnerability, product):
     if cpe_vendor == '_skip' or cpe_product == '_not_security_relevant':
         return [], None, None
 
+    # Skip browser/IDE extensions — they don't have CVEs in NVD.
+    # Their vendor (e.g., "Chrome Web Store") would false-match against
+    # the browser's own CVEs (Google Chrome).
+    if getattr(product, 'source_type', None) == 'extension':
+        return [], None, None
+
     match_type = product.match_type or 'auto'
 
     # Determine which matching methods to use
