@@ -5876,13 +5876,23 @@ def update_organization(org_id):
     # Webhook settings (requires Professional license for Email Alerts feature)
     webhook_fields = ['webhook_enabled', 'webhook_url', 'webhook_name', 'webhook_format', 'webhook_token']
     if any(field in data for field in webhook_fields):
-        from app.licensing import get_license
-        license_info = get_license()
-        if not license_info.is_professional():
-            return jsonify({
-                'error': 'Organization webhooks require a Professional license',
-                'license_required': True
-            }), 403
+        from app.saas import is_saas_mode, get_scoped_org_id, get_effective_features
+        if is_saas_mode():
+            from app.auth import get_current_user
+            org_features = get_effective_features(get_scoped_org_id(get_current_user()))
+            if not org_features.get('webhooks', False):
+                return jsonify({
+                    'error': 'Organization webhooks require a Professional license',
+                    'license_required': True
+                }), 403
+        else:
+            from app.licensing import get_license
+            license_info = get_license()
+            if not license_info.is_professional():
+                return jsonify({
+                    'error': 'Organization webhooks require a Professional license',
+                    'license_required': True
+                }), 403
 
     if 'webhook_enabled' in data:
         org.webhook_enabled = data['webhook_enabled']
