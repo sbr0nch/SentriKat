@@ -779,16 +779,41 @@ def check_license_can_add_agent(organization_id, is_new_agent=True):
     Check if the license allows adding a new agent.
     Returns (allowed, message, license_info) tuple.
 
-    IMPORTANT: This now uses the CORE RSA-signed license system for enforcement,
-    not the database-only AgentLicense table. The limits in the signed license
-    cannot be tampered with by modifying the database.
+    On-premise: Uses the CORE RSA-signed license system for enforcement.
+    SaaS: Uses the organization's subscription plan features.
 
     Agent limits are GLOBAL (across all organizations) to prevent the multi-org
     bypass vulnerability where users create multiple orgs to circumvent limits.
 
     The AgentLicense table is now used only for usage tracking/metering.
     """
-    # Get license info from core system (RSA-signed, tamper-proof)
+    from app.saas import is_saas_mode, get_effective_features
+
+    # SaaS mode: check org subscription plan instead of global RSA license
+    if is_saas_mode():
+        features = get_effective_features(organization_id)
+        if not features.get('push_agents', False):
+            return False, "Push Agents require a Professional license.", {
+                'edition': 'saas',
+                'feature_enabled': False,
+                'upgrade_required': True
+            }
+        # SaaS: skip global RSA license checks, allow agent
+        # Update usage tracking
+        try:
+            license_obj = AgentLicense.query.filter_by(organization_id=organization_id).first()
+            if license_obj:
+                license_obj.update_agent_count()
+        except Exception as e:
+            logger.warning(f"Could not update usage tracking: {e}")
+            db.session.rollback()
+        return True, None, {
+            'edition': 'saas',
+            'feature_enabled': True,
+            'upgrade_required': False
+        }
+
+    # On-premise: use RSA-signed license system
     license_info = get_license()
     agent_usage = get_agent_usage()
 
