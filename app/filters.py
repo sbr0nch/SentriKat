@@ -167,12 +167,16 @@ def check_cpe_match(vulnerability, product):
             if version:
                 return [], None, None
 
-        # Priority 3: Wildcard entries — ONLY used if no ranged/exact entries exist
+        # Priority 3: Wildcard entries — ONLY used if no ranged/exact entries exist.
+        # If the product has a specific version, wildcard entries are unreliable:
+        # they usually mean NVD hasn't detailed the affected versions, NOT that
+        # all versions are truly vulnerable. Skip to avoid massive false positives.
         if wildcard_entries:
-            if version:
-                return [f"CPE match: {cpe_vendor}:{cpe_product}:{version} (all versions affected)"], 'cpe', 'high'
-            else:
-                return [f"CPE match: {cpe_vendor}:{cpe_product} (all versions affected)"], 'cpe', 'high'
+            if not version:
+                return [f"CPE match: {cpe_vendor}:{cpe_product} (all versions affected)"], 'cpe', 'medium'
+            # Product has a version but CVE only has wildcard CPE — skip.
+            # The match will be created if/when NVD adds precise version ranges.
+            return [], None, None
     else:
         # No cached CPE data from NVD for this vulnerability.
         # Three scenarios:
@@ -194,9 +198,10 @@ def check_cpe_match(vulnerability, product):
             # Don't fall back to text matching; NVD is authoritative.
             return [], None, None
 
-        if product.version and not nvd_pending:
-            # Product has a version but we have no NVD data to verify ranges.
-            # Skip — the match will be created once CPE data is fetched.
+        if product.version:
+            # Product has a specific version but no CPE data to verify ranges.
+            # Skip — text matching without version verification causes massive
+            # false positives. The match will be created once NVD adds CPE data.
             return [], None, None
 
         # Fall back to text matching for:
