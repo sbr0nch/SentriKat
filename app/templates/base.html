@@ -3190,7 +3190,7 @@
                         </a>
                         <a href="/admin-panel#settings:email" class="sidebar-sublink" data-hash="settings:email">
                             <i class="bi bi-envelope"></i>
-                            Email (SMTP)
+                            {% if saas_mode and not is_platform_admin %}Email & Notifications{% else %}Email (SMTP){% endif %}
                         </a>
                         {% endif %}
                         {% if is_platform_admin or plan_features.get('siem_integration') or (not saas_mode and has_pro_features) %}
