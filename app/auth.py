@@ -327,9 +327,10 @@ def setup():
     return render_template('setup.html')
 
 @auth_bp.route('/api/auth/setup', methods=['POST'])
+@limiter.limit("3/minute")
 def api_setup():
     """Handle first-time setup"""
-    # Only allow if no users exist
+    # Only allow if no users exist — double check to prevent race conditions
     if User.query.count() > 0:
         return jsonify({'error': 'Setup already completed'}), 400
 

@@ -239,8 +239,9 @@ def saml_acs():
         pass
 
     # Redirect to RelayState (return URL) or dashboard
+    # Security: block protocol-relative URLs (//attacker.com) and non-path URLs
     relay_state = request.form.get('RelayState')
-    if relay_state and relay_state.startswith('/'):
+    if relay_state and relay_state.startswith('/') and not relay_state.startswith('//'):
         return redirect(relay_state)
 
     return redirect(url_for('main.index'))
