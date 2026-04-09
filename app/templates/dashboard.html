@@ -358,7 +358,7 @@
         <div class="col-lg-7 col-xl-8">
             <div class="row g-3 h-100">
                 <!-- Widget Slot 1 (Left) -->
-                <div class="col-md-5">
+                <div class="col-md-6">
                     <div class="card h-100" id="widgetCard1">
                         <div class="card-header py-2 d-flex justify-content-between align-items-center">
                             <span id="widgetTitle1"><i class="bi bi-pie-chart me-2"></i>Priority Breakdown</span>
@@ -379,7 +379,7 @@
                         </div>
                         <div class="card-body py-2 d-flex flex-column align-items-center justify-content-center">
                             <p class="text-muted mb-1 small widget-subtitle" id="widgetSubtitle1" style="font-size: 0.7rem;">Unacknowledged matches by effective priority</p>
-                            <div id="widgetChartContainer1" style="position: relative; width: 100%; max-height: 220px;">
+                            <div id="widgetChartContainer1" style="position: relative; width: 100%; min-height: 300px;">
                                 <canvas id="widgetCanvas1"></canvas>
                             </div>
                             <div id="widgetNoData1" class="text-center text-muted py-3 d-none">
@@ -390,7 +390,7 @@
                     </div>
                 </div>
                 <!-- Widget Slot 2 (Right) -->
-                <div class="col-md-7">
+                <div class="col-md-6">
                     <div class="card h-100" id="widgetCard2">
                         <div class="card-header py-2 d-flex justify-content-between align-items-center">
                             <span id="widgetTitle2"><i class="bi bi-building me-2"></i>Top Affected Vendors</span>
@@ -415,7 +415,7 @@
                         </div>
                         <div class="card-body py-2">
                             <p class="text-muted mb-1 small widget-subtitle" id="widgetSubtitle2" style="font-size: 0.7rem;">Top 10 vendors with unacknowledged vulnerabilities</p>
-                            <div id="widgetChartContainer2" style="position: relative; height: 210px;">
+                            <div id="widgetChartContainer2" style="position: relative; min-height: 300px;">
                                 <canvas id="widgetCanvas2"></canvas>
                             </div>
                             <div id="widgetNoData2" class="text-center text-muted py-3 d-none">
@@ -1496,7 +1496,7 @@
                 }]
             },
             options: {
-                responsive: true, maintainAspectRatio: true, cutout: '60%',
+                responsive: true, maintainAspectRatio: true, devicePixelRatio: 2, cutout: '60%',
                 plugins: {
                     legend: { position: 'bottom', labels: { usePointStyle: true, padding: 10, font: { size: 10 }, color: colors.legendColor,
                         generateLabels: function(chart) {
@@ -1600,7 +1600,7 @@
                         }]
                     },
                     options: {
-                        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+                        responsive: true, maintainAspectRatio: false, devicePixelRatio: 2, indexAxis: 'y',
                         plugins: {
                             legend: { display: false },
                             tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
@@ -1626,7 +1626,7 @@
                         }]
                     },
                     options: {
-                        responsive: true, maintainAspectRatio: false,
+                        responsive: true, maintainAspectRatio: false, devicePixelRatio: 2,
                         plugins: {
                             legend: { display: false },
                             tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
@@ -1652,7 +1652,7 @@
                         }]
                     },
                     options: {
-                        responsive: true, maintainAspectRatio: false,
+                        responsive: true, maintainAspectRatio: false, devicePixelRatio: 2,
                         plugins: {
                             legend: { display: false },
                             tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
@@ -1678,7 +1678,7 @@
                         }]
                     },
                     options: {
-                        responsive: true, maintainAspectRatio: false,
+                        responsive: true, maintainAspectRatio: false, devicePixelRatio: 2,
                         plugins: {
                             legend: { display: false },
                             tooltip: { backgroundColor: colors.tooltipBg, titleColor: '#fff', bodyColor: '#e5e7eb' }
@@ -1714,7 +1714,7 @@
                         ]
                     },
                     options: {
-                        responsive: true, maintainAspectRatio: false,
+                        responsive: true, maintainAspectRatio: false, devicePixelRatio: 2,
                         interaction: { intersect: false, mode: 'index' },
                         plugins: {
                             legend: { position: 'top', labels: { usePointStyle: true, padding: 12, font: { size: 10 }, color: colors.legendColor, boxWidth: 8 } },
