@@ -72,8 +72,8 @@ UTENTE (browser)
 
 | # | Problema | Repo | Note |
 |---|---------|------|------|
-| M1 | Job lock in-memory (non cross-process) | SentriKat | scheduler.py:87-98 |
-| M2 | Retry state non persistito | SentriKat | scheduler.py:82-84 |
+| ~~M1~~ | ~~Job lock in-memory~~ | SentriKat | scheduler.py — **FIXATO**: migrato a JobState DB model |
+| ~~M2~~ | ~~Retry state non persistito~~ | SentriKat | scheduler.py — **FIXATO**: migrato a JobState DB model |
 | ~~M3~~ | ~~Password reset token senza check scadenza~~ | SentriKat | models.py — **FALSO POSITIVO**: token SHA-256, scadenza 30min, single-use |
 | ~~M4~~ | ~~Provision key comparison non constant-time~~ | SentriKat | provision_api.py:52 — **FIXATO** |
 
@@ -427,8 +427,8 @@ Password reset token gia implementato correttamente: SHA-256, scadenza 30 min, s
 
 - [x] ~~Fixare H1-H5 (vulnerabilita alte)~~ — H1, H2, H5 fixati; H3, H4 in SentriKat-web
 - [ ] Aggiungere test automatici cross-org (`test_cross_org_access.py`)
-- [ ] Migrare job locks da in-memory a database
-- [ ] Persistere retry state in DB
+- [x] ~~Migrare job locks da in-memory a database~~ — JobState model
+- [x] ~~Persistere retry state in DB~~ — JobState model
 - [ ] Aggiungere Alembic migrations per SentriKat core
 - [ ] Setup CI/CD pipeline
 - [ ] Penetration test esterno
