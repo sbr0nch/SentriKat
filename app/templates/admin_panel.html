@@ -1238,7 +1238,7 @@
                 {% if has_email_tab %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link {% if not has_auth_tab %}active{% endif %}" id="email-settings-tab" type="button" onclick="showSettingsGroup('email', this)">
-                        <i class="bi bi-envelope me-2"></i>Email & Alerts
+                        <i class="bi bi-envelope me-2"></i>{% if saas_mode and not is_platform_admin %}Email & Notifications{% else %}Email & Alerts{% endif %}
                     </button>
                 </li>
                 {% endif %}
