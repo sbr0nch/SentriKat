@@ -1570,8 +1570,22 @@ def create_product():
         except Exception as e:
             current_app.logger.warning(f"CPE auto-match failed: {e}")
 
+    # Security: validate organization_id to prevent cross-tenant product creation
+    requested_org_id = data.get('organization_id', org_id)
+    if requested_org_id and requested_org_id != org_id:
+        if not current_user.is_super_admin():
+            # Non-super-admins can only create products in their own org
+            user_org_ids = {current_user.organization_id}
+            try:
+                for m in current_user.org_memberships.all():
+                    user_org_ids.add(m.organization_id)
+            except Exception:
+                pass
+            if requested_org_id not in user_org_ids:
+                return jsonify({'error': 'Not authorized for this organization'}), 403
+
     product = Product(
-        organization_id=data.get('organization_id', org_id),
+        organization_id=requested_org_id,
         service_catalog_id=data.get('service_catalog_id'),
         vendor=data['vendor'].strip(),
         product_name=data['product_name'].strip(),
@@ -1596,7 +1610,7 @@ def create_product():
     db.session.flush()  # Get the product ID
 
     # Also add to product_organizations many-to-many table
-    org_to_assign = data.get('organization_id', org_id)
+    org_to_assign = requested_org_id
     if org_to_assign:
         org = Organization.query.get(org_to_assign)
         if org and org not in product.organizations.all():
