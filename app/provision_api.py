@@ -16,6 +16,7 @@ Endpoints:
 - GET  /api/provision/status   — Check tenant status
 """
 
+import hmac
 import os
 import re
 import secrets
@@ -49,7 +50,7 @@ def _require_provision_key(f):
             return jsonify({'error': 'Provisioning not configured'}), 503
 
         provided_key = request.headers.get('X-Provision-Key', '')
-        if not provided_key or provided_key != _PROVISION_KEY:
+        if not provided_key or not hmac.compare_digest(provided_key, _PROVISION_KEY):
             logger.warning(f"Invalid provision key from {request.remote_addr}")
             return jsonify({'error': 'Invalid provision key'}), 401
 
