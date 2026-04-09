@@ -7546,3 +7546,100 @@ def switch_organization(org_id):
         import logging
         logging.getLogger(__name__).error(f"Error in switch_organization: {str(e)}")
         return jsonify({'error': 'Failed to switch organization'}), 500
+
+
+# ============================================================================
+# EMAIL BOUNCE WEBHOOK (Resend)
+# ============================================================================
+
+@bp.route('/api/webhooks/email/bounce', methods=['POST'])
+@csrf.exempt
+def email_bounce_webhook():
+    """Receive bounce/complaint webhooks from Resend.
+
+    Resend sends POST with JSON payload when an email bounces or a recipient
+    complains. We add the address to the suppression list so we never email
+    them again for that tenant.
+
+    Security: Resend signs webhooks with a svix signature. In production,
+    verify the signature. For now we validate the payload structure.
+    """
+    import logging
+    wh_logger = logging.getLogger('email.webhook')
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'error': 'Invalid payload'}), 400
+
+    event_type = data.get('type', '')
+    event_data = data.get('data', {})
+
+    # Only process bounce and complaint events
+    if event_type not in ('email.bounced', 'email.complained'):
+        wh_logger.debug(f"Ignoring webhook event: {event_type}")
+        return jsonify({'status': 'ignored'}), 200
+
+    email_addr = None
+    reason = 'hard_bounce' if event_type == 'email.bounced' else 'complaint'
+
+    # Extract bounced recipient from Resend payload
+    to_list = event_data.get('to', [])
+    if isinstance(to_list, list) and to_list:
+        email_addr = to_list[0]
+    elif isinstance(to_list, str):
+        email_addr = to_list
+
+    if not email_addr:
+        wh_logger.warning(f"Bounce webhook missing recipient: {data}")
+        return jsonify({'error': 'No recipient found'}), 400
+
+    email_addr = email_addr.lower().strip()
+
+    # Determine org_id from tags or headers (Resend supports custom headers)
+    org_id = None
+    tags = event_data.get('tags', {})
+    if isinstance(tags, dict):
+        org_id = tags.get('organization_id')
+    headers = event_data.get('headers', [])
+    if not org_id and isinstance(headers, list):
+        for h in headers:
+            if isinstance(h, dict) and h.get('name') == 'X-Organization-Id':
+                org_id = h.get('value')
+                break
+
+    if org_id:
+        try:
+            org_id = int(org_id)
+        except (TypeError, ValueError):
+            org_id = None
+
+    if not org_id:
+        # If no org context, suppress globally (org_id=0 as sentinel)
+        wh_logger.warning(
+            f"Bounce for {email_addr} without org context — suppressing globally"
+        )
+        org_id = 0
+
+    # Add to suppression list (idempotent)
+    from app.models import EmailSuppressionList
+    existing = EmailSuppressionList.query.filter_by(
+        organization_id=org_id, email=email_addr
+    ).first()
+
+    if not existing:
+        suppression = EmailSuppressionList(
+            organization_id=org_id,
+            email=email_addr,
+            reason=reason
+        )
+        db.session.add(suppression)
+        try:
+            db.session.commit()
+            wh_logger.info(
+                f"Suppressed {email_addr} for org {org_id} (reason={reason})"
+            )
+        except Exception as e:
+            db.session.rollback()
+            wh_logger.error(f"Failed to save suppression: {e}")
+
+    return jsonify({'status': 'processed'}), 200

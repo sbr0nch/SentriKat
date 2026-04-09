@@ -1582,8 +1582,58 @@
                 </div>
                 {% endif %}
 
-                <!-- Global SMTP Settings -->
+                <!-- Email Settings -->
                 <div class="tab-pane fade {% if has_email_tab and not has_auth_tab %}show active{% endif %}" id="smtpSettings" role="tabpanel">
+                    {% if saas_mode and not is_platform_admin %}
+                    {# SaaS org_admin: show managed email info instead of SMTP config #}
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-envelope-check me-2"></i>Email Delivery
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-success mb-4">
+                                <i class="bi bi-check-circle me-2"></i>
+                                <strong>Managed Email Delivery</strong> — Email alerts, reports, and notifications are sent automatically by the SentriKat platform. No SMTP configuration needed.
+                            </div>
+
+                            <div class="row g-4">
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <h6 class="fw-semibold mb-3"><i class="bi bi-envelope me-2"></i>Sender</h6>
+                                            <p class="mb-1"><strong>From:</strong> SentriKat Alerts</p>
+                                            <p class="mb-0 text-muted small">noreply@alerts.sentrikat.com</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <h6 class="fw-semibold mb-3"><i class="bi bi-reply me-2"></i>Reply-To</h6>
+                                            <form id="replyToForm">
+                                                <div class="input-group">
+                                                    <input type="email" class="form-control" id="emailReplyTo"
+                                                           placeholder="support@yourcompany.com"
+                                                           value="">
+                                                    <button class="btn btn-primary" type="button" onclick="saveReplyTo()">
+                                                        <i class="bi bi-check-lg"></i>
+                                                    </button>
+                                                </div>
+                                                <small class="form-text text-muted">Recipients will reply to this address instead of noreply@</small>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-4">
+                                <h6 class="fw-semibold"><i class="bi bi-speedometer me-2"></i>Monthly Email Quota</h6>
+                                <div id="emailQuotaInfo" class="text-muted small">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                    {% else %}
+                    {# On-premise or super_admin: show full SMTP configuration #}
                     <div class="card">
                         <div class="card-header">
                             <i class="bi bi-envelope me-2"></i>Global SMTP Configuration
@@ -1661,6 +1711,7 @@
                             </form>
                         </div>
                     </div>
+                    {% endif %}{# end saas_mode SMTP vs managed email #}
                 </div>
 
                 <!-- System Sub-Tabs Navigation -->

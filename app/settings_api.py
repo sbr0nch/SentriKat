@@ -2436,3 +2436,82 @@ def restore_full_backup():
         db.session.rollback()
         logger.exception("Full restore failed")
         return jsonify({'error': ERROR_MSGS['restore']}), 500
+
+
+# ============================================================================
+# MANAGED EMAIL SETTINGS (SaaS)
+# ============================================================================
+
+@settings_bp.route('/email/reply-to', methods=['GET'])
+@saas_admin_or_org_admin
+def get_email_reply_to():
+    """Get the org's reply-to address for managed email."""
+    from app.saas import get_scoped_org_id
+    from app.models import Organization
+    org_id = get_scoped_org_id()
+    org = Organization.query.get(org_id)
+    return jsonify({
+        'reply_to': org.email_reply_to if org else None,
+        'use_managed_email': getattr(org, 'use_managed_email', True) if org else True,
+    })
+
+
+@settings_bp.route('/email/reply-to', methods=['POST'])
+@saas_admin_or_org_admin
+def set_email_reply_to():
+    """Set the org's reply-to address for managed email."""
+    from app.saas import get_scoped_org_id
+    from app.models import Organization
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data'}), 400
+
+    org_id = get_scoped_org_id()
+    org = Organization.query.get(org_id)
+    if not org:
+        return jsonify({'error': 'Organization not found'}), 404
+
+    reply_to = data.get('reply_to', '').strip()
+    if reply_to:
+        from email_validator import validate_email, EmailNotValidError
+        try:
+            validate_email(reply_to)
+        except EmailNotValidError:
+            return jsonify({'error': 'Invalid email address'}), 400
+
+    org.email_reply_to = reply_to or None
+    db.session.commit()
+    return jsonify({'success': True, 'reply_to': org.email_reply_to})
+
+
+@settings_bp.route('/email/quota', methods=['GET'])
+@saas_admin_or_org_admin
+def get_email_quota():
+    """Get the org's email quota and current usage for this month."""
+    from app.saas import get_scoped_org_id, is_saas_mode
+    if not is_saas_mode():
+        return jsonify({'unlimited': True})
+
+    from app.models import Subscription, EmailMonthlyUsage
+    from app.email_provider import PLAN_EMAIL_LIMITS, _get_current_month_key
+
+    org_id = get_scoped_org_id()
+    sub = Subscription.query.filter_by(organization_id=org_id).filter(
+        Subscription.status.in_(['active', 'trialing'])
+    ).first()
+    plan_name = sub.plan.name if (sub and sub.plan) else 'free'
+    limit = PLAN_EMAIL_LIMITS.get(plan_name, 50)
+
+    month_key = _get_current_month_key()
+    usage = EmailMonthlyUsage.query.filter_by(
+        organization_id=org_id, month=month_key
+    ).first()
+    used = usage.count if usage else 0
+
+    return jsonify({
+        'plan': plan_name,
+        'limit': limit,
+        'used': used,
+        'remaining': max(0, limit - used),
+        'month': month_key,
+    })

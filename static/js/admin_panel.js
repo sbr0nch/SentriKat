@@ -2314,6 +2314,56 @@ async function testLDAPConnection() {
     }
 }
 
+// Managed Email Settings (SaaS)
+async function loadManagedEmailSettings() {
+    // Load reply-to
+    try {
+        const resp = await fetch('/api/settings/email/reply-to');
+        if (resp.ok) {
+            const data = await resp.json();
+            const el = document.getElementById('emailReplyTo');
+            if (el && data.reply_to) el.value = data.reply_to;
+        }
+    } catch (e) { console.error('Failed to load reply-to:', e); }
+
+    // Load quota
+    try {
+        const resp = await fetch('/api/settings/email/quota');
+        if (resp.ok) {
+            const data = await resp.json();
+            const el = document.getElementById('emailQuotaInfo');
+            if (el) {
+                if (data.unlimited) {
+                    el.textContent = 'Unlimited (on-premise)';
+                } else {
+                    const pct = data.limit > 0 ? Math.round((data.used / data.limit) * 100) : 0;
+                    const color = pct > 90 ? 'text-danger' : pct > 70 ? 'text-warning' : 'text-success';
+                    el.innerHTML = `<span class="${color} fw-semibold">${data.used} / ${data.limit}</span> emails used this month (${data.plan} plan)`;
+                }
+            }
+        }
+    } catch (e) { console.error('Failed to load quota:', e); }
+}
+
+async function saveReplyTo() {
+    const replyTo = document.getElementById('emailReplyTo')?.value || '';
+    try {
+        const resp = await fetch('/api/settings/email/reply-to', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ reply_to: replyTo })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            showToast('Reply-To address saved', 'success');
+        } else {
+            showToast(data.error || 'Failed to save', 'danger');
+        }
+    } catch (e) {
+        showToast('Failed to save Reply-To address', 'danger');
+    }
+}
+
 // Global SMTP Settings
 async function saveGlobalSMTPSettings() {
     const settings = {
@@ -5983,6 +6033,8 @@ function showSettingsGroup(groupName, btn) {
             if (typeof loadLogFile === 'function') loadLogFile();
         } else if (groupName === 'appearance') {
             if (typeof loadBrandingSettings === 'function') loadBrandingSettings();
+        } else if (groupName === 'email') {
+            if (typeof loadManagedEmailSettings === 'function') loadManagedEmailSettings();
         }
     }
 

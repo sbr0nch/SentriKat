@@ -120,6 +120,9 @@ def _apply_schema_migrations(logger, db_uri):
         ('users', 'password_reset_expires', 'DATETIME', 'TIMESTAMP'),
         # SaaS: per-org settings isolation
         ('system_settings', 'organization_id', 'INTEGER', 'INTEGER REFERENCES organizations(id) ON DELETE CASCADE'),
+        # Managed email (SaaS Resend integration)
+        ('organizations', 'use_managed_email', 'BOOLEAN DEFAULT 1', 'BOOLEAN DEFAULT TRUE'),
+        ('organizations', 'email_reply_to', 'VARCHAR(255)', 'VARCHAR(255)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
@@ -684,5 +687,21 @@ def create_app(config_class=Config):
                 logger.info("Subscription plans synced with defaults")
             except Exception as e:
                 logger.warning(f"Could not sync subscription plans: {e}")
+
+            # Migrate existing orgs with custom SMTP to use_managed_email=False
+            try:
+                from app.models import Organization
+                orgs_with_smtp = Organization.query.filter(
+                    Organization.smtp_host.isnot(None),
+                    Organization.smtp_host != '',
+                    Organization.use_managed_email.is_(True)
+                ).all()
+                for org in orgs_with_smtp:
+                    org.use_managed_email = False
+                if orgs_with_smtp:
+                    db.session.commit()
+                    logger.info(f"Migrated {len(orgs_with_smtp)} org(s) with custom SMTP to use_managed_email=False")
+            except Exception as e:
+                logger.debug(f"SMTP migration check: {e}")
 
     return app
