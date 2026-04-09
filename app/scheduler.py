@@ -74,28 +74,59 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# In-memory fallback locks (used when DB is unavailable)
 _job_locks = {}
 _job_locks_lock = threading.Lock()
 
-# Sync retry state (exponential backoff: 15min, 30min, 1h, 2h)
-_sync_retry_lock = threading.Lock()
-_sync_retry_count = 0
+# Sync retry constants
 _MAX_SYNC_RETRIES = 4
 _SYNC_RETRY_DELAYS = [900, 1800, 3600, 7200]  # seconds
 
 
 def _run_with_lock(job_name, func, *args, **kwargs):
-    """Run a job function with a lock to prevent overlap."""
-    with _job_locks_lock:
-        if _job_locks.get(job_name):
-            logger.info(f"Job '{job_name}' already running, skipping this execution")
+    """Run a job function with a database-backed lock to prevent overlap.
+
+    Falls back to in-memory lock if the database is unavailable.
+    Stale locks (running > 1 hour) are automatically released.
+    """
+    # Try database lock first (survives restarts, works cross-process)
+    db_lock_acquired = False
+    try:
+        from app.models import JobState
+        db_lock_acquired = JobState.acquire_lock(job_name)
+        if not db_lock_acquired:
+            logger.info(f"Job '{job_name}' already running (DB lock), skipping")
             return
-        _job_locks[job_name] = True
+    except Exception as e:
+        # DB unavailable — fall back to in-memory lock
+        logger.debug(f"DB lock unavailable for '{job_name}', using in-memory: {e}")
+        with _job_locks_lock:
+            if _job_locks.get(job_name):
+                logger.info(f"Job '{job_name}' already running (memory lock), skipping")
+                return
+            _job_locks[job_name] = True
+
     try:
         return func(*args, **kwargs)
+    except Exception as exc:
+        # Record error in DB
+        if db_lock_acquired:
+            try:
+                from app.models import JobState
+                JobState.release_lock(job_name, error=exc)
+            except Exception:
+                pass
+        raise
     finally:
-        with _job_locks_lock:
-            _job_locks[job_name] = False
+        if db_lock_acquired:
+            try:
+                from app.models import JobState
+                JobState.release_lock(job_name)
+            except Exception:
+                pass
+        else:
+            with _job_locks_lock:
+                _job_locks[job_name] = False
 
 # Store scheduler globally so we can reschedule jobs when settings change
 _scheduler = None
@@ -417,7 +448,6 @@ def cisa_sync_job(app):
     (15min → 30min → 1h → 2h, max 4 retries). On success, clears
     retry state and cancels any pending retry jobs.
     """
-    global _sync_retry_count
     with app.app_context():
         try:
             logger.info("Starting scheduled CISA KEV sync...")
@@ -462,10 +492,14 @@ def cisa_sync_job(app):
                 logger.warning(f"CPE mapping cleanup failed (non-critical): {cleanup_err}")
 
             # Sync succeeded - clear retry state and cancel pending retries
-            with _sync_retry_lock:
-                if _sync_retry_count > 0:
-                    logger.info(f"Sync succeeded after {_sync_retry_count} retry attempt(s), resetting retry state")
-                _sync_retry_count = 0
+            try:
+                from app.models import JobState
+                retry_count = JobState.get_retry_count('cisa_sync')
+                if retry_count > 0:
+                    logger.info(f"Sync succeeded after {retry_count} retry attempt(s), resetting retry state")
+                JobState.reset_retry('cisa_sync')
+            except Exception:
+                pass
             _cancel_pending_sync_retries()
             _record_sync_retry_status('idle')
 
@@ -480,20 +514,31 @@ def _schedule_sync_retry(app):
     Uses _run_with_lock to prevent overlap with regular sync.
     Records state in HealthCheckResult for dashboard visibility.
     """
-    global _sync_retry_count
-    with _sync_retry_lock:
-        if _sync_retry_count >= _MAX_SYNC_RETRIES:
-            logger.error(
-                f"CISA sync failed after {_MAX_SYNC_RETRIES} retries. "
-                f"Will retry at next scheduled sync."
-            )
-            _record_sync_retry_status('exhausted')
-            _sync_retry_count = 0
-            return
+    try:
+        from app.models import JobState
+        retry_count = JobState.get_retry_count('cisa_sync')
+    except Exception:
+        retry_count = 0
 
-        delay = _SYNC_RETRY_DELAYS[_sync_retry_count]
-        _sync_retry_count += 1
-        attempt = _sync_retry_count
+    if retry_count >= _MAX_SYNC_RETRIES:
+        logger.error(
+            f"CISA sync failed after {_MAX_SYNC_RETRIES} retries. "
+            f"Will retry at next scheduled sync."
+        )
+        _record_sync_retry_status('exhausted')
+        try:
+            from app.models import JobState
+            JobState.reset_retry('cisa_sync')
+        except Exception:
+            pass
+        return
+
+    delay = _SYNC_RETRY_DELAYS[min(retry_count, len(_SYNC_RETRY_DELAYS) - 1)]
+    try:
+        from app.models import JobState
+        attempt = JobState.increment_retry('cisa_sync')
+    except Exception:
+        attempt = retry_count + 1
 
     delay_min = delay // 60
     logger.warning(f"Scheduling CISA sync retry #{attempt}/{_MAX_SYNC_RETRIES} in {delay_min} minutes")
