@@ -19,7 +19,7 @@ Pillow==12.1.1
 PyYAML==6.0.1
 
 # Database
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.11
 
 # SAML SSO (optional - requires system packages: libxml2-dev libxmlsec1-dev)
 python3-saml==1.16.0
