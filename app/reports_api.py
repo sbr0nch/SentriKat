@@ -519,6 +519,24 @@ def download_report():
             match_ids = data.get('match_ids', [])
             if not match_ids:
                 return jsonify({'error': 'No vulnerabilities selected'}), 400
+            # Validate all match_ids belong to the user's organization
+            if org_id:
+                from app.models import product_organizations as po_table
+                from sqlalchemy import or_, exists, select
+                org_link_exists = exists(
+                    select(po_table.c.product_id).where(
+                        po_table.c.product_id == Product.id,
+                        po_table.c.organization_id == org_id
+                    )
+                )
+                valid_count = db.session.query(VulnerabilityMatch).join(
+                    Product, VulnerabilityMatch.product_id == Product.id
+                ).filter(
+                    VulnerabilityMatch.id.in_(match_ids),
+                    or_(Product.organization_id == org_id, org_link_exists)
+                ).count()
+                if valid_count != len(match_ids):
+                    return jsonify({'error': 'One or more selected vulnerabilities do not belong to your organization'}), 403
             pdf_buffer = generator.generate_selected_report(match_ids)
             filename = f"selected_vulnerabilities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
 
@@ -1515,6 +1533,9 @@ def generate_executive_summary():
             org_name = org.name
 
     # Query matches
+    from app.models import product_organizations as po_table
+    from sqlalchemy import or_, exists, select
+
     matches_query = db.session.query(
         VulnerabilityMatch, Vulnerability, Product
     ).join(
@@ -1523,7 +1544,16 @@ def generate_executive_summary():
         Product, VulnerabilityMatch.product_id == Product.id
     )
     if org_filter:
-        matches_query = matches_query.filter(Product.organization_id.in_(org_filter))
+        # Include products linked via legacy FK or many-to-many org table
+        org_link_exists = exists(
+            select(po_table.c.product_id).where(
+                po_table.c.product_id == Product.id,
+                po_table.c.organization_id.in_(org_filter)
+            )
+        )
+        matches_query = matches_query.filter(
+            or_(Product.organization_id.in_(org_filter), org_link_exists)
+        )
     matches = matches_query.all()
 
     # Asset count

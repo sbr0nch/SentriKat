@@ -22,8 +22,9 @@ def _allow_private_urls():
     if allowed and os.environ.get('FLASK_ENV') == 'production':
         logger.critical(
             "SECURITY WARNING: ALLOW_PRIVATE_URLS is enabled in production! "
-            "This disables SSRF protection. Remove this setting immediately."
+            "This disables SSRF protection. Ignoring the setting."
         )
+        return False  # Never allow private URLs in production
     return allowed
 
 

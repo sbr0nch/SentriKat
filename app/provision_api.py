@@ -430,3 +430,56 @@ def get_tenant_status():
         'subscription': sub.to_dict() if sub else None,
         'user_count': user_count
     })
+
+
+@provision_bp.route('/reset-password', methods=['POST'])
+@limiter.limit("10/minute")
+@_require_provision_key
+def reset_tenant_password():
+    """
+    Reset a tenant user's password.
+
+    Called by License Server admin panel for EA tenant password resets.
+
+    Request body:
+    {
+        "email": "user@company.com"
+    }
+
+    Returns:
+    {
+        "success": true,
+        "temporary_password": "xK9mN2pQ...",
+        "message": "Password reset for user@company.com"
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'email is required'}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    try:
+        temp_password = _generate_temp_password()
+        user.set_password(temp_password)
+        user.must_change_password = True
+        db.session.commit()
+
+        logger.info(f"Password reset via provision API for user: {email}")
+
+        return jsonify({
+            'success': True,
+            'temporary_password': temp_password,
+            'message': f'Password reset for {email}'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Failed to reset password for {email}: {e}")
+        return jsonify({'error': 'Failed to reset password'}), 500

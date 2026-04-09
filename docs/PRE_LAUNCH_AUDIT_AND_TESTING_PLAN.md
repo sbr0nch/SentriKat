@@ -60,21 +60,21 @@ UTENTE (browser)
 
 ### ALTE (da fixare entro prima settimana)
 
-| # | Problema | Repo | File | Impatto |
-|---|---------|------|------|---------|
-| H1 | ENCRYPTION_KEY fallback a SECRET_KEY senza errore in prod | SentriKat | encryption.py:39-51 | Crypto debole se ENCRYPTION_KEY non settato |
-| H2 | ALLOW_PRIVATE_URLS=true in prod solo loga warning | SentriKat | network_security.py:22 | SSRF protection disabilitabile |
-| H3 | ADMIN_API_KEY passato a container n8n | SentriKat-web | docker-compose.yml | Se n8n compromesso, attacker ha accesso admin API |
-| H4 | Turnstile fail-open su errore rete | SentriKat-web | contact.py | Spam possibile bloccando richieste a Cloudflare |
-| H5 | Cross-org report data su /api/reports endpoints | SentriKat | reports_api.py | Possibile leak dati report cross-tenant |
+| # | Problema | Repo | File | Impatto | Stato |
+|---|---------|------|------|---------|-------|
+| H1 | ENCRYPTION_KEY fallback a SECRET_KEY senza errore in prod | SentriKat | encryption.py:39-51 | Crypto debole se ENCRYPTION_KEY non settato | **FIXATO** - raise ValueError in prod |
+| H2 | ALLOW_PRIVATE_URLS=true in prod solo loga warning | SentriKat | network_security.py:22 | SSRF protection disabilitabile | **FIXATO** - return False in prod |
+| H3 | ADMIN_API_KEY passato a container n8n | SentriKat-web | docker-compose.yml | Se n8n compromesso, attacker ha accesso admin API | Da fixare in SentriKat-web |
+| H4 | Turnstile fail-open su errore rete | SentriKat-web | contact.py | Spam possibile bloccando richieste a Cloudflare | Da fixare in SentriKat-web |
+| H5 | Cross-org report data su /api/reports endpoints | SentriKat | reports_api.py | Leak dati report cross-tenant (executive-summary + selected download) | **FIXATO** - aggiunto many-to-many check + org validation |
 
 ### MEDIE
 
 | # | Problema | Repo | Note |
 |---|---------|------|------|
-| M1 | Job lock in-memory (non cross-process) | SentriKat | scheduler.py:87-98 |
-| M2 | Retry state non persistito | SentriKat | scheduler.py:82-84 |
-| M3 | Password reset token senza check scadenza esplicito | SentriKat | models.py |
+| ~~M1~~ | ~~Job lock in-memory~~ | SentriKat | scheduler.py — **FIXATO**: migrato a JobState DB model |
+| ~~M2~~ | ~~Retry state non persistito~~ | SentriKat | scheduler.py — **FIXATO**: migrato a JobState DB model |
+| ~~M3~~ | ~~Password reset token senza check scadenza~~ | SentriKat | models.py — **FALSO POSITIVO**: token SHA-256, scadenza 30min, single-use |
 | ~~M4~~ | ~~Provision key comparison non constant-time~~ | SentriKat | provision_api.py:52 — **FIXATO** |
 
 ### BASSE
@@ -308,9 +308,9 @@ G1. Rate Limiting
 G2. Multi-Tenant Isolation (CRITICO)
   [ ] Creare 2 org separate in SaaS
   [ ] Org A prova a leggere prodotti Org B → deve fallire
-  [ ] Org A prova a leggere asset Org B → deve fallire (BUG C2!)
-  [ ] Org A prova a creare prodotto in Org B → deve fallire (BUG C1!)
-  [ ] Org A prova a leggere report Org B → deve fallire (BUG H5!)
+  [ ] Org A prova a leggere asset Org B → deve fallire (verificato: gia protetto)
+  [ ] Org A prova a creare prodotto in Org B → deve fallire (FIXATO C1)
+  [ ] Org A prova a leggere report Org B → deve fallire (FIXATO H5)
   [ ] Verificare ogni API filtra per organization_id
 
 G3. Session & Auth
@@ -354,6 +354,22 @@ Da migrare a PostgreSQL/Redis post-lancio.
 ### Fix M4: Constant-time comparison per provision key -- APPLICATO
 Cambiato `provided_key != _PROVISION_KEY` in `hmac.compare_digest()` in `provision_api.py`
 per prevenire timing attacks sulla chiave di provisioning.
+
+### Fix H1: Encryption key fail-fast in produzione -- APPLICATO
+`encryption.py` ora lancia `ValueError` se `ENCRYPTION_KEY` non e' settato in produzione,
+invece di fare fallback silenzioso a `SECRET_KEY`.
+
+### Fix H2: SSRF protection forzata in produzione -- APPLICATO
+`network_security.py` ora ritorna `False` (SSRF protection attiva) anche se
+`ALLOW_PRIVATE_URLS=true` in produzione, invece di solo loggare un warning.
+
+### Fix H5: Report cross-org isolation -- APPLICATO
+- **Executive summary**: aggiunto check `product_organizations` many-to-many (come BOD 22-01 e NIS2)
+- **Download selected report**: aggiunta validazione che tutti i `match_ids` appartengano
+  all'organizzazione dell'utente prima di generare il PDF
+
+### ~~M3~~: FALSO POSITIVO
+Password reset token gia implementato correttamente: SHA-256, scadenza 30 min, single-use.
 
 ---
 
@@ -409,10 +425,10 @@ per prevenire timing attacks sulla chiave di provisioning.
 
 ## PARTE 6: POST-LANCIO (PRIMA SETTIMANA)
 
-- [ ] Fixare H1-H5 (vulnerabilita alte)
+- [x] ~~Fixare H1-H5 (vulnerabilita alte)~~ — H1, H2, H5 fixati; H3, H4 in SentriKat-web
 - [ ] Aggiungere test automatici cross-org (`test_cross_org_access.py`)
-- [ ] Migrare job locks da in-memory a database
-- [ ] Persistere retry state in DB
+- [x] ~~Migrare job locks da in-memory a database~~ — JobState model
+- [x] ~~Persistere retry state in DB~~ — JobState model
 - [ ] Aggiungere Alembic migrations per SentriKat core
 - [ ] Setup CI/CD pipeline
 - [ ] Penetration test esterno

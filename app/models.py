@@ -875,6 +875,111 @@ class SyncLog(db.Model):
             'duration_seconds': self.duration_seconds
         }
 
+class JobState(db.Model):
+    """Persistent job lock and retry state for the scheduler.
+
+    Replaces in-memory dicts so state survives restarts and works across
+    multiple workers/containers.
+    """
+    __tablename__ = 'job_states'
+
+    job_name = db.Column(db.String(100), primary_key=True)
+    is_running = db.Column(db.Boolean, default=False)
+    started_at = db.Column(db.DateTime, nullable=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    retry_count = db.Column(db.Integer, default=0)
+    last_error = db.Column(db.Text, nullable=True)
+    last_success_at = db.Column(db.DateTime, nullable=True)
+
+    # Auto-release lock if running for more than this many seconds (stale lock protection)
+    STALE_LOCK_SECONDS = 3600  # 1 hour
+
+    @classmethod
+    def acquire_lock(cls, job_name):
+        """Try to acquire a lock for a job. Returns True if acquired."""
+        try:
+            state = cls.query.get(job_name)
+            if not state:
+                state = cls(job_name=job_name, is_running=True, started_at=datetime.utcnow())
+                db.session.add(state)
+                db.session.commit()
+                return True
+
+            # Check for stale lock (process crashed while running)
+            if state.is_running and state.started_at:
+                elapsed = (datetime.utcnow() - state.started_at).total_seconds()
+                if elapsed > cls.STALE_LOCK_SECONDS:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"Job '{job_name}' lock is stale ({elapsed:.0f}s), releasing"
+                    )
+                    state.is_running = False
+
+            if state.is_running:
+                return False
+
+            state.is_running = True
+            state.started_at = datetime.utcnow()
+            db.session.commit()
+            return True
+        except Exception:
+            db.session.rollback()
+            return False
+
+    @classmethod
+    def release_lock(cls, job_name, error=None):
+        """Release a job lock, optionally recording an error."""
+        try:
+            state = cls.query.get(job_name)
+            if state:
+                state.is_running = False
+                state.finished_at = datetime.utcnow()
+                if error:
+                    state.last_error = str(error)[:1000]
+                else:
+                    state.last_success_at = datetime.utcnow()
+                    state.retry_count = 0
+                    state.last_error = None
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    @classmethod
+    def get_retry_count(cls, job_name):
+        """Get retry count for a job."""
+        try:
+            state = cls.query.get(job_name)
+            return state.retry_count if state else 0
+        except Exception:
+            return 0
+
+    @classmethod
+    def increment_retry(cls, job_name):
+        """Increment retry count for a job."""
+        try:
+            state = cls.query.get(job_name)
+            if state:
+                state.retry_count = (state.retry_count or 0) + 1
+                db.session.commit()
+                return state.retry_count
+            return 0
+        except Exception:
+            db.session.rollback()
+            return 0
+
+    @classmethod
+    def reset_retry(cls, job_name):
+        """Reset retry count for a job."""
+        try:
+            state = cls.query.get(job_name)
+            if state:
+                state.retry_count = 0
+                state.last_error = None
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+
 class ServiceCatalog(db.Model):
     """Catalog of real-world software/services for guided product addition"""
     __tablename__ = 'service_catalog'

@@ -42,6 +42,10 @@ def _get_fernet():
                 "This is INSECURE — set ENCRYPTION_KEY in .env immediately. Generate with: "
                 "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
             )
+            raise ValueError(
+                "ENCRYPTION_KEY must be set in production. Generate with: "
+                "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            )
         # Derive a stable key from SECRET_KEY so encrypted settings (Jira PAT,
         # SMTP password, etc.) survive container restarts as long as SECRET_KEY
         # remains the same.
