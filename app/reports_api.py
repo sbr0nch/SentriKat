@@ -586,8 +586,9 @@ def generate_compliance_report():
         org_features = get_effective_features(get_scoped_org_id(user))
         if not org_features.get('compliance_reports', False):
             return jsonify({
-                'error': 'CISA BOD 22-01 Compliance Reports require a Professional license',
-                'feature': 'compliance_reports'
+                'error': 'Compliance Reports are not available on your current plan. Upgrade to Pro or higher.',
+                'feature': 'compliance_reports',
+                'upgrade_required': True
             }), 403
     else:
         license_info = get_license()
@@ -1085,8 +1086,9 @@ def generate_nis2_compliance_report():
         org_features = get_effective_features(get_scoped_org_id(user))
         if not org_features.get('compliance_reports', False):
             return jsonify({
-                'error': 'NIS2 Compliance Reports require a Professional license',
-                'feature': 'compliance_reports'
+                'error': 'NIS2 Compliance Reports are not available on your current plan. Upgrade to Pro or higher.',
+                'feature': 'compliance_reports',
+                'upgrade_required': True
             }), 403
     else:
         license_info = get_license()
@@ -1477,8 +1479,9 @@ def generate_executive_summary():
         org_features = get_effective_features(get_scoped_org_id(user))
         if not org_features.get('compliance_reports', False):
             return jsonify({
-                'error': 'Executive Summary reports require a Professional license',
-                'feature': 'executive_reports'
+                'error': 'Executive Summary reports are not available on your current plan. Upgrade to Pro or higher.',
+                'feature': 'executive_reports',
+                'upgrade_required': True
             }), 403
     else:
         license_info = get_license()
@@ -1744,6 +1747,7 @@ def generate_executive_summary():
 
 @bp.route('/api/settings/syslog', methods=['GET'])
 @saas_admin_or_org_admin
+@requires_professional('SIEM Integration')
 def get_syslog_settings():
     """Get current syslog forwarding configuration (org-scoped in SaaS mode)."""
     from app.settings_api import get_setting
@@ -1760,6 +1764,7 @@ def get_syslog_settings():
 
 @bp.route('/api/settings/syslog', methods=['POST'])
 @saas_admin_or_org_admin
+@requires_professional('SIEM Integration')
 def update_syslog_settings():
     """Update syslog forwarding configuration (org-scoped in SaaS mode)."""
     from app.settings_api import set_setting
@@ -1794,6 +1799,7 @@ def update_syslog_settings():
 
 @bp.route('/api/settings/syslog/test', methods=['POST'])
 @saas_admin_or_org_admin
+@requires_professional('SIEM Integration')
 def test_syslog():
     """Send a test message to the configured syslog server."""
     try:
