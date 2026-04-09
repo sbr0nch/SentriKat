@@ -2545,25 +2545,25 @@
      * Share a single CVE with NVD link - copies to clipboard automatically
      */
     async function shareSingleCVE(cveId, vulnName) {
+        const dashboardUrl = `${window.location.origin}/?cve=${encodeURIComponent(cveId)}`;
         const nvdUrl = `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}`;
+        const shareText = `${cveId} — ${vulnName}\nDashboard: ${dashboardUrl}\nNVD: ${nvdUrl}`;
 
         try {
-            // Try modern clipboard API first
-            await navigator.clipboard.writeText(nvdUrl);
-            showToast(`NVD link copied to clipboard`, 'success');
+            await navigator.clipboard.writeText(shareText);
+            showToast(`${cveId} link copied — share with your team`, 'success');
         } catch (error) {
-            // Fallback for older browsers or non-HTTPS
             const textArea = document.createElement('textarea');
-            textArea.value = nvdUrl;
+            textArea.value = shareText;
             textArea.style.position = 'fixed';
             textArea.style.left = '-9999px';
             document.body.appendChild(textArea);
             textArea.select();
             try {
                 document.execCommand('copy');
-                showToast(`NVD link copied to clipboard`, 'success');
+                showToast(`${cveId} link copied — share with your team`, 'success');
             } catch (e) {
-                showToast(`Could not copy. URL: ${nvdUrl}`, 'warning');
+                showToast(`Could not copy. URL: ${dashboardUrl}`, 'warning');
             }
             document.body.removeChild(textArea);
         }
