@@ -667,6 +667,13 @@ def create_app(config_class=Config):
 
                 # Apply schema migrations for new columns (SQLite doesn't auto-add columns)
                 _apply_schema_migrations(logger, db_uri)
+
+            # Sync subscription plans for SQLite too (needed for SaaS dev/test)
+            try:
+                from app.models import SubscriptionPlan
+                SubscriptionPlan.seed_default_plans()
+            except Exception:
+                pass
         else:
             # Non-SQLite database (PostgreSQL, etc.)
             import logging
